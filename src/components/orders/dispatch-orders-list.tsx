@@ -38,6 +38,7 @@ import { useOrderDispatchEvents } from "@/modules/orders/hooks/use-order-dispatc
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import type { ChildOrderForDispatch } from "@/modules/orders/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
+import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { Textarea } from "../ui/textarea";
 import { OrderStatusBadge } from "./order-status-badge";
@@ -55,6 +56,36 @@ function getRemitoPlaceholder(
     return previewNumber;
   }
   return "Número de remito";
+}
+
+async function loadDeclaredValueDefault(
+  orgSlug: string,
+  totalAmount: number
+): Promise<string> {
+  const result = await getOrganizationSettings(orgSlug);
+  if (!(result.success && result.data)) {
+    return "";
+  }
+  const percentage = result.data.dispatch_declared_value_percentage;
+  if (percentage > 0 && totalAmount > 0) {
+    return ((totalAmount * percentage) / 100).toFixed(2);
+  }
+  return "";
+}
+
+function parseOptionalNonNegativeNumber(value: string): {
+  valid: boolean;
+  value: number | null;
+} {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return { valid: true, value: null };
+  }
+  const number = Number(trimmed);
+  if (Number.isNaN(number) || number < 0) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: number };
 }
 
 function groupByParent(
@@ -391,6 +422,9 @@ function PreparingChildCard({
   const [isPending, startTransition] = useTransition();
   const [isExpanded, setIsExpanded] = useState(false);
   const [remitoNumber, setRemitoNumber] = useState("");
+  const [packageCount, setPackageCount] = useState("");
+  const [declaredValue, setDeclaredValue] = useState("");
+  const [declaredValueLoading, setDeclaredValueLoading] = useState(false);
   const [autoNumbering, setAutoNumbering] = useState(false);
   const [previewNumber, setPreviewNumber] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -407,6 +441,8 @@ function PreparingChildCard({
     }
     generatedRef.current = true;
 
+    setDeclaredValueLoading(true);
+
     getRemittanceSettings(orgSlug).then((settings) => {
       if (settings.success && settings.data?.autoEnabled) {
         setAutoNumbering(true);
@@ -419,13 +455,25 @@ function PreparingChildCard({
       }
       setIsGenerating(false);
     });
-  }, [orgSlug, isExpanded]);
+
+    loadDeclaredValueDefault(orgSlug, child.total_amount)
+      .then(setDeclaredValue)
+      .finally(() => setDeclaredValueLoading(false));
+  }, [orgSlug, isExpanded, child.total_amount]);
 
   function handleDispatch() {
     const finalNumber = remitoNumber.trim();
 
     if (!(finalNumber || autoNumbering)) {
       toast.error("El número de remito es obligatorio");
+      return;
+    }
+
+    const packageCountResult = parseOptionalNonNegativeNumber(packageCount);
+    const declaredValueResult = parseOptionalNonNegativeNumber(declaredValue);
+
+    if (!(packageCountResult.valid && declaredValueResult.valid)) {
+      toast.error("Revisá la cantidad de bultos y el valor declarado");
       return;
     }
 
@@ -449,11 +497,15 @@ function PreparingChildCard({
         orgSlug,
         childOrderId: child.id,
         remitoNumber: remitoToUse,
+        packageCount: packageCountResult.value,
+        declaredValue: declaredValueResult.value,
       });
 
       if (dispatchResult.success) {
         toast.success(`Despachado — Remito ${remitoToUse}`);
         setRemitoNumber("");
+        setPackageCount("");
+        setDeclaredValue("");
         setPreviewNumber("");
         setAutoNumbering(false);
         generatedRef.current = false;
@@ -525,50 +577,23 @@ function PreparingChildCard({
             </div>
           )}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div className="flex-1">
-              <label
-                className="mb-1 block font-medium text-sm"
-                htmlFor={`remito-${child.id}`}
-              >
-                Número de remito
-              </label>
-              <Input
-                disabled={isGenerating || isPending}
-                id={`remito-${child.id}`}
-                onChange={(e) => setRemitoNumber(e.target.value)}
-                placeholder={getRemitoPlaceholder(
-                  isGenerating,
-                  autoNumbering,
-                  previewNumber
-                )}
-                value={remitoNumber}
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              {canRevert && (
-                <Button
-                  className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
-                  disabled={isPending || isGenerating}
-                  onClick={() => setRevertOpen(true)}
-                  size="sm"
-                  variant="outline"
-                >
-                  <ArrowFatLineLeftIcon className="size-4" />
-                  Volver atrás
-                </Button>
-              )}
-              <Button
-                disabled={isPending || isGenerating}
-                onClick={handleDispatch}
-                size="sm"
-              >
-                <TruckIcon className="mr-1 h-4 w-4" />
-                {isPending ? "Despachando..." : "Despachar"}
-              </Button>
-            </div>
-          </div>
+          <PreparingDispatchControls
+            autoNumbering={autoNumbering}
+            canRevert={canRevert}
+            childId={child.id}
+            declaredValue={declaredValue}
+            declaredValueLoading={declaredValueLoading}
+            isGenerating={isGenerating}
+            isPending={isPending}
+            onDeclaredValueChange={setDeclaredValue}
+            onDispatch={handleDispatch}
+            onPackageCountChange={setPackageCount}
+            onRemitoChange={setRemitoNumber}
+            onRevert={() => setRevertOpen(true)}
+            packageCount={packageCount}
+            previewNumber={previewNumber}
+            remitoNumber={remitoNumber}
+          />
 
           {canRevert && previousStatus && previousStatusLabel && (
             <RevertOrderModal
@@ -586,6 +611,128 @@ function PreparingChildCard({
         </CardContent>
       )}
     </Card>
+  );
+}
+
+type PreparingDispatchControlsProps = {
+  childId: string;
+  isGenerating: boolean;
+  isPending: boolean;
+  autoNumbering: boolean;
+  previewNumber: string;
+  remitoNumber: string;
+  packageCount: string;
+  declaredValue: string;
+  declaredValueLoading: boolean;
+  canRevert: boolean;
+  onRemitoChange: (value: string) => void;
+  onPackageCountChange: (value: string) => void;
+  onDeclaredValueChange: (value: string) => void;
+  onRevert: () => void;
+  onDispatch: () => void;
+};
+
+function PreparingDispatchControls({
+  childId,
+  isGenerating,
+  isPending,
+  autoNumbering,
+  previewNumber,
+  remitoNumber,
+  packageCount,
+  declaredValue,
+  declaredValueLoading,
+  canRevert,
+  onRemitoChange,
+  onPackageCountChange,
+  onDeclaredValueChange,
+  onRevert,
+  onDispatch,
+}: PreparingDispatchControlsProps) {
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <label
+            className="mb-1 block font-medium text-sm"
+            htmlFor={`remito-${childId}`}
+          >
+            Número de remito
+          </label>
+          <Input
+            disabled={isGenerating || isPending}
+            id={`remito-${childId}`}
+            onChange={(e) => onRemitoChange(e.target.value)}
+            placeholder={getRemitoPlaceholder(
+              isGenerating,
+              autoNumbering,
+              previewNumber
+            )}
+            value={remitoNumber}
+          />
+        </div>
+
+        <div>
+          <label
+            className="mb-1 block font-medium text-sm"
+            htmlFor={`bultos-${childId}`}
+          >
+            Cantidad de bultos
+          </label>
+          <Input
+            disabled={isGenerating || isPending}
+            id={`bultos-${childId}`}
+            min={0}
+            onChange={(e) => onPackageCountChange(e.target.value)}
+            placeholder="0"
+            type="number"
+            value={packageCount}
+          />
+        </div>
+
+        <div>
+          <label
+            className="mb-1 block font-medium text-sm"
+            htmlFor={`valor-declarado-${childId}`}
+          >
+            Valor declarado
+          </label>
+          <Input
+            disabled={isGenerating || isPending || declaredValueLoading}
+            id={`valor-declarado-${childId}`}
+            min={0}
+            onChange={(e) => onDeclaredValueChange(e.target.value)}
+            placeholder="0"
+            step="0.01"
+            type="number"
+            value={declaredValue}
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        {canRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            disabled={isPending || isGenerating}
+            onClick={onRevert}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
+        <Button
+          disabled={isPending || isGenerating}
+          onClick={onDispatch}
+          size="sm"
+        >
+          <TruckIcon className="mr-1 h-4 w-4" />
+          {isPending ? "Despachando..." : "Despachar"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

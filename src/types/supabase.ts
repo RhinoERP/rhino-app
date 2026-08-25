@@ -2208,29 +2208,35 @@ export type Database = {
       }
       order_dispatch_events: {
         Row: {
+          declared_value: number | null
           dispatch_group_id: string | null
           dispatched_at: string
           id: string
           notes: string | null
           order_id: string
+          package_count: number | null
           remito_number: string
           remittance_pdf_url: string | null
         }
         Insert: {
+          declared_value?: number | null
           dispatch_group_id?: string | null
           dispatched_at?: string
           id?: string
           notes?: string | null
           order_id: string
+          package_count?: number | null
           remito_number: string
           remittance_pdf_url?: string | null
         }
         Update: {
+          declared_value?: number | null
           dispatch_group_id?: string | null
           dispatched_at?: string
           id?: string
           notes?: string | null
           order_id?: string
+          package_count?: number | null
           remito_number?: string
           remittance_pdf_url?: string | null
         }

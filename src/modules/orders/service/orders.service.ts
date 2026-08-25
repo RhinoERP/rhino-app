@@ -497,6 +497,10 @@ export async function getChildOrdersForDispatch(
 
   return visibleOrders.map((o) => {
     const parent = parentMap.get(o.parent_order_id ?? o.id);
+    const dispatchItems = itemMap.get(o.id) ?? [];
+    const totalAmount = truncateMoney(
+      dispatchItems.reduce((sum, item) => sum + item.subtotal, 0)
+    );
 
     return {
       id: o.id,
@@ -506,7 +510,13 @@ export async function getChildOrdersForDispatch(
       parent_order_number: parent?.order_number ?? o.order_number,
       parent_customer_name: parent?.customer_name ?? "—",
       parent_sales_order_id: parent?.sales_order_id ?? o.sales_order_id ?? null,
-      items: itemMap.get(o.id) ?? [],
+      total_amount: totalAmount,
+      items: dispatchItems.map((item) => ({
+        id: item.id,
+        description: item.description,
+        quantity: item.quantity,
+        quote_item_extras: item.quote_item_extras,
+      })),
     };
   });
 }
@@ -693,13 +703,16 @@ async function loadUnassignedQuoteItems(
     id: string;
     description: string;
     quantity: number;
-    unit_price?: number;
+    unit_price: number;
+    subtotal: number;
     quote_item_extras: OrderQuoteItemExtraRow[];
   }>
 > {
   const { data: items } = await supabase
     .from("quote_items")
-    .select("id, description, quantity, unit_price, quote_item_extras(*)")
+    .select(
+      "id, description, quantity, unit_price, subtotal, quote_item_extras(*)"
+    )
     .eq("quote_id", quoteId)
     .is("assigned_order_id", null);
 
@@ -708,6 +721,7 @@ async function loadUnassignedQuoteItems(
     description: item.description ?? "",
     quantity: item.quantity,
     unit_price: item.unit_price ?? 0,
+    subtotal: item.subtotal ?? 0,
     quote_item_extras: (item.quote_item_extras ??
       []) as OrderQuoteItemExtraRow[],
   }));
@@ -835,6 +849,7 @@ async function loadDispatchItems(
       id: string;
       description: string;
       quantity: number;
+      subtotal: number;
       quote_item_extras: OrderQuoteItemExtraRow[];
     }>
   >
@@ -845,6 +860,7 @@ async function loadDispatchItems(
       id: string;
       description: string;
       quantity: number;
+      subtotal: number;
       quote_item_extras: OrderQuoteItemExtraRow[];
     }>
   >();
@@ -858,7 +874,7 @@ async function loadDispatchItems(
   const { data: items } = await supabase
     .from("quote_items")
     .select(
-      "id, description, quantity, assigned_order_id, quote_item_extras(*)"
+      "id, description, quantity, subtotal, assigned_order_id, quote_item_extras(*)"
     )
     .in("assigned_order_id", allIds);
 
@@ -870,6 +886,7 @@ async function loadDispatchItems(
     id: string;
     description: string;
     quantity: number;
+    subtotal: number;
     assigned_order_id: string;
     quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>) {
@@ -877,6 +894,7 @@ async function loadDispatchItems(
       id: item.id,
       description: item.description,
       quantity: item.quantity,
+      subtotal: item.subtotal ?? 0,
       quote_item_extras: item.quote_item_extras ?? [],
     };
     const group = map.get(item.assigned_order_id);
@@ -3555,6 +3573,8 @@ export async function dispatchChildOrder(params: {
   childOrderId: string;
   parentOrderId: string;
   remitoNumber: string;
+  packageCount?: number | null;
+  declaredValue?: number | null;
   notes?: string;
   userId: string;
 }): Promise<void> {
@@ -3580,6 +3600,8 @@ export async function dispatchChildOrder(params: {
       order_id: params.childOrderId,
       remito_number: params.remitoNumber,
       dispatched_at: new Date().toISOString(),
+      package_count: params.packageCount ?? null,
+      declared_value: params.declaredValue ?? null,
       notes: params.notes ?? null,
     });
 

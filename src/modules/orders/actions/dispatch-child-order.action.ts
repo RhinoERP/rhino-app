@@ -12,6 +12,8 @@ export type DispatchChildOrderInput = {
   orgSlug: string;
   childOrderId: string;
   remitoNumber: string;
+  packageCount?: number | null;
+  declaredValue?: number | null;
   notes?: string;
 };
 
@@ -25,7 +27,14 @@ export async function dispatchChildOrderAction(
 ): Promise<DispatchChildOrderResult> {
   await ensure("orders.dispatch", input.orgSlug);
   try {
-    const { orgSlug, childOrderId, remitoNumber, notes } = input;
+    const {
+      orgSlug,
+      childOrderId,
+      remitoNumber,
+      packageCount,
+      declaredValue,
+      notes,
+    } = input;
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 
@@ -64,6 +73,8 @@ export async function dispatchChildOrderAction(
       childOrderId,
       parentOrderId: parentId,
       remitoNumber: remitoNumber.trim(),
+      packageCount,
+      declaredValue,
       notes: notes?.trim() || undefined,
       userId: user.id,
     });
