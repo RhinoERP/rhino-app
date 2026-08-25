@@ -2,7 +2,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/dist/client/link";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getQuoteCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -36,7 +36,7 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
   const [organization, customers, products, salesPriceLists] =
     await Promise.all([
       getOrganizationBySlug(orgSlug),
-      getCustomersByOrgSlug(orgSlug),
+      getQuoteCustomersByOrgSlug(orgSlug),
       getSaleProducts(orgSlug),
       getSalesPriceListsByOrgSlug(orgSlug),
     ]);

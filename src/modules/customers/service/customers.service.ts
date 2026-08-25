@@ -192,6 +192,62 @@ export async function getVisibleCustomersByOrgSlug(
   return data ?? [];
 }
 
+/**
+ * Returns the customers available for the quote customer selector.
+ * Admins (or users with "view all" scope) see every customer; the rest
+ * only see the customers explicitly assigned to them as seller.
+ * Customers without an assigned seller are always excluded.
+ */
+export async function getQuoteCustomersByOrgSlug(
+  orgSlug: string,
+  status: CustomerStatusFilter = "active"
+): Promise<Customer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+  const canRead = canReadCustomers(accessContext.permissions);
+  const canViewAll = canViewAllCustomers(accessContext.permissions);
+
+  if (!canRead) {
+    return [];
+  }
+
+  let query = supabase
+    .from("customers")
+    .select("*")
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: false });
+
+  if (status === "active") {
+    query = query.eq("is_active", true);
+  }
+
+  if (status === "archived") {
+    query = query.eq("is_active", false);
+  }
+
+  if (!canViewAll) {
+    if (!accessContext.userId) {
+      return [];
+    }
+
+    query = query.eq("assigned_seller_id", accessContext.userId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Error fetching customers: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
 export async function filterCustomersBySalesScope(
   orgSlug: string,
   customers: Customer[]

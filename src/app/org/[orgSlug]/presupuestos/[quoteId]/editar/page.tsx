@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getQuoteCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -28,7 +28,7 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
   const [org, quote, customers, products, salesPriceLists] = await Promise.all([
     getOrganizationBySlug(orgSlug),
     getQuoteById(quoteId, orgSlug),
-    getCustomersByOrgSlug(orgSlug),
+    getQuoteCustomersByOrgSlug(orgSlug),
     getSaleProducts(orgSlug),
     getSalesPriceListsByOrgSlug(orgSlug),
   ]);
