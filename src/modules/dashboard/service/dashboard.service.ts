@@ -38,6 +38,7 @@ type AmountRow = {
 
 type ReceivablePaymentRow = {
   amount: number | null;
+  amount_ars?: number | null;
   payment_method: string | null;
 };
 
@@ -566,6 +567,7 @@ export async function getFinancialBreakdown(
     .select(
       `
         amount,
+        amount_ars,
         payment_method,
         accounts_receivable!inner(customer_id)
       `
@@ -665,7 +667,7 @@ export async function getFinancialBreakdown(
     0
   );
   const receivableCash = receivableCashPayments.reduce(
-    (sum, payment) => sum + Number(payment.amount ?? 0),
+    (sum, payment) => sum + Number(payment.amount_ars ?? payment.amount ?? 0),
     0
   );
   const directSalesCash = directSalesCashPayments.reduce(

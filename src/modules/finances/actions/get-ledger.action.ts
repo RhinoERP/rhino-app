@@ -17,6 +17,7 @@ type RawEntry = {
   reference_id: string;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ledger maps payment rows into running-balance entries and reconciles currency equivalents.
 export async function getLedgerAction(
   orgSlug: string,
   period: FinancialPeriod
@@ -37,7 +38,7 @@ export async function getLedgerAction(
       supabase
         .from("receivable_payments")
         .select(
-          "id, payment_date, amount, accounts_receivable(customers(business_name))"
+          "id, payment_date, amount, amount_ars, currency, accounts_receivable(customers(business_name))"
         )
         .eq("organization_id", orgId)
         .gte("payment_date", from)
@@ -54,7 +55,9 @@ export async function getLedgerAction(
       // Pagos a proveedores
       supabase
         .from("payable_payments")
-        .select("id, payment_date, amount, accounts_payable(suppliers(name))")
+        .select(
+          "id, payment_date, amount, amount_ars, currency, accounts_payable(suppliers(name))"
+        )
         .eq("organization_id", orgId)
         .gte("payment_date", from)
         .lte("payment_date", to),
@@ -78,19 +81,23 @@ export async function getLedgerAction(
       id: string;
       payment_date: string;
       amount: number;
+      amount_ars?: number | null;
+      currency?: string | null;
       accounts_receivable: {
         customers: { business_name: string } | null;
       } | null;
     };
     const customerName =
       row.accounts_receivable?.customers?.business_name ?? "Cliente";
+    const currencySuffix =
+      row.currency === "USD" ? " (USD — equivalente ARS)" : "";
     entries.push({
       id: `cobro-${row.id}`,
       date: row.payment_date,
-      concept: `Cobro — ${customerName}`,
+      concept: `Cobro — ${customerName}${currencySuffix}`,
       source: "cobro",
       debit: null,
-      credit: row.amount,
+      credit: row.amount_ars ?? row.amount,
       nonCashAmount: null,
       reference_id: row.id,
     });
@@ -121,15 +128,19 @@ export async function getLedgerAction(
       id: string;
       payment_date: string;
       amount: number;
+      amount_ars?: number | null;
+      currency?: string | null;
       accounts_payable: { suppliers: { name: string } | null } | null;
     };
     const supplierName = row.accounts_payable?.suppliers?.name ?? "Proveedor";
+    const currencySuffix =
+      row.currency === "USD" ? " (USD — equivalente ARS)" : "";
     entries.push({
       id: `pago-${row.id}`,
       date: row.payment_date,
-      concept: `Pago proveedor — ${supplierName}`,
+      concept: `Pago proveedor — ${supplierName}${currencySuffix}`,
       source: "pago_proveedor",
-      debit: row.amount,
+      debit: row.amount_ars ?? row.amount,
       credit: null,
       nonCashAmount: null,
       reference_id: row.id,
