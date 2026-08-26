@@ -130,6 +130,7 @@ export type ChildOrderForDispatch = {
   parent_order_number: string;
   parent_customer_name: string;
   parent_sales_order_id: string | null;
+  total_amount: number;
   items: Array<{
     id: string;
     description: string;

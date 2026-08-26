@@ -77,6 +77,8 @@ export function buildRemittanceMaskData(
   options?: {
     carrierName?: string | null;
     purchaseOrderNumber?: string | null;
+    packageCount?: number | null;
+    declaredValue?: number | null;
   }
 ): RemittanceMaskData {
   return {
@@ -93,12 +95,12 @@ export function buildRemittanceMaskData(
       quantity: item.quantity,
       description: [item.name, item.brand].filter(Boolean).join(" "),
     })),
-    packageCount: remittance.items.reduce(
-      (total, item) => total + item.quantity,
-      0
-    ),
+    packageCount:
+      options?.packageCount ??
+      remittance.items.reduce((total, item) => total + item.quantity, 0),
     purchaseOrderNumber: options?.purchaseOrderNumber?.trim() || null,
-    declaredValue: truncateMoney(remittance.total * 0.7),
+    declaredValue:
+      options?.declaredValue ?? truncateMoney(remittance.total * 0.7),
   };
 }
 
