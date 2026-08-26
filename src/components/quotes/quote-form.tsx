@@ -84,6 +84,7 @@ import {
   buildQuoteTaxLines,
   computeQuoteTotals,
 } from "@/modules/quotes/utils/quote-line-calcs";
+import { INVOICE_TYPE_OPTIONS } from "@/modules/sales/invoice-type-utils";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
@@ -433,6 +434,7 @@ export function QuoteForm({
       salesPriceListId: NO_PRICE_LIST,
       targetMarginListId: NO_PRICE_LIST,
       currency: "ARS",
+      invoiceType: "NOTA_DE_VENTA",
       items: [],
       notes: "",
       paymentCondition: "",
@@ -441,6 +443,17 @@ export function QuoteForm({
       ...defaultValues,
     } as QuoteFormValues,
   });
+
+  useEffect(() => {
+    const defaultInvoiceType = orgSettings?.sales_default_invoice_type;
+    if (defaultInvoiceType && !defaultValues?.invoiceType) {
+      form.setValue("invoiceType", defaultInvoiceType, { shouldDirty: false });
+    }
+  }, [
+    orgSettings?.sales_default_invoice_type,
+    defaultValues?.invoiceType,
+    form,
+  ]);
 
   const { fields, append, remove, update } = useFieldArray({
     control: form.control,
@@ -921,6 +934,11 @@ export function QuoteForm({
     name: "advancePaymentPercentage",
   });
 
+  const advancePaymentEnabled = useWatch({
+    control: form.control,
+    name: "advancePaymentEnabled",
+  });
+
   const selectedPriceListId = useWatch({
     control: form.control,
     name: "salesPriceListId",
@@ -1121,6 +1139,42 @@ export function QuoteForm({
                             ? "USD - Dólares"
                             : "ARS - Pesos Arg."}
                         </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="invoiceType"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tipo de comprobante</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Tipo" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {INVOICE_TYPE_OPTIONS.map((option) => (
+                              <SelectItem
+                                disabled={
+                                  advancePaymentEnabled &&
+                                  option.value !== "FACTURA_A" &&
+                                  option.value !== "FACTURA_B" &&
+                                  option.value !== "FACTURA_C"
+                                }
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}

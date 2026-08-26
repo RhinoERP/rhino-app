@@ -958,6 +958,9 @@ function ItemRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </td>
+      <td className="px-2 py-1.5">
+        <span className="text-sm">{stock?.brand ?? "—"}</span>
+      </td>
       <td className="px-2 py-1.5 text-right tabular-nums">{item.quantity}</td>
       <td className="px-2 py-1.5">
         <div className="flex items-center justify-center gap-2">
@@ -1139,6 +1142,7 @@ function UnassignedItemsSection({
                 </th>
                 <th className="pr-2 pb-1.5 text-left font-medium">Producto</th>
                 <th className="px-2 pb-1.5 text-left font-medium">Variante</th>
+                <th className="px-2 pb-1.5 text-left font-medium">Marca</th>
                 <th className="px-2 pb-1.5 text-right font-medium">
                   Necesario
                 </th>

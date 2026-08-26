@@ -2178,9 +2178,8 @@ export async function createProductLotForOrg(
   if (product.has_variants) {
     finalExpirationDate = null;
   } else if (!finalExpirationDate) {
-    throw new Error(
-      "La fecha de vencimiento es requerida para productos sin variantes"
-    );
+    // Permitir sin vencimiento para productos sin variantes
+    finalExpirationDate = null;
   }
 
   if (finalExpirationDate) {

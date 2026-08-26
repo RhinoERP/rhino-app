@@ -1,12 +1,16 @@
 "use server";
 
+import { createClient } from "@/lib/supabase/server";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   buildRemittanceMaskData,
   generateRemittanceMaskHTML,
 } from "@/modules/sales/service/remittance-mask-generator.service";
-import { getOrderRemittanceData } from "../server/order-remittance-pdf-document.service";
+import {
+  getOrderRemittanceData,
+  resolveRemittanceOrderIds,
+} from "../server/order-remittance-pdf-document.service";
 
 type PreviewOrderRemittanceMaskResult =
   | { success: true; html: string }
@@ -44,15 +48,30 @@ export async function previewOrderRemittanceMaskAction(
       };
     }
 
+    const childOrderIds = await resolveRemittanceOrderIds(
+      childOrderId,
+      remitoNumber
+    );
+
+    const supabase = await createClient();
+    const { data: event } = await supabase
+      .from("order_dispatch_events")
+      .select("package_count, declared_value")
+      .eq("order_id", childOrderId)
+      .eq("remito_number", remitoNumber)
+      .maybeSingle();
+
     const { remittance, carrierName } = await getOrderRemittanceData({
       orgSlug,
-      childOrderId,
+      childOrderIds,
       remitoNumber,
     });
 
     const mask = buildRemittanceMaskData(remittance, {
       carrierName,
       purchaseOrderNumber,
+      packageCount: event?.package_count ?? null,
+      declaredValue: event?.declared_value ?? null,
     });
     return { success: true, html: generateRemittanceMaskHTML(mask) };
   } catch (error) {

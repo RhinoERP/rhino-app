@@ -485,6 +485,7 @@ export function buildRemittanceFromSale(
   issuer?: {
     businessName?: string | null;
     cuit?: string | null;
+    logoUrl?: string | null;
     singlePageDuplicate?: boolean;
     finalRemittanceVisibility?: RemittanceFinalVisibility;
   }
@@ -560,7 +561,7 @@ export function buildRemittanceFromSale(
       businessName: issuer?.businessName ?? "Empresa",
       cuit: issuer?.cuit ?? undefined,
       legalAddress: remittanceIssuerConfig.legalAddress,
-      logoUrl: remittanceIssuerConfig.logoUrl,
+      logoUrl: issuer?.logoUrl ?? remittanceIssuerConfig.logoUrl,
     },
     customer: {
       businessName: sale.customer.business_name,

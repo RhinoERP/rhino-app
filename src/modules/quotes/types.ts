@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { InvoiceType } from "@/modules/sales/types";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 // biome-ignore lint/style/noExportedImports: re-export needed for module consumers
 import type { PaginatedResult, SortParam } from "@/types/pagination";
@@ -60,6 +61,8 @@ export type CreateQuoteInput = {
   advancePaymentPercentage?: number | null;
   targetMarginListId?: string | null;
   globalDiscountPercentage?: number | null;
+  /** Tipo de comprobante de la venta que se generará al convertir. */
+  invoiceType?: InvoiceType | null;
   /** Impuestos de fallback global (se aplican a ítems sin impuesto propio). */
   taxes?: ItemTaxInput[];
   items: CreateQuoteItemInput[];
@@ -97,6 +100,8 @@ export type UpdateQuoteInput = {
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
   globalDiscountPercentage?: number | null;
+  /** Tipo de comprobante de la venta que se generará al convertir. */
+  invoiceType?: InvoiceType | null;
   /** Impuestos de fallback global (se aplican a ítems sin impuesto propio). */
   taxes?: ItemTaxInput[];
   items?: CreateQuoteItemInput[];
@@ -156,43 +161,70 @@ export const quoteItemSchema = z.object({
   taxes: z.array(quoteItemTaxSchema).optional().default([]),
 });
 
-export const quoteFormSchema = z.object({
-  customerId: z.string().min(1, "Debe seleccionar un cliente."),
+export const QUOTE_INVOICE_TYPES = [
+  "NOTA_DE_VENTA",
+  "FACTURA_A",
+  "FACTURA_A_RETENCION",
+  "FACTURA_B",
+  "FACTURA_C",
+  "FACTURA_E",
+] as const;
 
-  salesPriceListId: z.string(),
+export const quoteFormSchema = z
+  .object({
+    customerId: z.string().min(1, "Debe seleccionar un cliente."),
 
-  targetMarginListId: z.string().optional().default("none"),
+    salesPriceListId: z.string(),
 
-  currency: z.enum(["ARS", "USD"]),
+    targetMarginListId: z.string().optional().default("none"),
 
-  exchangeRate: z.number().positive().optional().nullable(),
+    currency: z.enum(["ARS", "USD"]),
 
-  items: z
-    .array(quoteItemSchema)
-    .min(1, "Debe agregar al menos un producto al presupuesto."),
+    exchangeRate: z.number().positive().optional().nullable(),
 
-  notes: z.string().optional(),
+    items: z
+      .array(quoteItemSchema)
+      .min(1, "Debe agregar al menos un producto al presupuesto."),
 
-  purchaseOrderFile: z.string().nullable().optional(),
-  designFile: z.string().nullable().optional(),
+    notes: z.string().optional(),
 
-  advancePaymentEnabled: z.boolean().optional().default(false),
-  advancePaymentPercentage: z
-    .number()
-    .int()
-    .min(1, "Mínimo 1%")
-    .max(100, "Máximo 100%")
-    .nullable()
-    .optional()
-    .default(null),
+    purchaseOrderFile: z.string().nullable().optional(),
+    designFile: z.string().nullable().optional(),
 
-  globalDiscountPercentage: z.number().min(0).max(100).default(0),
+    invoiceType: z.enum(QUOTE_INVOICE_TYPES).default("NOTA_DE_VENTA"),
 
-  // Impuestos de fallback global (se aplican a ítems sin impuesto propio)
-  taxes: z.array(quoteItemTaxSchema).optional().default([]),
+    advancePaymentEnabled: z.boolean().optional().default(false),
+    advancePaymentPercentage: z
+      .number()
+      .int()
+      .min(1, "Mínimo 1%")
+      .max(100, "Máximo 100%")
+      .nullable()
+      .optional()
+      .default(null),
 
-  paymentCondition: z.string().optional(),
-});
+    globalDiscountPercentage: z.number().min(0).max(100).default(0),
+
+    // Impuestos de fallback global (se aplican a ítems sin impuesto propio)
+    taxes: z.array(quoteItemTaxSchema).optional().default([]),
+
+    paymentCondition: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (
+      val.advancePaymentEnabled &&
+      val.invoiceType !== "FACTURA_A" &&
+      val.invoiceType !== "FACTURA_B" &&
+      val.invoiceType !== "FACTURA_C"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["invoiceType"],
+        message:
+          "Con pago anticipado, el comprobante debe ser Factura A, B o C",
+      });
+    }
+  });
 
 // --- TypeScript Types ---
 

@@ -54,7 +54,7 @@ type SaleItemPrices = {
 
 async function fetchOrderItems(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  childOrderId: string,
+  childOrderIds: string[],
   quoteId?: string
 ): Promise<RemittanceData["items"]> {
   const query = supabase
@@ -72,7 +72,7 @@ async function fetchOrderItems(
       quote_item_extras(*)
     `
     )
-    .eq("assigned_order_id", childOrderId);
+    .in("assigned_order_id", childOrderIds);
 
   let { data: quoteItems } = await query;
 
@@ -202,19 +202,19 @@ function computeOrderTotals(items: RemittanceData["items"]) {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: assembles remittance data from order, customer, invoice, carrier, and organization sources
 export async function getOrderRemittanceData(params: {
   orgSlug: string;
-  childOrderId: string;
+  childOrderIds: string[];
   remitoNumber: string;
 }): Promise<OrderRemittanceData> {
   const supabase = await createClient();
 
-  const { data: orderData } = await supabase
+  const { data: ordersData } = await supabase
     .from("orders")
     .select(
       "id, order_number, observations, quote_id, sales_order_id, parent_order_id, quotes!inner(customer_id, created_by)"
     )
-    .eq("id", params.childOrderId)
-    .single();
+    .in("id", params.childOrderIds);
 
+  const orderData = (ordersData ?? [])[0];
   if (!orderData) {
     throw new Error("Pedido no encontrado");
   }
@@ -224,7 +224,11 @@ export async function getOrderRemittanceData(params: {
       getOrganizationBySlug(params.orgSlug),
       getOrganizationSettings(params.orgSlug),
     ]),
-    fetchOrderItems(supabase, params.childOrderId, orderData.quote_id),
+    fetchOrderItems(
+      supabase,
+      params.childOrderIds,
+      params.childOrderIds.length === 1 ? orderData.quote_id : undefined
+    ),
   ]);
 
   const [customer, invoiceNumber, carrierResult] = await Promise.all([
@@ -262,7 +266,7 @@ export async function getOrderRemittanceData(params: {
       businessName: organization?.name ?? "Empresa",
       cuit: organization?.cuit ?? undefined,
       legalAddress: undefined,
-      logoUrl: undefined,
+      logoUrl: organization?.logo_url ?? undefined,
     },
     customer: {
       businessName: customer.business_name,
@@ -295,13 +299,42 @@ export async function getOrderRemittanceData(params: {
 
 export async function generateOrderRemittancePdfDocument(params: {
   orgSlug: string;
-  childOrderId: string;
+  childOrderIds: string[];
   remitoNumber: string;
 }): Promise<OrderRemittancePdfDocument> {
   const { remittance, orderNumber } = await getOrderRemittanceData(params);
   const html = generateRemittanceHTML(remittance);
   const content = await renderHtmlToPdfBuffer(html);
-  const filename = `Remito_${orderNumber}.pdf`;
+  const filename =
+    params.childOrderIds.length === 1
+      ? `Remito_${orderNumber}.pdf`
+      : `Remito_${params.remitoNumber}.pdf`;
 
   return { filename, content, html };
+}
+
+export async function resolveRemittanceOrderIds(
+  childOrderId: string,
+  remitoNumber: string
+): Promise<string[]> {
+  const supabase = await createClient();
+
+  const { data: event } = await supabase
+    .from("order_dispatch_events")
+    .select("dispatch_group_id")
+    .eq("order_id", childOrderId)
+    .eq("remito_number", remitoNumber)
+    .maybeSingle();
+
+  if (!event?.dispatch_group_id) {
+    return [childOrderId];
+  }
+
+  const { data: groupEvents } = await supabase
+    .from("order_dispatch_events")
+    .select("order_id")
+    .eq("dispatch_group_id", event.dispatch_group_id);
+
+  const ids = [...new Set((groupEvents ?? []).map((e) => e.order_id))];
+  return ids.length > 0 ? ids : [childOrderId];
 }

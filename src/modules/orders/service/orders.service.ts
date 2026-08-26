@@ -497,6 +497,10 @@ export async function getChildOrdersForDispatch(
 
   return visibleOrders.map((o) => {
     const parent = parentMap.get(o.parent_order_id ?? o.id);
+    const dispatchItems = itemMap.get(o.id) ?? [];
+    const totalAmount = truncateMoney(
+      dispatchItems.reduce((sum, item) => sum + item.subtotal, 0)
+    );
 
     return {
       id: o.id,
@@ -506,7 +510,13 @@ export async function getChildOrdersForDispatch(
       parent_order_number: parent?.order_number ?? o.order_number,
       parent_customer_name: parent?.customer_name ?? "—",
       parent_sales_order_id: parent?.sales_order_id ?? o.sales_order_id ?? null,
-      items: itemMap.get(o.id) ?? [],
+      total_amount: totalAmount,
+      items: dispatchItems.map((item) => ({
+        id: item.id,
+        description: item.description,
+        quantity: item.quantity,
+        quote_item_extras: item.quote_item_extras,
+      })),
     };
   });
 }
@@ -693,13 +703,16 @@ async function loadUnassignedQuoteItems(
     id: string;
     description: string;
     quantity: number;
-    unit_price?: number;
+    unit_price: number;
+    subtotal: number;
     quote_item_extras: OrderQuoteItemExtraRow[];
   }>
 > {
   const { data: items } = await supabase
     .from("quote_items")
-    .select("id, description, quantity, unit_price, quote_item_extras(*)")
+    .select(
+      "id, description, quantity, unit_price, subtotal, quote_item_extras(*)"
+    )
     .eq("quote_id", quoteId)
     .is("assigned_order_id", null);
 
@@ -708,6 +721,7 @@ async function loadUnassignedQuoteItems(
     description: item.description ?? "",
     quantity: item.quantity,
     unit_price: item.unit_price ?? 0,
+    subtotal: item.subtotal ?? 0,
     quote_item_extras: (item.quote_item_extras ??
       []) as OrderQuoteItemExtraRow[],
   }));
@@ -835,6 +849,7 @@ async function loadDispatchItems(
       id: string;
       description: string;
       quantity: number;
+      subtotal: number;
       quote_item_extras: OrderQuoteItemExtraRow[];
     }>
   >
@@ -845,6 +860,7 @@ async function loadDispatchItems(
       id: string;
       description: string;
       quantity: number;
+      subtotal: number;
       quote_item_extras: OrderQuoteItemExtraRow[];
     }>
   >();
@@ -858,7 +874,7 @@ async function loadDispatchItems(
   const { data: items } = await supabase
     .from("quote_items")
     .select(
-      "id, description, quantity, assigned_order_id, quote_item_extras(*)"
+      "id, description, quantity, subtotal, assigned_order_id, quote_item_extras(*)"
     )
     .in("assigned_order_id", allIds);
 
@@ -870,6 +886,7 @@ async function loadDispatchItems(
     id: string;
     description: string;
     quantity: number;
+    subtotal: number;
     assigned_order_id: string;
     quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>) {
@@ -877,6 +894,7 @@ async function loadDispatchItems(
       id: item.id,
       description: item.description,
       quantity: item.quantity,
+      subtotal: item.subtotal ?? 0,
       quote_item_extras: item.quote_item_extras ?? [],
     };
     const group = map.get(item.assigned_order_id);
@@ -1137,7 +1155,7 @@ export async function getStockForOrder(
 
   const { data: stockData, error } = await supabase
     .from("view_stock_detail")
-    .select("product_id, product_name, total_stock")
+    .select("product_id, product_name, brand, total_stock")
     .eq("organization_id", org.id)
     .in("product_id", productIds);
 
@@ -1152,6 +1170,7 @@ export async function getStockForOrder(
     return {
       product_id: item.productId,
       product_name: stock?.product_name ?? "Desconocido",
+      brand: stock?.brand ?? null,
       quantity_needed: item.quantityNeeded,
       stock_available: stockAvailable,
       has_stock: stockAvailable >= item.quantityNeeded,
@@ -3549,37 +3568,31 @@ async function recordOrderHistory(params: OrderHistoryParams): Promise<void> {
   }
 }
 
-export async function dispatchChildOrder(params: {
-  orgSlug: string;
-  orgId: string;
-  childOrderId: string;
-  parentOrderId: string;
-  remitoNumber: string;
-  notes?: string;
-  userId: string;
-}): Promise<void> {
-  const supabase = await createClient();
-
-  const accessContext = await resolveOrdersAccessContext(
-    supabase,
-    params.orgSlug
-  );
-
-  const { data: currentOrder } = await supabase
-    .from("orders")
-    .select("status, created_by")
-    .eq("id", params.childOrderId)
-    .eq("organization_id", params.orgId)
-    .single();
-
-  assertCanManageOrder(accessContext, currentOrder?.created_by ?? null);
-
+async function insertChildOrderDispatch(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    fromStatus: OrderFlowStatus;
+    remitoNumber: string;
+    dispatchGroupId: string;
+    dispatchedAt: string;
+    historyNote: string;
+    notes?: string;
+    packageCount?: number | null;
+    declaredValue?: number | null;
+    userId: string;
+    orgId: string;
+  }
+): Promise<void> {
   const { error: eventError } = await supabase
     .from("order_dispatch_events")
     .insert({
-      order_id: params.childOrderId,
+      order_id: params.orderId,
       remito_number: params.remitoNumber,
-      dispatched_at: new Date().toISOString(),
+      dispatch_group_id: params.dispatchGroupId,
+      dispatched_at: params.dispatchedAt,
+      package_count: params.packageCount ?? null,
+      declared_value: params.declaredValue ?? null,
       notes: params.notes ?? null,
     });
 
@@ -3589,17 +3602,15 @@ export async function dispatchChildOrder(params: {
     );
   }
 
-  const fromStatus = currentOrder?.status ?? "PREPARING";
-
   const { error: historyError } = await supabase
     .from("order_status_history")
     .insert({
-      order_id: params.childOrderId,
-      from_status: fromStatus,
+      order_id: params.orderId,
+      from_status: params.fromStatus,
       to_status: "DISPATCHED",
-      notes: `Despachado - Remito ${params.remitoNumber}${params.notes ? ` - ${params.notes}` : ""}`,
+      notes: params.historyNote,
       changed_by: params.userId,
-      changed_at: new Date().toISOString(),
+      changed_at: params.dispatchedAt,
     });
 
   if (historyError) {
@@ -3610,14 +3621,191 @@ export async function dispatchChildOrder(params: {
 
   const { error: updateError } = await supabase
     .from("orders")
-    .update({ status: "DISPATCHED", updated_at: new Date().toISOString() })
-    .eq("id", params.childOrderId)
+    .update({ status: "DISPATCHED", updated_at: params.dispatchedAt })
+    .eq("id", params.orderId)
     .eq("organization_id", params.orgId);
 
   if (updateError) {
     throw new Error(
       `Error al actualizar estado del pedido: ${updateError.message}`
     );
+  }
+}
+
+export async function dispatchChildOrders(params: {
+  orgSlug: string;
+  orgId: string;
+  childOrderIds: string[];
+  parentOrderId: string;
+  remitoNumber: string;
+  packageCount?: number | null;
+  declaredValue?: number | null;
+  notes?: string;
+  userId: string;
+}): Promise<string> {
+  const supabase = await createClient();
+
+  const accessContext = await resolveOrdersAccessContext(
+    supabase,
+    params.orgSlug
+  );
+
+  const { data: currentOrders } = await supabase
+    .from("orders")
+    .select("id, status, created_by, parent_order_id")
+    .in("id", params.childOrderIds)
+    .eq("organization_id", params.orgId);
+
+  if (!currentOrders || currentOrders.length !== params.childOrderIds.length) {
+    throw new Error("Uno o más pedidos no fueron encontrados");
+  }
+
+  for (const order of currentOrders) {
+    assertCanManageOrder(accessContext, order.created_by ?? null);
+
+    if (order.status !== "PREPARING") {
+      throw new Error(
+        `Solo se pueden despachar pedidos en preparación (${order.id})`
+      );
+    }
+
+    const effectiveParentId = order.parent_order_id ?? order.id;
+    if (effectiveParentId !== params.parentOrderId) {
+      throw new Error("Los subpedidos deben pertenecer al mismo cliente");
+    }
+  }
+
+  const { data: existingEvent } = await supabase
+    .from("order_dispatch_events")
+    .select("id, orders!inner(id)")
+    .eq("remito_number", params.remitoNumber)
+    .eq("orders.organization_id", params.orgId)
+    .limit(1);
+
+  if (existingEvent && existingEvent.length > 0) {
+    throw new Error("El número de remito ya fue utilizado");
+  }
+
+  const dispatchGroupId = crypto.randomUUID();
+  const dispatchedAt = new Date().toISOString();
+  const historyNote = `Despachado - Remito ${params.remitoNumber}${params.notes ? ` - ${params.notes}` : ""}`;
+
+  for (const order of currentOrders) {
+    await insertChildOrderDispatch(supabase, {
+      orderId: order.id,
+      fromStatus: order.status,
+      remitoNumber: params.remitoNumber,
+      dispatchGroupId,
+      dispatchedAt,
+      historyNote,
+      notes: params.notes,
+      packageCount: params.packageCount,
+      declaredValue: params.declaredValue,
+      userId: params.userId,
+      orgId: params.orgId,
+    });
+  }
+
+  await recalcParentOrderStatus(params.parentOrderId, params.orgId);
+
+  return dispatchGroupId;
+}
+
+export async function dispatchChildOrder(params: {
+  orgSlug: string;
+  orgId: string;
+  childOrderId: string;
+  parentOrderId: string;
+  remitoNumber: string;
+  packageCount?: number | null;
+  declaredValue?: number | null;
+  notes?: string;
+  userId: string;
+}): Promise<void> {
+  await dispatchChildOrders({
+    orgSlug: params.orgSlug,
+    orgId: params.orgId,
+    childOrderIds: [params.childOrderId],
+    parentOrderId: params.parentOrderId,
+    remitoNumber: params.remitoNumber,
+    packageCount: params.packageCount,
+    declaredValue: params.declaredValue,
+    notes: params.notes,
+    userId: params.userId,
+  });
+}
+
+export async function deliverChildOrders(params: {
+  orgSlug: string;
+  orgId: string;
+  childOrderIds: string[];
+  parentOrderId: string;
+  notes?: string;
+  userId: string;
+}): Promise<void> {
+  const supabase = await createClient();
+
+  const accessContext = await resolveOrdersAccessContext(
+    supabase,
+    params.orgSlug
+  );
+
+  const { data: currentOrders } = await supabase
+    .from("orders")
+    .select("id, status, created_by, parent_order_id")
+    .in("id", params.childOrderIds)
+    .eq("organization_id", params.orgId);
+
+  if (!currentOrders || currentOrders.length !== params.childOrderIds.length) {
+    throw new Error("Uno o más pedidos no fueron encontrados");
+  }
+
+  for (const order of currentOrders) {
+    assertCanManageOrder(accessContext, order.created_by ?? null);
+
+    if (order.status !== "DISPATCHED") {
+      throw new Error(
+        `Solo se pueden entregar pedidos despachados (${order.id})`
+      );
+    }
+
+    const effectiveParentId = order.parent_order_id ?? order.id;
+    if (effectiveParentId !== params.parentOrderId) {
+      throw new Error("Los subpedidos deben pertenecer al mismo cliente");
+    }
+  }
+
+  const deliveredAt = new Date().toISOString();
+
+  for (const order of currentOrders) {
+    const { error: historyError } = await supabase
+      .from("order_status_history")
+      .insert({
+        order_id: order.id,
+        from_status: order.status,
+        to_status: "DELIVERED",
+        notes: params.notes ?? null,
+        changed_by: params.userId,
+        changed_at: deliveredAt,
+      });
+
+    if (historyError) {
+      throw new Error(
+        `Error al registrar historial de entrega: ${historyError.message}`
+      );
+    }
+
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({ status: "DELIVERED", updated_at: deliveredAt })
+      .eq("id", order.id)
+      .eq("organization_id", params.orgId);
+
+    if (updateError) {
+      throw new Error(
+        `Error al actualizar estado del pedido: ${updateError.message}`
+      );
+    }
   }
 
   await recalcParentOrderStatus(params.parentOrderId, params.orgId);

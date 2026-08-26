@@ -5,7 +5,10 @@ import { createClient } from "@/lib/supabase/server";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
-import { generateOrderRemittancePdfDocument } from "../server/order-remittance-pdf-document.service";
+import {
+  generateOrderRemittancePdfDocument,
+  resolveRemittanceOrderIds,
+} from "../server/order-remittance-pdf-document.service";
 
 type GenerateOrderRemittanceResult = {
   success: boolean;
@@ -55,9 +58,14 @@ export async function generateOrderRemittanceAction(
       }
     }
 
+    const childOrderIds = await resolveRemittanceOrderIds(
+      orderId,
+      resolvedRemito
+    );
+
     const pdfDoc = await generateOrderRemittancePdfDocument({
       orgSlug,
-      childOrderId: orderId,
+      childOrderIds,
       remitoNumber: resolvedRemito,
     });
 
@@ -65,7 +73,7 @@ export async function generateOrderRemittanceAction(
     try {
       const uploadResult = await uploadOrderDocument({
         orgSlug,
-        orderId,
+        orderId: childOrderIds[0],
         type: "order_remittos",
         filename: pdfDoc.filename,
         content: pdfDoc.content,
@@ -77,7 +85,7 @@ export async function generateOrderRemittanceAction(
         await supabase
           .from("order_dispatch_events")
           .update({ remittance_pdf_url: pdfUrl })
-          .eq("order_id", orderId)
+          .in("order_id", childOrderIds)
           .eq("remito_number", resolvedRemito);
 
         revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);

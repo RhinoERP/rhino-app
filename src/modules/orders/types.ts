@@ -130,6 +130,7 @@ export type ChildOrderForDispatch = {
   parent_order_number: string;
   parent_customer_name: string;
   parent_sales_order_id: string | null;
+  total_amount: number;
   items: Array<{
     id: string;
     description: string;
@@ -182,6 +183,7 @@ export type OrderAreaCounts = {
 export type StockInfo = {
   product_id: string;
   product_name: string;
+  brand?: string | null;
   quantity_needed: number;
   stock_available: number;
   has_stock: boolean;
@@ -416,6 +418,7 @@ export type SaleDispatchEvent = {
   dispatched_at: string;
   child_order_number: string;
   child_order_id: string;
+  child_orders: Array<{ id: string; order_number: string }>;
   notes: string | null;
   items: SaleDispatchEventItem[];
   remittance_pdf_url?: string | null;

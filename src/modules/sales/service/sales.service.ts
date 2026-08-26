@@ -5793,6 +5793,7 @@ export async function regenerateSaleLevelRemito(params: {
       issuer: {
         businessName: organization?.name,
         cuit: organization?.cuit,
+        logoUrl: organization?.logo_url,
       },
       singlePageDuplicate:
         orgSettingsResult.success && orgSettingsResult.data

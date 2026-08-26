@@ -20,6 +20,7 @@ type PreSaleRemittanceData = {
   issuer?: {
     businessName?: string | null;
     cuit?: string | null;
+    logoUrl?: string | null;
   };
   date: string;
   expirationDate?: string | null;
@@ -64,6 +65,7 @@ export function generatePreSaleBudgetHTML(data: PreSaleRemittanceData): string {
     issuer: {
       businessName: data.issuer?.businessName ?? "Empresa",
       cuit: data.issuer?.cuit ?? undefined,
+      logoUrl: data.issuer?.logoUrl ?? undefined,
     },
     customer: data.customer,
     seller: {

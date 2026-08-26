@@ -5,12 +5,16 @@ import {
   ArrowLeft,
   Calendar,
   CheckCircle,
+  ImageIcon,
+  Loader2,
   Lock,
   LockOpen,
+  Trash2,
+  Upload,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +33,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { removeOrganizationLogoAction } from "@/modules/admin/actions/remove-organization-logo.action";
+import { uploadOrganizationLogoAction } from "@/modules/admin/actions/upload-organization-logo.action";
 import { toggleOrganizationStatusAction } from "@/modules/organizations/actions/toggle-organization-status.action";
 import { updateOrganizationModulesAction } from "@/modules/organizations/actions/update-organization-modules.action";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -104,6 +110,17 @@ export function OrganizationDetailsClient({
   );
   const [remittanceMaskPrintingEnabled, setRemittanceMaskPrintingEnabled] =
     useState(configuredRemittanceMaskPrintingEnabled);
+
+  const [logoUrl, setLogoUrl] = useState<string | null>(
+    organization.logo_url ?? null
+  );
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setLogoUrl(organization.logo_url ?? null);
+  }, [organization.logo_url]);
 
   useEffect(() => {
     setIsActive(organization.is_active ?? true);
@@ -204,6 +221,68 @@ export function OrganizationDetailsClient({
     }
   };
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setLogoError(null);
+    setIsUploadingLogo(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const result = await uploadOrganizationLogoAction(
+        organization.id,
+        organization.slug ?? "",
+        formData
+      );
+
+      if (!result.success) {
+        setLogoError(result.error);
+        return;
+      }
+
+      setLogoUrl(result.logoUrl);
+      router.refresh();
+    } catch (err) {
+      setLogoError("Error desconocido al subir el logo");
+      console.error(err);
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoInputRef.current) {
+        logoInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    setLogoError(null);
+    setIsUploadingLogo(true);
+
+    try {
+      const result = await removeOrganizationLogoAction(
+        organization.id,
+        organization.slug ?? ""
+      );
+
+      if (!result.success) {
+        setLogoError(result.error);
+        return;
+      }
+
+      setLogoUrl(null);
+      router.refresh();
+    } catch (err) {
+      setLogoError("Error desconocido al eliminar el logo");
+      console.error(err);
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Back Button */}
@@ -259,6 +338,73 @@ export function OrganizationDetailsClient({
                 {formatDate(organization.created_at)}
               </p>
             </div>
+          </div>
+
+          {/* Logo Section */}
+          <div className="border-t pt-4">
+            <div className="mb-3">
+              <div className="text-muted-foreground text-sm">Logo</div>
+              <p className="text-muted-foreground text-xs">
+                Se muestra en presupuestos, remitos y otros documentos. PNG, JPG
+                o WebP (máx. 1MB).
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border bg-muted">
+                {logoUrl ? (
+                  // biome-ignore lint/performance/noImgElement: admin-only preview, not a public page
+                  <img
+                    alt={`Logo de ${organization.name}`}
+                    className="h-full w-full object-contain"
+                    height={64}
+                    src={logoUrl}
+                    width={64}
+                  />
+                ) : (
+                  <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  disabled={isUploadingLogo}
+                  onChange={handleLogoUpload}
+                  ref={logoInputRef}
+                  type="file"
+                />
+                <Button
+                  disabled={isUploadingLogo}
+                  onClick={() => logoInputRef.current?.click()}
+                  size="sm"
+                  variant="outline"
+                >
+                  {isUploadingLogo ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  {logoUrl ? "Cambiar" : "Subir logo"}
+                </Button>
+                {logoUrl && (
+                  <Button
+                    disabled={isUploadingLogo}
+                    onClick={handleLogoRemove}
+                    size="sm"
+                    variant="destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Eliminar
+                  </Button>
+                )}
+              </div>
+            </div>
+            {logoError && (
+              <div className="mt-2 flex items-center gap-2 rounded-md bg-destructive/10 p-2 text-destructive text-xs">
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                {logoError}
+              </div>
+            )}
           </div>
 
           {/* Status Section */}

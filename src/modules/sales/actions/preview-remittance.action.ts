@@ -48,6 +48,7 @@ export async function previewRemittanceAction(
     const remittanceData = buildRemittanceFromSale(sale, type, {
       businessName: organization?.name,
       cuit: organization?.cuit,
+      logoUrl: organization?.logo_url,
       singlePageDuplicate,
       finalRemittanceVisibility,
     });

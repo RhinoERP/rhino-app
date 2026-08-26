@@ -46,20 +46,39 @@ export async function regenerateChildOrderRemitos(params: {
 
   const { data: events } = await supabase
     .from("order_dispatch_events")
-    .select("id, order_id, remito_number")
+    .select("id, order_id, remito_number, dispatch_group_id")
     .in("order_id", childIds);
 
-  for (const event of events ?? []) {
+  type EventRow = {
+    id: string;
+    order_id: string;
+    remito_number: string;
+    dispatch_group_id: string | null;
+  };
+
+  const groups = new Map<string, EventRow[]>();
+  for (const event of (events ?? []) as EventRow[]) {
+    const key = event.dispatch_group_id ?? event.id;
+    const group = groups.get(key) ?? [];
+    group.push(event);
+    groups.set(key, group);
+  }
+
+  for (const group of groups.values()) {
+    const orderIds = group.map((event) => event.order_id);
+    const remitoNumber = group[0].remito_number;
+    const eventIds = group.map((event) => event.id);
+
     try {
       const pdfDoc = await generateOrderRemittancePdfDocument({
         orgSlug,
-        childOrderId: event.order_id,
-        remitoNumber: event.remito_number,
+        childOrderIds: orderIds,
+        remitoNumber,
       });
 
       const uploadResult = await uploadOrderDocument({
         orgSlug,
-        orderId: event.order_id,
+        orderId: orderIds[0],
         type: "order_remittos",
         filename: pdfDoc.filename,
         content: pdfDoc.content,
@@ -69,25 +88,22 @@ export async function regenerateChildOrderRemitos(params: {
         await supabase
           .from("order_dispatch_events")
           .update({ remittance_pdf_url: uploadResult.url })
-          .eq("id", event.id);
+          .in("id", eventIds);
       } else {
         console.error(
-          `No se pudo regenerar el remito del pedido ${event.order_id}: ${uploadResult.error}`
+          `No se pudo regenerar el remito ${remitoNumber}: ${uploadResult.error}`
         );
         await supabase
           .from("order_dispatch_events")
           .update({ remittance_pdf_url: null })
-          .eq("id", event.id);
+          .in("id", eventIds);
       }
     } catch (error) {
-      console.error(
-        `No se pudo regenerar el remito del pedido ${event.order_id}`,
-        error
-      );
+      console.error(`No se pudo regenerar el remito ${remitoNumber}`, error);
       await supabase
         .from("order_dispatch_events")
         .update({ remittance_pdf_url: null })
-        .eq("id", event.id);
+        .in("id", eventIds);
     }
   }
 }

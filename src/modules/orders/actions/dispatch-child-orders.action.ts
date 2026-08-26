@@ -6,35 +6,26 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
 import { generateOrderRemittancePdfDocument } from "../server/order-remittance-pdf-document.service";
-import { dispatchChildOrder } from "../service/orders.service";
+import { dispatchChildOrders } from "../service/orders.service";
 
-export type DispatchChildOrderInput = {
+export type DispatchChildOrdersInput = {
   orgSlug: string;
-  childOrderId: string;
+  childOrderIds: string[];
   remitoNumber: string;
-  packageCount?: number | null;
-  declaredValue?: number | null;
   notes?: string;
 };
 
-export type DispatchChildOrderResult = {
+export type DispatchChildOrdersResult = {
   success: boolean;
   error?: string;
 };
 
-export async function dispatchChildOrderAction(
-  input: DispatchChildOrderInput
-): Promise<DispatchChildOrderResult> {
+export async function dispatchChildOrdersAction(
+  input: DispatchChildOrdersInput
+): Promise<DispatchChildOrdersResult> {
   await ensure("orders.dispatch", input.orgSlug);
   try {
-    const {
-      orgSlug,
-      childOrderId,
-      remitoNumber,
-      packageCount,
-      declaredValue,
-      notes,
-    } = input;
+    const { orgSlug, childOrderIds, remitoNumber, notes } = input;
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 
@@ -50,31 +41,33 @@ export async function dispatchChildOrderAction(
       throw new Error("No autorizado");
     }
 
+    const ids = Array.from(new Set(childOrderIds));
+    if (ids.length === 0) {
+      throw new Error("Seleccioná al menos un subpedido para despachar");
+    }
+
     if (!remitoNumber.trim()) {
       throw new Error("El número de remito es obligatorio");
     }
 
-    const { data: childOrder, error: fetchError } = await supabase
+    const { data: orders } = await supabase
       .from("orders")
       .select("id, parent_order_id")
-      .eq("id", childOrderId)
-      .eq("organization_id", org.id)
-      .single();
+      .in("id", ids)
+      .eq("organization_id", org.id);
 
-    if (fetchError || !childOrder) {
-      throw new Error("Pedido no encontrado");
+    if (!orders || orders.length !== ids.length) {
+      throw new Error("Uno o más pedidos no fueron encontrados");
     }
 
-    const parentId = childOrder.parent_order_id ?? childOrderId;
+    const parentId = orders[0].parent_order_id ?? orders[0].id;
 
-    await dispatchChildOrder({
+    await dispatchChildOrders({
       orgSlug,
       orgId: org.id,
-      childOrderId,
+      childOrderIds: ids,
       parentOrderId: parentId,
       remitoNumber: remitoNumber.trim(),
-      packageCount,
-      declaredValue,
       notes: notes?.trim() || undefined,
       userId: user.id,
     });
@@ -82,13 +75,13 @@ export async function dispatchChildOrderAction(
     try {
       const pdfDoc = await generateOrderRemittancePdfDocument({
         orgSlug,
-        childOrderIds: [childOrderId],
+        childOrderIds: ids,
         remitoNumber: remitoNumber.trim(),
       });
 
       const uploadResult = await uploadOrderDocument({
         orgSlug,
-        orderId: childOrderId,
+        orderId: ids[0],
         type: "order_remittos",
         filename: pdfDoc.filename,
         content: pdfDoc.content,
@@ -98,7 +91,7 @@ export async function dispatchChildOrderAction(
         await supabase
           .from("order_dispatch_events")
           .update({ remittance_pdf_url: uploadResult.url })
-          .eq("order_id", childOrderId)
+          .in("order_id", ids)
           .eq("remito_number", remitoNumber.trim());
       }
     } catch (e) {
