@@ -64,7 +64,7 @@ export function generateReceiptHTML(data: ReceiptDocumentData): string {
   <div class="page-header">
     <div class="header-left">
       ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
-      <div class="company-name">${escapeHtml(data.issuer.businessName)}</div>
+      ${data.issuer.logoUrl ? "" : `<div class="company-name">${escapeHtml(data.issuer.businessName)}</div>`}
     </div>
     <div class="header-right">
       <div class="doctype-label">RECIBO</div>

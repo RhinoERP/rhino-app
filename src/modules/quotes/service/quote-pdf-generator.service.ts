@@ -427,8 +427,11 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
 <div class="document-copy">
   <div class="page-header">
     <div class="header-left">
-      ${data.organization.logoUrl ? `<img src="${escapeHtml(data.organization.logoUrl)}" alt="Logo" class="header-logo" />` : ""}
-      <div class="company-name">${escapeHtml(data.organization.name)}</div>
+      ${
+        data.organization.logoUrl
+          ? `<img src="${escapeHtml(data.organization.logoUrl)}" alt="Logo" class="header-logo" />`
+          : `<div class="company-name">${escapeHtml(data.organization.name)}</div>`
+      }
     </div>
     <div class="header-right">
       <div class="doctype-label">Presupuesto</div>
