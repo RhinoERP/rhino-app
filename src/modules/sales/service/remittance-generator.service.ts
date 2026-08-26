@@ -161,7 +161,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     <div class="header-left">
       ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
       <div>
-        <div class="company-name">${escapeHtml(data.issuer.businessName)}</div>
+        ${data.issuer.logoUrl ? "" : `<div class="company-name">${escapeHtml(data.issuer.businessName)}</div>`}
         ${data.issuer.cuit || data.issuer.legalAddress ? `<div class="issuer-details">${data.issuer.cuit ? `CUIT: ${displayValue(data.issuer.cuit, "")}` : ""}${data.issuer.cuit && data.issuer.legalAddress ? " · " : ""}${data.issuer.legalAddress ? displayValue(data.issuer.legalAddress, "") : ""}</div>` : ""}
       </div>
     </div>
