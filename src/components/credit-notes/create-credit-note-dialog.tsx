@@ -2,7 +2,7 @@
 
 import { PlusIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Info } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -33,6 +33,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -688,6 +694,7 @@ export function CreateCreditNoteDialog({
   const [supplierId, setSupplierId] = useState("");
   const [amount, setAmount] = useState("");
   const [observations, setObservations] = useState("");
+  const [applyToReceivable, setApplyToReceivable] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnNotes, setReturnNotes] = useState("");
   const [returnSale, setReturnSale] = useState<SalesOrderDetail | null>(null);
@@ -722,6 +729,12 @@ export function CreateCreditNoteDialog({
   const maxAmount = selectedSale
     ? Number(selectedSale.total_amount ?? 0)
     : undefined;
+  const selectedSalePendingBalance = Number(
+    selectedSale?.receivable?.pending_balance ?? 0
+  );
+  const canApplyToReceivable = selectedSalePendingBalance > 0;
+  const shouldApplyToReceivable =
+    mode === "sale" && canApplyToReceivable && applyToReceivable;
   const dialogDescription =
     mode === "return"
       ? "Seleccioná la venta y los productos devueltos."
@@ -807,6 +820,7 @@ export function CreateCreditNoteDialog({
     setSupplierId("");
     setAmount("");
     setObservations("");
+    setApplyToReceivable(false);
     setReturnReason("");
     setReturnNotes("");
     setReturnSale(null);
@@ -821,6 +835,12 @@ export function CreateCreditNoteDialog({
     setSaleSearch("");
     setCustomerSearch("");
     setSupplierSearch("");
+  }
+
+  function handleManualSaleSelection(id: string) {
+    const sale = eligibleSales.find((candidate) => candidate.id === id);
+    setSalesOrderId(id);
+    setApplyToReceivable(Number(sale?.receivable?.pending_balance ?? 0) > 0);
   }
 
   function validateForm(parsedAmount: number): string | null {
@@ -1083,6 +1103,7 @@ export function CreateCreditNoteDialog({
         isHistorical: mode === "direct",
         customerId: mode === "direct" ? customerId : undefined,
         supplierId: mode === "direct" ? supplierId || null : undefined,
+        applyToReceivable: shouldApplyToReceivable,
       });
 
       if (!result.success) {
@@ -1220,7 +1241,7 @@ export function CreateCreditNoteDialog({
                   salesOrderId={salesOrderId}
                   search={saleSearch}
                   setIsOpen={setIsSalePickerOpen}
-                  setSalesOrderId={setSalesOrderId}
+                  setSalesOrderId={handleManualSaleSelection}
                   setSearch={setSaleSearch}
                 />
               </div>
@@ -1392,6 +1413,49 @@ export function CreateCreditNoteDialog({
                   type="number"
                   value={amount}
                 />
+              </div>
+            )}
+
+            {mode === "sale" && selectedSale && (
+              <div className="rounded-md border p-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="nc-apply-to-receivable">
+                        Cancelar automáticamente la factura asociada
+                      </Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            aria-label="Cómo funciona la cancelación automática"
+                            className="text-muted-foreground hover:text-foreground"
+                            type="button"
+                          >
+                            <Info className="size-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs" side="top">
+                          Al activarlo, la NC se aplica a la cuenta corriente de
+                          esta factura hasta su saldo pendiente. Si sobra
+                          importe, queda como saldo a favor. Al desactivarlo, la
+                          factura no se modifica y toda la NC queda como saldo a
+                          favor.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      {canApplyToReceivable
+                        ? `Saldo pendiente: ${formatCurrency(selectedSalePendingBalance)}`
+                        : "La factura no tiene saldo pendiente; la NC quedará como saldo a favor."}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={applyToReceivable}
+                    disabled={!canApplyToReceivable}
+                    id="nc-apply-to-receivable"
+                    onCheckedChange={setApplyToReceivable}
+                  />
+                </div>
               </div>
             )}
 

@@ -125,6 +125,8 @@ export type CreditNote = {
   issueDate: string;
   amount: number;
   remainingAmount?: number;
+  applyToReceivable: boolean;
+  appliedToReceivableAmount: number;
   invoiceType: InvoiceType;
   observations: string | null;
   status: "CONFIRMED" | "CANCELLED";
@@ -197,6 +199,7 @@ export type CreateCreditNoteInput = {
   reason?: string | null;
   purchaseTargetCreditId?: string | null;
   skipAccountingEntryRegistration?: boolean;
+  applyToReceivable?: boolean;
   items?: CreateCreditNoteItemInput[];
   itemTaxes?: CreateCreditNoteItemTaxInput[];
   taxes?: CreateCreditNoteTaxInput[];

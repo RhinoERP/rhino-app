@@ -67,6 +67,14 @@ function chunkItems<T>(items: T[]): T[][] {
   return pages;
 }
 
+function formatItemDescription(
+  item: Pick<RemittanceData["items"][number], "name" | "brand">
+): string {
+  // The preprinted form only has room for the product identification. Product
+  // variants (such as size and color) must never be included in this overlay.
+  return [item.name, item.brand].filter(Boolean).join(" ");
+}
+
 /**
  * Adapts the existing remittance payload to the fields available on the
  * preprinted Roble remittance form. Fields without a source in Rhino
@@ -91,7 +99,7 @@ export function buildRemittanceMaskData(
     carrierName: options?.carrierName,
     items: remittance.items.map((item) => ({
       quantity: item.quantity,
-      description: [item.name, item.brand].filter(Boolean).join(" "),
+      description: formatItemDescription(item),
     })),
     packageCount: remittance.items.reduce(
       (total, item) => total + item.quantity,
@@ -168,9 +176,9 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
   .field, .line-item { position: absolute; white-space: nowrap; }
   .document-number { left: 135.5mm; top: 41.4mm; font-size: 3.3mm; font-weight: 700; }
   .date-day { left: 131.7mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
-  .date-month { left: 149.4mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
-  .date-year { left: 164mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
-  .customer-name { left: 32.1mm; top: 72.9mm; max-width: 91mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
+  .date-month { left: 150.9mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .date-year { left: 165.5mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .customer-name { left: 32.1mm; top: 71.4mm; max-width: 91mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .customer-address { left: 34.2mm; top: 78.2mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .carrier-name { left: 33mm; top: 85.1mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.2mm; font-weight: 700; }
   .tax-condition { left: 134mm; top: 71.4mm; max-width: 61mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }

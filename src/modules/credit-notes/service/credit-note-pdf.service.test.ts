@@ -18,6 +18,8 @@ function createCreditNote(overrides: Partial<CreditNote> = {}): CreditNote {
     creditNoteNumber: "NC-00062",
     issueDate: "2026-06-30",
     amount: 397_260.98,
+    applyToReceivable: false,
+    appliedToReceivableAmount: 0,
     invoiceType: "FACTURA_A",
     observations: "Nota de credito por tybo inflado",
     status: "CONFIRMED",

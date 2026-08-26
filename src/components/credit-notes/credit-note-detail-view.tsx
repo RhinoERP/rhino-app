@@ -101,6 +101,35 @@ function getFiscalEmissionDisabledReason(
   return null;
 }
 
+function getFinancialTreatmentLabel(creditNote: CreditNote): string {
+  if (!creditNote.applyToReceivable) {
+    return "Saldo a favor";
+  }
+
+  if (creditNote.appliedToReceivableAmount > 0) {
+    return `Aplicada a factura (${formatCurrency(creditNote.appliedToReceivableAmount)})`;
+  }
+
+  return "Aplicación a factura solicitada";
+}
+
+function CreditNoteFinancialTreatment({
+  creditNote,
+}: {
+  creditNote: CreditNote;
+}) {
+  if (!(creditNote.salesOrderId && !creditNote.salesReturnId)) {
+    return null;
+  }
+
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="text-muted-foreground">Tratamiento financiero</dt>
+      <dd className="text-right">{getFinancialTreatmentLabel(creditNote)}</dd>
+    </div>
+  );
+}
+
 function CreditNoteArcaSection({
   creditNote,
   orgSlug,
@@ -396,6 +425,7 @@ export function CreditNoteDetailView({
                   <dd>{formatCurrency(creditNote.sale.totalAmount)}</dd>
                 </div>
               )}
+              <CreditNoteFinancialTreatment creditNote={creditNote} />
             </dl>
           </CardContent>
         </Card>

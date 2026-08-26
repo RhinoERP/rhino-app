@@ -290,7 +290,7 @@ async function createNcCustomerCredit(params: {
     params;
 
   const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
-  await supabase.from("customer_credits").insert({
+  const { error } = await supabase.from("customer_credits").insert({
     organization_id: orgId,
     customer_id: customerId,
     supplier_id: creditSupplierId,
@@ -299,6 +299,40 @@ async function createNcCustomerCredit(params: {
     credit_note_id: creditNoteId,
     notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
   });
+
+  if (error) {
+    throw new Error(
+      `No se pudo generar el saldo a favor de la nota de crédito: ${error.message}`
+    );
+  }
+}
+
+type CreditNoteReceivableApplication = {
+  applied_amount?: number;
+  remaining_credit_amount?: number;
+  account_receivable_id?: string | null;
+};
+
+async function applyCreditNoteToReceivable(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  creditNoteId: string;
+}): Promise<CreditNoteReceivableApplication> {
+  const { data, error } = await params.supabase.rpc(
+    "apply_credit_note_to_receivable" as never,
+    {
+      p_credit_note_id: params.creditNoteId,
+      p_organization_id: params.orgId,
+    } as never
+  );
+
+  if (error) {
+    throw new Error(
+      `No se pudo aplicar la nota de crédito a la cuenta corriente: ${error.message}`
+    );
+  }
+
+  return (data ?? {}) as CreditNoteReceivableApplication;
 }
 
 async function cleanupCreditNoteRecord(params: {
@@ -424,6 +458,7 @@ export async function createCreditNote(
     customerId,
     issueDate,
     invoiceType,
+    applyToReceivable = false,
   } = input;
   const originType = resolveOriginType(input);
   const reason = input.reason ?? observations ?? null;
@@ -473,6 +508,7 @@ export async function createCreditNote(
         observations: observations ?? null,
         status: "CONFIRMED",
         is_historical: true,
+        apply_to_receivable: false,
         created_by: user.id,
       } as never)
       .select("id")
@@ -606,6 +642,10 @@ export async function createCreditNote(
       invoice_type: sale.invoice_type,
       observations: observations ?? null,
       status: "CONFIRMED",
+      apply_to_receivable:
+        !salesReturnId && originType === "MANUAL_ADJUSTMENT"
+          ? applyToReceivable
+          : false,
       created_by: user.id,
     } as never)
     .select("id")
@@ -620,22 +660,11 @@ export async function createCreditNote(
     );
   }
 
-  // Las NCs standalone siempre generan un saldo a favor del cliente
-  // sin modificar la cuenta corriente. Las NCs de devolución no generan
-  // crédito adicional porque el AR ya fue reducido por la devolución.
+  // Las NCs de devolución no generan crédito adicional porque el AR ya fue
+  // reducido por la devolución. Las manuales pueden aplicar su propio crédito
+  // a la cuenta corriente sólo cuando el usuario lo eligió explícitamente.
   // Advance settlement credits must not be spendable until ARCA authorizes
   // their credit note. The settlement orchestrator creates it after emission.
-  if (!salesReturnId && originType !== "ADVANCE_SETTLEMENT") {
-    await createNcCustomerCredit({
-      supabase,
-      orgId: org.id,
-      saleId: salesOrderId,
-      customerId: sale.customer_id,
-      ncAmount: truncateMoney(amount),
-      creditNoteId: record.id,
-    });
-  }
-
   try {
     await insertCreditNoteDetails({
       supabase,
@@ -646,6 +675,25 @@ export async function createCreditNote(
       taxes: input.taxes,
       sourceDocuments: input.sourceDocuments,
     });
+
+    if (!salesReturnId && originType !== "ADVANCE_SETTLEMENT") {
+      await createNcCustomerCredit({
+        supabase,
+        orgId: org.id,
+        saleId: salesOrderId,
+        customerId: sale.customer_id,
+        ncAmount: truncateMoney(amount),
+        creditNoteId: record.id,
+      });
+
+      if (originType === "MANUAL_ADJUSTMENT" && applyToReceivable) {
+        await applyCreditNoteToReceivable({
+          supabase,
+          orgId: org.id,
+          creditNoteId: record.id,
+        });
+      }
+    }
   } catch (error) {
     await cleanupCreditNoteRecord({ supabase, creditNoteId: record.id });
     throw error;
@@ -869,6 +917,8 @@ function mapCreditNoteRow(row: any): CreditNote {
     creditNoteNumber: row.credit_note_number,
     issueDate: row.issue_date,
     amount: Number(row.amount),
+    applyToReceivable: row.apply_to_receivable ?? false,
+    appliedToReceivableAmount: Number(row.applied_to_receivable_amount ?? 0),
     invoiceType: row.invoice_type,
     observations: row.observations,
     status: row.status,
@@ -922,6 +972,8 @@ export async function getCreditNotesByOrgSlug(
       amount,
       invoice_type,
       observations,
+      apply_to_receivable,
+      applied_to_receivable_amount,
       status,
       is_historical,
       created_at,
@@ -1002,6 +1054,8 @@ export async function getCreditNotesByCustomerId(
       amount,
       invoice_type,
       observations,
+      apply_to_receivable,
+      applied_to_receivable_amount,
       status,
       is_historical,
       created_at,
@@ -1090,6 +1144,8 @@ export async function getCreditNoteById(
       amount,
       invoice_type,
       observations,
+      apply_to_receivable,
+      applied_to_receivable_amount,
       status,
       is_historical,
       created_at,
@@ -1161,6 +1217,8 @@ export async function getCreditNotesBySaleId(
       amount,
       invoice_type,
       observations,
+      apply_to_receivable,
+      applied_to_receivable_amount,
       status,
       is_historical,
       created_at,
@@ -1220,6 +1278,8 @@ const CREDIT_NOTE_LIST_SELECT = `
   amount,
   invoice_type,
   observations,
+  apply_to_receivable,
+  applied_to_receivable_amount,
   status,
   is_historical,
   created_at,

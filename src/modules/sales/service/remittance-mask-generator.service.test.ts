@@ -58,6 +58,23 @@ describe("remittance mask data", () => {
     });
   });
 
+  it("keeps size and color variants out of item descriptions", () => {
+    const remittance = remittanceWithItems();
+    const itemWithVariant = remittance
+      .items[0] as RemittanceData["items"][number] & {
+      talle: string;
+      color: string;
+    };
+    itemWithVariant.talle = "XL";
+    itemWithVariant.color = "Azul";
+
+    const data = buildRemittanceMaskData(remittance);
+
+    expect(data.items[0].description).toBe("Producto 1 Marca");
+    expect(data.items[0].description).not.toContain("XL");
+    expect(data.items[0].description).not.toContain("Azul");
+  });
+
   it("renders optional purchase order data safely and prints the added fields", () => {
     const remittance = remittanceWithItems();
     remittance.customer.address = undefined;
@@ -85,6 +102,16 @@ describe("remittance mask data", () => {
     expect(html).toContain(
       'class="field purchase-order"><strong>O.C.:</strong> </div>'
     );
+  });
+
+  it("positions the month, year, and customer name on the preprinted form", () => {
+    const html = generateRemittanceMaskHTML(
+      buildRemittanceMaskData(remittanceWithItems())
+    );
+
+    expect(html).toContain(".date-month { left: 150.9mm;");
+    expect(html).toContain(".date-year { left: 165.5mm;");
+    expect(html).toContain(".customer-name { left: 32.1mm; top: 71.4mm;");
   });
 
   it("sums all item quantities as packages and truncates the declared value", () => {
