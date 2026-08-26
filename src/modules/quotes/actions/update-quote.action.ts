@@ -31,6 +31,7 @@ export async function updateQuoteAction(
         ? (values.advancePaymentPercentage ?? null)
         : null,
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",
       taxes: values.taxes,
       items: values.items.map((item) => ({
         productId: item.productId,

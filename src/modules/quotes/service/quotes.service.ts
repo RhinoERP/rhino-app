@@ -287,26 +287,14 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
 
   const { data: quoteData, error: quoteError } = await supabase
     .from("quotes")
-    .insert({
-      organization_id: organization.id,
-      customer_id: input.customerId,
-      status: "DRAFT",
-      total_amount: totals.totalAmount,
-      sub_total: totals.subTotal,
-      total_tax_amount: totals.totalTaxAmount,
-      global_discount_percentage: input.globalDiscountPercentage ?? null,
-      global_discount_amount: totals.globalDiscountAmount,
-      currency: input.currency ?? "ARS",
-      exchange_rate: input.exchangeRate ?? null,
-      payment_condition: input.paymentCondition ?? null,
-      observations: input.observations ?? null,
-      created_by: userId,
-      advance_payment: input.advancePaymentEnabled ?? false,
-      advance_payment_percentage: input.advancePaymentEnabled
-        ? (input.advancePaymentPercentage ?? null)
-        : null,
-      target_margin_list_id: input.targetMarginListId ?? null,
-    } as unknown as Database["public"]["Tables"]["quotes"]["Insert"])
+    .insert(
+      buildQuoteInsertPayload({
+        organizationId: organization.id,
+        input,
+        userId,
+        totals,
+      }) as unknown as Database["public"]["Tables"]["quotes"]["Insert"]
+    )
     .select("id")
     .maybeSingle();
 
@@ -332,6 +320,40 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
   );
 
   return quoteData.id;
+}
+
+function buildQuoteInsertPayload({
+  organizationId,
+  input,
+  userId,
+  totals,
+}: {
+  organizationId: string;
+  input: CreateQuoteInput;
+  userId: string;
+  totals: Awaited<ReturnType<typeof buildQuoteTotals>>;
+}) {
+  return {
+    organization_id: organizationId,
+    customer_id: input.customerId,
+    status: "DRAFT",
+    total_amount: totals.totalAmount,
+    sub_total: totals.subTotal,
+    total_tax_amount: totals.totalTaxAmount,
+    global_discount_percentage: input.globalDiscountPercentage ?? null,
+    global_discount_amount: totals.globalDiscountAmount,
+    currency: input.currency ?? "ARS",
+    exchange_rate: input.exchangeRate ?? null,
+    invoice_type: input.invoiceType ?? "NOTA_DE_VENTA",
+    payment_condition: input.paymentCondition ?? null,
+    observations: input.observations ?? null,
+    created_by: userId,
+    advance_payment: input.advancePaymentEnabled ?? false,
+    advance_payment_percentage: input.advancePaymentEnabled
+      ? (input.advancePaymentPercentage ?? null)
+      : null,
+    target_margin_list_id: input.targetMarginListId ?? null,
+  };
 }
 
 async function fetchQuoteForConversion(
@@ -761,6 +783,8 @@ function buildUpdatePayload(
       input.advancePaymentPercentage !== undefined
         ? input.advancePaymentPercentage
         : undefined,
+    invoice_type:
+      input.invoiceType !== undefined ? input.invoiceType : undefined,
     updated_at: new Date().toISOString(),
   };
 }
@@ -779,6 +803,7 @@ function hasMetadataChanged(
     },
     { inputVal: input.designFileUrl, dbVal: existing.design_file_url },
     { inputVal: input.advancePaymentEnabled, dbVal: raw.advance_payment },
+    { inputVal: input.invoiceType, dbVal: raw.invoice_type },
     {
       inputVal: input.advancePaymentPercentage,
       dbVal: raw.advance_payment_percentage,
@@ -1076,7 +1101,8 @@ export async function convertQuoteToSalesOrder(
       customer_id: quote.customer_id,
       user_id: userId,
       sale_date: saleDate,
-      invoice_type: "NOTA_DE_VENTA",
+      invoice_type: (quote.invoice_type ??
+        "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
       currency: "ARS",
       sub_total: convertMoney(quote.sub_total),
       total_amount: totalAmount,

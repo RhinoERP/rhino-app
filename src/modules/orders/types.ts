@@ -183,6 +183,7 @@ export type OrderAreaCounts = {
 export type StockInfo = {
   product_id: string;
   product_name: string;
+  brand?: string | null;
   quantity_needed: number;
   stock_available: number;
   has_stock: boolean;

@@ -35,6 +35,7 @@ export async function createQuoteAction(
           ? values.targetMarginListId
           : null,
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",
       taxes: values.taxes,
       items: values.items.map((item) => ({
         productId: item.productId,
