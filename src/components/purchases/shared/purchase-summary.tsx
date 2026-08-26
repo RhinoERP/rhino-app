@@ -16,16 +16,11 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
-import {
-  calculatePurchaseTotals,
-  getModifierKey,
-} from "@/modules/purchases/utils/purchase-calculations";
-import type { Tax } from "@/modules/taxes/types";
+import { getModifierKey } from "@/modules/purchases/utils/purchase-calculations";
 import type { PurchaseItem } from "../forms/purchase-items-list";
 
 type PurchaseSummaryProps = {
   items: PurchaseItem[];
-  taxes?: Tax[];
   onSubmit?: () => void;
   isSubmitting?: boolean;
   disabled?: boolean;
@@ -35,7 +30,6 @@ type PurchaseSummaryProps = {
 
 export function PurchaseSummary({
   items,
-  taxes = [],
   onSubmit,
   isSubmitting = false,
   disabled = false,
@@ -53,10 +47,9 @@ export function PurchaseSummary({
 
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
 
-  const { taxDetails, discountAmount, total } = calculatePurchaseTotals(
-    subtotal,
-    taxes,
-    globalDiscountPercent
+  const discountAmount = Math.min(
+    Math.max(0, (globalDiscountPercent / 100) * subtotal),
+    Math.max(0, subtotal)
   );
 
   const handleGlobalDiscountChange = (value: string) => {
@@ -119,23 +112,18 @@ export function PurchaseSummary({
             </div>
           )}
 
-          {taxDetails.map(({ tax, amount }) => (
-            <div className="flex items-center justify-between" key={tax.id}>
-              <span className="text-muted-foreground text-sm">
-                {tax.name} ({tax.rate}%)
-              </span>
-              <span className="font-medium text-sm">
-                {formatCurrency(amount)}
-              </span>
-            </div>
-          ))}
+          <p className="text-muted-foreground text-xs italic">
+            Los impuestos se calculan automáticamente según cada producto.
+          </p>
         </div>
 
         <Separator />
 
         <div className="flex items-center justify-between">
-          <span className="font-semibold">Total</span>
-          <span className="font-bold text-2xl">{formatCurrency(total)}</span>
+          <span className="font-semibold">Subtotal con descuento</span>
+          <span className="font-bold text-2xl">
+            {formatCurrency(Math.max(0, subtotal - discountAmount))}
+          </span>
         </div>
 
         {items.length === 0 && (
