@@ -144,6 +144,7 @@ async function checkActionPermission(
     PENDING_STOCK: "orders.finance_review",
     FINANCE_REJECTED: "orders.finance_review",
     DESIGN_REVIEW: ["orders.production", "orders.stock_review"],
+    DISPATCHED: "orders.dispatch",
     DELIVERED: ["orders.dispatch", "orders.stock_review"],
   };
   const raw = permissionByStatus[newStatus] ?? "orders.read";

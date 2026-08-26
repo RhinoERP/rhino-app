@@ -417,6 +417,7 @@ export type SaleDispatchEvent = {
   dispatched_at: string;
   child_order_number: string;
   child_order_id: string;
+  child_orders: Array<{ id: string; order_number: string }>;
   notes: string | null;
   items: SaleDispatchEventItem[];
   remittance_pdf_url?: string | null;

@@ -7,7 +7,10 @@ import {
   buildRemittanceMaskData,
   generateRemittanceMaskHTML,
 } from "@/modules/sales/service/remittance-mask-generator.service";
-import { getOrderRemittanceData } from "../server/order-remittance-pdf-document.service";
+import {
+  getOrderRemittanceData,
+  resolveRemittanceOrderIds,
+} from "../server/order-remittance-pdf-document.service";
 
 type PreviewOrderRemittanceMaskResult =
   | { success: true; html: string }
@@ -45,6 +48,11 @@ export async function previewOrderRemittanceMaskAction(
       };
     }
 
+    const childOrderIds = await resolveRemittanceOrderIds(
+      childOrderId,
+      remitoNumber
+    );
+
     const supabase = await createClient();
     const { data: event } = await supabase
       .from("order_dispatch_events")
@@ -55,7 +63,7 @@ export async function previewOrderRemittanceMaskAction(
 
     const { remittance, carrierName } = await getOrderRemittanceData({
       orgSlug,
-      childOrderId,
+      childOrderIds,
       remitoNumber,
     });
 

@@ -32,9 +32,9 @@ describe("getOrderRemittanceData", () => {
       if (table === "orders") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              single: vi.fn().mockResolvedValue({
-                data: {
+            in: vi.fn().mockResolvedValue({
+              data: [
+                {
                   order_number: 12,
                   observations: null,
                   quote_id: "quote-1",
@@ -42,8 +42,8 @@ describe("getOrderRemittanceData", () => {
                   parent_order_id: null,
                   quotes: { customer_id: "customer-1" },
                 },
-              }),
-            })),
+              ],
+            }),
           })),
         };
       }
@@ -51,7 +51,7 @@ describe("getOrderRemittanceData", () => {
       if (table === "quote_items") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn().mockResolvedValue({
+            in: vi.fn().mockResolvedValue({
               data: [
                 {
                   id: "quote-item-1",
@@ -137,7 +137,7 @@ describe("getOrderRemittanceData", () => {
 
     const { remittance } = await getOrderRemittanceData({
       orgSlug: "empresa",
-      childOrderId: "order-1",
+      childOrderIds: ["order-1"],
       remitoNumber: "R-0001",
     });
 

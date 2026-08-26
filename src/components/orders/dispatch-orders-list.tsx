@@ -9,6 +9,7 @@ import {
   FileTextIcon,
   PackageIcon,
   TruckIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -19,6 +20,7 @@ import { RemittancePreviewButton } from "@/components/sales/remittance-preview-b
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Empty,
   EmptyDescription,
@@ -29,17 +31,25 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { deliverChildOrdersAction } from "@/modules/orders/actions/deliver-child-orders.action";
 import { dispatchChildOrderAction } from "@/modules/orders/actions/dispatch-child-order.action";
+import { dispatchChildOrdersAction } from "@/modules/orders/actions/dispatch-child-orders.action";
 import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
 import { generateOrderRemittanceAction } from "@/modules/orders/actions/generate-order-remittance.action";
 import type { OrderDispatchEventSummary } from "@/modules/orders/actions/get-order-dispatch-events.action";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import { useOrderDispatchEvents } from "@/modules/orders/hooks/use-order-dispatch-events";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
-import type { ChildOrderForDispatch } from "@/modules/orders/types";
+import type {
+  ChildOrderForDispatch,
+  OrderFlowStatus,
+} from "@/modules/orders/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
-import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
+import {
+  getRemittanceSettings,
+  type RemittanceSettings,
+} from "@/modules/organizations/actions/get-remittance-settings.action";
 import { Textarea } from "../ui/textarea";
 import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
@@ -117,6 +127,60 @@ export function DispatchOrdersList({
   const preparing = orders.filter((o) => o.status === "PREPARING");
   const dispatched = orders.filter((o) => o.status === "DISPATCHED");
   const delivered = orders.filter((o) => o.status === "DELIVERED");
+
+  const [dispatchSelectedIds, setDispatchSelectedIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [deliverSelectedIds, setDeliverSelectedIds] = useState<Set<string>>(
+    new Set()
+  );
+
+  function handleToggleDispatchSelect(child: ChildOrderForDispatch) {
+    setDispatchSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(child.id)) {
+        next.delete(child.id);
+        return next;
+      }
+      if (next.size > 0) {
+        const firstId = [...next][0];
+        const first = preparing.find((o) => o.id === firstId);
+        if (first && first.parent_order_id !== child.parent_order_id) {
+          toast.error(
+            "Solo se pueden despachar juntos subpedidos del mismo cliente"
+          );
+          return prev;
+        }
+      }
+      next.add(child.id);
+      return next;
+    });
+  }
+
+  function handleToggleDeliverSelect(child: ChildOrderForDispatch) {
+    setDeliverSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(child.id)) {
+        next.delete(child.id);
+        return next;
+      }
+      if (next.size > 0) {
+        const firstId = [...next][0];
+        const first = dispatched.find((o) => o.id === firstId);
+        if (first && first.parent_order_id !== child.parent_order_id) {
+          toast.error(
+            "Solo se pueden entregar juntos subpedidos del mismo cliente"
+          );
+          return prev;
+        }
+      }
+      next.add(child.id);
+      return next;
+    });
+  }
+
+  const dispatchBulkMode = dispatchSelectedIds.size > 1;
+  const deliverBulkMode = deliverSelectedIds.size > 1;
 
   const dispatchOrderIds = [...dispatched, ...delivered].map((o) => o.id);
   const { data: dispatchEvents = [] } = useOrderDispatchEvents(
@@ -252,10 +316,13 @@ export function DispatchOrdersList({
           orgSlug={orgSlug}
           renderChild={(child) => (
             <PreparingChildCard
+              bulkMode={dispatchBulkMode}
               child={child}
               key={child.id}
+              onToggleSelect={handleToggleDispatchSelect}
               orgSlug={orgSlug}
               revertInfo={revertInfoMap[child.id]}
+              selected={dispatchSelectedIds.has(child.id)}
             />
           )}
           revertInfoMap={revertInfoMap}
@@ -272,6 +339,7 @@ export function DispatchOrdersList({
           orgSlug={orgSlug}
           renderChild={(child) => (
             <DispatchedChildCard
+              bulkMode={deliverBulkMode}
               child={child}
               dispatchEvent={effectiveDispatchEventsByOrder.get(child.id)}
               downloadingRemito={downloadingRemito}
@@ -279,8 +347,10 @@ export function DispatchOrdersList({
               key={child.id}
               onDownload={handleDownloadRemito}
               onGenerate={handleGenerateRemito}
+              onToggleSelect={handleToggleDeliverSelect}
               orgSlug={orgSlug}
               revertInfo={revertInfoMap[child.id]}
+              selected={deliverSelectedIds.has(child.id)}
             />
           )}
           revertInfoMap={revertInfoMap}
@@ -311,6 +381,26 @@ export function DispatchOrdersList({
           revertInfoMap={revertInfoMap}
         />
       </DispatchSection>
+
+      {dispatchBulkMode && (
+        <MultiDispatchBar
+          childOrderIds={[...dispatchSelectedIds]}
+          count={dispatchSelectedIds.size}
+          onClear={() => setDispatchSelectedIds(new Set())}
+          onSuccess={() => setDispatchSelectedIds(new Set())}
+          orgSlug={orgSlug}
+        />
+      )}
+
+      {deliverBulkMode && (
+        <MultiDeliverBar
+          childOrderIds={[...deliverSelectedIds]}
+          count={deliverSelectedIds.size}
+          onClear={() => setDeliverSelectedIds(new Set())}
+          onSuccess={() => setDeliverSelectedIds(new Set())}
+          orgSlug={orgSlug}
+        />
+      )}
     </div>
   );
 }
@@ -407,117 +497,66 @@ function ParentGroup({
   );
 }
 
+type ResolveRemitoResult =
+  | { ok: true; number: string }
+  | { ok: false; reason: "missing" | "error" };
+
+async function resolveRemitoNumber(
+  orgSlug: string,
+  manualNumber: string,
+  autoNumbering: boolean
+): Promise<ResolveRemitoResult> {
+  const manual = manualNumber.trim();
+  if (manual) {
+    return { ok: true, number: manual };
+  }
+  if (!autoNumbering) {
+    return { ok: false, reason: "missing" };
+  }
+  const result = await generateRemittanceNumber(orgSlug);
+  if (result.success && result.number) {
+    return { ok: true, number: result.number };
+  }
+  return { ok: false, reason: "error" };
+}
+
+function buildRemitoPreview(settings: RemittanceSettings): string {
+  const nextNumber = settings.lastNumber + 1;
+  const padded = String(nextNumber).padStart(5, "0");
+  return settings.prefix ? `${settings.prefix}-${padded}` : padded;
+}
+
 type PreparingChildCardProps = {
   child: ChildOrderForDispatch;
   orgSlug: string;
   revertInfo: OrdersRevertInfoMap[string] | undefined;
+  selected: boolean;
+  bulkMode: boolean;
+  onToggleSelect: (child: ChildOrderForDispatch) => void;
 };
 
 function PreparingChildCard({
   child,
   orgSlug,
   revertInfo,
+  selected,
+  bulkMode,
+  onToggleSelect,
 }: PreparingChildCardProps) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [remitoNumber, setRemitoNumber] = useState("");
-  const [packageCount, setPackageCount] = useState("");
-  const [declaredValue, setDeclaredValue] = useState("");
-  const [declaredValueLoading, setDeclaredValueLoading] = useState(false);
-  const [autoNumbering, setAutoNumbering] = useState(false);
-  const [previewNumber, setPreviewNumber] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [revertOpen, setRevertOpen] = useState(false);
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
   const revertType = revertInfo?.revertType ?? "normal";
-  const generatedRef = useRef(false);
-
-  useEffect(() => {
-    if (!isExpanded || generatedRef.current) {
-      return;
-    }
-    generatedRef.current = true;
-
-    setDeclaredValueLoading(true);
-
-    getRemittanceSettings(orgSlug).then((settings) => {
-      if (settings.success && settings.data?.autoEnabled) {
-        setAutoNumbering(true);
-        const nextNumber = settings.data.lastNumber + 1;
-        const padded = String(nextNumber).padStart(5, "0");
-        const preview = settings.data.prefix
-          ? `${settings.data.prefix}-${padded}`
-          : padded;
-        setPreviewNumber(preview);
-      }
-      setIsGenerating(false);
-    });
-
-    loadDeclaredValueDefault(orgSlug, child.total_amount)
-      .then(setDeclaredValue)
-      .finally(() => setDeclaredValueLoading(false));
-  }, [orgSlug, isExpanded, child.total_amount]);
-
-  function handleDispatch() {
-    const finalNumber = remitoNumber.trim();
-
-    if (!(finalNumber || autoNumbering)) {
-      toast.error("El número de remito es obligatorio");
-      return;
-    }
-
-    const packageCountResult = parseOptionalNonNegativeNumber(packageCount);
-    const declaredValueResult = parseOptionalNonNegativeNumber(declaredValue);
-
-    if (!(packageCountResult.valid && declaredValueResult.valid)) {
-      toast.error("Revisá la cantidad de bultos y el valor declarado");
-      return;
-    }
-
-    startTransition(async () => {
-      let remitoToUse = finalNumber;
-
-      if (autoNumbering && !finalNumber) {
-        setIsGenerating(true);
-        const result = await generateRemittanceNumber(orgSlug);
-        if (result.success && result.number) {
-          remitoToUse = result.number;
-        } else {
-          toast.error("Error al generar número de remito");
-          setIsGenerating(false);
-          return;
-        }
-        setIsGenerating(false);
-      }
-
-      const dispatchResult = await dispatchChildOrderAction({
-        orgSlug,
-        childOrderId: child.id,
-        remitoNumber: remitoToUse,
-        packageCount: packageCountResult.value,
-        declaredValue: declaredValueResult.value,
-      });
-
-      if (dispatchResult.success) {
-        toast.success(`Despachado — Remito ${remitoToUse}`);
-        setRemitoNumber("");
-        setPackageCount("");
-        setDeclaredValue("");
-        setPreviewNumber("");
-        setAutoNumbering(false);
-        generatedRef.current = false;
-        router.refresh();
-      } else {
-        toast.error(`Error al despachar: ${dispatchResult.error}`);
-      }
-    });
-  }
+  const hideActions = selected && bulkMode;
 
   return (
-    <Card className="border-dashed">
+    <Card
+      className={cn(
+        "border-dashed",
+        selected && "border-primary/60 bg-primary/5"
+      )}
+    >
       <CardHeader
         className={cn(
           "flex cursor-pointer flex-row items-center gap-2 py-2.5",
@@ -525,6 +564,13 @@ function PreparingChildCard({
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
+        <Checkbox
+          aria-label={`Seleccionar ${child.order_number}`}
+          checked={selected}
+          className="shrink-0"
+          onCheckedChange={() => onToggleSelect(child)}
+          onClick={(e) => e.stopPropagation()}
+        />
         <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <Link
           className="font-mono font-semibold text-sm hover:underline"
@@ -577,31 +623,10 @@ function PreparingChildCard({
             </div>
           )}
 
-          <PreparingDispatchControls
-            autoNumbering={autoNumbering}
-            canRevert={canRevert}
-            childId={child.id}
-            declaredValue={declaredValue}
-            declaredValueLoading={declaredValueLoading}
-            isGenerating={isGenerating}
-            isPending={isPending}
-            onDeclaredValueChange={setDeclaredValue}
-            onDispatch={handleDispatch}
-            onPackageCountChange={setPackageCount}
-            onRemitoChange={setRemitoNumber}
-            onRevert={() => setRevertOpen(true)}
-            packageCount={packageCount}
-            previewNumber={previewNumber}
-            remitoNumber={remitoNumber}
-          />
-
-          {canRevert && previousStatus && previousStatusLabel && (
-            <RevertOrderModal
-              onOpenChange={setRevertOpen}
-              onSuccess={() => router.refresh()}
-              open={revertOpen}
-              orderId={child.id}
-              orderNumber={child.order_number}
+          {!hideActions && (
+            <PreparingDispatchControls
+              canRevert={canRevert}
+              child={child}
               orgSlug={orgSlug}
               previousStatus={previousStatus}
               previousStatusLabel={previousStatusLabel}
@@ -615,123 +640,394 @@ function PreparingChildCard({
 }
 
 type PreparingDispatchControlsProps = {
-  childId: string;
-  isGenerating: boolean;
-  isPending: boolean;
-  autoNumbering: boolean;
-  previewNumber: string;
-  remitoNumber: string;
-  packageCount: string;
-  declaredValue: string;
-  declaredValueLoading: boolean;
+  child: ChildOrderForDispatch;
+  orgSlug: string;
   canRevert: boolean;
-  onRemitoChange: (value: string) => void;
-  onPackageCountChange: (value: string) => void;
-  onDeclaredValueChange: (value: string) => void;
-  onRevert: () => void;
-  onDispatch: () => void;
+  previousStatus: OrderFlowStatus | null;
+  previousStatusLabel: string | null;
+  revertType: "normal" | "undo_creation" | "cascade_revert";
 };
 
 function PreparingDispatchControls({
-  childId,
-  isGenerating,
-  isPending,
-  autoNumbering,
-  previewNumber,
-  remitoNumber,
-  packageCount,
-  declaredValue,
-  declaredValueLoading,
+  child,
+  orgSlug,
   canRevert,
-  onRemitoChange,
-  onPackageCountChange,
-  onDeclaredValueChange,
-  onRevert,
-  onDispatch,
+  previousStatus,
+  previousStatusLabel,
+  revertType,
 }: PreparingDispatchControlsProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [remitoNumber, setRemitoNumber] = useState("");
+  const [packageCount, setPackageCount] = useState("");
+  const [declaredValue, setDeclaredValue] = useState("");
+  const [declaredValueLoading, setDeclaredValueLoading] = useState(false);
+  const [autoNumbering, setAutoNumbering] = useState(false);
+  const [previewNumber, setPreviewNumber] = useState("");
+  const [revertOpen, setRevertOpen] = useState(false);
+  const controlsDisabled = isPending;
+
+  useEffect(() => {
+    getRemittanceSettings(orgSlug).then((settings) => {
+      if (settings.success && settings.data?.autoEnabled) {
+        setAutoNumbering(true);
+        setPreviewNumber(buildRemitoPreview(settings.data));
+      }
+    });
+
+    setDeclaredValueLoading(true);
+    loadDeclaredValueDefault(orgSlug, child.total_amount)
+      .then(setDeclaredValue)
+      .finally(() => setDeclaredValueLoading(false));
+  }, [orgSlug, child.total_amount]);
+
+  function handleDispatch() {
+    const packageCountResult = parseOptionalNonNegativeNumber(packageCount);
+    const declaredValueResult = parseOptionalNonNegativeNumber(declaredValue);
+
+    if (!(packageCountResult.valid && declaredValueResult.valid)) {
+      toast.error("Revisá la cantidad de bultos y el valor declarado");
+      return;
+    }
+
+    startTransition(async () => {
+      const resolved = await resolveRemitoNumber(
+        orgSlug,
+        remitoNumber,
+        autoNumbering
+      );
+
+      if (!resolved.ok) {
+        toast.error(
+          resolved.reason === "missing"
+            ? "El número de remito es obligatorio"
+            : "Error al generar número de remito"
+        );
+        return;
+      }
+
+      const dispatchResult = await dispatchChildOrderAction({
+        orgSlug,
+        childOrderId: child.id,
+        remitoNumber: resolved.number,
+        packageCount: packageCountResult.value,
+        declaredValue: declaredValueResult.value,
+      });
+
+      if (dispatchResult.success) {
+        toast.success(`Despachado — Remito ${resolved.number}`);
+        setRemitoNumber("");
+        setPackageCount("");
+        setDeclaredValue("");
+        setPreviewNumber("");
+        setAutoNumbering(false);
+        router.refresh();
+      } else {
+        toast.error(`Error al despachar: ${dispatchResult.error}`);
+      }
+    });
+  }
+
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div>
-          <label
-            className="mb-1 block font-medium text-sm"
-            htmlFor={`remito-${childId}`}
-          >
-            Número de remito
-          </label>
-          <Input
-            disabled={isGenerating || isPending}
-            id={`remito-${childId}`}
-            onChange={(e) => onRemitoChange(e.target.value)}
-            placeholder={getRemitoPlaceholder(
-              isGenerating,
-              autoNumbering,
-              previewNumber
-            )}
-            value={remitoNumber}
-          />
+    <>
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <label
+              className="mb-1 block font-medium text-sm"
+              htmlFor={`remito-${child.id}`}
+            >
+              Número de remito
+            </label>
+            <Input
+              disabled={controlsDisabled}
+              id={`remito-${child.id}`}
+              onChange={(e) => setRemitoNumber(e.target.value)}
+              placeholder={getRemitoPlaceholder(
+                false,
+                autoNumbering,
+                previewNumber
+              )}
+              value={remitoNumber}
+            />
+          </div>
+
+          <div>
+            <label
+              className="mb-1 block font-medium text-sm"
+              htmlFor={`bultos-${child.id}`}
+            >
+              Cantidad de bultos
+            </label>
+            <Input
+              disabled={controlsDisabled}
+              id={`bultos-${child.id}`}
+              min={0}
+              onChange={(e) => setPackageCount(e.target.value)}
+              placeholder="0"
+              type="number"
+              value={packageCount}
+            />
+          </div>
+
+          <div>
+            <label
+              className="mb-1 block font-medium text-sm"
+              htmlFor={`valor-declarado-${child.id}`}
+            >
+              Valor declarado
+            </label>
+            <Input
+              disabled={controlsDisabled || declaredValueLoading}
+              id={`valor-declarado-${child.id}`}
+              min={0}
+              onChange={(e) => setDeclaredValue(e.target.value)}
+              placeholder="0"
+              step="0.01"
+              type="number"
+              value={declaredValue}
+            />
+          </div>
         </div>
 
-        <div>
-          <label
-            className="mb-1 block font-medium text-sm"
-            htmlFor={`bultos-${childId}`}
-          >
-            Cantidad de bultos
-          </label>
-          <Input
-            disabled={isGenerating || isPending}
-            id={`bultos-${childId}`}
-            min={0}
-            onChange={(e) => onPackageCountChange(e.target.value)}
-            placeholder="0"
-            type="number"
-            value={packageCount}
-          />
-        </div>
-
-        <div>
-          <label
-            className="mb-1 block font-medium text-sm"
-            htmlFor={`valor-declarado-${childId}`}
-          >
-            Valor declarado
-          </label>
-          <Input
-            disabled={isGenerating || isPending || declaredValueLoading}
-            id={`valor-declarado-${childId}`}
-            min={0}
-            onChange={(e) => onDeclaredValueChange(e.target.value)}
-            placeholder="0"
-            step="0.01"
-            type="number"
-            value={declaredValue}
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-2">
-        {canRevert && (
+        <div className="flex justify-end gap-2">
+          {canRevert && (
+            <Button
+              className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+              disabled={controlsDisabled}
+              onClick={() => setRevertOpen(true)}
+              size="sm"
+              variant="outline"
+            >
+              <ArrowFatLineLeftIcon className="size-4" />
+              Volver atrás
+            </Button>
+          )}
           <Button
-            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
-            disabled={isPending || isGenerating}
-            onClick={onRevert}
+            disabled={controlsDisabled}
+            onClick={handleDispatch}
             size="sm"
-            variant="outline"
           >
-            <ArrowFatLineLeftIcon className="size-4" />
-            Volver atrás
+            <TruckIcon className="mr-1 h-4 w-4" />
+            {isPending ? "Despachando..." : "Despachar"}
           </Button>
-        )}
-        <Button
-          disabled={isPending || isGenerating}
-          onClick={onDispatch}
-          size="sm"
-        >
-          <TruckIcon className="mr-1 h-4 w-4" />
-          {isPending ? "Despachando..." : "Despachar"}
-        </Button>
+        </div>
       </div>
+
+      {canRevert && previousStatus && previousStatusLabel && (
+        <RevertOrderModal
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={child.id}
+          orderNumber={child.order_number}
+          orgSlug={orgSlug}
+          previousStatus={previousStatus}
+          previousStatusLabel={previousStatusLabel}
+          revertType={revertType}
+        />
+      )}
+    </>
+  );
+}
+
+type MultiDispatchBarProps = {
+  orgSlug: string;
+  childOrderIds: string[];
+  count: number;
+  onClear: () => void;
+  onSuccess: () => void;
+};
+
+function MultiDispatchBar({
+  orgSlug,
+  childOrderIds,
+  count,
+  onClear,
+  onSuccess,
+}: MultiDispatchBarProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [remitoNumber, setRemitoNumber] = useState("");
+  const [autoNumbering, setAutoNumbering] = useState(false);
+  const [previewNumber, setPreviewNumber] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const settingsLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (settingsLoadedRef.current) {
+      return;
+    }
+    settingsLoadedRef.current = true;
+
+    getRemittanceSettings(orgSlug).then((settings) => {
+      if (settings.success && settings.data?.autoEnabled) {
+        setAutoNumbering(true);
+        const nextNumber = settings.data.lastNumber + 1;
+        const padded = String(nextNumber).padStart(5, "0");
+        const preview = settings.data.prefix
+          ? `${settings.data.prefix}-${padded}`
+          : padded;
+        setPreviewNumber(preview);
+      }
+    });
+  }, [orgSlug]);
+
+  function handleDispatch() {
+    const finalNumber = remitoNumber.trim();
+
+    if (!(finalNumber || autoNumbering)) {
+      toast.error("El número de remito es obligatorio");
+      return;
+    }
+
+    startTransition(async () => {
+      let remitoToUse = finalNumber;
+
+      if (autoNumbering && !finalNumber) {
+        setIsGenerating(true);
+        const result = await generateRemittanceNumber(orgSlug);
+        if (result.success && result.number) {
+          remitoToUse = result.number;
+        } else {
+          toast.error("Error al generar número de remito");
+          setIsGenerating(false);
+          return;
+        }
+        setIsGenerating(false);
+      }
+
+      const dispatchResult = await dispatchChildOrdersAction({
+        orgSlug,
+        childOrderIds,
+        remitoNumber: remitoToUse,
+      });
+
+      if (dispatchResult.success) {
+        toast.success(
+          `Despachados ${count} subpedidos — Remito ${remitoToUse}`
+        );
+        setRemitoNumber("");
+        onSuccess();
+        router.refresh();
+      } else {
+        toast.error(`Error al despachar: ${dispatchResult.error}`);
+      }
+    });
+  }
+
+  return (
+    <div className="sticky bottom-4 z-10 mx-auto max-w-3xl">
+      <Card className="border-2 border-primary/30 shadow-lg">
+        <CardContent className="flex items-center gap-2 p-4">
+          <Button
+            aria-label="Limpiar selección"
+            disabled={isPending || isGenerating}
+            onClick={onClear}
+            size="icon"
+            variant="ghost"
+          >
+            <XIcon className="size-4" />
+          </Button>
+          <span className="font-medium text-sm">
+            {count} subpedidos seleccionados
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Input
+              className="w-44"
+              disabled={isGenerating || isPending}
+              onChange={(e) => setRemitoNumber(e.target.value)}
+              placeholder={getRemitoPlaceholder(
+                isGenerating,
+                autoNumbering,
+                previewNumber
+              )}
+              value={remitoNumber}
+            />
+            <Button
+              disabled={isPending || isGenerating}
+              onClick={handleDispatch}
+              size="sm"
+            >
+              <TruckIcon className="mr-1 h-4 w-4" />
+              {isPending ? "Despachando..." : `Despachar ${count} juntos`}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+type MultiDeliverBarProps = {
+  orgSlug: string;
+  childOrderIds: string[];
+  count: number;
+  onClear: () => void;
+  onSuccess: () => void;
+};
+
+function MultiDeliverBar({
+  orgSlug,
+  childOrderIds,
+  count,
+  onClear,
+  onSuccess,
+}: MultiDeliverBarProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+
+  function handleDeliver() {
+    startTransition(async () => {
+      const result = await deliverChildOrdersAction({
+        orgSlug,
+        childOrderIds,
+        notes: deliveryNotes,
+      });
+
+      if (result.success) {
+        toast.success(`Entrega confirmada de ${count} subpedidos`);
+        setDeliveryNotes("");
+        onSuccess();
+        router.refresh();
+      } else {
+        toast.error(`Error al confirmar entrega: ${result.error}`);
+      }
+    });
+  }
+
+  return (
+    <div className="sticky bottom-4 z-10 mx-auto max-w-3xl">
+      <Card className="border-2 border-primary/30 shadow-lg">
+        <CardContent className="flex items-center gap-2 p-4">
+          <Button
+            aria-label="Limpiar selección"
+            disabled={isPending}
+            onClick={onClear}
+            size="icon"
+            variant="ghost"
+          >
+            <XIcon className="size-4" />
+          </Button>
+          <span className="font-medium text-sm">
+            {count} subpedidos seleccionados
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Textarea
+              className="min-h-5 w-80"
+              disabled={isPending}
+              onChange={(e) => setDeliveryNotes(e.target.value)}
+              placeholder="Notas sobre la entrega..."
+              value={deliveryNotes}
+            />
+            <Button disabled={isPending} onClick={handleDeliver} size="sm">
+              <CheckCircleIcon className="mr-1 h-4 w-4" />
+              {isPending ? "Confirmando..." : `Entregar ${count} juntos`}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -835,6 +1131,9 @@ type DispatchedChildCardProps = {
   onGenerate: (orderId: string) => void;
   downloadingRemito: string | null;
   generatingRemito: string | null;
+  selected: boolean;
+  bulkMode: boolean;
+  onToggleSelect: (child: ChildOrderForDispatch) => void;
 };
 
 function DispatchedChildCard({
@@ -846,6 +1145,9 @@ function DispatchedChildCard({
   onGenerate,
   downloadingRemito,
   generatingRemito,
+  selected,
+  bulkMode,
+  onToggleSelect,
 }: DispatchedChildCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -856,6 +1158,7 @@ function DispatchedChildCard({
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
   const revertType = revertInfo?.revertType ?? "normal";
+  const hideActions = selected && bulkMode;
 
   function handleConfirmDelivery() {
     startTransition(async () => {
@@ -877,7 +1180,12 @@ function DispatchedChildCard({
   }
 
   return (
-    <Card className="border-dashed">
+    <Card
+      className={cn(
+        "border-dashed",
+        selected && "border-primary/60 bg-primary/5"
+      )}
+    >
       <CardHeader
         className={cn(
           "flex cursor-pointer flex-row items-center gap-2 py-2.5",
@@ -885,6 +1193,13 @@ function DispatchedChildCard({
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
+        <Checkbox
+          aria-label={`Seleccionar ${child.order_number}`}
+          checked={selected}
+          className="shrink-0"
+          onCheckedChange={() => onToggleSelect(child)}
+          onClick={(e) => e.stopPropagation()}
+        />
         <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <Link
           className="font-mono font-semibold text-sm hover:underline"
@@ -948,44 +1263,50 @@ function DispatchedChildCard({
             </div>
           )}
 
-          <div>
-            <label
-              className="mb-1 block font-medium text-sm"
-              htmlFor={`delivery-notes-${child.id}`}
-            >
-              Notas de entrega
-            </label>
-            <Textarea
-              id={`delivery-notes-${child.id}`}
-              onChange={(e) => setDeliveryNotes(e.target.value)}
-              placeholder="Notas sobre la entrega..."
-              value={deliveryNotes}
-            />
-          </div>
+          {!hideActions && (
+            <>
+              <div>
+                <label
+                  className="mb-1 block font-medium text-sm"
+                  htmlFor={`delivery-notes-${child.id}`}
+                >
+                  Notas de entrega
+                </label>
+                <Textarea
+                  id={`delivery-notes-${child.id}`}
+                  onChange={(e) => setDeliveryNotes(e.target.value)}
+                  placeholder="Notas sobre la entrega..."
+                  value={deliveryNotes}
+                />
+              </div>
 
-          <div className="flex justify-end gap-2">
-            {canRevert && (
-              <Button
-                className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
-                disabled={isPending}
-                onClick={() => setRevertOpen(true)}
-                size="sm"
-                variant="outline"
-              >
-                <ArrowFatLineLeftIcon className="size-4" />
-                Volver atrás
-              </Button>
-            )}
-            <Button
-              disabled={isPending}
-              onClick={handleConfirmDelivery}
-              size="sm"
-              variant="default"
-            >
-              <CheckCircleIcon className="mr-1 h-4 w-4" />
-              {isPending ? "Confirmando..." : "Confirmar entrega al cliente"}
-            </Button>
-          </div>
+              <div className="flex justify-end gap-2">
+                {canRevert && (
+                  <Button
+                    className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                    disabled={isPending}
+                    onClick={() => setRevertOpen(true)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <ArrowFatLineLeftIcon className="size-4" />
+                    Volver atrás
+                  </Button>
+                )}
+                <Button
+                  disabled={isPending}
+                  onClick={handleConfirmDelivery}
+                  size="sm"
+                  variant="default"
+                >
+                  <CheckCircleIcon className="mr-1 h-4 w-4" />
+                  {isPending
+                    ? "Confirmando..."
+                    : "Confirmar entrega al cliente"}
+                </Button>
+              </div>
+            </>
+          )}
 
           {canRevert && previousStatus && previousStatusLabel && (
             <RevertOrderModal
