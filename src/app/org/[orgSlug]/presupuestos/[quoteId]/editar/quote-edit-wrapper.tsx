@@ -230,6 +230,9 @@ function buildDefaultValues(
     targetMarginListId: quote.target_margin_list_id ?? "none",
     currency: quote.currency as "ARS" | "USD",
     exchangeRate: quote.exchange_rate,
+    invoiceType: (quote as Record<string, unknown>).invoice_type as
+      | QuoteFormValues["invoiceType"]
+      | undefined,
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",
     purchaseOrderFile: quote.purchase_order_file ?? null,
