@@ -1,7 +1,7 @@
 "use client";
 
 import { FloppyDiskIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,11 +16,14 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
+import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
 import { getModifierKey } from "@/modules/purchases/utils/purchase-calculations";
+import { calculatePurchaseTaxPreview } from "@/modules/purchases/utils/purchase-tax-preview";
 import type { PurchaseItem } from "../forms/purchase-items-list";
 
 type PurchaseSummaryProps = {
   items: PurchaseItem[];
+  orgSlug: string;
   onSubmit?: () => void;
   isSubmitting?: boolean;
   disabled?: boolean;
@@ -30,6 +33,7 @@ type PurchaseSummaryProps = {
 
 export function PurchaseSummary({
   items,
+  orgSlug,
   onSubmit,
   isSubmitting = false,
   disabled = false,
@@ -45,12 +49,40 @@ export function PurchaseSummary({
       ? globalDiscountPercentProp
       : localGlobalDiscount;
 
-  const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+  const subtotal = useMemo(
+    () => items.reduce((sum, item) => sum + item.subtotal, 0),
+    [items]
+  );
 
   const discountAmount = Math.min(
     Math.max(0, (globalDiscountPercent / 100) * subtotal),
     Math.max(0, subtotal)
   );
+
+  const productIds = useMemo(
+    () => Array.from(new Set(items.map((item) => item.product_id))),
+    [items]
+  );
+
+  const { data: productTaxes = new Map() } = useProductTaxes(
+    orgSlug,
+    productIds
+  );
+
+  const { taxes, totalTaxAmount } = useMemo(
+    () =>
+      calculatePurchaseTaxPreview({
+        items: items.map((item) => ({
+          product_id: item.product_id,
+          subtotal: item.subtotal,
+        })),
+        productTaxes,
+        globalDiscountPercent,
+      }),
+    [items, productTaxes, globalDiscountPercent]
+  );
+
+  const total = Math.max(0, subtotal - discountAmount + totalTaxAmount);
 
   const handleGlobalDiscountChange = (value: string) => {
     const parsed = Number.parseFloat(value);
@@ -112,18 +144,29 @@ export function PurchaseSummary({
             </div>
           )}
 
-          <p className="text-muted-foreground text-xs italic">
-            Los impuestos se calculan automáticamente según cada producto.
-          </p>
+          {taxes.map((tax) => (
+            <div className="flex items-center justify-between" key={tax.taxId}>
+              <span className="text-muted-foreground text-sm">
+                {tax.name} ({tax.rate}%)
+              </span>
+              <span className="font-medium text-sm">
+                {formatCurrency(tax.taxAmount)}
+              </span>
+            </div>
+          ))}
+
+          {items.length > 0 && taxes.length === 0 && (
+            <p className="text-muted-foreground text-xs italic">
+              Ninguno de los productos tiene impuestos asignados.
+            </p>
+          )}
         </div>
 
         <Separator />
 
         <div className="flex items-center justify-between">
-          <span className="font-semibold">Subtotal con descuento</span>
-          <span className="font-bold text-2xl">
-            {formatCurrency(Math.max(0, subtotal - discountAmount))}
-          </span>
+          <span className="font-semibold">Total</span>
+          <span className="font-bold text-2xl">{formatCurrency(total)}</span>
         </div>
 
         {items.length === 0 && (

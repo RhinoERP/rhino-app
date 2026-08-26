@@ -128,6 +128,7 @@ function NewPurchaseContent() {
           unit_quantity: unitQuantity,
           unit_cost: item.unit_cost,
           subtotal: item.subtotal,
+          unit_of_measure: item.unit_of_measure,
           variant_stocks: item.has_variants ? item.variant_stocks : undefined,
         };
       }),
@@ -266,6 +267,7 @@ function NewPurchaseContent() {
             items={purchaseItems}
             onGlobalDiscountChange={setGlobalDiscountPercent}
             onSubmit={handleSubmit}
+            orgSlug={orgSlug}
           />
         </div>
       </div>

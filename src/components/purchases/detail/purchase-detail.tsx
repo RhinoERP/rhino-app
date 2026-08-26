@@ -179,6 +179,7 @@ export function PurchaseDetail({
       unit_quantity: item.unit_quantity,
       unit_cost: item.unit_cost,
       subtotal: item.subtotal,
+      unit_of_measure: item.unit_of_measure,
       variant_stocks: item.variant_stocks ?? null,
     })),
     global_discount_percentage:

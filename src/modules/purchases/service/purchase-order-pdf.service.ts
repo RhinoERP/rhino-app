@@ -9,6 +9,7 @@ export type PurchaseOrderPDFItem = {
   unitCost: number;
   subtotal: number;
   variantStocks: Record<string, Record<string, number>> | null;
+  itemTaxes: Array<{ name: string; rate: number; taxAmount: number }>;
 };
 
 export type PurchaseOrderPDFData = {
@@ -89,6 +90,10 @@ export type BuildPurchaseOrderPDFDataInput = {
     issuerLegalAddress?: string | null;
     issuerLogoUrl?: string | null;
   } | null;
+  itemTaxesByLine?: Map<
+    string,
+    Array<{ name: string; rate: number; taxAmount: number }>
+  >;
 };
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -119,14 +124,18 @@ const formatQuantityValue = (value: number): string =>
 
 const WEIGHT_OR_VOLUME_UNITS = ["KG", "LT", "MT"];
 
-const SINGLE_PAGE_ITEM_LIMIT = 11;
-const FIRST_PAGE_ITEM_LIMIT = 16;
-const CONTINUATION_PAGE_ITEM_LIMIT = 22;
+const SINGLE_PAGE_ITEM_LIMIT = 9;
+const FIRST_PAGE_ITEM_LIMIT = 13;
+const CONTINUATION_PAGE_ITEM_LIMIT = 18;
 
 function buildPurchaseOrderItems(
-  purchaseOrder: PurchaseOrderPDFSource
+  purchaseOrder: PurchaseOrderPDFSource,
+  itemTaxesByLine?: Map<
+    string,
+    Array<{ name: string; rate: number; taxAmount: number }>
+  >
 ): PurchaseOrderPDFItem[] {
-  return (purchaseOrder.items ?? []).map((item) => {
+  return (purchaseOrder.items ?? []).map((item, index) => {
     const unitOfMeasure = item.unit_of_measure ?? null;
     const isWeightOrVolume =
       unitOfMeasure != null &&
@@ -138,6 +147,9 @@ function buildPurchaseOrderItems(
         ? item.quantity * item.weight_per_unit
         : null);
 
+    const lineId = String(index);
+    const itemTaxes = itemTaxesByLine?.get(lineId) ?? [];
+
     return {
       productName: item.product_name ?? "—",
       unitOfMeasure: unitOfMeasure ?? null,
@@ -146,6 +158,7 @@ function buildPurchaseOrderItems(
       unitCost: item.unit_cost ?? 0,
       subtotal: item.subtotal ?? 0,
       variantStocks: item.variant_stocks ?? null,
+      itemTaxes,
     };
   });
 }
@@ -182,7 +195,8 @@ function buildSupplier(
 export function buildPurchaseOrderPDFData(
   input: BuildPurchaseOrderPDFDataInput
 ): PurchaseOrderPDFData {
-  const { purchaseOrder, supplier, organization, branding } = input;
+  const { purchaseOrder, supplier, organization, branding, itemTaxesByLine } =
+    input;
   const businessName =
     branding?.issuerBusinessName?.trim() || organization.name || "Empresa";
   const purchaseNumber = purchaseOrder.purchase_number
@@ -206,7 +220,7 @@ export function buildPurchaseOrderPDFData(
     total: truncateMoney(purchaseOrder.total_amount ?? 0),
     issuer: buildIssuer(input, businessName),
     supplier: buildSupplier(supplier),
-    items: buildPurchaseOrderItems(purchaseOrder),
+    items: buildPurchaseOrderItems(purchaseOrder, itemTaxesByLine),
     taxes: (purchaseOrder.taxes ?? []).map((tax) => ({
       name: tax.name,
       rate: tax.rate,
@@ -362,6 +376,21 @@ function renderVariantBreakdownText(
     : "";
 }
 
+function renderItemTaxes(
+  itemTaxes: Array<{ name: string; rate: number; taxAmount: number }>
+): string {
+  if (itemTaxes.length === 0) {
+    return "";
+  }
+
+  const parts = itemTaxes.map(
+    (tax) =>
+      `${escapeHtml(tax.name)}${tax.rate ? ` ${tax.rate.toFixed(2)}%` : ""}: ${formatCompactCurrency(tax.taxAmount)}`
+  );
+
+  return `<div class="item-tax-detail">${parts.join(" / ")}</div>`;
+}
+
 function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
   const rows = items
     .map((item) => {
@@ -371,10 +400,11 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
       const variantHtml = item.variantStocks
         ? renderVariantBreakdownText(item.variantStocks)
         : "";
+      const itemTaxesHtml = renderItemTaxes(item.itemTaxes);
 
       return `
     <tr>
-      <td class="c-desc">${displayValue(item.productName)}${variantHtml}</td>
+      <td class="c-desc">${displayValue(item.productName)}${variantHtml}${itemTaxesHtml}</td>
       <td class="c-qty">${formatQuantityValue(quantity)}${escapeHtml(unitLabel)}</td>
       <td class="c-right c-price">${formatCompactCurrency(item.unitCost)}</td>
       <td class="c-right c-bold c-amount">${formatCompactCurrency(item.subtotal)}</td>
@@ -618,6 +648,11 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
   .c-center { text-align: center; }
   .c-bold { font-weight: 700; }
   .variant-detail {
+    font-size: 7px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .item-tax-detail {
     font-size: 7px;
     color: var(--muted);
     margin-top: 2px;

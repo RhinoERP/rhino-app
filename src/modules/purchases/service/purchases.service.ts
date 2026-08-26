@@ -293,6 +293,7 @@ export type CreatePurchaseOrderInput = {
     unit_quantity: number;
     unit_cost: number;
     subtotal: number;
+    unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>>;
   }[];
   global_discount_percentage?: number;
@@ -395,16 +396,22 @@ async function insertPurchaseOrderItems(
   purchaseOrderId: string,
   items: CreatePurchaseOrderInput["items"]
 ): Promise<void> {
-  const itemsToInsert = items.map((item) => ({
-    organization_id: orgId,
-    purchase_order_id: purchaseOrderId,
-    product_id: item.product_id,
-    quantity: Math.max(1, item.quantity),
-    unit_quantity: item.unit_quantity,
-    unit_cost: truncateMoney(item.unit_cost),
-    subtotal: truncateMoney(item.subtotal),
-    variant_stocks: item.variant_stocks ?? null,
-  }));
+  const itemsToInsert = items.map((item) => {
+    const uom = item.unit_of_measure ?? "";
+    const isWeightOrVolume = uom === "KG" || uom === "LT" || uom === "MT";
+    const minQuantity = isWeightOrVolume ? 0 : 1;
+
+    return {
+      organization_id: orgId,
+      purchase_order_id: purchaseOrderId,
+      product_id: item.product_id,
+      quantity: Math.max(minQuantity, item.quantity),
+      unit_quantity: item.unit_quantity,
+      unit_cost: truncateMoney(item.unit_cost),
+      subtotal: truncateMoney(item.subtotal),
+      variant_stocks: item.variant_stocks ?? null,
+    };
+  });
 
   const { error } = await supabase
     .from("purchase_order_items")
@@ -2034,6 +2041,7 @@ export type UpdatePurchaseOrderInput = {
     unit_quantity: number;
     unit_cost: number;
     subtotal: number;
+    unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
   }[];
   global_discount_percentage?: number;
@@ -2122,16 +2130,22 @@ async function updatePurchaseOrderItems(
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", orgId);
 
-  const itemsToInsert = items.map((item) => ({
-    organization_id: orgId,
-    purchase_order_id: purchaseOrderId,
-    product_id: item.product_id,
-    quantity: Math.max(1, item.quantity),
-    unit_quantity: item.unit_quantity,
-    unit_cost: truncateMoney(item.unit_cost),
-    subtotal: truncateMoney(item.subtotal),
-    variant_stocks: item.variant_stocks ?? null,
-  }));
+  const itemsToInsert = items.map((item) => {
+    const uom = item.unit_of_measure ?? "";
+    const isWeightOrVolume = uom === "KG" || uom === "LT" || uom === "MT";
+    const minQuantity = isWeightOrVolume ? 0 : 1;
+
+    return {
+      organization_id: orgId,
+      purchase_order_id: purchaseOrderId,
+      product_id: item.product_id,
+      quantity: Math.max(minQuantity, item.quantity),
+      unit_quantity: item.unit_quantity,
+      unit_cost: truncateMoney(item.unit_cost),
+      subtotal: truncateMoney(item.subtotal),
+      variant_stocks: item.variant_stocks ?? null,
+    };
+  });
 
   const { error: itemsError } = await supabase
     .from("purchase_order_items")
