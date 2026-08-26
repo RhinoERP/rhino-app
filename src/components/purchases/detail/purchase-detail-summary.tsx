@@ -12,12 +12,18 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
-import type { Tax } from "@/modules/taxes/types";
 import type { PurchaseDetailItem } from "./purchase-detail-items";
+
+type PurchaseOrderTax = {
+  tax_id: string;
+  name: string;
+  rate: number;
+  tax_amount?: number;
+};
 
 type PurchaseDetailSummaryProps = {
   items: PurchaseDetailItem[];
-  selectedTaxes: Tax[];
+  purchaseOrderTaxes?: PurchaseOrderTax[] | null;
   error: string | null;
   isDraftSale: boolean;
   isConfirmingDraft: boolean;
@@ -32,7 +38,7 @@ type PurchaseDetailSummaryProps = {
 
 export function PurchaseDetailSummary({
   items,
-  selectedTaxes,
+  purchaseOrderTaxes,
   error,
   isDraftSale,
   isConfirmingDraft,
@@ -51,7 +57,6 @@ export function PurchaseDetailSummary({
     0
   );
 
-  // Calculate discount (on subtotal only, not on taxes)
   const discountPercentage = globalDiscountPercentage ?? 0;
   const discountAmount =
     globalDiscountAmount ??
@@ -60,21 +65,13 @@ export function PurchaseDetailSummary({
       Math.max(0, subtotal)
     );
 
-  // Subtotal after discount (tax base)
   const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
 
-  // Calculate taxes on discounted subtotal
-  const taxDetails = selectedTaxes.map((tax) => ({
-    tax,
-    amount: subtotalAfterDiscount * (tax.rate / 100),
-  }));
-
-  const totalTaxAmount = taxDetails.reduce(
-    (sum, detail) => sum + detail.amount,
+  const totalTaxAmount = (purchaseOrderTaxes ?? []).reduce(
+    (sum, tax) => sum + (tax.tax_amount ?? 0),
     0
   );
 
-  // Total: (subtotal - discount) + taxes
   const total = subtotalAfterDiscount + totalTaxAmount;
 
   return (
@@ -121,12 +118,17 @@ export function PurchaseDetailSummary({
                   </span>
                 </div>
               )}
-              {taxDetails.map(({ tax, amount }) => (
-                <div className="flex items-center justify-between" key={tax.id}>
+              {(purchaseOrderTaxes ?? []).map((tax) => (
+                <div
+                  className="flex items-center justify-between"
+                  key={tax.tax_id}
+                >
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)
                   </span>
-                  <span className="font-medium">{formatCurrency(amount)}</span>
+                  <span className="font-medium">
+                    {formatCurrency(tax.tax_amount ?? 0)}
+                  </span>
                 </div>
               ))}
               <Separator />

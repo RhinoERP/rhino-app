@@ -3,12 +3,12 @@ import { formatCurrency, formatDateOnly } from "@/lib/format";
 
 export type PurchaseOrderPDFItem = {
   productName: string;
-  productSku: string | null;
   unitOfMeasure: string | null;
   quantity: number;
   unitQuantity: number | null;
   unitCost: number;
   subtotal: number;
+  variantStocks: Record<string, Record<string, number>> | null;
 };
 
 export type PurchaseOrderPDFData = {
@@ -59,13 +59,13 @@ export type PurchaseOrderPDFSource = {
   total_amount: number;
   items: Array<{
     product_name?: string;
-    product_sku?: string | null;
     unit_of_measure?: string | null;
     weight_per_unit?: number | null;
     quantity: number;
     unit_quantity: number | null;
     unit_cost: number;
     subtotal: number;
+    variant_stocks?: Record<string, Record<string, number>> | null;
   }>;
   taxes: Array<{ name: string; rate: number; tax_amount: number }> | null;
 };
@@ -140,12 +140,12 @@ function buildPurchaseOrderItems(
 
     return {
       productName: item.product_name ?? "—",
-      productSku: item.product_sku ?? null,
       unitOfMeasure: unitOfMeasure ?? null,
       quantity: item.quantity ?? 0,
       unitQuantity,
       unitCost: item.unit_cost ?? 0,
       subtotal: item.subtotal ?? 0,
+      variantStocks: item.variant_stocks ?? null,
     };
   });
 }
@@ -340,17 +340,41 @@ function buildContinuationHeader(
   `;
 }
 
+function renderVariantBreakdownText(
+  variantStocks: Record<string, Record<string, number>>
+): string {
+  const parts: string[] = [];
+
+  for (const [attribute, values] of Object.entries(variantStocks)) {
+    const detailParts = Object.entries(values)
+      .filter(([, qty]) => qty > 0)
+      .map(([variantName, qty]) => `${variantName}: ${qty}`);
+
+    if (detailParts.length > 0) {
+      parts.push(
+        `${escapeHtml(attribute)} ${detailParts.map(escapeHtml).join(", ")}`
+      );
+    }
+  }
+
+  return parts.length > 0
+    ? `<div class="variant-detail">${parts.join(" — ")}</div>`
+    : "";
+}
+
 function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
   const rows = items
     .map((item) => {
       const quantity = item.unitQuantity ?? item.quantity;
       const unitLabel =
         item.unitOfMeasure && item.unitQuantity ? ` ${item.unitOfMeasure}` : "";
+      const variantHtml = item.variantStocks
+        ? renderVariantBreakdownText(item.variantStocks)
+        : "";
 
       return `
     <tr>
-      <td class="c-code">${displayValue(item.productSku)}</td>
-      <td class="c-desc">${displayValue(item.productName)}</td>
+      <td class="c-desc">${displayValue(item.productName)}${variantHtml}</td>
       <td class="c-qty">${formatQuantityValue(quantity)}${escapeHtml(unitLabel)}</td>
       <td class="c-right c-price">${formatCompactCurrency(item.unitCost)}</td>
       <td class="c-right c-bold c-amount">${formatCompactCurrency(item.subtotal)}</td>
@@ -363,7 +387,6 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
       <table>
         <thead>
           <tr>
-            <th class="c-code">Código</th>
             <th>Detalle</th>
             <th class="c-qty">Cantidad</th>
             <th class="c-price">Precio U.</th>
@@ -587,7 +610,6 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
     word-break: break-word;
   }
   td:last-child { border-right: none; }
-  .c-code { width: 50px; }
   .c-qty { width: 60px; text-align: center; }
   .c-desc { text-align: left; }
   .c-price { width: 75px; text-align: right; }
@@ -595,6 +617,11 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
   .c-right { text-align: right; }
   .c-center { text-align: center; }
   .c-bold { font-weight: 700; }
+  .variant-detail {
+    font-size: 7px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
 
   /* TOTALS */
   .breakdown {
