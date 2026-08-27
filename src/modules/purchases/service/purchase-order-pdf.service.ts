@@ -84,7 +84,12 @@ export type PurchaseOrderPDFSupplierSource = {
 export type BuildPurchaseOrderPDFDataInput = {
   purchaseOrder: PurchaseOrderPDFSource;
   supplier: PurchaseOrderPDFSupplierSource;
-  organization: { id: string; name: string; cuit?: string | null };
+  organization: {
+    id: string;
+    name: string;
+    cuit?: string | null;
+    logo_url?: string | null;
+  };
   branding?: {
     issuerBusinessName?: string | null;
     issuerLegalAddress?: string | null;
@@ -174,7 +179,7 @@ function buildIssuer(
     businessName,
     cuit: organization.cuit ?? null,
     legalAddress: branding?.issuerLegalAddress ?? null,
-    logoUrl: branding?.issuerLogoUrl ?? null,
+    logoUrl: organization.logo_url ?? branding?.issuerLogoUrl ?? null,
   };
 }
 
@@ -277,8 +282,7 @@ function buildHeaderHtml(data: PurchaseOrderPDFData): string {
         ${
           data.issuer.logoUrl
             ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="issuer-logo" />`
-            : ""
-        }
+            : `
         <div>
           <div class="company-name">${displayValue(data.issuer.businessName)}</div>
           <div class="company-detail">${displayValue(data.issuer.organizationName)}</div>
@@ -288,7 +292,8 @@ function buildHeaderHtml(data: PurchaseOrderPDFData): string {
               ? `<div class="company-detail">${escapeHtml(data.issuer.legalAddress)}</div>`
               : ""
           }
-        </div>
+        </div>`
+        }
       </div>
       <div class="header-right">
         <div class="doctype-label">Orden de compra</div>
