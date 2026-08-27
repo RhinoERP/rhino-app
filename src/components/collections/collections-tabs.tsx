@@ -7,6 +7,8 @@ import {
   UsersThreeIcon,
 } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
+import { useEffect, useRef, useState } from "react";
+import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
 import type {
@@ -52,6 +54,9 @@ export function CollectionsTabs({
   paymentAccountId,
   paginatedData,
 }: CollectionsTabsProps) {
+  const [isLoading, setIsLoading] = useState(false);
+  const prevTabRef = useRef(currentTab);
+
   const [, setVista] = useQueryState(
     "vista",
     parseAsString.withOptions({
@@ -62,7 +67,15 @@ export function CollectionsTabs({
     })
   );
 
+  useEffect(() => {
+    if (prevTabRef.current !== currentTab) {
+      prevTabRef.current = currentTab;
+      setIsLoading(false);
+    }
+  });
+
   const handleTabChange = (value: string) => {
+    setIsLoading(true);
     setVista(tabQueryValues[value as CollectionTabValue]);
   };
 
@@ -70,7 +83,10 @@ export function CollectionsTabs({
     <Tabs className="w-full" onValueChange={handleTabChange} value={currentTab}>
       <TabsList>
         {wholesaleEnabled ? (
-          <TabsTrigger value="receivables">
+          <TabsTrigger
+            className="cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+            value="receivables"
+          >
             <PiggyBankIcon
               className="mr-2 h-4 w-4 text-green-500"
               weight="duotone"
@@ -78,7 +94,10 @@ export function CollectionsTabs({
             Por cobrar
           </TabsTrigger>
         ) : null}
-        <TabsTrigger value="payables">
+        <TabsTrigger
+          className="cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+          value="payables"
+        >
           <HandCoinsIcon
             className="mr-2 h-4 w-4 text-orange-500"
             weight="duotone"
@@ -86,7 +105,10 @@ export function CollectionsTabs({
           Por pagar
         </TabsTrigger>
         {wholesaleEnabled ? (
-          <TabsTrigger value="current-customers">
+          <TabsTrigger
+            className="cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+            value="current-customers"
+          >
             <UsersThreeIcon
               className="mr-2 h-4 w-4 text-blue-500"
               weight="duotone"
@@ -94,7 +116,10 @@ export function CollectionsTabs({
             CC clientes
           </TabsTrigger>
         ) : null}
-        <TabsTrigger value="current-suppliers">
+        <TabsTrigger
+          className="cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+          value="current-suppliers"
+        >
           <FactoryIcon
             className="mr-2 h-4 w-4 text-amber-500"
             weight="duotone"
@@ -104,37 +129,55 @@ export function CollectionsTabs({
       </TabsList>
       {wholesaleEnabled ? (
         <TabsContent className="mt-2" value="receivables">
-          {paginatedData && currentTab === "receivables" ? (
-            <ReceivablesTable
-              initialData={paginatedData.data as ReceivableAccount[]}
-              orgSlug={orgSlug}
-              pageCount={paginatedData.pageCount}
-              paymentAccountId={paymentAccountId}
-            />
-          ) : null}
+          {isLoading ? (
+            <DataTableSkeleton columnCount={7} filterCount={1} rowCount={8} />
+          ) : (
+            paginatedData &&
+            currentTab === "receivables" && (
+              <ReceivablesTable
+                initialData={paginatedData.data as ReceivableAccount[]}
+                orgSlug={orgSlug}
+                pageCount={paginatedData.pageCount}
+                paymentAccountId={paymentAccountId}
+              />
+            )
+          )}
         </TabsContent>
       ) : null}
       <TabsContent className="mt-2" value="payables">
-        {paginatedData && currentTab === "payables" ? (
-          <PayablesTable
-            initialData={paginatedData.data as PayableAccount[]}
-            orgId={orgId}
-            orgSlug={orgSlug}
-            pageCount={paginatedData.pageCount}
-          />
-        ) : null}
+        {isLoading ? (
+          <DataTableSkeleton columnCount={7} filterCount={1} rowCount={8} />
+        ) : (
+          paginatedData &&
+          currentTab === "payables" && (
+            <PayablesTable
+              initialData={paginatedData.data as PayableAccount[]}
+              orgId={orgId}
+              orgSlug={orgSlug}
+              pageCount={paginatedData.pageCount}
+            />
+          )
+        )}
       </TabsContent>
       {wholesaleEnabled ? (
         <TabsContent className="mt-2" value="current-customers">
-          <CurrentAccounts
-            creditOnlyCustomers={creditOnlyCustomers}
-            orgSlug={orgSlug}
-            receivables={fullReceivables}
-          />
+          {isLoading ? (
+            <DataTableSkeleton columnCount={7} filterCount={1} rowCount={8} />
+          ) : (
+            <CurrentAccounts
+              creditOnlyCustomers={creditOnlyCustomers}
+              orgSlug={orgSlug}
+              receivables={fullReceivables}
+            />
+          )}
         </TabsContent>
       ) : null}
       <TabsContent className="mt-2" value="current-suppliers">
-        <CurrentAccounts orgSlug={orgSlug} payables={fullPayables} />
+        {isLoading ? (
+          <DataTableSkeleton columnCount={7} filterCount={1} rowCount={8} />
+        ) : (
+          <CurrentAccounts orgSlug={orgSlug} payables={fullPayables} />
+        )}
       </TabsContent>
     </Tabs>
   );
