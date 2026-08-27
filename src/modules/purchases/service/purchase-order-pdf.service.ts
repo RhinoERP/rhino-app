@@ -566,7 +566,7 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
   .header-left { display:flex; align-items:center; gap:8px; flex:1; min-width:0; }
   .company-name { font-size:18px; font-weight:700; line-height:1.1; }
   .company-detail { font-size:8px; color:var(--muted); }
-  .issuer-logo { max-width: 60px; max-height: 40px; object-fit: contain; flex-shrink: 0; }
+  .issuer-logo { max-width: 86px; max-height: 76px; object-fit: contain; flex-shrink: 0; }
   .header-right { text-align:right; flex-shrink:0; }
   .doctype-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--blue); margin-bottom:1px; }
   .doctype-number { font-size:14px; font-weight:700; line-height:1.1; margin-bottom:2px; }

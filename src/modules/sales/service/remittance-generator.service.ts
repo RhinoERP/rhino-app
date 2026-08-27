@@ -304,7 +304,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     gap: 16px;
   }
   .header-left { display:flex; align-items:center; gap:8px; }
-  .logo-img { max-width:52px; max-height:46px; object-fit:contain; }
+  .logo-img { max-width:86px; max-height:76px; object-fit:contain; }
   .company-name { font-size:18px; font-weight:700; line-height:1.1; }
   .issuer-details { margin-top:3px; color:var(--muted); font-size:7.5px; }
   .header-right { text-align:right; flex-shrink:0; }
