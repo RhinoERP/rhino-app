@@ -12,6 +12,8 @@ import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 import type { StockLotUpdate } from "../service/orders.service";
 import {
+  deductStockForOrderItems,
+  findAlreadyDeductedItemIds,
   recalcParentOrderStatus,
   rollbackStockDeduction,
   syncSaleStatus,
@@ -58,11 +60,73 @@ async function validateStockForTransition(
   return [];
 }
 
-function deductStockForTransition(): { lotUpdates: StockLotUpdate[] } {
-  // A Pedido may validate availability before production or preparation, but
-  // it is not a stock-consuming commercial event. Stock is deducted exactly
-  // once when its Preventa becomes a confirmed Venta.
-  return { lotUpdates: [] };
+async function deductStockForTransition(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  orderId: string;
+  orderNumber: string;
+  newStatus: Database["public"]["Enums"]["order_flow_status"];
+}): Promise<{ lotUpdates: StockLotUpdate[] }> {
+  const { supabase, orgId, orderId, orderNumber, newStatus } = params;
+
+  // El stock se consume cuando un sub-pedido pasa a despacho/producción.
+  // Los hijos direct/producción/reserva ya descontaron al crearse; los hijos
+  // de compra descuentan acá, cuando su mercadería ya está disponible.
+  if (newStatus !== "PREPARING" && newStatus !== "IN_PRODUCTION") {
+    return { lotUpdates: [] };
+  }
+
+  // Solo los sub-pedidos consumen stock en esta transición. Un pedido padre
+  // que pasa a despacho/producción se sincroniza vía su venta (syncSaleStatus).
+  const { data: order } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .eq("id", orderId)
+    .eq("organization_id", orgId)
+    .single();
+
+  if (!order?.parent_order_id) {
+    return { lotUpdates: [] };
+  }
+
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id")
+    .eq("assigned_order_id", orderId);
+
+  const quoteItemIds = (items ?? []).map((i) => i.id);
+  if (quoteItemIds.length === 0) {
+    return { lotUpdates: [] };
+  }
+
+  const alreadyDeducted = await findAlreadyDeductedItemIds(
+    supabase,
+    quoteItemIds
+  );
+  const toDeduct = quoteItemIds.filter((id) => !alreadyDeducted.has(id));
+  if (toDeduct.length === 0) {
+    return { lotUpdates: [] };
+  }
+
+  const route: ChildOrderRoute =
+    newStatus === "PREPARING" ? "direct" : "production";
+
+  await validateStockForItems({
+    supabase,
+    orgId,
+    quoteItemIds: toDeduct,
+    route,
+  });
+
+  const routeLabel = newStatus === "PREPARING" ? "Despacho" : "Producción";
+  const deduction = await deductStockForOrderItems({
+    supabase,
+    orgId,
+    quoteItemIds: toDeduct,
+    movementReason: `Pedido ${orderNumber} - ${routeLabel}`,
+  });
+
+  return { lotUpdates: deduction.lotUpdates };
 }
 
 function revalidateOrderPaths(
@@ -212,7 +276,13 @@ export async function updateOrderStatusAction(
       );
     }
 
-    const deduction = deductStockForTransition();
+    const deduction = await deductStockForTransition({
+      supabase,
+      orgId: org.id,
+      orderId,
+      orderNumber: currentOrder.order_number,
+      newStatus,
+    });
 
     if (currentOrder.sales_order_id) {
       await syncSaleStatus(
