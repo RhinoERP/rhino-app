@@ -49,7 +49,7 @@ async function OrganizationLayoutContent({
           }}
         />
         <SidebarInset>
-          <div className="flex flex-1 flex-col gap-4 p-4 pb-20 md:pb-6">
+          <div className="flex flex-1 flex-col gap-4 p-2 pb-20 md:pb-4">
             {children}
           </div>
           <BottomNav
