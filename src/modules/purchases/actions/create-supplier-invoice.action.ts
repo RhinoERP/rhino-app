@@ -145,7 +145,7 @@ export async function createSupplierInvoiceAction(formData: FormData) {
     }
 
     revalidatePath(`/org/${orgSlug}/compras/facturas-proveedor`);
-    return { success: true };
+    return { success: true, invoice };
   } catch (error) {
     if (uploadedPdfPath) {
       await removeUploadedPdf(uploadedPdfPath);

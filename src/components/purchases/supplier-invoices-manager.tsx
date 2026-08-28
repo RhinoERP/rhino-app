@@ -3,6 +3,7 @@
 import { FilePdfIcon, PlusIcon } from "@phosphor-icons/react";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,7 +15,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  buildFacturaCompra,
+  confirmAccountingEvent,
+  previewAccountingEvent,
+} from "@/lib/accounting-client";
 import { formatCurrency, formatDate } from "@/lib/format";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { createSupplierInvoiceAction } from "@/modules/purchases/actions/create-supplier-invoice.action";
 import {
   SUPPLIER_INVOICE_TYPES,
@@ -178,6 +186,14 @@ function SupplierInvoiceDialog({
   const [subtotalAmount, setSubtotalAmount] = useState("0");
   const [taxAmount, setTaxAmount] = useState("0");
   const [isPending, startTransition] = useTransition();
+  const [accountingPayload, setAccountingPayload] =
+    useState<EventoFacturaCompra | null>(null);
+
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const accountingIntegrationEnabled =
+    orgSettings?.accounting_integration_enabled ?? false;
+  const automaticAccountingEnabled =
+    orgSettings?.automatic_accounting_enabled ?? false;
 
   const supplierPurchaseOrders = useMemo(
     () =>
@@ -211,6 +227,59 @@ function SupplierInvoiceDialog({
     setTaxAmount("0");
   }
 
+  async function tryAutoAccounting(
+    payload: EventoFacturaCompra
+  ): Promise<boolean> {
+    try {
+      const preview = await previewAccountingEvent(payload);
+      if (preview.estadoImputacion === "COMPLETO") {
+        await confirmAccountingEvent(payload);
+        return true;
+      }
+    } catch (autoError) {
+      console.error(
+        "No se pudo automatizar el asiento de factura proveedor, abriendo revisión manual",
+        autoError
+      );
+    }
+    return false;
+  }
+
+  function buildInvoiceAccountingPayload(
+    invoice: NonNullable<
+      Extract<
+        Awaited<ReturnType<typeof createSupplierInvoiceAction>>,
+        { success: true }
+      >["invoice"]
+    >
+  ): EventoFacturaCompra {
+    return buildFacturaCompra(
+      {
+        id: invoice.id,
+        organization_id: invoice.organization_id,
+        supplier_id: invoice.supplier_id,
+        purchase_date: invoice.invoice_date,
+        expiration_date: invoice.due_date,
+        subtotal_amount: invoice.subtotal_amount,
+        tax_amount: invoice.tax_amount,
+        total_amount: invoice.total_amount,
+        remittance_number: [
+          invoice.invoice_type,
+          invoice.point_of_sale,
+          invoice.invoice_number,
+        ]
+          .filter(Boolean)
+          .join("-"),
+        taxes: null,
+      },
+      {},
+      {
+        referenciaTabla: "supplier_invoices",
+        idempotencyKey: `FACTURA_COMPRA_SI_${invoice.id}`,
+      }
+    );
+  }
+
   function submit(formData: FormData) {
     startTransition(async () => {
       const result = await createSupplierInvoiceAction(formData);
@@ -218,6 +287,23 @@ function SupplierInvoiceDialog({
         toast.error(result.error);
         return;
       }
+
+      const { invoice } = result;
+
+      if (accountingIntegrationEnabled && invoice.supplier_id) {
+        const payload = buildInvoiceAccountingPayload(invoice);
+
+        if (automaticAccountingEnabled && (await tryAutoAccounting(payload))) {
+          toast.success("Factura de proveedor registrada");
+          reset();
+          onOpenChange(false);
+          return;
+        }
+
+        setAccountingPayload(payload);
+        return;
+      }
+
       toast.success("Factura de proveedor registrada");
       reset();
       onOpenChange(false);
@@ -225,180 +311,203 @@ function SupplierInvoiceDialog({
   }
 
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Registrar factura de proveedor</DialogTitle>
-          <DialogDescription>
-            El comprobante queda asociado a la orden de compra, sin modificar la
-            recepción de mercadería.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog onOpenChange={onOpenChange} open={open && !accountingPayload}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Registrar factura de proveedor</DialogTitle>
+            <DialogDescription>
+              El comprobante queda asociado a la orden de compra, sin modificar
+              la recepción de mercadería.
+            </DialogDescription>
+          </DialogHeader>
 
-        <form action={submit} className="grid gap-4">
-          <input name="orgSlug" type="hidden" value={orgSlug} />
-          <input name="totalAmount" type="hidden" value={totalAmount} />
+          <form action={submit} className="grid gap-4">
+            <input name="orgSlug" type="hidden" value={orgSlug} />
+            <input name="totalAmount" type="hidden" value={totalAmount} />
 
-          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="purchaseOrderId">Orden de compra</Label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  id="purchaseOrderId"
+                  name="purchaseOrderId"
+                  onChange={(event) => selectPurchaseOrder(event.target.value)}
+                  value={purchaseOrderId}
+                >
+                  <option value="">Sin vincular a una OC</option>
+                  {supplierPurchaseOrders.map((purchaseOrder) => (
+                    <option key={purchaseOrder.id} value={purchaseOrder.id}>
+                      OC-
+                      {String(purchaseOrder.purchase_number ?? 0).padStart(
+                        4,
+                        "0"
+                      )}{" "}
+                      · {formatCurrency(purchaseOrder.total_amount)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="supplierId">Proveedor</Label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  id="supplierId"
+                  name="supplierId"
+                  onChange={(event) => {
+                    setSupplierId(event.target.value);
+                    setPurchaseOrderId("");
+                  }}
+                  required
+                  value={supplierId}
+                >
+                  <option value="">Seleccionar proveedor</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="invoiceType">Tipo</Label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  defaultValue="A"
+                  id="invoiceType"
+                  name="invoiceType"
+                >
+                  {SUPPLIER_INVOICE_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pointOfSale">Punto de venta</Label>
+                <Input
+                  id="pointOfSale"
+                  maxLength={20}
+                  name="pointOfSale"
+                  placeholder="0001"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invoiceNumber">Número</Label>
+                <Input
+                  id="invoiceNumber"
+                  maxLength={100}
+                  name="invoiceNumber"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="invoiceDate">Fecha de emisión</Label>
+                <Input
+                  defaultValue={today()}
+                  id="invoiceDate"
+                  name="invoiceDate"
+                  required
+                  type="date"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dueDate">Vencimiento</Label>
+                <Input id="dueDate" name="dueDate" type="date" />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="subtotalAmount">Neto gravado</Label>
+                <Input
+                  id="subtotalAmount"
+                  min="0"
+                  name="subtotalAmount"
+                  onChange={(event) => setSubtotalAmount(event.target.value)}
+                  required
+                  step="0.01"
+                  type="number"
+                  value={subtotalAmount}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="taxAmount">Impuestos</Label>
+                <Input
+                  id="taxAmount"
+                  min="0"
+                  name="taxAmount"
+                  onChange={(event) => setTaxAmount(event.target.value)}
+                  required
+                  step="0.01"
+                  type="number"
+                  value={taxAmount}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="totalPreview">Total</Label>
+                <Input disabled id="totalPreview" value={totalAmount} />
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <Label htmlFor="purchaseOrderId">Orden de compra</Label>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                id="purchaseOrderId"
-                name="purchaseOrderId"
-                onChange={(event) => selectPurchaseOrder(event.target.value)}
-                value={purchaseOrderId}
+              <Label htmlFor="file">Comprobante PDF</Label>
+              <Input
+                accept="application/pdf"
+                id="file"
+                name="file"
+                type="file"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notas</Label>
+              <Textarea
+                id="notes"
+                name="notes"
+                placeholder="Observaciones opcionales"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                disabled={isPending}
+                onClick={() => onOpenChange(false)}
+                type="button"
+                variant="outline"
               >
-                <option value="">Sin vincular a una OC</option>
-                {supplierPurchaseOrders.map((purchaseOrder) => (
-                  <option key={purchaseOrder.id} value={purchaseOrder.id}>
-                    OC-
-                    {String(purchaseOrder.purchase_number ?? 0).padStart(
-                      4,
-                      "0"
-                    )}{" "}
-                    · {formatCurrency(purchaseOrder.total_amount)}
-                  </option>
-                ))}
-              </select>
+                Cancelar
+              </Button>
+              <Button disabled={isPending} type="submit">
+                {isPending ? "Guardando..." : "Registrar factura"}
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="supplierId">Proveedor</Label>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                id="supplierId"
-                name="supplierId"
-                onChange={(event) => {
-                  setSupplierId(event.target.value);
-                  setPurchaseOrderId("");
-                }}
-                required
-                value={supplierId}
-              >
-                <option value="">Seleccionar proveedor</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="invoiceType">Tipo</Label>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                defaultValue="A"
-                id="invoiceType"
-                name="invoiceType"
-              >
-                {SUPPLIER_INVOICE_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pointOfSale">Punto de venta</Label>
-              <Input
-                id="pointOfSale"
-                maxLength={20}
-                name="pointOfSale"
-                placeholder="0001"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invoiceNumber">Número</Label>
-              <Input
-                id="invoiceNumber"
-                maxLength={100}
-                name="invoiceNumber"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="invoiceDate">Fecha de emisión</Label>
-              <Input
-                defaultValue={today()}
-                id="invoiceDate"
-                name="invoiceDate"
-                required
-                type="date"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="dueDate">Vencimiento</Label>
-              <Input id="dueDate" name="dueDate" type="date" />
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="subtotalAmount">Neto gravado</Label>
-              <Input
-                id="subtotalAmount"
-                min="0"
-                name="subtotalAmount"
-                onChange={(event) => setSubtotalAmount(event.target.value)}
-                required
-                step="0.01"
-                type="number"
-                value={subtotalAmount}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="taxAmount">Impuestos</Label>
-              <Input
-                id="taxAmount"
-                min="0"
-                name="taxAmount"
-                onChange={(event) => setTaxAmount(event.target.value)}
-                required
-                step="0.01"
-                type="number"
-                value={taxAmount}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="totalPreview">Total</Label>
-              <Input disabled id="totalPreview" value={totalAmount} />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="file">Comprobante PDF</Label>
-            <Input accept="application/pdf" id="file" name="file" type="file" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notas</Label>
-            <Textarea
-              id="notes"
-              name="notes"
-              placeholder="Observaciones opcionales"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button
-              disabled={isPending}
-              onClick={() => onOpenChange(false)}
-              type="button"
-              variant="outline"
-            >
-              Cancelar
-            </Button>
-            <Button disabled={isPending} type="submit">
-              {isPending ? "Guardando..." : "Registrar factura"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+      {accountingPayload && (
+        <AsientoModal
+          eventoPayload={accountingPayload}
+          mode="gate"
+          onCancel={() => setAccountingPayload(null)}
+          onConfirm={() => {
+            toast.success("Factura de proveedor registrada");
+            setAccountingPayload(null);
+            reset();
+            onOpenChange(false);
+          }}
+          open
+          persistAs="formal"
+        />
+      )}
+    </>
   );
 }

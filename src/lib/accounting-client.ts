@@ -743,6 +743,10 @@ export function buildFacturaCompra(
   },
   options: {
     items?: LineaDesglosadaInput[];
+  } = {},
+  overrides: {
+    referenciaTabla?: "purchase_orders" | "supplier_invoices";
+    idempotencyKey?: string;
   } = {}
 ): EventoFacturaCompra {
   const total = purchaseOrder.total_amount ?? 0;
@@ -757,10 +761,11 @@ export function buildFacturaCompra(
     tipoEvento: "FACTURA_COMPRA",
     orgId: purchaseOrder.organization_id,
     referenciaId: purchaseOrder.id,
-    referenciaTabla: "purchase_orders",
+    referenciaTabla: overrides.referenciaTabla ?? "purchase_orders",
     fecha: purchaseOrder.purchase_date,
     descripcion: `Factura compra ${facturaNumero}`,
-    idempotencyKey: `FACTURA_COMPRA_${purchaseOrder.id}`,
+    idempotencyKey:
+      overrides.idempotencyKey ?? `FACTURA_COMPRA_${purchaseOrder.id}`,
     datos: {
       montoNeto: toAccountingStr(montoNeto),
       montoImpuestos: toAccountingStr(montoImpuestos),

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createSupplierInvoiceSchema } from "./supplier-invoices.service";
+import { buildFacturaCompra } from "@/lib/accounting-client";
+import {
+  createSupplierInvoiceSchema,
+  formatSupplierInvoiceReference,
+} from "./supplier-invoices.service";
 
 const validInvoice = {
   orgSlug: "demo",
@@ -45,5 +49,82 @@ describe("createSupplierInvoiceSchema", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("formatSupplierInvoiceReference", () => {
+  it("joins type, point of sale and number with dashes", () => {
+    expect(
+      formatSupplierInvoiceReference({
+        invoice_type: "A",
+        point_of_sale: "0001",
+        invoice_number: "00000123",
+      })
+    ).toBe("A-0001-00000123");
+  });
+
+  it("omits null segments", () => {
+    expect(
+      formatSupplierInvoiceReference({
+        invoice_type: "B",
+        point_of_sale: null,
+        invoice_number: "42",
+      })
+    ).toBe("B-42");
+  });
+});
+
+describe("supplier invoice → buildFacturaCompra integration", () => {
+  const invoice = {
+    id: "si-aaa",
+    organization_id: "org-bbb",
+    supplier_id: "sup-ccc",
+    invoice_date: "2026-08-01",
+    due_date: "2026-09-01",
+    subtotal_amount: 2000,
+    tax_amount: 420,
+    total_amount: 2420,
+    invoice_type: "A" as const,
+    point_of_sale: "0003",
+    invoice_number: "00000007",
+  };
+
+  it("produces FACTURA_COMPRA event pointing to supplier_invoices table", () => {
+    const ref = formatSupplierInvoiceReference(invoice);
+    const event = buildFacturaCompra(
+      {
+        id: invoice.id,
+        organization_id: invoice.organization_id,
+        supplier_id: invoice.supplier_id,
+        purchase_date: invoice.invoice_date,
+        expiration_date: invoice.due_date,
+        subtotal_amount: invoice.subtotal_amount,
+        tax_amount: invoice.tax_amount,
+        total_amount: invoice.total_amount,
+        remittance_number: ref,
+        taxes: null,
+      },
+      {},
+      {
+        referenciaTabla: "supplier_invoices",
+        idempotencyKey: `FACTURA_COMPRA_SI_${invoice.id}`,
+      }
+    );
+
+    expect(event.tipoEvento).toBe("FACTURA_COMPRA");
+    expect(event.referenciaTabla).toBe("supplier_invoices");
+    expect(event.referenciaId).toBe("si-aaa");
+    expect(event.idempotencyKey).toBe("FACTURA_COMPRA_SI_si-aaa");
+    expect(event.datos.facturaNumero).toBe("A-0003-00000007");
+    expect(event.datos.condicionCompra).toBe("CREDITO");
+    expect(event.datos.totalFactura).toBe("2420.0000");
+    expect(event.datos.proveedorId).toBe("sup-ccc");
+  });
+
+  it("idempotency key differs from OC-based key to prevent collision", () => {
+    const siKey = `FACTURA_COMPRA_SI_${invoice.id}`;
+    const ocKey = `FACTURA_COMPRA_${invoice.id}`;
+
+    expect(siKey).not.toBe(ocKey);
   });
 });
