@@ -1700,11 +1700,11 @@ const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
   PENDING_FINANCE: "DRAFT",
   FINANCE_REJECTED: "DRAFT",
   PENDING_STOCK: "INCOMPLETE",
-  STOCK_OK: "CONFIRMED",
-  STOCK_RESERVED: "CONFIRMED",
-  PURCHASE_REQUIRED: "CONFIRMED",
-  PURCHASING: "CONFIRMED",
-  GOODS_RECEIVED: "CONFIRMED",
+  STOCK_OK: "INCOMPLETE",
+  STOCK_RESERVED: "INCOMPLETE",
+  PURCHASE_REQUIRED: "INCOMPLETE",
+  PURCHASING: "INCOMPLETE",
+  GOODS_RECEIVED: "INCOMPLETE",
   IN_PRODUCTION: "CONFIRMED",
   DESIGN_REVIEW: "CONFIRMED",
   PREPARING: "CONFIRMED",
@@ -1713,10 +1713,9 @@ const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
   CANCELLED: "CANCELLED",
 };
 
+// La venta vinculada solo se confirma cuando el pedido entra en ejecución
+// (despacho/producción). Recibir mercadería o reservar stock no la confirma.
 const CONFIRM_WITH_DEDUCTION_STATUSES: ReadonlySet<string> = new Set([
-  "STOCK_OK",
-  "STOCK_RESERVED",
-  "GOODS_RECEIVED",
   "IN_PRODUCTION",
   "DESIGN_REVIEW",
   "PREPARING",
@@ -3146,7 +3145,16 @@ function computeEffectiveIdsAndQuantities(params: {
   return { effectiveIds, effectiveQuantities };
 }
 
-async function fetchReservedChildIds(
+const STOCK_CONSUMED_CHILD_STATUSES = new Set([
+  "STOCK_RESERVED",
+  "PREPARING",
+  "IN_PRODUCTION",
+  "DESIGN_REVIEW",
+  "DISPATCHED",
+  "DELIVERED",
+]);
+
+async function fetchStockConsumedChildIds(
   supabase: SupabaseClient<Database>,
   childIds: string[]
 ): Promise<Set<string>> {
@@ -3161,7 +3169,7 @@ async function fetchReservedChildIds(
 
   return new Set(
     (childOrders ?? [])
-      .filter((o) => o.status === "STOCK_RESERVED")
+      .filter((o) => STOCK_CONSUMED_CHILD_STATUSES.has(o.status))
       .map((o) => o.id)
   );
 }
@@ -3209,7 +3217,7 @@ export async function findAlreadyDeductedItemIds(
     }
   }
 
-  const reservedChildIds = await fetchReservedChildIds(supabase, [
+  const reservedChildIds = await fetchStockConsumedChildIds(supabase, [
     ...itemToChild.values(),
   ]);
 
