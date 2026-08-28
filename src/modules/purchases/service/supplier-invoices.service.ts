@@ -7,7 +7,13 @@ import type {
   SupplierInvoiceWithRelations,
 } from "../supplier-invoices.types";
 
-const money = z.coerce.number().finite().min(0);
+const money = z.coerce
+  .number()
+  .finite()
+  .min(0)
+  .refine((value) => truncateMoney(value) === value, {
+    message: "El importe no puede tener más de dos decimales.",
+  });
 
 export const createSupplierInvoiceSchema = z
   .object({
@@ -26,7 +32,7 @@ export const createSupplierInvoiceSchema = z
   })
   .superRefine((value, ctx) => {
     const expectedTotal = truncateMoney(value.subtotalAmount + value.taxAmount);
-    if (Math.abs(value.totalAmount - expectedTotal) > 0.01) {
+    if (value.totalAmount !== expectedTotal) {
       ctx.addIssue({
         code: "custom",
         path: ["totalAmount"],

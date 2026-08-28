@@ -59,10 +59,14 @@ async function uploadPdfIfPresent(params: {
   file: FormDataEntryValue | null;
   invoiceId: string;
   orgSlug: string;
-}): Promise<void> {
+}): Promise<{
+  filename: string;
+  path: string;
+  url: string;
+} | null> {
   const { file, invoiceId, orgSlug } = params;
   if (!(file instanceof File) || file.size === 0) {
-    return;
+    return null;
   }
 
   const supabase = await createClient();
@@ -78,12 +82,23 @@ async function uploadPdfIfPresent(params: {
   const { data: urlData } = supabase.storage
     .from("documents")
     .getPublicUrl(path);
-  await attachSupplierInvoicePdf({
-    invoiceId,
-    orgSlug,
+  return {
     filename,
+    path,
     url: `${urlData.publicUrl}?v=${Date.now()}`,
-  });
+  };
+}
+
+async function removeUploadedPdf(path: string): Promise<void> {
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.storage.from("documents").remove([path]);
+    if (error) {
+      console.error("No se pudo eliminar el PDF de factura huérfano:", error);
+    }
+  } catch (error) {
+    console.error("No se pudo eliminar el PDF de factura huérfano:", error);
+  }
 }
 
 export async function createSupplierInvoiceAction(formData: FormData) {
@@ -110,14 +125,31 @@ export async function createSupplierInvoiceAction(formData: FormData) {
   }
 
   let createdInvoiceId: string | null = null;
+  let uploadedPdfPath: string | null = null;
   try {
     const invoice = await createSupplierInvoice(parsed.data);
     createdInvoiceId = invoice.id;
-    await uploadPdfIfPresent({ file, invoiceId: invoice.id, orgSlug });
+    const uploadedPdf = await uploadPdfIfPresent({
+      file,
+      invoiceId: invoice.id,
+      orgSlug,
+    });
+    uploadedPdfPath = uploadedPdf?.path ?? null;
+    if (uploadedPdf) {
+      await attachSupplierInvoicePdf({
+        invoiceId: invoice.id,
+        orgSlug,
+        filename: uploadedPdf.filename,
+        url: uploadedPdf.url,
+      });
+    }
 
     revalidatePath(`/org/${orgSlug}/compras/facturas-proveedor`);
     return { success: true };
   } catch (error) {
+    if (uploadedPdfPath) {
+      await removeUploadedPdf(uploadedPdfPath);
+    }
     if (createdInvoiceId) {
       await deleteSupplierInvoice({ invoiceId: createdInvoiceId, orgSlug });
     }

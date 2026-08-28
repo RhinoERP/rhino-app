@@ -1,31 +1,10 @@
--- Supplier invoices are the fiscal documents received from suppliers.
--- They are intentionally separate from purchase orders: one order may be
--- invoiced in installments and an invoice can be recorded before goods arrive.
+-- Repair installations where the initial supplier invoices migration was run
+-- from the SQL editor before all of its statements completed.
 
-CREATE TABLE IF NOT EXISTS public.supplier_invoices (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-  supplier_id UUID NOT NULL REFERENCES public.suppliers(id),
-  purchase_order_id UUID REFERENCES public.purchase_orders(id) ON DELETE SET NULL,
-  invoice_type TEXT NOT NULL CHECK (invoice_type IN ('A', 'B', 'C', 'M', 'E', 'Otro')),
-  point_of_sale TEXT,
-  invoice_number TEXT NOT NULL,
-  invoice_date DATE NOT NULL,
-  due_date DATE,
-  subtotal_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (subtotal_amount >= 0),
-  tax_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (tax_amount >= 0),
-  total_amount NUMERIC(14, 2) NOT NULL
-    CHECK (total_amount >= 0 AND total_amount = subtotal_amount + tax_amount),
-  currency TEXT NOT NULL DEFAULT 'ARS',
-  status TEXT NOT NULL DEFAULT 'REGISTERED'
-    CHECK (status IN ('REGISTERED', 'CANCELLED')),
-  invoice_pdf_url TEXT,
-  invoice_filename TEXT,
-  notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  created_by UUID REFERENCES auth.users(id)
-);
+ALTER TABLE public.supplier_invoices
+  DROP CONSTRAINT IF EXISTS supplier_invoices_document_unique,
+  DROP CONSTRAINT IF EXISTS supplier_invoices_invoice_type_check,
+  DROP CONSTRAINT IF EXISTS supplier_invoices_total_amount_check;
 
 CREATE UNIQUE INDEX IF NOT EXISTS supplier_invoices_document_unique
   ON public.supplier_invoices (
@@ -36,12 +15,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS supplier_invoices_document_unique
     invoice_number
   );
 
-CREATE INDEX IF NOT EXISTS supplier_invoices_organization_date_idx
-  ON public.supplier_invoices (organization_id, invoice_date DESC);
-
-CREATE INDEX IF NOT EXISTS supplier_invoices_purchase_order_idx
-  ON public.supplier_invoices (purchase_order_id)
-  WHERE purchase_order_id IS NOT NULL;
+ALTER TABLE public.supplier_invoices
+  ADD CONSTRAINT supplier_invoices_invoice_type_check
+    CHECK (invoice_type IN ('A', 'B', 'C', 'M', 'E', 'Otro')),
+  ADD CONSTRAINT supplier_invoices_total_amount_check
+    CHECK (total_amount >= 0 AND total_amount = subtotal_amount + tax_amount);
 
 CREATE OR REPLACE FUNCTION public.validate_supplier_invoice_relations()
 RETURNS TRIGGER
