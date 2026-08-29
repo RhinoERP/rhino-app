@@ -55,24 +55,40 @@ describe("remittance mask data", () => {
     expect(data.items[0]).toEqual({
       quantity: 1,
       description: "Producto 1 Marca",
+      variantName: null,
     });
   });
 
-  it("keeps size and color variants out of item descriptions", () => {
+  it("keeps variants out of the description and exposes them as a separate field", () => {
     const remittance = remittanceWithItems();
-    const itemWithVariant = remittance
-      .items[0] as RemittanceData["items"][number] & {
-      talle: string;
-      color: string;
-    };
-    itemWithVariant.talle = "XL";
-    itemWithVariant.color = "Azul";
+    remittance.items[0].variantName = "XL · Azul";
 
     const data = buildRemittanceMaskData(remittance);
 
     expect(data.items[0].description).toBe("Producto 1 Marca");
-    expect(data.items[0].description).not.toContain("XL");
     expect(data.items[0].description).not.toContain("Azul");
+    expect(data.items[0].variantName).toBe("XL · Azul");
+  });
+
+  it("renders the variant to the right of the item description", () => {
+    const remittance = remittanceWithItems();
+    remittance.items[0].variantName = "XL · Azul";
+
+    const html = generateRemittanceMaskHTML(
+      buildRemittanceMaskData(remittance)
+    );
+
+    expect(html).toContain('class="item-description has-variant"');
+    expect(html).toContain('<span class="item-variant">XL · Azul</span>');
+  });
+
+  it("does not render a variant when the item has no variant", () => {
+    const html = generateRemittanceMaskHTML(
+      buildRemittanceMaskData(remittanceWithItems())
+    );
+
+    expect(html).not.toContain('class="item-description has-variant"');
+    expect(html).not.toContain('<span class="item-variant">');
   });
 
   it("renders optional purchase order data safely and prints the added fields", () => {
