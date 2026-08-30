@@ -279,6 +279,7 @@ const applyCustomerCredits = async ({
   supplierId,
   supplierDifferentiatedCredits,
   customerCreditId,
+  currency,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -291,6 +292,7 @@ const applyCustomerCredits = async ({
   supplierId?: string | null;
   supplierDifferentiatedCredits?: boolean;
   customerCreditId?: string | null;
+  currency: string;
 }) => {
   if (creditToApply <= 0) {
     return null;
@@ -301,6 +303,7 @@ const applyCustomerCredits = async ({
     .select("id, remaining_amount")
     .eq("organization_id", orgId)
     .eq("customer_id", customerId)
+    .eq("currency" as never, currency)
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
 
@@ -392,6 +395,7 @@ const createCustomerOverpaymentCredit = async (params: {
   supplierId: string | null;
   creditGenerated: number;
   notes: string | null;
+  currency: string;
 }) => {
   if (params.creditGenerated <= 0) {
     return;
@@ -403,11 +407,12 @@ const createCustomerOverpaymentCredit = async (params: {
     supplier_id: params.supplierId,
     amount: params.creditGenerated,
     remaining_amount: params.creditGenerated,
+    currency: params.currency,
     source_payment_id: null,
     notes: params.notes
       ? `Saldo a favor por sobrepago — ${params.notes}`
       : "Saldo a favor por sobrepago",
-  });
+  } as never);
 };
 
 async function syncSalesAdvanceAfterReceivablePayment(params: {
@@ -925,6 +930,7 @@ async function applyReceivablePayment({
     supplierId: creditSupplierId,
     supplierDifferentiatedCredits,
     customerCreditId: input.customerCreditId,
+    currency: receivable.currency ?? "ARS",
   });
 
   if (creditError) {
@@ -990,6 +996,7 @@ async function applyReceivablePayment({
     supplierId: creditSupplierId,
     creditGenerated,
     notes,
+    currency: receivable.currency ?? "ARS",
   });
 
   await syncSalesAdvanceAfterReceivablePayment({

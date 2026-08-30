@@ -97,6 +97,55 @@ describe("buildArcaCreditNoteVoucherRequest", () => {
     expect(request.CbteTipo).toBe(8);
   });
 
+  it("mantiene moneda, cotización y cancelación USD de la factura asociada", () => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: {
+        id: "credit-note-usd",
+        amount: 1210,
+        invoiceType: "FACTURA_A",
+      },
+      sale: buildSale({
+        arcaRequestJson: {
+          fiscalCurrency: {
+            code: "DOL",
+            rate: 1234.56,
+            sameCurrencySettlement: true,
+          },
+        },
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+
+    expect(request).toMatchObject({
+      MonId: "DOL",
+      MonCotiz: 1234.56,
+      CanMisMonExt: "S",
+    });
+    expect(
+      buildArcaDebitNoteVoucherRequest({
+        creditNote: {
+          id: "debit-note-usd",
+          amount: 1210,
+          invoiceType: "FACTURA_A",
+        },
+        sale: buildSale({
+          arcaRequestJson: {
+            fiscalCurrency: {
+              code: "DOL",
+              rate: 1234.56,
+              sameCurrencySettlement: true,
+            },
+          },
+        }),
+        pointOfSale: 5,
+        cbteFch: TEST_CBTE_FCH,
+        associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+      })
+    ).toMatchObject({ MonId: "DOL", MonCotiz: 1234.56, CanMisMonExt: "S" });
+  });
+
   it("mapea Factura C a Nota de Crédito C", () => {
     const request = buildArcaCreditNoteVoucherRequest({
       creditNote: {

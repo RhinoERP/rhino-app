@@ -179,6 +179,7 @@ const insertReceivableCredit = async ({
   accountId,
   creditGenerated,
   notes,
+  currency,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -187,6 +188,7 @@ const insertReceivableCredit = async ({
   accountId: string;
   creditGenerated: number;
   notes: string | null;
+  currency: string;
 }) => {
   const creditSupplierId = await deriveReceivableCreditSupplier(
     orgSlug,
@@ -199,11 +201,12 @@ const insertReceivableCredit = async ({
     supplier_id: creditSupplierId,
     amount: creditGenerated,
     remaining_amount: creditGenerated,
+    currency,
     source_payment_id: null,
     notes: notes
       ? `Saldo a favor por sobrepago (edición) — ${notes}`
       : "Saldo a favor por sobrepago (edición)",
-  });
+  } as never);
 };
 
 const insertPayableCredit = async ({
@@ -365,6 +368,7 @@ async function handleReceivablePayment(
       accountId: account.id,
       creditGenerated,
       notes,
+      currency: account.currency ?? "ARS",
     });
   }
 

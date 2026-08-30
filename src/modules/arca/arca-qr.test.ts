@@ -6,6 +6,8 @@ import {
   formatDateToArgentinaIsoDate,
 } from "./arca-qr";
 
+const MISSING_USD_RATE_ERROR = /cotización fiscal autorizada/;
+
 describe("arca QR helper", () => {
   it("convierte la fecha fiscal a America/Argentina/Buenos_Aires", () => {
     expect(formatDateToArgentinaIsoDate("2026-06-09T02:30:00.000Z")).toBe(
@@ -42,5 +44,20 @@ describe("arca QR helper", () => {
     expect(encodedPayload).toBe(
       Buffer.from(JSON.stringify(payload), "utf-8").toString("base64")
     );
+  });
+
+  it("no genera un QR USD con una cotización ARS por defecto", () => {
+    expect(() =>
+      buildArcaQrPayload({
+        issueDate: "2026-08-30",
+        issuerCuit: "20-12345678-3",
+        pointOfSale: 1,
+        voucherTypeCode: 1,
+        voucherNumber: 1,
+        totalAmount: 100,
+        currency: "DOL",
+        authorizationCode: "12345678901234",
+      })
+    ).toThrow(MISSING_USD_RATE_ERROR);
   });
 });

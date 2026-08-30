@@ -19,6 +19,10 @@ import {
   ArcaValidationError,
   sanitizeArcaErrorMessage,
 } from "../errors";
+import {
+  buildInvoiceFiscalCurrency,
+  findArcaCurrencyRate,
+} from "../fiscal-currency";
 import { buildArcaReceiverDocument } from "../receiver-document";
 import { mapCustomerTaxConditionToArcaReceiverVatConditionId } from "../receiver-tax-conditions";
 import {
@@ -84,6 +88,7 @@ type LoadedSale = {
   invoiceNumber: string | null;
   subTotal: number | null;
   totalAmount: number;
+  currency: string;
   totalTaxAmount: number | null;
   globalDiscountAmount: number | null;
   arcaStatus: string;
@@ -116,6 +121,7 @@ type LoadedSaleQueryRecord = {
   invoice_number: string | null;
   sub_total: number | null;
   total_amount: number;
+  currency: string | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
   arca_status: string;
@@ -212,7 +218,8 @@ type ArcaVoucherRequest = {
   ImpIVA: number;
   ImpTrib: number;
   MonId: string;
-  MonCotiz: number;
+  MonCotiz?: number;
+  CanMisMonExt?: "S";
   PtoVta: number;
   CbteTipo: number;
   Iva?: Array<{
@@ -666,6 +673,7 @@ function normalizeLoadedSale(data: {
   invoice_number: string | null;
   sub_total: number | null;
   total_amount: number;
+  currency: string | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
   arca_status: string | null;
@@ -733,6 +741,7 @@ function normalizeLoadedSale(data: {
     invoiceNumber: data.invoice_number,
     subTotal: toNullableMoney(data.sub_total),
     totalAmount: truncateMoney(Number(data.total_amount ?? 0)),
+    currency: data.currency ?? "ARS",
     totalTaxAmount: toNullableMoney(data.total_tax_amount),
     globalDiscountAmount: toNullableMoney(data.global_discount_amount),
     ...normalizeLoadedSaleArcaState(data),
@@ -765,6 +774,7 @@ async function loadSaleForArcaInvoicing(params: {
         invoice_number,
         sub_total,
         total_amount,
+        currency,
         total_tax_amount,
         global_discount_amount,
         arca_status,
@@ -836,6 +846,7 @@ async function loadSaleForArcaInvoicing(params: {
       invoice_number: saleData.invoice_number,
       sub_total: saleData.sub_total,
       total_amount: saleData.total_amount,
+      currency: saleData.currency,
       total_tax_amount: saleData.total_tax_amount,
       global_discount_amount: saleData.global_discount_amount,
       arca_status: saleData.arca_status,
@@ -1127,6 +1138,7 @@ export function buildArcaVoucherRequestFromSale(
   const voucherTypeCode = mapInvoiceTypeToArcaVoucherType(
     context.effectiveInvoiceType
   );
+  const fiscalCurrency = buildInvoiceFiscalCurrency(context.sale.currency);
   const { ivaTaxes, tributeTaxes } = classifySaleTaxes(context.sale);
 
   const tributeAmount = truncateMoney(
@@ -1173,8 +1185,11 @@ export function buildArcaVoucherRequestFromSale(
     ImpOpEx: 0,
     ImpIVA: ivaAmount,
     ImpTrib: tributeAmount,
-    MonId: "PES",
-    MonCotiz: 1,
+    MonId: fiscalCurrency.code,
+    ...(fiscalCurrency.rate ? { MonCotiz: fiscalCurrency.rate } : {}),
+    ...(fiscalCurrency.sameCurrencySettlement
+      ? { CanMisMonExt: "S" as const }
+      : {}),
     PtoVta: context.resolvedCredentials.pointOfSale,
     CbteTipo: voucherTypeCode,
     ...(ivaTaxes.length > 0
@@ -1198,6 +1213,26 @@ export function buildArcaVoucherRequestFromSale(
         }
       : {}),
   };
+}
+
+function persistFiscalCurrencySnapshot(params: {
+  requestJson: Json;
+  responseJson: Json | null;
+  request: ArcaVoucherRequest;
+}): Json {
+  const rate =
+    params.request.MonCotiz ??
+    findArcaCurrencyRate(params.responseJson) ??
+    null;
+
+  return (toJsonValue({
+    ...(params.requestJson as Record<string, Json>),
+    fiscalCurrency: {
+      code: params.request.MonId,
+      rate,
+      sameCurrencySettlement: params.request.CanMisMonExt === "S",
+    },
+  }) ?? {}) as Json;
 }
 
 async function markSaleInvoicePending(params: {
@@ -1488,6 +1523,12 @@ export async function emitSaleInvoice(params: {
     );
   }
 
+  const authorizedRequestJson = persistFiscalCurrencySnapshot({
+    requestJson: requestJson ?? {},
+    responseJson,
+    request,
+  });
+
   const result = await persistAuthorizedInvoice({
     orgId: context.organizationId,
     saleId: context.sale.id,
@@ -1496,7 +1537,7 @@ export async function emitSaleInvoice(params: {
     voucherTypeCode: request.CbteTipo,
     voucherNumber: authorization.voucherNumber,
     authorization,
-    requestJson: requestJson ?? {},
+    requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
   });
 
