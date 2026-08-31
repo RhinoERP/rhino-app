@@ -11,12 +11,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
-import { getCustomerCreditBalance } from "@/modules/collections/service/collections.service";
+import {
+  type CustomerCreditBreakdown,
+  getCustomerCreditBalance,
+  getCustomerCreditBreakdown,
+} from "@/modules/collections/service/collections.service";
 import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignments/service/assignments.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-notes.service";
@@ -57,12 +62,14 @@ export default async function CustomerDetailsPage({
     organization,
     customerWithStats,
     creditBalance,
+    creditBreakdown,
     orgSettings,
     debitNotes,
   ] = await Promise.all([
     getOrganizationBySlug(orgSlug),
     getCustomerWithStats(orgSlug, customerId),
     getCustomerCreditBalance(orgSlug, customerId),
+    getCustomerCreditBreakdown(orgSlug, customerId),
     getOrgSettings(orgSlug),
     getDebitNotesByCustomerId(orgSlug, customerId),
   ]);
@@ -147,23 +154,13 @@ export default async function CustomerDetailsPage({
             />
           </div>
 
-          {creditBalance > 0 ? (
-            <Card className="border-blue-200 bg-blue-50/40">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div className="space-y-1">
-                  <CardTitle className="text-base text-blue-800">
-                    Crédito a favor
-                  </CardTitle>
-                  <CardDescription className="text-blue-700">
-                    Disponible para aplicar en próximas cobranzas
-                  </CardDescription>
-                </div>
-                <Badge className="bg-blue-100 text-blue-800 text-lg hover:bg-blue-100">
-                  {formatCurrency(creditBalance)}
-                </Badge>
-              </CardHeader>
-            </Card>
-          ) : null}
+          <CustomerCreditCard
+            creditBalance={creditBalance}
+            creditBreakdown={creditBreakdown}
+            supplierDifferentiatedCredits={
+              organization?.supplier_differentiated_credits
+            }
+          />
 
           <CustomerMetricsCards
             productionEnabled={productionEnabled}
@@ -207,5 +204,56 @@ export default async function CustomerDetailsPage({
         </div>
       </div>
     </div>
+  );
+}
+
+function CustomerCreditCard({
+  creditBalance,
+  creditBreakdown,
+  supplierDifferentiatedCredits,
+}: {
+  creditBalance: number;
+  creditBreakdown: CustomerCreditBreakdown;
+  supplierDifferentiatedCredits?: boolean;
+}) {
+  if (creditBalance <= 0) {
+    return null;
+  }
+
+  const showBreakdown =
+    supplierDifferentiatedCredits === true &&
+    creditBreakdown.bySupplier.length > 1;
+
+  return (
+    <Card className="border-blue-200 bg-blue-50/40">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div className="space-y-1">
+          <CardTitle className="text-base text-blue-800">
+            Crédito a favor
+          </CardTitle>
+          <CardDescription className="text-blue-700">
+            Disponible para aplicar en próximas cobranzas
+          </CardDescription>
+        </div>
+        <Badge className="bg-blue-100 text-blue-800 text-lg hover:bg-blue-100">
+          {formatCurrency(creditBalance)}
+        </Badge>
+      </CardHeader>
+      {showBreakdown && (
+        <CardContent className="space-y-1.5 pt-0 pb-4">
+          {creditBreakdown.bySupplier.map((entry) => (
+            <div
+              className="flex items-center justify-between text-sm"
+              key={entry.supplierId ?? "null"}
+            >
+              <span className="text-blue-700">{entry.supplierName}</span>
+              <span className="font-medium text-blue-800 tabular-nums">
+                {formatCurrency(entry.amount)}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      )}
+    </Card>
   );
 }
