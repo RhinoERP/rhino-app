@@ -3,12 +3,13 @@ import { formatCurrency, formatDateOnly } from "@/lib/format";
 
 export type PurchaseOrderPDFItem = {
   productName: string;
-  productSku: string | null;
   unitOfMeasure: string | null;
   quantity: number;
   unitQuantity: number | null;
   unitCost: number;
   subtotal: number;
+  variantStocks: Record<string, Record<string, number>> | null;
+  itemTaxes: Array<{ name: string; rate: number; taxAmount: number }>;
 };
 
 export type PurchaseOrderPDFData = {
@@ -59,13 +60,13 @@ export type PurchaseOrderPDFSource = {
   total_amount: number;
   items: Array<{
     product_name?: string;
-    product_sku?: string | null;
     unit_of_measure?: string | null;
     weight_per_unit?: number | null;
     quantity: number;
     unit_quantity: number | null;
     unit_cost: number;
     subtotal: number;
+    variant_stocks?: Record<string, Record<string, number>> | null;
   }>;
   taxes: Array<{ name: string; rate: number; tax_amount: number }> | null;
 };
@@ -83,12 +84,21 @@ export type PurchaseOrderPDFSupplierSource = {
 export type BuildPurchaseOrderPDFDataInput = {
   purchaseOrder: PurchaseOrderPDFSource;
   supplier: PurchaseOrderPDFSupplierSource;
-  organization: { id: string; name: string; cuit?: string | null };
+  organization: {
+    id: string;
+    name: string;
+    cuit?: string | null;
+    logo_url?: string | null;
+  };
   branding?: {
     issuerBusinessName?: string | null;
     issuerLegalAddress?: string | null;
     issuerLogoUrl?: string | null;
   } | null;
+  itemTaxesByLine?: Map<
+    string,
+    Array<{ name: string; rate: number; taxAmount: number }>
+  >;
 };
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -119,14 +129,18 @@ const formatQuantityValue = (value: number): string =>
 
 const WEIGHT_OR_VOLUME_UNITS = ["KG", "LT", "MT"];
 
-const SINGLE_PAGE_ITEM_LIMIT = 11;
-const FIRST_PAGE_ITEM_LIMIT = 16;
-const CONTINUATION_PAGE_ITEM_LIMIT = 22;
+const SINGLE_PAGE_ITEM_LIMIT = 9;
+const FIRST_PAGE_ITEM_LIMIT = 13;
+const CONTINUATION_PAGE_ITEM_LIMIT = 18;
 
 function buildPurchaseOrderItems(
-  purchaseOrder: PurchaseOrderPDFSource
+  purchaseOrder: PurchaseOrderPDFSource,
+  itemTaxesByLine?: Map<
+    string,
+    Array<{ name: string; rate: number; taxAmount: number }>
+  >
 ): PurchaseOrderPDFItem[] {
-  return (purchaseOrder.items ?? []).map((item) => {
+  return (purchaseOrder.items ?? []).map((item, index) => {
     const unitOfMeasure = item.unit_of_measure ?? null;
     const isWeightOrVolume =
       unitOfMeasure != null &&
@@ -138,14 +152,18 @@ function buildPurchaseOrderItems(
         ? item.quantity * item.weight_per_unit
         : null);
 
+    const lineId = String(index);
+    const itemTaxes = itemTaxesByLine?.get(lineId) ?? [];
+
     return {
       productName: item.product_name ?? "—",
-      productSku: item.product_sku ?? null,
       unitOfMeasure: unitOfMeasure ?? null,
       quantity: item.quantity ?? 0,
       unitQuantity,
       unitCost: item.unit_cost ?? 0,
       subtotal: item.subtotal ?? 0,
+      variantStocks: item.variant_stocks ?? null,
+      itemTaxes,
     };
   });
 }
@@ -161,7 +179,7 @@ function buildIssuer(
     businessName,
     cuit: organization.cuit ?? null,
     legalAddress: branding?.issuerLegalAddress ?? null,
-    logoUrl: branding?.issuerLogoUrl ?? null,
+    logoUrl: organization.logo_url ?? branding?.issuerLogoUrl ?? null,
   };
 }
 
@@ -182,7 +200,8 @@ function buildSupplier(
 export function buildPurchaseOrderPDFData(
   input: BuildPurchaseOrderPDFDataInput
 ): PurchaseOrderPDFData {
-  const { purchaseOrder, supplier, organization, branding } = input;
+  const { purchaseOrder, supplier, organization, branding, itemTaxesByLine } =
+    input;
   const businessName =
     branding?.issuerBusinessName?.trim() || organization.name || "Empresa";
   const purchaseNumber = purchaseOrder.purchase_number
@@ -206,7 +225,7 @@ export function buildPurchaseOrderPDFData(
     total: truncateMoney(purchaseOrder.total_amount ?? 0),
     issuer: buildIssuer(input, businessName),
     supplier: buildSupplier(supplier),
-    items: buildPurchaseOrderItems(purchaseOrder),
+    items: buildPurchaseOrderItems(purchaseOrder, itemTaxesByLine),
     taxes: (purchaseOrder.taxes ?? []).map((tax) => ({
       name: tax.name,
       rate: tax.rate,
@@ -263,8 +282,7 @@ function buildHeaderHtml(data: PurchaseOrderPDFData): string {
         ${
           data.issuer.logoUrl
             ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="issuer-logo" />`
-            : ""
-        }
+            : `
         <div>
           <div class="company-name">${displayValue(data.issuer.businessName)}</div>
           <div class="company-detail">${displayValue(data.issuer.organizationName)}</div>
@@ -274,7 +292,8 @@ function buildHeaderHtml(data: PurchaseOrderPDFData): string {
               ? `<div class="company-detail">${escapeHtml(data.issuer.legalAddress)}</div>`
               : ""
           }
-        </div>
+        </div>`
+        }
       </div>
       <div class="header-right">
         <div class="doctype-label">Orden de compra</div>
@@ -340,17 +359,57 @@ function buildContinuationHeader(
   `;
 }
 
+function renderVariantBreakdownText(
+  variantStocks: Record<string, Record<string, number>>
+): string {
+  const parts: string[] = [];
+
+  for (const [attribute, values] of Object.entries(variantStocks)) {
+    const detailParts = Object.entries(values)
+      .filter(([, qty]) => qty > 0)
+      .map(([variantName, qty]) => `${variantName}: ${qty}`);
+
+    if (detailParts.length > 0) {
+      parts.push(
+        `${escapeHtml(attribute)} ${detailParts.map(escapeHtml).join(", ")}`
+      );
+    }
+  }
+
+  return parts.length > 0
+    ? `<div class="variant-detail">${parts.join(" — ")}</div>`
+    : "";
+}
+
+function renderItemTaxes(
+  itemTaxes: Array<{ name: string; rate: number; taxAmount: number }>
+): string {
+  if (itemTaxes.length === 0) {
+    return "";
+  }
+
+  const parts = itemTaxes.map(
+    (tax) =>
+      `${escapeHtml(tax.name)}${tax.rate ? ` ${tax.rate.toFixed(2)}%` : ""}: ${formatCompactCurrency(tax.taxAmount)}`
+  );
+
+  return `<div class="item-tax-detail">${parts.join(" / ")}</div>`;
+}
+
 function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
   const rows = items
     .map((item) => {
       const quantity = item.unitQuantity ?? item.quantity;
       const unitLabel =
         item.unitOfMeasure && item.unitQuantity ? ` ${item.unitOfMeasure}` : "";
+      const variantHtml = item.variantStocks
+        ? renderVariantBreakdownText(item.variantStocks)
+        : "";
+      const itemTaxesHtml = renderItemTaxes(item.itemTaxes);
 
       return `
     <tr>
-      <td class="c-code">${displayValue(item.productSku)}</td>
-      <td class="c-desc">${displayValue(item.productName)}</td>
+      <td class="c-desc">${displayValue(item.productName)}${variantHtml}${itemTaxesHtml}</td>
       <td class="c-qty">${formatQuantityValue(quantity)}${escapeHtml(unitLabel)}</td>
       <td class="c-right c-price">${formatCompactCurrency(item.unitCost)}</td>
       <td class="c-right c-bold c-amount">${formatCompactCurrency(item.subtotal)}</td>
@@ -363,7 +422,6 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
       <table>
         <thead>
           <tr>
-            <th class="c-code">Código</th>
             <th>Detalle</th>
             <th class="c-qty">Cantidad</th>
             <th class="c-price">Precio U.</th>
@@ -508,7 +566,7 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
   .header-left { display:flex; align-items:center; gap:8px; flex:1; min-width:0; }
   .company-name { font-size:18px; font-weight:700; line-height:1.1; }
   .company-detail { font-size:8px; color:var(--muted); }
-  .issuer-logo { max-width: 60px; max-height: 40px; object-fit: contain; flex-shrink: 0; }
+  .issuer-logo { max-width: 86px; max-height: 76px; object-fit: contain; flex-shrink: 0; }
   .header-right { text-align:right; flex-shrink:0; }
   .doctype-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--blue); margin-bottom:1px; }
   .doctype-number { font-size:14px; font-weight:700; line-height:1.1; margin-bottom:2px; }
@@ -587,7 +645,6 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
     word-break: break-word;
   }
   td:last-child { border-right: none; }
-  .c-code { width: 50px; }
   .c-qty { width: 60px; text-align: center; }
   .c-desc { text-align: left; }
   .c-price { width: 75px; text-align: right; }
@@ -595,6 +652,16 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
   .c-right { text-align: right; }
   .c-center { text-align: center; }
   .c-bold { font-weight: 700; }
+  .variant-detail {
+    font-size: 7px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .item-tax-detail {
+    font-size: 7px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
 
   /* TOTALS */
   .breakdown {
