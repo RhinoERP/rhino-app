@@ -20,8 +20,11 @@ import {
   sanitizeArcaErrorMessage,
 } from "../errors";
 import {
+  type ArcaCurrencyQuoteClient,
+  type AuthorizedArcaFiscalCurrency,
+  buildArcaCurrencyRequestFields,
   buildInvoiceFiscalCurrency,
-  findArcaCurrencyRate,
+  resolveArcaFiscalCurrency,
 } from "../fiscal-currency";
 import { buildArcaReceiverDocument } from "../receiver-document";
 import { mapCustomerTaxConditionToArcaReceiverVatConditionId } from "../receiver-tax-conditions";
@@ -218,7 +221,7 @@ type ArcaVoucherRequest = {
   ImpIVA: number;
   ImpTrib: number;
   MonId: string;
-  MonCotiz?: number;
+  MonCotiz: number;
   CanMisMonExt?: "S";
   PtoVta: number;
   CbteTipo: number;
@@ -1123,7 +1126,8 @@ function mapArcaEmissionErrorMessage(params: {
 }
 
 export function buildArcaVoucherRequestFromSale(
-  context: ValidatedSaleContext
+  context: ValidatedSaleContext,
+  fiscalCurrency: AuthorizedArcaFiscalCurrency
 ): ArcaVoucherRequest {
   const receiverDocument = buildArcaReceiverDocument({
     customerCuit: context.sale.customer.cuit,
@@ -1138,7 +1142,6 @@ export function buildArcaVoucherRequestFromSale(
   const voucherTypeCode = mapInvoiceTypeToArcaVoucherType(
     context.effectiveInvoiceType
   );
-  const fiscalCurrency = buildInvoiceFiscalCurrency(context.sale.currency);
   const { ivaTaxes, tributeTaxes } = classifySaleTaxes(context.sale);
 
   const tributeAmount = truncateMoney(
@@ -1185,11 +1188,7 @@ export function buildArcaVoucherRequestFromSale(
     ImpOpEx: 0,
     ImpIVA: ivaAmount,
     ImpTrib: tributeAmount,
-    MonId: fiscalCurrency.code,
-    ...(fiscalCurrency.rate ? { MonCotiz: fiscalCurrency.rate } : {}),
-    ...(fiscalCurrency.sameCurrencySettlement
-      ? { CanMisMonExt: "S" as const }
-      : {}),
+    ...buildArcaCurrencyRequestFields(fiscalCurrency),
     PtoVta: context.resolvedCredentials.pointOfSale,
     CbteTipo: voucherTypeCode,
     ...(ivaTaxes.length > 0
@@ -1217,19 +1216,13 @@ export function buildArcaVoucherRequestFromSale(
 
 function persistFiscalCurrencySnapshot(params: {
   requestJson: Json;
-  responseJson: Json | null;
   request: ArcaVoucherRequest;
 }): Json {
-  const rate =
-    params.request.MonCotiz ??
-    findArcaCurrencyRate(params.responseJson) ??
-    null;
-
   return (toJsonValue({
     ...(params.requestJson as Record<string, Json>),
     fiscalCurrency: {
       code: params.request.MonId,
-      rate,
+      rate: params.request.MonCotiz,
       sameCurrencySettlement: params.request.CanMisMonExt === "S",
     },
   }) ?? {}) as Json;
@@ -1410,7 +1403,17 @@ export async function emitSaleInvoice(params: {
     throw new ArcaValidationError("No se pudo preparar la emisión ARCA.");
   }
 
-  const request = buildArcaVoucherRequestFromSale(context);
+  const client = createArcaClientFromCredentials({
+    cuit: context.organizationCuit,
+    cert: context.resolvedCredentials.cert,
+    key: context.resolvedCredentials.key,
+    environment: context.resolvedCredentials.environment,
+  });
+  const fiscalCurrency = await resolveArcaFiscalCurrency(
+    client as unknown as ArcaCurrencyQuoteClient,
+    buildInvoiceFiscalCurrency(context.sale.currency)
+  );
+  const request = buildArcaVoucherRequestFromSale(context, fiscalCurrency);
   const requestJson = toJsonValue({
     saleId: context.sale.id,
     invoiceType: context.effectiveInvoiceType,
@@ -1450,13 +1453,6 @@ export async function emitSaleInvoice(params: {
   let responseJson: Json | null = null;
 
   try {
-    const client = createArcaClientFromCredentials({
-      cuit: context.organizationCuit,
-      cert: context.resolvedCredentials.cert,
-      key: context.resolvedCredentials.key,
-      environment: context.resolvedCredentials.environment,
-    });
-
     const rawAuthorization =
       await client.ElectronicBilling.createNextVoucher(request);
     authorization = {
@@ -1525,7 +1521,6 @@ export async function emitSaleInvoice(params: {
 
   const authorizedRequestJson = persistFiscalCurrencySnapshot({
     requestJson: requestJson ?? {},
-    responseJson,
     request,
   });
 

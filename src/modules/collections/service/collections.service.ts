@@ -1741,6 +1741,7 @@ async function saveCreditBalance(options: {
     customer_id: customerId,
     amount: truncateMoney(creditBalance),
     remaining_amount: truncateMoney(creditBalance),
+    currency: "ARS",
     source_payment_id: null,
     notes: creditNotes,
     supplier_id: supplierId ?? null,

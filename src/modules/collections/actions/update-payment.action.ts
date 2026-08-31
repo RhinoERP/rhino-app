@@ -206,7 +206,7 @@ const insertReceivableCredit = async ({
     notes: notes
       ? `Saldo a favor por sobrepago (edición) — ${notes}`
       : "Saldo a favor por sobrepago (edición)",
-  } as never);
+  });
 };
 
 const insertPayableCredit = async ({

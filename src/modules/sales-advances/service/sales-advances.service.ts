@@ -1520,7 +1520,7 @@ export async function settleSalesAdvance(
     const { data: finalSale } = await supabase
       .from("sales_orders")
       .select(
-        "id, customer_id, sale_date, total_amount, arca_status, invoice_type"
+        "id, customer_id, sale_date, total_amount, currency, arca_status, invoice_type"
       )
       .eq("id", advance.final_sales_order_id)
       .eq("organization_id", org.id)
@@ -1630,6 +1630,7 @@ export async function settleSalesAdvance(
           customer_id: finalSale.customer_id,
           amount: money(advance.amount),
           remaining_amount: money(advance.amount),
+          currency: finalSale.currency === "USD" ? "USD" : "ARS",
           credit_note_id: advance.credit_note_id,
           notes: `Saldo a favor por liquidación de anticipo ${advance.id}`,
         })

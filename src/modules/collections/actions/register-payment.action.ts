@@ -303,7 +303,7 @@ const applyCustomerCredits = async ({
     .select("id, remaining_amount")
     .eq("organization_id", orgId)
     .eq("customer_id", customerId)
-    .eq("currency" as never, currency)
+    .eq("currency", currency)
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
 
@@ -412,7 +412,7 @@ const createCustomerOverpaymentCredit = async (params: {
     notes: params.notes
       ? `Saldo a favor por sobrepago — ${params.notes}`
       : "Saldo a favor por sobrepago",
-  } as never);
+  });
 };
 
 async function syncSalesAdvanceAfterReceivablePayment(params: {

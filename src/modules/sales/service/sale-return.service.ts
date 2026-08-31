@@ -14,6 +14,7 @@ import {
   deriveSaleCreditSupplier,
   formatSaleMovementReason,
   getSalesAccessContext,
+  resolveSaleCurrency,
   type SalesOrderDetail,
 } from "./sales.service";
 
@@ -518,7 +519,7 @@ async function updateReceivableForReturn(params: {
 
   const { data: receivable } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance, status")
+    .select("id, total_amount, pending_balance, status, currency")
     .eq("sales_order_id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -568,6 +569,7 @@ async function updateReceivableForReturn(params: {
         supplier_id: creditSupplierId,
         amount: overpaid,
         remaining_amount: overpaid,
+        currency: receivable.currency === "USD" ? "USD" : "ARS",
         source_payment_id: null,
         notes: `Saldo a favor generado por devolución de venta ${saleId}`,
       })
@@ -1091,6 +1093,7 @@ async function createCreditForReturn(params: {
     creditNoteId,
   } = params;
   const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+  const currency = await resolveSaleCurrency(supabase, saleId);
 
   const { data: credit, error: creditError } = await supabase
     .from("customer_credits")
@@ -1100,6 +1103,7 @@ async function createCreditForReturn(params: {
       supplier_id: creditSupplierId,
       amount,
       remaining_amount: amount,
+      currency,
       credit_note_id: creditNoteId ?? null,
       sales_return_id: returnId,
       notes: `Saldo a favor por devolución ${returnId}`,

@@ -1055,6 +1055,7 @@ async function createCustomerCreditRecord(params: {
       customer_id: params.customerId,
       amount: creditAmount,
       remaining_amount: creditAmount,
+      currency: "ARS",
       source_payment_id: null,
       notes: params.notes,
     })

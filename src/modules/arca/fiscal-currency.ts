@@ -6,6 +6,19 @@ export type ArcaFiscalCurrency = {
   sameCurrencySettlement: boolean;
 };
 
+export type AuthorizedArcaFiscalCurrency = Omit<ArcaFiscalCurrency, "rate"> & {
+  rate: number;
+};
+
+export type ArcaCurrencyQuoteClient = {
+  ElectronicBilling?: {
+    executeRequest?: (
+      operation: string,
+      params: Record<string, unknown>
+    ) => Promise<unknown>;
+  };
+};
+
 type JsonRecord = Record<string, unknown>;
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -33,6 +46,64 @@ export function buildInvoiceFiscalCurrency(
   return saleCurrency === "USD"
     ? { code: "DOL", rate: null, sameCurrencySettlement: true }
     : { code: "PES", rate: 1, sameCurrencySettlement: false };
+}
+
+/**
+ * Resolves the official ARCA quote required when an invoice is settled in USD.
+ * The SDK exposes the generic WSFE executor at runtime but does not declare it
+ * in its TypeScript surface, so the narrow adapter lives here.
+ */
+export async function resolveArcaFiscalCurrency(
+  client: ArcaCurrencyQuoteClient,
+  currency: ArcaFiscalCurrency
+): Promise<AuthorizedArcaFiscalCurrency> {
+  if (currency.rate) {
+    return { ...currency, rate: currency.rate };
+  }
+
+  const executeRequest = client.ElectronicBilling?.executeRequest;
+  if (!executeRequest) {
+    throw new ArcaValidationError(
+      "El cliente ARCA no permite consultar la cotización fiscal requerida para emitir en USD."
+    );
+  }
+
+  let response: unknown;
+  try {
+    response = await executeRequest.call(
+      client.ElectronicBilling,
+      "FEParamGetCotizacion",
+      { MonId: currency.code }
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ArcaValidationError(
+      `No se pudo obtener la cotización fiscal ARCA para USD: ${message}`
+    );
+  }
+
+  const rate = findArcaCurrencyRate(response);
+  if (!rate) {
+    throw new ArcaValidationError(
+      "ARCA no devolvió una cotización fiscal válida para USD."
+    );
+  }
+
+  return { ...currency, rate };
+}
+
+export function buildArcaCurrencyRequestFields(
+  currency: AuthorizedArcaFiscalCurrency
+): {
+  MonId: "PES" | "DOL";
+  MonCotiz: number;
+  CanMisMonExt?: "S";
+} {
+  return {
+    MonId: currency.code,
+    MonCotiz: currency.rate,
+    ...(currency.sameCurrencySettlement ? { CanMisMonExt: "S" as const } : {}),
+  };
 }
 
 /** Reads the immutable fiscal snapshot persisted when the source invoice was authorized. */

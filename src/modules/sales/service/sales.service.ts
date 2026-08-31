@@ -4261,6 +4261,19 @@ export async function deriveSaleCreditSupplier(
   return supplierIds.size === 1 ? [...supplierIds][0] : null;
 }
 
+export async function resolveSaleCurrency(
+  supabase: SupabaseServerClient,
+  saleId: string
+): Promise<string> {
+  const { data } = await supabase
+    .from("sales_orders")
+    .select("currency")
+    .eq("id", saleId)
+    .maybeSingle();
+
+  return data?.currency === "USD" ? "USD" : "ARS";
+}
+
 export async function deriveSupplierNameFromSale(
   supabase: SupabaseServerClient,
   saleId: string
@@ -4298,7 +4311,7 @@ async function cancelSaleReceivable(params: {
 
   const { data: receivable } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance")
+    .select("id, total_amount, pending_balance, currency")
     .eq("sales_order_id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -4340,6 +4353,7 @@ async function cancelSaleReceivable(params: {
       supplier_id: creditSupplierId,
       amount: creditAmount,
       remaining_amount: creditAmount,
+      currency: receivable.currency === "USD" ? "USD" : "ARS",
       source_payment_id: null,
       notes: `Saldo a favor generado por cancelación de venta ${saleId}`,
     });
@@ -5521,6 +5535,7 @@ async function createCustomerCreditFromSaleOverpayment(params: {
   saleId: string;
   customerId: string;
   amount: number;
+  currency: string;
 }): Promise<void> {
   const creditAmount = truncateMoney(Math.max(0, params.amount));
   if (creditAmount <= 0) {
@@ -5541,6 +5556,7 @@ async function createCustomerCreditFromSaleOverpayment(params: {
     supplier_id: creditSupplierId,
     amount: creditAmount,
     remaining_amount: creditAmount,
+    currency: params.currency === "USD" ? "USD" : "ARS",
     source_payment_id: null,
     notes: `Saldo a favor generado por devolución/edición de venta ${params.saleId}`,
   });
@@ -5627,6 +5643,7 @@ async function updateExistingReceivable(params: {
       saleId: params.saleId,
       customerId: params.context.customerId,
       amount: overpaidAmount,
+      currency: params.context.currency,
     });
   }
 }
