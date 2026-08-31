@@ -149,7 +149,7 @@ export async function getRouteSheetPageData(
     .select(SALES_SELECT)
     .eq("organization_id", org.id)
     .is("route_sheet_id", null)
-    .in("status", ["CONFIRMED", "DISPATCH"]);
+    .eq("status", "CONFIRMED");
 
   if (accessContext.scope === "own" && accessContext.userId) {
     salesQuery = salesQuery.eq("user_id", accessContext.userId);
