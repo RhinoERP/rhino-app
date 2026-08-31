@@ -2614,6 +2614,7 @@ export function SaleDetail({
         <SalesAdvanceCard
           canIssueBalance={isConfirmedSale}
           canManage={canManageSale}
+          currency={sale.currency}
           orgSlug={orgSlug}
           saleId={sale.id}
           total={sale.total_amount}

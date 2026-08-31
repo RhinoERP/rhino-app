@@ -52,6 +52,7 @@ export default async function SalesAdvancePage({
         saleNumber: sale.sale_number ?? null,
         invoiceNumber: sale.invoice_number ?? null,
         totalAmount: sale.total_amount,
+        currency: sale.currency ?? "ARS",
         customerName: sale.customer.fantasy_name ?? sale.customer.business_name,
       }}
     />

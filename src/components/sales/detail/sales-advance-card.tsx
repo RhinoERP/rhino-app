@@ -38,6 +38,7 @@ export function SalesAdvanceCard(props: {
   orgSlug: string;
   saleId: string;
   total: number;
+  currency?: string;
   canManage: boolean;
   canIssueBalance?: boolean;
 }) {
@@ -58,6 +59,7 @@ export function SalesAdvanceCard(props: {
   const numericPercentage = Number(percentage);
   const advances = summary?.advances ?? [];
   const latestAdvance = advances[0] ?? null;
+  const displayCurrency = props.currency ?? latestAdvance?.currency ?? "ARS";
   const remaining = summary?.remainingAmount ?? props.total;
   let statusLabel = "No configurado";
   if (latestAdvance) {
@@ -135,13 +137,16 @@ export function SalesAdvanceCard(props: {
               <div>
                 <p className="text-muted-foreground">Anticipado</p>
                 <p className="font-medium">
-                  {formatCurrency(summary?.committedAmount ?? 0)}
+                  {formatCurrency(
+                    summary?.committedAmount ?? 0,
+                    displayCurrency
+                  )}
                 </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Último anticipo</p>
                 <p className="font-medium">
-                  {formatCurrency(latestAdvance.amount)} ·{" "}
+                  {formatCurrency(latestAdvance.amount, displayCurrency)} ·{" "}
                   {formatSalesAdvancePercentage(
                     latestAdvance.percentageSnapshot
                   )}
@@ -149,7 +154,9 @@ export function SalesAdvanceCard(props: {
               </div>
               <div>
                 <p className="text-muted-foreground">Saldo estimado</p>
-                <p className="font-medium">{formatCurrency(remaining)}</p>
+                <p className="font-medium">
+                  {formatCurrency(remaining, displayCurrency)}
+                </p>
               </div>
             </div>
             {advances.length > 1 ? (
@@ -163,7 +170,7 @@ export function SalesAdvanceCard(props: {
                       {salesAdvanceStatusLabels[advance.status]}
                     </Link>
                     <span className="font-medium">
-                      {formatCurrency(advance.amount)}
+                      {formatCurrency(advance.amount, displayCurrency)}
                     </span>
                   </div>
                 ))}
@@ -288,16 +295,18 @@ export function SalesAdvanceCard(props: {
           {suggestion?.amount ? (
             <p className="text-muted-foreground text-xs">
               Sugerido por presupuesto: {suggestion.percentage}% ·{" "}
-              {formatCurrency(suggestion.amount)}
+              {formatCurrency(suggestion.amount, displayCurrency)}
             </p>
           ) : null}
           <p className="text-muted-foreground text-sm">
-            Total: {formatCurrency(props.total)} · Saldo estimado:{" "}
+            Total: {formatCurrency(props.total, displayCurrency)} · Saldo
+            estimado:{" "}
             {formatCurrency(
               Math.max(
                 0,
                 remaining - (Number.isFinite(numericAmount) ? numericAmount : 0)
-              )
+              ),
+              displayCurrency
             )}
           </p>
           <DialogFooter>

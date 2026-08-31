@@ -29,6 +29,7 @@ type SalesAdvanceWorkspaceProps = {
     saleNumber: number | null;
     invoiceNumber: string | null;
     totalAmount: number;
+    currency?: string;
     customerName: string | null;
   };
   advanceId: string;
@@ -57,6 +58,7 @@ export function SalesAdvanceWorkspace({
   const { data, refetch } = useSalesAdvanceById(orgSlug, advanceId);
   const advance = data ?? initialAdvance;
   const [pending, setPending] = useState(false);
+  const displayCurrency = advance.currency ?? sale.currency ?? "ARS";
   const finalBalance = Math.max(0, sale.totalAmount - advance.amount);
   const canRetryIssuance =
     advance.status === "DRAFT" ||
@@ -126,13 +128,17 @@ export function SalesAdvanceWorkspace({
           <div className="grid gap-4 sm:grid-cols-4">
             <div>
               <p className="text-muted-foreground text-sm">Total de venta</p>
-              <p className="font-medium">{formatCurrency(sale.totalAmount)}</p>
+              <p className="font-medium">
+                {formatCurrency(sale.totalAmount, displayCurrency)}
+              </p>
             </div>
             <div>
               <p className="text-muted-foreground text-sm">
                 Importe anticipado
               </p>
-              <p className="font-medium">{formatCurrency(advance.amount)}</p>
+              <p className="font-medium">
+                {formatCurrency(advance.amount, displayCurrency)}
+              </p>
             </div>
             <div>
               <p className="text-muted-foreground text-sm">Porcentaje</p>
@@ -144,16 +150,23 @@ export function SalesAdvanceWorkspace({
               <p className="text-muted-foreground text-sm">
                 Saldo final estimado
               </p>
-              <p className="font-medium">{formatCurrency(finalBalance)}</p>
+              <p className="font-medium">
+                {formatCurrency(finalBalance, displayCurrency)}
+              </p>
             </div>
           </div>
 
           {advance.fiscalSnapshot ? (
             <p className="text-muted-foreground text-sm">
               {advance.fiscalSnapshot.description}: neto{" "}
-              {formatCurrency(advance.fiscalSnapshot.netAmount)} · impuestos{" "}
               {formatCurrency(
-                advance.amount - advance.fiscalSnapshot.netAmount
+                advance.fiscalSnapshot.netAmount,
+                displayCurrency
+              )}{" "}
+              · impuestos{" "}
+              {formatCurrency(
+                advance.amount - advance.fiscalSnapshot.netAmount,
+                displayCurrency
               )}
             </p>
           ) : null}
