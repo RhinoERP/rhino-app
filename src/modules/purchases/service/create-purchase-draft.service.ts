@@ -48,7 +48,7 @@ function groupQuoteItemsByProduct(
       grouped.set(item.product_id, group);
     }
 
-    const qty = Math.max(1, item.quantity);
+    const qty = Math.max(0, item.quantity);
     group.totalQty += qty;
 
     if (!item.product_variant_id) {

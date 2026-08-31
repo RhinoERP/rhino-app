@@ -891,8 +891,10 @@ export function PurchaseDetailItems({
                         {isEditingDetails ? (
                           <Input
                             className="h-8 w-full"
-                            inputMode="decimal"
-                            min={0}
+                            inputMode={
+                              itemIsWeightOrVolume ? "decimal" : "numeric"
+                            }
+                            min={itemIsWeightOrVolume ? 0.01 : 1}
                             onChange={(event) => {
                               const value = Number.parseFloat(
                                 event.target.value
@@ -906,8 +908,8 @@ export function PurchaseDetailItems({
                                 handleQuantityChange(item.id, "0");
                               }
                             }}
-                            placeholder="0"
-                            step="0.01"
+                            placeholder={itemIsWeightOrVolume ? "0" : "1"}
+                            step={itemIsWeightOrVolume ? "0.01" : "1"}
                             type="number"
                             value={
                               !item.quantity || Number.isNaN(item.quantity)

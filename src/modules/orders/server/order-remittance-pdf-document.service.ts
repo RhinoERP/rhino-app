@@ -31,6 +31,11 @@ type QuoteItemWithProduct = {
   unit_price: number;
   subtotal: number;
   discount_percentage: number | null;
+  product_variant_id: string | null;
+  product_variants: {
+    talle: string | null;
+    color: string | null;
+  } | null;
   quote_item_extras: Array<{
     description: string;
     price: number;
@@ -68,6 +73,8 @@ async function fetchOrderItems(
       subtotal,
       discount_percentage,
       product_id,
+      product_variant_id,
+      product_variants!left(talle, color),
       products!left(name, sku, brand, unit_of_measure),
       quote_item_extras(*)
     `
@@ -90,6 +97,8 @@ async function fetchOrderItems(
         subtotal,
         discount_percentage,
         product_id,
+        product_variant_id,
+        product_variants!left(talle, color),
         products!left(name, sku, brand, unit_of_measure),
         quote_item_extras(*)
       `
@@ -136,6 +145,11 @@ async function fetchOrderItems(
       sku: item.products?.sku ?? "",
       name: item.products?.name ?? description ?? "Producto",
       brand: item.products?.brand ?? undefined,
+      variantName: item.product_variants
+        ? [item.product_variants.talle, item.product_variants.color]
+            .filter(Boolean)
+            .join(" · ") || undefined
+        : undefined,
       quantity,
       unitOfMeasure: item.products?.unit_of_measure ?? "UN",
       weightQuantity: saleItem?.unit_quantity ?? undefined,

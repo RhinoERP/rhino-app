@@ -185,16 +185,27 @@ export function ProductSection({
           <Label className="font-medium text-sm" htmlFor="quantity">
             {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
           </Label>
-          <Input
-            id="quantity"
-            min="0.01"
-            onChange={(e) => onQuantityChange(e.target.value)}
-            onKeyDown={onQuantityKeyDown}
-            placeholder="0"
-            step="0.01"
-            type="number"
-            value={quantity}
-          />
+          {(() => {
+            const unitOfMeasure = selectedProduct?.unit_of_measure ?? "";
+            const isWeightOrVolume =
+              unitOfMeasure === "KG" ||
+              unitOfMeasure === "LT" ||
+              unitOfMeasure === "MT";
+
+            return (
+              <Input
+                id="quantity"
+                inputMode={isWeightOrVolume ? "decimal" : "numeric"}
+                min={isWeightOrVolume ? "0.01" : "1"}
+                onChange={(e) => onQuantityChange(e.target.value)}
+                onKeyDown={onQuantityKeyDown}
+                placeholder={isWeightOrVolume ? "0" : "1"}
+                step={isWeightOrVolume ? "0.01" : "1"}
+                type="number"
+                value={quantity}
+              />
+            );
+          })()}
         </div>
       )}
 

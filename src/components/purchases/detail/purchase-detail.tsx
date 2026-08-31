@@ -13,7 +13,6 @@ import type {
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
-import type { Tax } from "@/modules/taxes/types";
 import { PurchaseDetailForm } from "./purchase-detail-form";
 import {
   PurchaseDetailHeader,
@@ -38,32 +37,11 @@ type PurchaseOrderWithItems = PurchaseOrder & {
   }> | null;
 };
 
-const toAvailableTax = (params: {
-  id: string;
-  name: string;
-  rate: number;
-  code?: string | null;
-}): Tax => ({
-  id: params.id,
-  name: params.name,
-  rate: params.rate,
-  code: params.code ?? null,
-  description: null,
-  created_at: null,
-  updated_at: null,
-  is_favorite: false,
-  is_favorite_sales: false,
-  is_favorite_direct_sales: false,
-  is_active: true,
-  organization_id: null,
-});
-
 type PurchaseDetailProps = {
   orgSlug: string;
   purchaseOrder: PurchaseOrderWithItems;
   relatedOrder?: { id: string; order_number: string } | null;
   suppliers: Supplier[];
-  taxes: Tax[];
   products: ProductWithPrice[];
   categories?: Category[];
 };
@@ -120,7 +98,6 @@ export function PurchaseDetail({
   purchaseOrder,
   relatedOrder,
   suppliers,
-  taxes,
   products,
   categories = [],
 }: PurchaseDetailProps) {
@@ -130,7 +107,6 @@ export function PurchaseDetail({
 
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [isSupplierPickerOpen, setIsSupplierPickerOpen] = useState(false);
-  const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
   const [supplierId, setSupplierId] = useState<string>(
     purchaseOrder.supplier_id ?? ""
   );
@@ -158,9 +134,6 @@ export function PurchaseDetail({
 
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
     purchaseOrder.remittance_number ?? ""
-  );
-  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>(
-    () => purchaseOrder.taxes?.map((tax) => tax.tax_id) ?? []
   );
   const [globalDiscountPercentage, setGlobalDiscountPercentage] =
     useState<number>(purchaseOrder.global_discount_percentage ?? 0);
@@ -192,42 +165,6 @@ export function PurchaseDetail({
     return null;
   }, [expirationDays, purchaseDate]);
 
-  const availableTaxes = useMemo(() => {
-    const byId = new Map<string, Tax>();
-
-    for (const tax of taxes) {
-      byId.set(tax.id, tax);
-    }
-
-    for (const applied of purchaseOrder.taxes ?? []) {
-      if (applied.tax_id && !byId.has(applied.tax_id)) {
-        byId.set(
-          applied.tax_id,
-          toAvailableTax({
-            id: applied.tax_id,
-            name: applied.name,
-            rate: applied.rate,
-          })
-        );
-      }
-    }
-
-    return Array.from(byId.values());
-  }, [purchaseOrder.taxes, taxes]);
-
-  const selectedTaxes = useMemo(
-    () => availableTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
-    [availableTaxes, selectedTaxIds]
-  );
-
-  const handleToggleTax = (taxId: string) => {
-    setSelectedTaxIds((prev) =>
-      prev.includes(taxId)
-        ? prev.filter((id) => id !== taxId)
-        : [...prev, taxId]
-    );
-  };
-
   const buildSavePayload = () => ({
     orgSlug,
     purchaseOrderId: purchaseOrder.id,
@@ -242,12 +179,8 @@ export function PurchaseDetail({
       unit_quantity: item.unit_quantity,
       unit_cost: item.unit_cost,
       subtotal: item.subtotal,
+      unit_of_measure: item.unit_of_measure,
       variant_stocks: item.variant_stocks ?? null,
-    })),
-    taxes: selectedTaxes.map((tax) => ({
-      tax_id: tax.id,
-      name: tax.name,
-      rate: tax.rate,
     })),
     global_discount_percentage:
       globalDiscountPercentage > 0 ? globalDiscountPercentage : undefined,
@@ -417,21 +350,16 @@ export function PurchaseDetail({
             globalDiscountPercentage={globalDiscountPercentage}
             isEditingDetails={isEditingDetails}
             isSupplierPickerOpen={isSupplierPickerOpen}
-            isTaxesPickerOpen={isTaxesPickerOpen}
             onExpirationDaysChange={setExpirationDays}
             onGlobalDiscountPercentageChange={setGlobalDiscountPercentage}
             onPurchaseDateChange={setPurchaseDate}
             onRemittanceNumberChange={setRemittanceNumber}
             onSupplierChange={setSupplierId}
             onSupplierPickerOpenChange={setIsSupplierPickerOpen}
-            onTaxesPickerOpenChange={setIsTaxesPickerOpen}
-            onTaxToggle={handleToggleTax}
             purchaseDate={purchaseDate}
             remittanceNumber={remittanceNumber}
-            selectedTaxIds={selectedTaxIds}
             supplierId={supplierId}
             suppliers={suppliers}
-            taxes={availableTaxes}
           />
 
           <PurchaseDetailItems
@@ -461,7 +389,7 @@ export function PurchaseDetail({
           items={items}
           onConfirmDraft={handleConfirmDraft}
           onSave={handleSave}
-          selectedTaxes={selectedTaxes}
+          purchaseOrderTaxes={purchaseOrder.taxes}
           supplierId={supplierId}
         />
       </div>
