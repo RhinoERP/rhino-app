@@ -41,12 +41,23 @@ type SalesOrderSale = Pick<
   | "status"
   | "user_id"
   | "dispatched_at"
+  | "sale_date"
+  | "carrier_id"
 > & {
   customer:
-    | { business_name?: string | null; fantasy_name?: string | null }
+    | {
+        business_name?: string | null;
+        fantasy_name?: string | null;
+        city?: string | null;
+        delivery_city?: string | null;
+        province?: string | null;
+      }
     | Array<{
         business_name?: string | null;
         fantasy_name?: string | null;
+        city?: string | null;
+        delivery_city?: string | null;
+        province?: string | null;
       }>
     | null;
 };
@@ -59,13 +70,23 @@ const SALES_SELECT = `
   status,
   user_id,
   dispatched_at,
+  sale_date,
+  carrier_id,
   route_sheet_id,
-  customer:customers(business_name, fantasy_name)
+  customer:customers(business_name, fantasy_name, city, delivery_city, province)
 `;
 
 function normalizeCustomerName(customer: SalesOrderSale["customer"]): string {
   const normalized = Array.isArray(customer) ? customer[0] : customer;
   return normalized?.business_name || normalized?.fantasy_name || "Cliente";
+}
+
+function normalizeCustomerField(
+  customer: SalesOrderSale["customer"],
+  field: "city" | "delivery_city" | "province"
+): string | null {
+  const normalized = Array.isArray(customer) ? customer[0] : customer;
+  return normalized?.[field] || null;
 }
 
 function toRouteSheetSale(sale: SalesOrderSale): RouteSheetSale {
@@ -78,6 +99,14 @@ function toRouteSheetSale(sale: SalesOrderSale): RouteSheetSale {
     status: sale.status as SalesOrderStatus,
     user_id: sale.user_id,
     dispatched_at: sale.dispatched_at,
+    sale_date: sale.sale_date,
+    carrier_id: sale.carrier_id,
+    customer_city: normalizeCustomerField(sale.customer, "city"),
+    customer_delivery_city: normalizeCustomerField(
+      sale.customer,
+      "delivery_city"
+    ),
+    customer_province: normalizeCustomerField(sale.customer, "province"),
   };
 }
 

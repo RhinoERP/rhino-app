@@ -14,6 +14,11 @@ export type RouteSheetSale = {
   status: Database["public"]["Enums"]["order_status"];
   user_id: string | null;
   dispatched_at: string | null;
+  sale_date: string | null;
+  carrier_id: string | null;
+  customer_city: string | null;
+  customer_delivery_city: string | null;
+  customer_province: string | null;
 };
 
 export type RouteSheetWithSales = RouteSheet & {
