@@ -177,3 +177,21 @@ describe("remittance commercial information", () => {
     );
   });
 });
+
+describe("remittance product variants", () => {
+  it("shows the variant as secondary text next to the product name", () => {
+    const data = remittanceWithItems("REMITO_FINAL");
+    data.items[0].variantName = "M · Azul";
+
+    const html = generateRemittanceHTML(data);
+
+    expect(html).toContain(`<span class="variant">M · Azul</span>`);
+  });
+
+  it("omits the variant span when there is no variant", () => {
+    const data = remittanceWithItems("PRESUPUESTO");
+    data.items[0].variantName = undefined;
+
+    expect(generateRemittanceHTML(data)).not.toContain('class="variant"');
+  });
+});

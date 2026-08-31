@@ -182,6 +182,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: ["purchases.read", "purchases.read.all"],
         },
         {
+          title: "Facturas proveedor",
+          url: `/org/${orgSlug}/compras/facturas-proveedor`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: ["purchases.read", "purchases.read.all"],
+        },
+        {
           title: "Proveedores",
           url: `/org/${orgSlug}/proveedores`,
           icon: <HandshakeIcon weight="duotone" />,

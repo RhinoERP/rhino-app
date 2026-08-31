@@ -10,8 +10,15 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { BulkSupplierPaymentDialog } from "@/components/purchases/bulk-supplier-payment-dialog";
 import { Button } from "@/components/ui/button";
@@ -69,6 +76,7 @@ export function PayablesTable({
   pageCount,
 }: PayablesTableProps) {
   const [bulkPaymentDialogOpen, setBulkPaymentDialogOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
   const [search, setSearch] = useQueryState(
     "search",
@@ -80,17 +88,19 @@ export function PayablesTable({
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
 
+  const currentStatus = status || "ALL";
+  const hasActiveFilters = search || status;
+
   const handleStatusChange = (value: string) => {
-    setStatus(value === "ALL" ? null : value);
+    startTransition(() => {
+      setStatus(value === "ALL" ? null : value);
+    });
   };
 
   const handleClearFilters = () => {
     setSearch(null);
     setStatus(null);
   };
-
-  const currentStatus = status || "ALL";
-  const hasActiveFilters = search || status;
 
   const everHadData = useRef(false);
   if (initialData.length > 0) {
@@ -159,7 +169,11 @@ export function PayablesTable({
       >
         <TabsList>
           {Object.entries(STATUS_CONFIG).map(([key, config]) => (
-            <TabsTrigger key={key} value={key}>
+            <TabsTrigger
+              className="cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+              key={key}
+              value={key}
+            >
               <span className={config.color}>{config.icon}</span>
               <span className="ml-1.5">{config.label}</span>
             </TabsTrigger>
@@ -167,47 +181,51 @@ export function PayablesTable({
         </TabsList>
       </Tabs>
 
-      <DataTable table={table}>
-        <DataTableToolbar
-          searchSlot={
-            <>
-              <div className="relative">
-                <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="h-8 w-48 pl-8 lg:w-72"
-                  onChange={(event) => {
-                    setSearch(event.target.value || null);
-                  }}
-                  placeholder="Buscar proveedor..."
-                  value={search}
-                />
-              </div>
-              {hasActiveFilters && (
-                <Button
-                  aria-label="Limpiar filtros"
-                  className="border-dashed"
-                  onClick={handleClearFilters}
-                  size="sm"
-                  variant="outline"
-                >
-                  <XIcon />
-                  Limpiar filtros
-                </Button>
-              )}
-            </>
-          }
-          table={table}
-        >
-          <Button onClick={() => setBulkPaymentDialogOpen(true)}>
-            Pago Masivo
-          </Button>
-          <CollectionsExportButton
-            orgSlug={orgSlug}
+      {isPending ? (
+        <DataTableSkeleton columnCount={7} filterCount={1} rowCount={8} />
+      ) : (
+        <DataTable table={table}>
+          <DataTableToolbar
+            searchSlot={
+              <>
+                <div className="relative">
+                  <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="h-8 w-48 pl-8 lg:w-72"
+                    onChange={(event) => {
+                      setSearch(event.target.value || null);
+                    }}
+                    placeholder="Buscar proveedor..."
+                    value={search}
+                  />
+                </div>
+                {hasActiveFilters && (
+                  <Button
+                    aria-label="Limpiar filtros"
+                    className="border-dashed"
+                    onClick={handleClearFilters}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <XIcon />
+                    Limpiar filtros
+                  </Button>
+                )}
+              </>
+            }
             table={table}
-            variant="payable"
-          />
-        </DataTableToolbar>
-      </DataTable>
+          >
+            <Button onClick={() => setBulkPaymentDialogOpen(true)}>
+              Pago Masivo
+            </Button>
+            <CollectionsExportButton
+              orgSlug={orgSlug}
+              table={table}
+              variant="payable"
+            />
+          </DataTableToolbar>
+        </DataTable>
+      )}
 
       <BulkSupplierPaymentDialog
         onOpenChange={setBulkPaymentDialogOpen}

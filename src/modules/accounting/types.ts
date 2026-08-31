@@ -128,7 +128,7 @@ export interface EventoFacturaVenta extends EventoBase {
 
 export interface EventoFacturaCompra extends EventoBase {
   tipoEvento: "FACTURA_COMPRA";
-  referenciaTabla: "purchase_orders";
+  referenciaTabla: "purchase_orders" | "supplier_invoices";
   datos: {
     montoNeto: string;
     montoImpuestos: string;

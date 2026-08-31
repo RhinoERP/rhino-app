@@ -20,7 +20,6 @@ import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
 import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
-import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
 
 function NewPurchaseContent() {
   const params = useParams();
@@ -31,7 +30,6 @@ function NewPurchaseContent() {
     null
   );
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
-  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
   const [formValues, setFormValues] = useState<Partial<PurchaseFormValues>>({
     purchase_date: new Date(),
   });
@@ -43,7 +41,6 @@ function NewPurchaseContent() {
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
-  const { data: taxes = [] } = useTaxes(orgSlug);
   const { data: categories = [] } = useCategories(orgSlug);
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
@@ -90,7 +87,6 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
-    // Calculate expiration date from purchase date + expiration days
     let expirationDateStr: string | undefined;
     if (
       formValues.expiration_days &&
@@ -103,14 +99,6 @@ function NewPurchaseContent() {
       );
       expirationDateStr = expirationDate.toISOString().split("T")[0];
     }
-
-    const selectedTaxesData = taxes
-      .filter((tax) => selectedTaxIds.includes(tax.id))
-      .map((tax) => ({
-        tax_id: tax.id,
-        name: tax.name,
-        rate: tax.rate,
-      }));
 
     return {
       orgSlug,
@@ -140,10 +128,10 @@ function NewPurchaseContent() {
           unit_quantity: unitQuantity,
           unit_cost: item.unit_cost,
           subtotal: item.subtotal,
+          unit_of_measure: item.unit_of_measure,
           variant_stocks: item.has_variants ? item.variant_stocks : undefined,
         };
       }),
-      taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
       global_discount_percentage:
         globalDiscountPercent > 0 ? globalDiscountPercent : undefined,
     };
@@ -152,8 +140,6 @@ function NewPurchaseContent() {
     selectedSupplierId,
     formValues,
     purchaseItems,
-    taxes,
-    selectedTaxIds,
     globalDiscountPercent,
   ]);
 
@@ -251,11 +237,8 @@ function NewPurchaseContent() {
               <PurchaseForm
                 onFormChange={handleFormChange}
                 onSupplierChange={setSelectedSupplierId}
-                onTaxesChange={setSelectedTaxIds}
                 selectedSupplierId={selectedSupplierId}
-                selectedTaxIds={selectedTaxIds}
                 suppliers={suppliers}
-                taxes={taxes}
               />
             </CardContent>
           </Card>
@@ -284,7 +267,7 @@ function NewPurchaseContent() {
             items={purchaseItems}
             onGlobalDiscountChange={setGlobalDiscountPercent}
             onSubmit={handleSubmit}
-            taxes={taxes.filter((t) => selectedTaxIds.includes(t.id))}
+            orgSlug={orgSlug}
           />
         </div>
       </div>

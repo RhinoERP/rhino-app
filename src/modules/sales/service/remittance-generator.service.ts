@@ -54,6 +54,7 @@ export type RemittanceData = {
     sku: string;
     name: string;
     brand?: string | null;
+    variantName?: string | null;
     quantity: number;
     unitOfMeasure: string;
     weightQuantity?: number | null;
@@ -147,7 +148,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       ${isFinalRemittance ? "" : `<td class="c-center">${displayValue(item.unitOfMeasure)}</td>`}
       ${showWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       ${showSku ? `<td class="c-sku">${displayValue(item.sku)}</td>` : ""}
-      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice)}/u</div>`).join("") : ""}</td>
+      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice)}/u</div>`).join("") : ""}</td>
       ${showUnitPrice ? `<td class="c-right">${formatCurrency(item.unitPrice)}</td>` : ""}
       ${showDiscount ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
       ${showLineTotal ? `<td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>` : ""}
@@ -304,7 +305,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     gap: 16px;
   }
   .header-left { display:flex; align-items:center; gap:8px; }
-  .logo-img { max-width:52px; max-height:46px; object-fit:contain; }
+  .logo-img { max-width:86px; max-height:76px; object-fit:contain; }
   .company-name { font-size:18px; font-weight:700; line-height:1.1; }
   .issuer-details { margin-top:3px; color:var(--muted); font-size:7.5px; }
   .header-right { text-align:right; flex-shrink:0; }
@@ -380,6 +381,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .c-sku    { font-size:7.5px; color:var(--muted); }
   .c-bold   { font-weight:700; }
   .brand    { font-size:7.5px; color:var(--muted); margin-left:2px; }
+  .variant  { font-size:7.5px; color:var(--muted); margin-left:2px; }
   .unit-inline { color:var(--muted); font-size:7.5px; white-space:nowrap; }
   .extra    { font-size:7.5px; color:var(--muted); margin-top:1px; }
 
@@ -448,7 +450,8 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .document-copy--remittance td { border-color:#d8d8d8; padding:7px 6px; font-size:10px; }
   .document-copy--remittance .c-quantity { font-weight:700; }
   .document-copy--remittance .unit-inline,
-  .document-copy--remittance .brand { font-size:8.5px; }
+  .document-copy--remittance .brand,
+  .document-copy--remittance .variant { font-size:8.5px; }
   .document-copy--remittance .disclaimer { color:#555; }
   .document-copy--remittance-expanded .table-wrap { min-height:170mm; }
   .document-copy--remittance-expanded .sig-wrap { margin-top:16px; }
@@ -510,6 +513,7 @@ export function buildRemittanceFromSale(
       sku: item.sku,
       name: item.name,
       brand: item.brand ?? undefined,
+      variantName: item.productVariantName ?? undefined,
       quantity: item.quantity,
       unitOfMeasure:
         unitOfMeasureLabels[item.unitOfMeasure] ?? item.unitOfMeasure,
