@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
-import { resolvePaymentCurrencyFields } from "@/modules/collections/utils/payment-currency";
+import {
+  assertPaymentExchangeRate,
+  resolvePaymentCurrencyFields,
+} from "@/modules/collections/utils/payment-currency";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
@@ -55,7 +58,8 @@ export type UpdatePaymentResult =
         | "organization_not_found"
         | "payment_not_found"
         | "invalid_amount"
-        | "amount_exceeds_pending";
+        | "amount_exceeds_pending"
+        | "exchange_rate_required";
     };
 
 const paymentMethodMap: Record<
@@ -215,18 +219,21 @@ const insertPayableCredit = async ({
   supplierId,
   creditGenerated,
   notes,
+  currency,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
   supplierId: string;
   creditGenerated: number;
   notes: string | null;
+  currency: string;
 }) => {
   await supabase.from("supplier_credits" as never).insert({
     organization_id: orgId,
     supplier_id: supplierId,
     amount: creditGenerated,
     remaining_amount: creditGenerated,
+    currency: currency === "USD" ? "USD" : "ARS",
     source_payment_id: null,
     notes: notes
       ? `Saldo a favor por sobrepago (edición) — ${notes}`
@@ -302,10 +309,24 @@ async function handleReceivablePayment(
     newPendingBalance
   );
 
+  const effectiveExchangeRate = ctx.exchangeRate ?? payment.exchange_rate;
+  const exchangeRateError = assertPaymentExchangeRate(
+    account.currency,
+    amount,
+    effectiveExchangeRate
+  );
+  if (exchangeRateError) {
+    return {
+      success: false,
+      error: exchangeRateError,
+      code: "exchange_rate_required",
+    };
+  }
+
   const currencyFields = resolvePaymentCurrencyFields(
     account.currency,
     amount,
-    ctx.exchangeRate ?? payment.exchange_rate
+    effectiveExchangeRate
   );
 
   const updatePayment = async (
@@ -454,10 +475,24 @@ async function handlePayablePayment(
     newPendingBalance
   );
 
+  const effectiveExchangeRate = ctx.exchangeRate ?? payment.exchange_rate;
+  const exchangeRateError = assertPaymentExchangeRate(
+    account.currency,
+    amount,
+    effectiveExchangeRate
+  );
+  if (exchangeRateError) {
+    return {
+      success: false,
+      error: exchangeRateError,
+      code: "exchange_rate_required",
+    };
+  }
+
   const currencyFields = resolvePaymentCurrencyFields(
     account.currency,
     amount,
-    ctx.exchangeRate ?? payment.exchange_rate
+    effectiveExchangeRate
   );
 
   const updatePayment = async (
@@ -517,6 +552,7 @@ async function handlePayablePayment(
       supplierId: account.supplier_id,
       creditGenerated,
       notes,
+      currency: account.currency ?? "ARS",
     });
   }
 

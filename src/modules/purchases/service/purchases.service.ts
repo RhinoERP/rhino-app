@@ -2815,6 +2815,7 @@ async function saveSupplierCredit(options: {
     supplier_id: supplierId,
     amount: truncateMoney(creditBalance),
     remaining_amount: truncateMoney(creditBalance),
+    currency: "ARS",
     source_payment_id: null,
     notes: creditNotes,
   } as never);

@@ -258,7 +258,8 @@ export type RegisterPaymentResult =
         | "check_not_available"
         | "insufficient_credit"
         | "concurrency_conflict"
-        | "total_exceeds_pending";
+        | "total_exceeds_pending"
+        | "exchange_rate_required";
     };
 
 export type CustomerCredit = {

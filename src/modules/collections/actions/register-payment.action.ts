@@ -18,6 +18,7 @@ import {
   generateCommissions,
 } from "@/modules/collections/service/collections.service";
 import {
+  assertPaymentExchangeRate,
   type PaymentCurrencyFields,
   resolvePaymentCurrencyFields,
 } from "@/modules/collections/utils/payment-currency";
@@ -466,6 +467,7 @@ const createSupplierOverpaymentCredit = async (params: {
   supplierId: string;
   creditGenerated: number;
   notes: string | null;
+  currency: string;
 }) => {
   if (params.creditGenerated <= 0) {
     return;
@@ -476,6 +478,7 @@ const createSupplierOverpaymentCredit = async (params: {
     supplier_id: params.supplierId,
     amount: params.creditGenerated,
     remaining_amount: params.creditGenerated,
+    currency: params.currency === "USD" ? "USD" : "ARS",
     source_payment_id: null,
     notes: params.notes
       ? `Saldo a favor por sobrepago — ${params.notes}`
@@ -488,11 +491,13 @@ const applySupplierCredits = async ({
   orgId,
   supplierId,
   creditToApply,
+  currency,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
   supplierId: string;
   creditToApply: number;
+  currency: string;
 }) => {
   if (creditToApply <= 0) {
     return null;
@@ -503,6 +508,7 @@ const applySupplierCredits = async ({
     .select("id, remaining_amount")
     .eq("organization_id", orgId)
     .eq("supplier_id", supplierId)
+    .eq("currency", currency)
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
 
@@ -834,6 +840,7 @@ async function createPayablePaymentWithAccounting(params: {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: receivable payment applies credits, reconciles balance and validates currency fields.
 async function applyReceivablePayment({
   supabase,
   orgId,
@@ -941,6 +948,19 @@ async function applyReceivablePayment({
   }
 
   if (amount > 0) {
+    const exchangeRateError = assertPaymentExchangeRate(
+      receivable.currency,
+      amount,
+      input.exchangeRate
+    );
+    if (exchangeRateError) {
+      return {
+        success: false,
+        error: exchangeRateError,
+        code: "exchange_rate_required",
+      };
+    }
+
     const currencyFields = resolvePaymentCurrencyFields(
       receivable.currency,
       amount,
@@ -1057,6 +1077,7 @@ async function applyEndorsedPayablePayment(params: {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: payable payment applies supplier credits, reconciles balance and validates currency fields.
 async function applyStandardPayablePayment(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -1099,6 +1120,7 @@ async function applyStandardPayablePayment(params: {
     orgId: params.orgId,
     supplierId: params.payableAccount.supplier_id,
     creditToApply,
+    currency: params.payableAccount.currency ?? "ARS",
   });
 
   if (creditError) {
@@ -1112,6 +1134,19 @@ async function applyStandardPayablePayment(params: {
   let paymentId: string | undefined;
 
   if (params.amount > 0) {
+    const exchangeRateError = assertPaymentExchangeRate(
+      params.payableAccount.currency,
+      params.amount,
+      params.input.exchangeRate
+    );
+    if (exchangeRateError) {
+      return {
+        success: false,
+        error: exchangeRateError,
+        code: "exchange_rate_required",
+      };
+    }
+
     const currencyFields = resolvePaymentCurrencyFields(
       params.payableAccount.currency,
       params.amount,
@@ -1174,6 +1209,7 @@ async function applyStandardPayablePayment(params: {
     supplierId: params.payableAccount.supplier_id,
     creditGenerated,
     notes: params.notes,
+    currency: params.payableAccount.currency ?? "ARS",
   });
 
   return {

@@ -909,6 +909,19 @@ export function RegisterPaymentDialog({
     return null;
   };
 
+  const validateExchangeRate = ({ parsedAmount }: { parsedAmount: number }) => {
+    if (isEditMode || !isUsdDebt || parsedAmount <= 0) {
+      return null;
+    }
+
+    const parsedExchangeRate = Number(exchangeRate);
+    if (!Number.isFinite(parsedExchangeRate) || parsedExchangeRate <= 0) {
+      return "Debe ingresar el tipo de cambio para deudas en USD.";
+    }
+
+    return null;
+  };
+
   const getValidationError = ({
     parsedAmount,
     parsedCredit,
@@ -926,6 +939,7 @@ export function RegisterPaymentDialog({
         ? validateIssuedCheckFields()
         : null,
       validateEndorsedCheckFields({ parsedAmount, parsedCredit }),
+      validateExchangeRate({ parsedAmount }),
     ];
 
     return errors.find(Boolean) ?? null;

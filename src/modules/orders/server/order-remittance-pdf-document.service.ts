@@ -210,7 +210,7 @@ export async function getOrderRemittanceData(params: {
   const { data: ordersData } = await supabase
     .from("orders")
     .select(
-      "id, order_number, observations, quote_id, sales_order_id, parent_order_id, quotes!inner(customer_id, created_by)"
+      "id, order_number, observations, quote_id, sales_order_id, parent_order_id, quotes!inner(customer_id, created_by, currency)"
     )
     .in("id", params.childOrderIds);
 
@@ -261,6 +261,7 @@ export async function getOrderRemittanceData(params: {
     type: "REMITO_FINAL",
     documentNumber: params.remitoNumber,
     invoiceNumber,
+    currency: orderData.quotes.currency ?? "ARS",
     date: new Date().toISOString().split("T")[0],
     issuer: {
       businessName: organization?.name ?? "Empresa",

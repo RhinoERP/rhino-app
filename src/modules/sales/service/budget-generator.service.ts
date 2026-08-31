@@ -22,6 +22,7 @@ type PreSaleRemittanceData = {
     cuit?: string | null;
     logoUrl?: string | null;
   };
+  currency?: string;
   date: string;
   expirationDate?: string | null;
   customer: {
@@ -60,6 +61,7 @@ export function generatePreSaleBudgetHTML(data: PreSaleRemittanceData): string {
 
   const remittanceData: RemittanceData = {
     type: "PRESUPUESTO",
+    currency: data.currency ?? "ARS",
     date: data.date,
     expirationDate: data.expirationDate ?? undefined,
     issuer: {

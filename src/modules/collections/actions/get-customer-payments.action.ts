@@ -90,6 +90,11 @@ const getSaleFromRow = (row: Record<string, unknown>) => {
 const getCurrencyFromRow = (
   row: Record<string, unknown>
 ): string | undefined => {
+  const ownCurrency = row.currency;
+  if (typeof ownCurrency === "string") {
+    return ownCurrency;
+  }
+
   const account = row.accounts_receivable as
     | Record<string, unknown>
     | Record<string, unknown>[]
@@ -208,6 +213,7 @@ export async function getCustomerPaymentsAction(
         id,
         account_receivable_id,
         amount,
+        currency,
         payment_method,
         payment_date,
         reference_number,
@@ -218,7 +224,6 @@ export async function getCustomerPaymentsAction(
         receipt_pdf_url,
         accounts_receivable!inner(
           customer_id,
-          currency,
           sale:sales_orders(invoice_number, sale_number)
         )
       `
@@ -246,6 +251,7 @@ export async function getCustomerPaymentsAction(
         notes,
         created_at,
         accounts_receivable(
+          currency,
           sale:sales_orders(invoice_number, sale_number)
         )
       `

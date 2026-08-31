@@ -1606,6 +1606,7 @@ export function PreSaleForm({
           businessName: organization.name,
           cuit: organization.cuit,
         },
+        currency: "ARS",
         date: saleDateString,
         expirationDate: expirationDateString || null,
         customer: {

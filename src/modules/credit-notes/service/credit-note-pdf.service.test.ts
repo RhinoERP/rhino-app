@@ -112,6 +112,7 @@ function createCreditNote(overrides: Partial<CreditNote> = {}): CreditNote {
       remittanceNumber: null,
       invoiceType: "FACTURA_A",
       totalAmount: 397_260.98,
+      currency: "ARS",
       arcaStatus: "authorized",
       arcaPointOfSale: 27,
       arcaVoucherNumber: 27_862,

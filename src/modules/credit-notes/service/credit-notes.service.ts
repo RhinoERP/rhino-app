@@ -823,6 +823,7 @@ function mapCreditNoteSale(row: any): CreditNote["sale"] {
         remittanceNumber: row.sales_orders.remittance_number ?? null,
         invoiceType: row.sales_orders.invoice_type,
         totalAmount: Number(row.sales_orders.total_amount),
+        currency: row.sales_orders.currency ?? "ARS",
         arcaStatus: row.sales_orders.arca_status ?? null,
         arcaPointOfSale: row.sales_orders.arca_point_of_sale ?? null,
         arcaVoucherNumber: row.sales_orders.arca_voucher_number ?? null,
