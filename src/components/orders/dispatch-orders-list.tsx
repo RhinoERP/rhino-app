@@ -389,6 +389,9 @@ export function DispatchOrdersList({
           onClear={() => setDispatchSelectedIds(new Set())}
           onSuccess={() => setDispatchSelectedIds(new Set())}
           orgSlug={orgSlug}
+          totalAmount={preparing
+            .filter((o) => dispatchSelectedIds.has(o.id))
+            .reduce((sum, o) => sum + o.total_amount, 0)}
         />
       )}
 
@@ -835,6 +838,7 @@ type MultiDispatchBarProps = {
   orgSlug: string;
   childOrderIds: string[];
   count: number;
+  totalAmount: number;
   onClear: () => void;
   onSuccess: () => void;
 };
@@ -843,12 +847,16 @@ function MultiDispatchBar({
   orgSlug,
   childOrderIds,
   count,
+  totalAmount,
   onClear,
   onSuccess,
 }: MultiDispatchBarProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [remitoNumber, setRemitoNumber] = useState("");
+  const [packageCount, setPackageCount] = useState("");
+  const [declaredValue, setDeclaredValue] = useState("");
+  const [declaredValueLoading, setDeclaredValueLoading] = useState(false);
   const [autoNumbering, setAutoNumbering] = useState(false);
   const [previewNumber, setPreviewNumber] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -873,11 +881,26 @@ function MultiDispatchBar({
     });
   }, [orgSlug]);
 
+  useEffect(() => {
+    setDeclaredValueLoading(true);
+    loadDeclaredValueDefault(orgSlug, totalAmount)
+      .then(setDeclaredValue)
+      .finally(() => setDeclaredValueLoading(false));
+  }, [orgSlug, totalAmount]);
+
   function handleDispatch() {
     const finalNumber = remitoNumber.trim();
 
     if (!(finalNumber || autoNumbering)) {
       toast.error("El número de remito es obligatorio");
+      return;
+    }
+
+    const packageCountResult = parseOptionalNonNegativeNumber(packageCount);
+    const declaredValueResult = parseOptionalNonNegativeNumber(declaredValue);
+
+    if (!(packageCountResult.valid && declaredValueResult.valid)) {
+      toast.error("Revisá la cantidad de bultos y el valor declarado");
       return;
     }
 
@@ -901,6 +924,8 @@ function MultiDispatchBar({
         orgSlug,
         childOrderIds,
         remitoNumber: remitoToUse,
+        packageCount: packageCountResult.value,
+        declaredValue: declaredValueResult.value,
       });
 
       if (dispatchResult.success) {
@@ -908,6 +933,8 @@ function MultiDispatchBar({
           `Despachados ${count} subpedidos — Remito ${remitoToUse}`
         );
         setRemitoNumber("");
+        setPackageCount("");
+        setDeclaredValue("");
         onSuccess();
         router.refresh();
       } else {
@@ -919,31 +946,82 @@ function MultiDispatchBar({
   return (
     <div className="sticky bottom-4 z-10 mx-auto max-w-3xl">
       <Card className="border-2 border-primary/30 shadow-lg">
-        <CardContent className="flex items-center gap-2 p-4">
-          <Button
-            aria-label="Limpiar selección"
-            disabled={isPending || isGenerating}
-            onClick={onClear}
-            size="icon"
-            variant="ghost"
-          >
-            <XIcon className="size-4" />
-          </Button>
-          <span className="font-medium text-sm">
-            {count} subpedidos seleccionados
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <Input
-              className="w-44"
-              disabled={isGenerating || isPending}
-              onChange={(e) => setRemitoNumber(e.target.value)}
-              placeholder={getRemitoPlaceholder(
-                isGenerating,
-                autoNumbering,
-                previewNumber
-              )}
-              value={remitoNumber}
-            />
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center gap-2">
+            <Button
+              aria-label="Limpiar selección"
+              disabled={isPending || isGenerating}
+              onClick={onClear}
+              size="icon"
+              variant="ghost"
+            >
+              <XIcon className="size-4" />
+            </Button>
+            <span className="font-medium text-sm">
+              {count} subpedidos seleccionados
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label
+                className="mb-1 block font-medium text-sm"
+                htmlFor="remito-multiple"
+              >
+                Número de remito
+              </label>
+              <Input
+                disabled={isGenerating || isPending}
+                id="remito-multiple"
+                onChange={(e) => setRemitoNumber(e.target.value)}
+                placeholder={getRemitoPlaceholder(
+                  isGenerating,
+                  autoNumbering,
+                  previewNumber
+                )}
+                value={remitoNumber}
+              />
+            </div>
+
+            <div>
+              <label
+                className="mb-1 block font-medium text-sm"
+                htmlFor="bultos-multiple"
+              >
+                Cantidad de bultos
+              </label>
+              <Input
+                disabled={isPending || isGenerating}
+                id="bultos-multiple"
+                min={0}
+                onChange={(e) => setPackageCount(e.target.value)}
+                placeholder="0"
+                type="number"
+                value={packageCount}
+              />
+            </div>
+
+            <div>
+              <label
+                className="mb-1 block font-medium text-sm"
+                htmlFor="valor-declarado-multiple"
+              >
+                Valor declarado
+              </label>
+              <Input
+                disabled={isPending || isGenerating || declaredValueLoading}
+                id="valor-declarado-multiple"
+                min={0}
+                onChange={(e) => setDeclaredValue(e.target.value)}
+                placeholder="0"
+                step="0.01"
+                type="number"
+                value={declaredValue}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
             <Button
               disabled={isPending || isGenerating}
               onClick={handleDispatch}
