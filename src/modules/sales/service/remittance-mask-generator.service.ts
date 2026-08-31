@@ -16,6 +16,7 @@ export type RemittanceMaskData = {
   items: Array<{
     quantity: number;
     description: string;
+    variantName?: string | null;
   }>;
   packageCount: number;
   purchaseOrderNumber?: string | null;
@@ -70,8 +71,8 @@ function chunkItems<T>(items: T[]): T[][] {
 function formatItemDescription(
   item: Pick<RemittanceData["items"][number], "name" | "brand">
 ): string {
-  // The preprinted form only has room for the product identification. Product
-  // variants (such as size and color) must never be included in this overlay.
+  // The preprinted form only has room for the product identification line.
+  // The variant (size/color) is rendered separately as a second line.
   return [item.name, item.brand].filter(Boolean).join(" ");
 }
 
@@ -102,6 +103,7 @@ export function buildRemittanceMaskData(
     items: remittance.items.map((item) => ({
       quantity: item.quantity,
       description: formatItemDescription(item),
+      variantName: item.variantName ?? null,
     })),
     packageCount:
       options?.packageCount ??
@@ -130,7 +132,12 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
           (item, itemIndex) => `
             <div class="line-item" style="top:${99.6 + itemIndex * 5.15}mm">
               <span class="item-quantity">${escapeHtml(formatQuantity(item.quantity))}</span>
-              <span class="item-description">${escapeHtml(item.description)}</span>
+              <span class="item-description${item.variantName ? " has-variant" : ""}">${escapeHtml(item.description)}</span>
+              ${
+                item.variantName
+                  ? `<span class="item-variant">${escapeHtml(item.variantName)}</span>`
+                  : ""
+              }
             </div>`
         )
         .join("");
@@ -185,9 +192,38 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
   .carrier-name { left: 33mm; top: 85.1mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.2mm; font-weight: 700; }
   .tax-condition { left: 134mm; top: 71.4mm; max-width: 61mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .customer-cuit { left: 146mm; top: 78.2mm; max-width: 48mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
-  .line-item { left: 30mm; right: 20mm; height: 4.5mm; font-size: 3.3mm; line-height: 4.5mm; }
-  .item-quantity { display: inline-block; width: 21.5mm; }
-  .item-description { display: inline-block; max-width: 126mm; overflow: hidden; text-overflow: clip; vertical-align: top; }
+  .line-item {
+    left: 30mm;
+    right: 20mm;
+    height: 4.5mm;
+    font-size: 3.3mm;
+    line-height: 4.5mm;
+  }
+  .item-quantity {
+    display: inline-block;
+    width: 21.5mm;
+    vertical-align: top;
+  }
+  .item-description {
+    display: inline-block;
+    max-width: 126mm;
+    overflow: hidden;
+    text-overflow: clip;
+    vertical-align: middle;
+  }
+  .item-description.has-variant {
+    max-width: 86mm;
+  }
+  .item-variant {
+    display: inline-block;
+    max-width: 52mm;
+    margin-left: 2mm;
+    font-size: 2.7mm;
+    color: #555;
+    overflow: hidden;
+    text-overflow: clip;
+    vertical-align: middle;
+  }
   .page-label { left: 164mm; top: 94.8mm; font-size: 2.5mm; }
   .package-count { left: 28.5mm; top: 253.8mm; font-size: 3.2mm; }
   .purchase-order { left: 76.5mm; top: 253.8mm; max-width: 45mm; overflow: hidden; text-overflow: clip; font-size: 3.2mm; }
