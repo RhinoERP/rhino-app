@@ -28,6 +28,7 @@ type SupplierTransactionsDialogProps = {
 type GroupedPayment = {
   id: string;
   totalAmount: number;
+  totalAmountByCurrency: Record<string, number>;
   payment_method: SupplierPaymentEntry["payment_method"];
   payment_date: string;
   reference_number: string | null;
@@ -147,6 +148,7 @@ const addPaymentToGroup = (
     ({
       id: key,
       totalAmount: 0,
+      totalAmountByCurrency: {},
       payment_method: payment.payment_method,
       payment_date: payment.payment_date,
       reference_number: payment.reference_number,
@@ -158,6 +160,9 @@ const addPaymentToGroup = (
     } satisfies GroupedPayment);
 
   group.totalAmount += payment.amount;
+  const currency = payment.currency ?? "ARS";
+  group.totalAmountByCurrency[currency] =
+    (group.totalAmountByCurrency[currency] ?? 0) + payment.amount;
   group.count += 1;
   group.items.push(payment);
   map.set(key, group);
@@ -330,7 +335,13 @@ export function SupplierTransactionsDialog({
                         )}
                       </p>
                       <p className="font-semibold">
-                        {formatCurrency(payment.totalAmount)}
+                        {Object.entries(payment.totalAmountByCurrency).map(
+                          ([currency, amount]) => (
+                            <span key={currency}>
+                              {formatCurrency(amount, currency)}
+                            </span>
+                          )
+                        )}
                       </p>
                     </div>
                   </div>

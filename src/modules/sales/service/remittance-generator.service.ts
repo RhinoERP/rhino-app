@@ -30,6 +30,7 @@ export type RemittanceData = {
   documentNumber?: string;
   saleNumber?: number | null;
   invoiceNumber?: string | null;
+  currency?: string;
   date: string;
   expirationDate?: string | null;
   issuer: {
@@ -105,6 +106,8 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   const useSinglePage =
     data.singlePageDuplicate === true &&
     data.items.length <= MAX_ITEMS_FOR_SINGLE_PAGE;
+  const displayCurrency = data.currency === "USD" ? "USD" : "ARS";
+  const totalWordsLabel = displayCurrency === "USD" ? "Dólares" : "Pesos";
   const documentCopyClass = [
     "document-copy",
     isFinalRemittance ? "document-copy--remittance" : "",
@@ -148,10 +151,10 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       ${isFinalRemittance ? "" : `<td class="c-center">${displayValue(item.unitOfMeasure)}</td>`}
       ${showWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       ${showSku ? `<td class="c-sku">${displayValue(item.sku)}</td>` : ""}
-      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice)}/u</div>`).join("") : ""}</td>
-      ${showUnitPrice ? `<td class="c-right">${formatCurrency(item.unitPrice)}</td>` : ""}
+      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice, displayCurrency)}/u</div>`).join("") : ""}</td>
+      ${showUnitPrice ? `<td class="c-right">${formatCurrency(item.unitPrice, displayCurrency)}</td>` : ""}
       ${showDiscount ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
-      ${showLineTotal ? `<td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>` : ""}
+      ${showLineTotal ? `<td class="c-right c-bold">${formatCurrency(item.subtotal, displayCurrency)}</td>` : ""}
     </tr>`
     )
     .join("");
@@ -227,9 +230,9 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     ${
       showTotal
         ? `<div class="total-row">
-      <div class="total-words">Pesos: <em>${formatAmountInWords(data.total)}</em></div>
+      <div class="total-words">${totalWordsLabel}: <em>${formatAmountInWords(data.total)}</em></div>
       <div class="total-label">TOTAL</div>
-      <div class="total-amount">${formatCurrency(data.total)}</div>
+      <div class="total-amount">${formatCurrency(data.total, displayCurrency)}</div>
     </div>`
         : ""
     }
@@ -559,6 +562,7 @@ export function buildRemittanceFromSale(
       sale.arca_status === "authorized"
         ? (sale.invoice_number ?? undefined)
         : undefined,
+    currency: sale.currency ?? "ARS",
     date: sale.sale_date,
     expirationDate: sale.expiration_date ?? undefined,
     issuer: {

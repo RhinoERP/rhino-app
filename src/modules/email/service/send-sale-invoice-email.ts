@@ -147,7 +147,10 @@ function buildInvoiceEmailTemplateValues(params: {
     comprobante: invoiceReference,
     numero_factura: invoiceReference,
     fecha: formatDateOnly(params.sale.sale_date),
-    total: formatCurrency(params.sale.total_amount),
+    total: formatCurrency(
+      params.sale.total_amount,
+      params.sale.currency === "USD" ? "USD" : "ARS"
+    ),
   };
 }
 

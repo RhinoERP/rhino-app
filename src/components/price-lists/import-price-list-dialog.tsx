@@ -59,6 +59,7 @@ import { suppliersClientQueryOptions } from "@/modules/suppliers/queries/queries
 // Excel column regex patterns (moved to top-level for performance)
 const SKU_COLUMN_REGEX = /^sku$/i;
 const PRICE_COLUMN_REGEX = /^(precio|price)$/i;
+const CURRENCY_COLUMN_REGEX = /^(moneda|currency)$/i;
 
 const priceListSchema = z.object({
   supplier_id: z.string().min(1, "El proveedor es obligatorio"),
@@ -202,6 +203,7 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   ): ImportPriceListItem | null => {
     const skuKey = findColumnKey(row, SKU_COLUMN_REGEX);
     const priceKey = findColumnKey(row, PRICE_COLUMN_REGEX);
+    const currencyKey = findColumnKey(row, CURRENCY_COLUMN_REGEX);
 
     if (!(skuKey && priceKey)) {
       return null;
@@ -209,12 +211,16 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
 
     const sku = String(row[skuKey]).trim();
     const price = Number(row[priceKey]);
+    const rawCurrency = currencyKey
+      ? String(row[currencyKey]).trim().toUpperCase()
+      : "";
+    const currency = rawCurrency === "USD" ? "USD" : "ARS";
 
     if (!sku || Number.isNaN(price) || price <= 0) {
       return null;
     }
 
-    const item: ImportPriceListItem = { sku, price };
+    const item: ImportPriceListItem = { sku, price, currency };
 
     return item;
   };

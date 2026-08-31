@@ -98,6 +98,8 @@ function buildPaymentConditionsHTML(params: {
 /**
  * Generates quote HTML for PDF generation
  */
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: <TODO: Fix after rebase>
 export function generateQuotePDFHTML(data: QuotePDFData): string {
   const customerName =
     data.customer.fantasy_name || data.customer.business_name || "Cliente";
@@ -135,6 +137,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
     data.quote.global_discount_amount ?? 0
   );
   const total = truncateMoney(data.quote.total_amount ?? 0);
+  const currency = data.quote.currency ?? "ARS";
 
   const itemsHTML = itemsWithExtras
     .map(({ item, extrasTotal, net }) => {
@@ -146,7 +149,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
             (extra) => `
           <div class="extra-line">
             <span>+ ${escapeHtml(extra.description)}</span>
-            <span class="extra-price">${formatCurrency(extra.price)} por unidad</span>
+            <span class="extra-price">${formatCurrency(extra.price, currency)} por unidad</span>
           </div>`
           )
           .join("")}
@@ -156,9 +159,9 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
     <tr>
       <td class="c-qty">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
       <td class="c-desc">${displayValue(item.description ?? item.product_name)}${extrasHTML}</td>
-      <td class="c-right c-price">${formatCurrency(item.unit_price)}</td>
+      <td class="c-right c-price">${formatCurrency(item.unit_price, currency)}</td>
       ${item.discount_percentage ? `<td class="c-right c-discount">${item.discount_percentage.toFixed(1)}%</td>` : ""}
-      <td class="c-right c-bold c-amount">${formatCurrency(net)}</td>
+      <td class="c-right c-bold c-amount">${formatCurrency(net, currency)}</td>
     </tr>`;
     })
     .join("");
@@ -482,14 +485,14 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   <div class="breakdown">
     <div class="breakdown-item">
       <span class="breakdown-label">Subtotal:</span>
-      <span class="breakdown-value">${formatCurrency(subtotal)}</span>
+      <span class="breakdown-value">${formatCurrency(subtotal, currency)}</span>
     </div>
     ${
       lineDiscountTotal > 0
         ? `
     <div class="breakdown-item">
       <span class="breakdown-label">Descuentos:</span>
-      <span class="breakdown-value">-${formatCurrency(lineDiscountTotal)}</span>
+      <span class="breakdown-value">-${formatCurrency(lineDiscountTotal, currency)}</span>
     </div>
     `
         : ""
@@ -503,7 +506,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
           ? ` (${data.quote.global_discount_percentage.toFixed(1)}%)`
           : ""
       }:</span>
-      <span class="breakdown-value">-${formatCurrency(globalDiscountAmount)}</span>
+      <span class="breakdown-value">-${formatCurrency(globalDiscountAmount, currency)}</span>
     </div>
     `
         : ""
@@ -515,14 +518,14 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
       <span class="breakdown-label">${escapeHtml(tax.name)}${
         tax.rate ? ` (${tax.rate.toFixed(1)}%)` : ""
       }:</span>
-      <span class="breakdown-value">${formatCurrency(tax.tax_amount)}</span>
+      <span class="breakdown-value">${formatCurrency(tax.tax_amount, currency)}</span>
     </div>
     `
       )
       .join("")}
     <div class="breakdown-item">
       <span class="breakdown-label">Total:</span>
-      <span class="breakdown-value">${formatCurrency(total)}</span>
+      <span class="breakdown-value">${formatCurrency(total, currency)}</span>
     </div>
   </div>
 

@@ -58,9 +58,23 @@ export function useProductFilters(
     categoryFilter
   );
 
-  const availableProducts = filteredProducts.filter(
-    (p) => !items.some((item) => item.product_id === p.id)
+  const productCurrencyById = new Map(
+    products.map((p) => [p.id, p.currency ?? "ARS"])
   );
+  const currency =
+    items.length > 0 && items[0].product_id
+      ? (productCurrencyById.get(items[0].product_id) ?? "ARS")
+      : undefined;
+
+  const availableProducts = filteredProducts.filter((p) => {
+    if (items.some((item) => item.product_id === p.id)) {
+      return false;
+    }
+    if (currency && p.currency !== currency) {
+      return false;
+    }
+    return true;
+  });
 
   const brandFilterLabel = brandFilter
     ? (brandOptions.find((brand) => brand === brandFilter) ?? "Todas")
@@ -82,5 +96,6 @@ export function useProductFilters(
     availableProducts,
     brandFilterLabel,
     categoryFilterLabel,
+    currency,
   };
 }

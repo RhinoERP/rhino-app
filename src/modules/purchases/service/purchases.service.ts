@@ -128,6 +128,13 @@ async function syncAccountsPayable(params: {
     params;
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
+  const { data: purchaseOrderRow } = await supabase
+    .from("purchase_orders")
+    .select("currency")
+    .eq("id", purchaseOrderId)
+    .maybeSingle();
+  const currency = purchaseOrderRow?.currency ?? "ARS";
+
   const { data: existingData, error: fetchError } = await supabase
     .from("accounts_payable")
     .select("id, total_amount, pending_balance")
@@ -189,6 +196,7 @@ async function syncAccountsPayable(params: {
       purchase_order_id: purchaseOrderId,
       total_amount: normalizedTotalAmount,
       pending_balance: normalizedTotalAmount,
+      currency,
       due_date: dueDate,
       status: "PENDING",
     });
@@ -287,6 +295,7 @@ export type CreatePurchaseOrderInput = {
   purchase_date: string;
   expiration_date?: string;
   remittance_number?: string;
+  currency?: string;
   items: {
     product_id: string;
     quantity: number;
@@ -566,6 +575,7 @@ export async function createPurchaseOrder(
       expiration_date: input.expiration_date,
       remittance_number: input.remittance_number,
       purchase_number: purchaseNumber,
+      currency: input.currency ?? "ARS",
       subtotal_amount,
       tax_amount: total_tax_amount,
       global_discount_percentage,
@@ -2577,6 +2587,9 @@ function insertBulkSupplierPayments(
       organization_id: orgId,
       account_payable_id: p.account_payable_id,
       amount: truncateMoney(p.amount),
+      currency: "ARS",
+      exchange_rate: null,
+      amount_ars: truncateMoney(p.amount),
       payment_method: paymentMethodValue,
       payment_date: paymentDateValue,
       reference_number: sanitizedReference,
@@ -2648,6 +2661,7 @@ async function rollbackBulkSupplierPayments(options: {
 /**
  * Process bulk supplier payment (FIFO distribution)
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bulk payment distributes FIFO across supplier payables and reconciles currency scoping.
 export async function processBulkSupplierPayment(input: {
   orgSlug: string;
   supplierId: string;
@@ -2663,6 +2677,7 @@ export async function processBulkSupplierPayment(input: {
   appliedAmount?: number;
   creditBalance?: number;
   affectedAccounts?: number;
+  excludedUsdCount?: number;
   distributions?: Array<{
     accountId: string;
     purchaseNumber: number | null;
@@ -2714,6 +2729,7 @@ export async function processBulkSupplierPayment(input: {
       total_amount,
       pending_balance,
       due_date,
+      currency,
       purchase:purchase_orders(purchase_number)
     `)
     .eq("organization_id", org.id)
@@ -2737,17 +2753,28 @@ export async function processBulkSupplierPayment(input: {
     };
   }
 
-  // Calculate distribution (FIFO)
+  const arsAccounts = pendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+  const excludedUsdCount = pendingAccounts.length - arsAccounts.length;
+
+  if (arsAccounts.length === 0) {
+    return {
+      success: false,
+      error:
+        "Este proveedor tiene deudas solo en USD. Usá el pago individual para esas órdenes de compra.",
+      code: "usd_only",
+    };
+  }
+
+  // Calculate distribution (FIFO) solo sobre cuentas ARS
   const {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateSupplierPaymentDistributions(
-    pendingAccounts,
-    normalizedTotalAmount
-  );
+  } = calculateSupplierPaymentDistributions(arsAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -2822,6 +2849,7 @@ export async function processBulkSupplierPayment(input: {
     creditBalance,
     affectedAccounts: distributions.length,
     distributions,
+    excludedUsdCount: excludedUsdCount > 0 ? excludedUsdCount : undefined,
   };
 }
 
@@ -2843,6 +2871,7 @@ async function saveSupplierCredit(options: {
     supplier_id: supplierId,
     amount: truncateMoney(creditBalance),
     remaining_amount: truncateMoney(creditBalance),
+    currency: "ARS",
     source_payment_id: null,
     notes: creditNotes,
   } as never);
@@ -2892,6 +2921,7 @@ export async function calculateBulkSupplierPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
+      currency,
       purchase:purchase_orders(purchase_number)
     `)
     .eq("organization_id", org.id)
@@ -2908,6 +2938,14 @@ export async function calculateBulkSupplierPaymentDistribution(
     return [];
   }
 
+  const arsAccounts = pendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+
+  if (arsAccounts.length === 0) {
+    return [];
+  }
+
   let remainingAmount = normalizedTotalAmount;
   const distributions: Array<{
     accountId: string;
@@ -2920,7 +2958,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     newStatus: CollectionAccountStatus;
   }> = [];
 
-  for (const account of pendingAccounts) {
+  for (const account of arsAccounts) {
     if (remainingAmount <= 0) {
       break;
     }

@@ -42,6 +42,7 @@ type PurchaseReceiptSummaryProps = {
   onReceive: () => void;
   isReceiving: boolean;
   error: string | null;
+  currency?: string;
   globalDiscountPercentage?: number | null;
   taxes: Array<{
     tax_id: string;
@@ -57,6 +58,7 @@ export function PurchaseReceiptSummary({
   totalItems,
   onReceive,
   isReceiving,
+  currency = "ARS",
   globalDiscountPercentage = 0,
   taxes,
   variantStockValues,
@@ -180,7 +182,9 @@ export function PurchaseReceiptSummary({
 
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span className="font-medium">{formatCurrency(subtotal)}</span>
+                <span className="font-medium">
+                  {formatCurrency(subtotal, currency)}
+                </span>
               </div>
 
               {(globalDiscountPercentage ?? 0) > 0 && (
@@ -189,7 +193,7 @@ export function PurchaseReceiptSummary({
                     Descuento ({globalDiscountPercentage}%)
                   </span>
                   <span className="font-medium">
-                    -{formatCurrency(discountAmount)}
+                    -{formatCurrency(discountAmount, currency)}
                   </span>
                 </div>
               )}
@@ -202,7 +206,9 @@ export function PurchaseReceiptSummary({
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)
                   </span>
-                  <span className="font-medium">{formatCurrency(amount)}</span>
+                  <span className="font-medium">
+                    {formatCurrency(amount, currency)}
+                  </span>
                 </div>
               ))}
 
@@ -210,7 +216,7 @@ export function PurchaseReceiptSummary({
 
               <div className="flex items-center justify-between font-semibold text-base">
                 <span>Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span>{formatCurrency(total, currency)}</span>
               </div>
             </div>
 

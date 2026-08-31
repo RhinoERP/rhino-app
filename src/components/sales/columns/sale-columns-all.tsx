@@ -557,7 +557,7 @@ export function createSalesColumns({
         const amount = row.original.total_amount;
         return (
           <div className="text-right font-semibold">
-            {formatCurrency(amount)}
+            {formatCurrency(amount, row.original.currency)}
           </div>
         );
       },

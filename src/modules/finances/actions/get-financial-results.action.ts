@@ -35,7 +35,7 @@ export async function getFinancialResultsAction(
     // Cobros — pagos recibidos de clientes
     supabase
       .from("receivable_payments")
-      .select("amount")
+      .select("amount, amount_ars")
       .eq("organization_id", orgId)
       .gte("payment_date", from)
       .lte("payment_date", to),
@@ -51,7 +51,7 @@ export async function getFinancialResultsAction(
     // Pagos a proveedores
     supabase
       .from("payable_payments")
-      .select("amount")
+      .select("amount, amount_ars")
       .eq("organization_id", orgId)
       .gte("payment_date", from)
       .lte("payment_date", to),
@@ -91,7 +91,8 @@ export async function getFinancialResultsAction(
   ]);
 
   const cashCollections = (cobrosResult.data ?? []).reduce(
-    (sum, r) => sum + (r.amount ?? 0),
+    (sum, r) =>
+      sum + ((r as { amount_ars?: number | null }).amount_ars ?? r.amount ?? 0),
     0
   );
 
@@ -101,7 +102,8 @@ export async function getFinancialResultsAction(
   );
 
   const purchasesAmount = (pagosResult.data ?? []).reduce(
-    (sum, r) => sum + (r.amount ?? 0),
+    (sum, r) =>
+      sum + ((r as { amount_ars?: number | null }).amount_ars ?? r.amount ?? 0),
     0
   );
 

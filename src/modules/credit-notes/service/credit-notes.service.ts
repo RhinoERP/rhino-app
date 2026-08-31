@@ -15,6 +15,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import {
   deriveSaleCreditSupplier,
   deriveSupplierNameFromSale,
+  resolveSaleCurrency,
 } from "@/modules/sales/service/sales.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -290,12 +291,14 @@ async function createNcCustomerCredit(params: {
     params;
 
   const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+  const currency = await resolveSaleCurrency(supabase, saleId);
   const { error } = await supabase.from("customer_credits").insert({
     organization_id: orgId,
     customer_id: customerId,
     supplier_id: creditSupplierId,
     amount: ncAmount,
     remaining_amount: ncAmount,
+    currency,
     credit_note_id: creditNoteId,
     notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
   });
@@ -526,6 +529,7 @@ export async function createCreditNote(
       supplier_id: supplierId ?? null,
       amount: truncateMoney(amount),
       remaining_amount: truncateMoney(amount),
+      currency: "ARS",
       credit_note_id: ncRecord.id,
       notes: `Saldo a favor por Nota de Crédito ${ncNum}`,
     });
@@ -819,6 +823,7 @@ function mapCreditNoteSale(row: any): CreditNote["sale"] {
         remittanceNumber: row.sales_orders.remittance_number ?? null,
         invoiceType: row.sales_orders.invoice_type,
         totalAmount: Number(row.sales_orders.total_amount),
+        currency: row.sales_orders.currency ?? "ARS",
         arcaStatus: row.sales_orders.arca_status ?? null,
         arcaPointOfSale: row.sales_orders.arca_point_of_sale ?? null,
         arcaVoucherNumber: row.sales_orders.arca_voucher_number ?? null,

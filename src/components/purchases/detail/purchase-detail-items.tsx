@@ -96,6 +96,7 @@ type PurchaseDetailItemsProps = {
   items: PurchaseDetailItem[];
   products: ProductWithPrice[];
   supplierId: string;
+  currency?: string;
   isEditingDetails: boolean;
   onItemsChange: (items: PurchaseDetailItem[]) => void;
   onError: (error: string | null) => void;
@@ -107,6 +108,7 @@ export function PurchaseDetailItems({
   items,
   products,
   supplierId,
+  currency = "ARS",
   isEditingDetails,
   onItemsChange,
   onError,
@@ -669,7 +671,10 @@ export function PurchaseDetailItems({
                           <div className="flex items-center justify-between gap-4">
                             <span>{selectedProduct.name}</span>
                             <span className="text-muted-foreground text-xs">
-                              {formatCurrency(selectedProduct.cost_price ?? 0)}
+                              {formatCurrency(
+                                selectedProduct.cost_price ?? 0,
+                                selectedProduct.currency ?? "ARS"
+                              )}
                             </span>
                           </div>
                         ) : (
@@ -717,7 +722,8 @@ export function PurchaseDetailItems({
                                       <p className="text-muted-foreground text-xs">
                                         SKU {product.sku} ·{" "}
                                         {formatCurrency(
-                                          product.cost_price ?? 0
+                                          product.cost_price ?? 0,
+                                          product.currency ?? "ARS"
                                         )}
                                       </p>
                                     </div>
@@ -1014,10 +1020,11 @@ export function PurchaseDetailItems({
                                   item.total_weight_kg
                                 ) {
                                   return formatCurrency(
-                                    item.price_per_kg ?? item.unit_cost ?? 0
+                                    item.price_per_kg ?? item.unit_cost ?? 0,
+                                    currency
                                   );
                                 }
-                                return formatCurrency(item.unit_cost);
+                                return formatCurrency(item.unit_cost, currency);
                               })()}
                             </p>
                           );
@@ -1060,7 +1067,7 @@ export function PurchaseDetailItems({
                           Subtotal
                         </span>
                         <p className="font-medium">
-                          {formatCurrency(item.subtotal)}
+                          {formatCurrency(item.subtotal, currency)}
                         </p>
                       </div>
 

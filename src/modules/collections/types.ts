@@ -21,6 +21,7 @@ export type ReceivableAccount = {
   sales_order_id: string;
   total_amount: number;
   pending_balance: number;
+  currency?: string;
   due_date: string;
   status: CollectionAccountStatus;
   created_at?: string | null;
@@ -62,6 +63,7 @@ export type PayableAccount = {
   purchase_order_id: string;
   total_amount: number;
   pending_balance: number;
+  currency?: string;
   due_date: string;
   status: CollectionAccountStatus;
   created_at?: string | null;
@@ -138,6 +140,8 @@ export type BulkPaymentResult =
       creditBalance: number;
       affectedAccounts: number;
       distributions: BulkPaymentDistribution[];
+      /** Facturas en USD omitidas (se cobran con el pago individual). */
+      excludedUsdCount?: number;
     }
   | {
       success: false;
@@ -146,8 +150,17 @@ export type BulkPaymentResult =
         | "invalid_amount"
         | "no_pending_accounts"
         | "customer_not_found"
-        | "organization_not_found";
+        | "organization_not_found"
+        | "usd_only";
     };
+
+export type BulkPaymentPreviewResponse = {
+  distributions: BulkPaymentDistribution[];
+  /** Facturas en USD omitidas de la distribución (se cobran con el pago individual). */
+  excludedUsdCount: number;
+  /** true cuando el cliente tiene deudas pendientes pero todas son en USD. */
+  usdOnly: boolean;
+};
 
 export type ReceivablesPaginatedParams = {
   page: number;
@@ -179,14 +192,20 @@ export type PayablesPaginatedParams = {
 };
 
 export type ReceivablesMetrics = {
-  pendingReceivables: number;
-  collected: number;
-  overdueReceivables: number;
+  byCurrency: Array<{
+    currency: string;
+    pendingReceivables: number;
+    collected: number;
+    overdueReceivables: number;
+  }>;
 };
 
 export type PayablesMetrics = {
-  pendingPayables: number;
-  overduePayables: number;
+  byCurrency: Array<{
+    currency: string;
+    pendingPayables: number;
+    overduePayables: number;
+  }>;
 };
 
 import type { AnyEvento } from "@/modules/accounting/types";
@@ -198,6 +217,8 @@ export type RegisterPaymentInput = {
   creditAmount?: number;
   /** Apply this exact customer credit instead of consuming the FIFO balance. */
   customerCreditId?: string;
+  /** Cotización USD→ARS usada al registrar el pago de una deuda en dólares. */
+  exchangeRate?: number;
   paymentMethod: PaymentMethod;
   operationId?: string;
   paymentDate?: string;
@@ -230,13 +251,15 @@ export type RegisterPaymentResult =
       code?:
         | "invalid_amount"
         | "invalid_check_data"
+        | "invalid_payment_method"
         | "amount_exceeds_pending"
         | "account_not_found"
         | "organization_not_found"
         | "check_not_available"
         | "insufficient_credit"
         | "concurrency_conflict"
-        | "total_exceeds_pending";
+        | "total_exceeds_pending"
+        | "exchange_rate_required";
     };
 
 export type CustomerCredit = {

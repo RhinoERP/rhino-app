@@ -1,6 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import type { Database } from "@/types/supabase";
 import { ArcaValidationError } from "./errors";
+import { readAuthorizedFiscalCurrency } from "./fiscal-currency";
 import { buildArcaReceiverDocument } from "./receiver-document";
 import { mapCustomerTaxConditionToArcaReceiverVatConditionId } from "./receiver-tax-conditions";
 import {
@@ -88,6 +89,7 @@ export type ArcaCreditNoteVoucherRequest = {
   ImpTrib: number;
   MonId: string;
   MonCotiz: number;
+  CanMisMonExt?: "S";
   PtoVta: number;
   CbteTipo: number;
   CbteDesde?: number;
@@ -453,6 +455,9 @@ export function buildArcaCreditNoteVoucherRequest(
     sale: context.sale,
   });
   const sourceDocuments = context.creditNote.sourceDocuments ?? [];
+  const fiscalCurrency = readAuthorizedFiscalCurrency(
+    context.sale.arcaRequestJson
+  );
   const associatedVouchers =
     sourceDocuments.length > 0
       ? sourceDocuments.map((source) => {
@@ -498,8 +503,11 @@ export function buildArcaCreditNoteVoucherRequest(
     ImpTotal: truncateMoney(context.creditNote.amount),
     ImpTotConc: 0,
     ImpOpEx: 0,
-    MonId: "PES",
-    MonCotiz: 1,
+    MonId: fiscalCurrency.code,
+    MonCotiz: fiscalCurrency.rate ?? 1,
+    ...(fiscalCurrency.sameCurrencySettlement
+      ? { CanMisMonExt: "S" as const }
+      : {}),
     PtoVta: context.pointOfSale,
     CbteTipo: voucherTypeCode,
     CbtesAsoc: associatedVouchers,

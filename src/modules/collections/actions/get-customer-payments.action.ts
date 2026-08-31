@@ -10,6 +10,7 @@ export type CustomerPaymentEntry = {
   id: string;
   account_receivable_id: string | null;
   amount: number;
+  currency?: string;
   payment_method: string;
   payment_date: string;
   reference_number: string | null;
@@ -86,6 +87,24 @@ const getSaleFromRow = (row: Record<string, unknown>) => {
   return sale ?? null;
 };
 
+const getCurrencyFromRow = (
+  row: Record<string, unknown>
+): string | undefined => {
+  const ownCurrency = row.currency;
+  if (typeof ownCurrency === "string") {
+    return ownCurrency;
+  }
+
+  const account = row.accounts_receivable as
+    | Record<string, unknown>
+    | Record<string, unknown>[]
+    | null
+    | undefined;
+  const ar = Array.isArray(account) ? account[0] : account;
+  const currency = ar?.currency;
+  return typeof currency === "string" ? currency : undefined;
+};
+
 const parseReceiptFields = (
   row: Record<string, unknown>
 ): { receipt_number: string | null; receipt_pdf_url: string | null } => ({
@@ -106,6 +125,7 @@ const normalizePaymentRow = (
         ? row.account_receivable_id
         : null,
     amount: truncateMoney(Number(row.amount) || 0),
+    currency: getCurrencyFromRow(row),
     payment_method: normalizePaymentMethod(
       typeof row.payment_method === "string" ? row.payment_method : null
     ),
@@ -134,6 +154,7 @@ const normalizeCreditRow = (
         ? row.account_receivable_id
         : null,
     amount: truncateMoney(Number(row.amount) || 0),
+    currency: getCurrencyFromRow(row),
     payment_method: "cuenta corriente",
     payment_date: typeof row.payment_date === "string" ? row.payment_date : "",
     reference_number:
@@ -192,6 +213,7 @@ export async function getCustomerPaymentsAction(
         id,
         account_receivable_id,
         amount,
+        currency,
         payment_method,
         payment_date,
         reference_number,
@@ -229,6 +251,7 @@ export async function getCustomerPaymentsAction(
         notes,
         created_at,
         accounts_receivable(
+          currency,
           sale:sales_orders(invoice_number, sale_number)
         )
       `

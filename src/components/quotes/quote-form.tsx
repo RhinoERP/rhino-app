@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
-import { toast } from "sonner";
 import { usePermissions } from "@/components/auth/permissions-provider";
 
 import { Badge } from "@/components/ui/badge";
@@ -98,31 +97,6 @@ import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
 const NO_PRICE_LIST = "none";
-
-async function fetchBlueRate(): Promise<number> {
-  const res = await fetch("/api/exchange-rate/blue");
-  if (!res.ok) {
-    throw new Error("Error al obtener la cotización");
-  }
-  const data = (await res.json()) as { venta: number };
-  return data.venta;
-}
-
-function convertItemsToCurrency(
-  items: QuoteFormValues["items"],
-  rate: number,
-  divide: boolean
-): QuoteFormValues["items"] {
-  return items.map((item) => ({
-    ...item,
-    unitPrice: divide
-      ? truncateMoney(item.unitPrice / rate)
-      : truncateMoney(item.unitPrice * rate),
-    subtotal: divide
-      ? truncateMoney(item.subtotal / rate)
-      : truncateMoney(item.subtotal * rate),
-  }));
-}
 
 function getDisplayName(
   file: File | null | undefined,
@@ -410,8 +384,6 @@ export function QuoteForm({
   const [editingInitialQuantities, setEditingInitialQuantities] = useState<
     Record<string, Record<string, number>>
   >({});
-  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
-  const [convertingCurrency, setConvertingCurrency] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const designFileInputRef = useRef<HTMLInputElement>(null);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -1002,51 +974,6 @@ export function QuoteForm({
     getAdjustedPrice,
   ]);
 
-  const handleConvertCurrency = async () => {
-    if (convertingCurrency) {
-      return;
-    }
-
-    if (currency === "ARS") {
-      setConvertingCurrency(true);
-      try {
-        const rate = await fetchBlueRate();
-        setExchangeRate(rate);
-
-        const currentItems = form.getValues("items");
-        form.setValue(
-          "items",
-          convertItemsToCurrency(currentItems, rate, true),
-          {
-            shouldDirty: true,
-          }
-        );
-        form.setValue("currency", "USD");
-        form.setValue("exchangeRate", rate);
-      } catch {
-        toast.error("No se pudo obtener la cotización del dólar blue");
-      } finally {
-        setConvertingCurrency(false);
-      }
-    } else if (exchangeRate) {
-      const currentItems = form.getValues("items");
-      form.setValue(
-        "items",
-        convertItemsToCurrency(currentItems, exchangeRate, false),
-        { shouldDirty: true }
-      );
-      form.setValue("currency", "ARS");
-      form.setValue("exchangeRate", null);
-      setExchangeRate(null);
-    }
-  };
-
-  useEffect(() => {
-    if (defaultValues?.exchangeRate) {
-      setExchangeRate(defaultValues.exchangeRate);
-    }
-  }, [defaultValues?.exchangeRate]);
-
   return (
     <div className="grid gap-6 lg:grid-cols-12">
       <div className="flex flex-col gap-6 lg:col-span-8">
@@ -1131,14 +1058,28 @@ export function QuoteForm({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Moneda</FormLabel>
-                        <FormControl>
-                          <input type="hidden" {...field} />
-                        </FormControl>
-                        <div className="flex h-9 items-center rounded-md border px-3 text-sm">
-                          {field.value === "USD"
-                            ? "USD - Dólares"
-                            : "ARS - Pesos Arg."}
-                        </div>
+                        <Select
+                          disabled={fields.length > 0}
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Seleccione moneda" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="ARS">
+                              ARS - Pesos Arg.
+                            </SelectItem>
+                            <SelectItem value="USD">USD - Dólares</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {fields.length > 0 && (
+                          <p className="text-muted-foreground text-xs">
+                            Vacía el presupuesto para cambiar la moneda.
+                          </p>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1269,14 +1210,6 @@ export function QuoteForm({
                     )}
                   />
                 </div>
-                {fields.length > 0 && (
-                  <ConvertCurrencySection
-                    convertingCurrency={convertingCurrency}
-                    currency={currency}
-                    exchangeRate={exchangeRate}
-                    onConvert={handleConvertCurrency}
-                  />
-                )}
               </CardContent>
             </Card>
 
@@ -1419,6 +1352,7 @@ export function QuoteForm({
                 <div className="grid gap-6">
                   {/* Buscador */}
                   <ProductSearch
+                    currency={currency}
                     onSelectProduct={handleProductSelect}
                     priceList={
                       salesPriceLists.find(
@@ -1915,45 +1849,6 @@ export function QuoteForm({
         orgSlug={orgSlug}
         product={selectedProduct}
       />
-    </div>
-  );
-}
-
-function ConvertCurrencySection({
-  convertingCurrency,
-  currency,
-  exchangeRate,
-  onConvert,
-}: {
-  convertingCurrency: boolean;
-  currency: string;
-  exchangeRate: number | null;
-  onConvert: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-      {currency === "ARS" ? (
-        <Button
-          disabled={convertingCurrency}
-          onClick={onConvert}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {convertingCurrency
-            ? "Obteniendo cotización..."
-            : "Convertir a Dólares"}
-        </Button>
-      ) : (
-        <Button onClick={onConvert} size="sm" type="button" variant="outline">
-          Convertir a Pesos
-        </Button>
-      )}
-      {currency === "USD" && exchangeRate && (
-        <span className="text-muted-foreground text-sm">
-          Cotización: {formatCurrency(exchangeRate, "ARS")}
-        </span>
-      )}
     </div>
   );
 }

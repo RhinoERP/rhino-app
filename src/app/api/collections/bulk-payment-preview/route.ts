@@ -24,13 +24,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: "Monto inválido" }, { status: 400 });
     }
 
-    const distributions = await calculateBulkPaymentDistribution(
+    const result = await calculateBulkPaymentDistribution(
       orgSlug,
       customerId,
       totalAmount
     );
 
-    return NextResponse.json(distributions);
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       {

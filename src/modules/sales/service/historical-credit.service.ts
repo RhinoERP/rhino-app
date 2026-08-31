@@ -49,6 +49,7 @@ async function processSingleCredit(params: {
     customer_id: row.customerId,
     amount: truncateMoney(row.totalAmount),
     remaining_amount: truncateMoney(row.totalAmount),
+    currency: "ARS",
     credit_note_id: nc.id,
     notes: row.observations ?? null,
   });

@@ -119,6 +119,21 @@ function encodeStandardBase64(value: string): string {
 export function buildArcaQrPayload(
   input: BuildArcaQrPayloadInput
 ): ArcaQrPayload {
+  const currency = input.currency?.trim() || "PES";
+  const suppliedCurrencyRate = input.currencyRate;
+  const hasValidCurrencyRate =
+    typeof suppliedCurrencyRate === "number" &&
+    Number.isFinite(suppliedCurrencyRate) &&
+    suppliedCurrencyRate > 0;
+
+  if (currency === "DOL" && !hasValidCurrencyRate) {
+    throw new Error(
+      "Un comprobante USD necesita una cotización fiscal autorizada para generar el QR ARCA."
+    );
+  }
+
+  const currencyRate = suppliedCurrencyRate ?? 1;
+
   const payload: ArcaQrPayload = {
     ver: 1,
     fecha: formatDateToArgentinaIsoDate(input.issueDate),
@@ -127,8 +142,8 @@ export function buildArcaQrPayload(
     tipoCmp: input.voucherTypeCode,
     nroCmp: input.voucherNumber,
     importe: truncateMoney(input.totalAmount),
-    moneda: input.currency?.trim() || "PES",
-    ctz: input.currencyRate ?? 1,
+    moneda: currency,
+    ctz: currencyRate,
     tipoCodAut: "E",
     codAut: normalizeNumericIdentifier(input.authorizationCode),
   };

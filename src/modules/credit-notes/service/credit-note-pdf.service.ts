@@ -68,12 +68,15 @@ function formatPercentValue(value: number | null | undefined): string {
   }).format(value);
 }
 
-function formatCompactCurrency(value: number | null | undefined): string {
+function formatCompactCurrency(
+  value: number | null | undefined,
+  currency?: string
+): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "-";
   }
 
-  return formatCurrency(value).replace(/\s+/g, " ");
+  return formatCurrency(value, currency).replace(/\s+/g, " ");
 }
 
 function formatTaxAmountLabel(name: string, rate: number): string {
@@ -189,6 +192,7 @@ export type CreditNotePDFData = {
   sale: {
     saleNumber?: number | null;
     invoiceNumber?: string | null;
+    currency?: string | null;
   } | null;
   amount: number;
   observations?: string | null;
@@ -543,7 +547,11 @@ async function generateCreditNoteQrDataUrl(
   }
 }
 
-function buildItemsRows(items: CreditNotePDFItem[]): string {
+function resolveDisplayCurrency(data: CreditNotePDFData): string {
+  return data.sale?.currency === "USD" ? "USD" : "ARS";
+}
+
+function buildItemsRows(items: CreditNotePDFItem[], currency?: string): string {
   return items
     .map(
       (item) => `
@@ -553,9 +561,9 @@ function buildItemsRows(items: CreditNotePDFItem[]): string {
           <td class="cell-detail">${displayValue(item.detail)}</td>
           <td class="cell-center">${displayValue(item.unitOfMeasure)}</td>
           <td class="cell-right">${formatQuantityValue(item.weightQuantity)}</td>
-          <td class="cell-right">${formatCompactCurrency(item.unitPrice)}</td>
+          <td class="cell-right">${formatCompactCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatPercentValue(item.discountPercent)}</td>
-          <td class="cell-right cell-amount">${formatCompactCurrency(item.totalAmount)}</td>
+          <td class="cell-right cell-amount">${formatCompactCurrency(item.totalAmount, currency)}</td>
         </tr>
       `
     )
@@ -588,12 +596,13 @@ function resolveDisplayTaxes(data: CreditNotePDFData): CreditNotePDFTax[] {
 
 function buildTaxesRows(data: CreditNotePDFData): string {
   const taxes = resolveDisplayTaxes(data);
+  const currency = resolveDisplayCurrency(data);
 
   if (taxes.length === 0) {
     return `
       <tr>
         <td>IVA</td>
-        <td class="cell-right">${formatCompactCurrency(0)}</td>
+        <td class="cell-right">${formatCompactCurrency(0, currency)}</td>
       </tr>
     `;
   }
@@ -603,7 +612,7 @@ function buildTaxesRows(data: CreditNotePDFData): string {
       (tax) => `
         <tr>
           <td>${escapeHtml(formatTaxAmountLabel(tax.name, tax.rate))}</td>
-          <td class="cell-right">${formatCompactCurrency(tax.taxAmount)}</td>
+          <td class="cell-right">${formatCompactCurrency(tax.taxAmount, currency)}</td>
         </tr>
       `
     )
@@ -617,6 +626,8 @@ function getItemPricingQuantity(item: CreditNotePDFItem): number {
 }
 
 function buildSourceDocumentsRows(data: CreditNotePDFData): string {
+  const currency = resolveDisplayCurrency(data);
+
   if (data.sourceDocuments.length === 0) {
     return `
       <tr>
@@ -638,7 +649,7 @@ function buildSourceDocumentsRows(data: CreditNotePDFData): string {
         <tr>
           <td>${displayValue(documentNumber)}</td>
           <td class="cell-center">${displayValue(source.arcaVoucherDate ? formatDateOnly(source.arcaVoucherDate) : null)}</td>
-          <td class="cell-right">${formatCompactCurrency(source.appliedAmount)}</td>
+          <td class="cell-right">${formatCompactCurrency(source.appliedAmount, currency)}</td>
         </tr>
       `;
     })
@@ -655,12 +666,14 @@ function buildSummaryHtml(data: CreditNotePDFData): string {
     0
   );
   const netTotal = data.items.reduce((sum, item) => sum + item.netAmount, 0);
+  const currency = resolveDisplayCurrency(data);
+  const amountLabel = currency === "USD" ? "Son dólares" : "Son pesos";
 
   return `
     <section class="closing-block">
       <div class="reason-row">
         <div class="reason-label">${displayValue(getReasonLabel(data))}</div>
-        <div class="amount-text">Son pesos ${formatCompactCurrency(data.amount)}</div>
+        <div class="amount-text">${amountLabel} ${formatCompactCurrency(data.amount, currency)}</div>
       </div>
 
       <div class="summary-grid">
@@ -669,15 +682,15 @@ function buildSummaryHtml(data: CreditNotePDFData): string {
             <tbody>
               <tr>
                 <td>Sub. Total</td>
-                <td class="cell-right">${formatCompactCurrency(grossSubtotal)}</td>
+                <td class="cell-right">${formatCompactCurrency(grossSubtotal, currency)}</td>
               </tr>
               <tr>
                 <td>Desc.</td>
-                <td class="cell-right">${formatCompactCurrency(discountTotal)}</td>
+                <td class="cell-right">${formatCompactCurrency(discountTotal, currency)}</td>
               </tr>
               <tr>
                 <td>Sub. Total 2</td>
-                <td class="cell-right">${formatCompactCurrency(netTotal)}</td>
+                <td class="cell-right">${formatCompactCurrency(netTotal, currency)}</td>
               </tr>
               ${buildTaxesRows(data)}
             </tbody>
@@ -686,7 +699,7 @@ function buildSummaryHtml(data: CreditNotePDFData): string {
 
         <div class="total-box">
           <span>Total</span>
-          <strong>${formatCompactCurrency(data.amount)}</strong>
+          <strong>${formatCompactCurrency(data.amount, currency)}</strong>
         </div>
       </div>
     </section>
@@ -817,7 +830,10 @@ function buildCustomerHtml(
   `;
 }
 
-function buildItemsTableHtml(page: CreditNotePDFPage): string {
+function buildItemsTableHtml(
+  page: CreditNotePDFPage,
+  currency: string
+): string {
   const title = page.isFirstPage
     ? "Detalle de productos"
     : `Detalle de productos - continuacion ${page.pageNumber}`;
@@ -839,7 +855,7 @@ function buildItemsTableHtml(page: CreditNotePDFPage): string {
           </tr>
         </thead>
         <tbody>
-          ${buildItemsRows(page.items)}
+          ${buildItemsRows(page.items, currency)}
         </tbody>
       </table>
     </section>
@@ -903,6 +919,7 @@ export async function generateCreditNoteHTML(
 ): Promise<string> {
   const pages = paginateItems(data.items);
   const qrDataUrl = await generateCreditNoteQrDataUrl(data);
+  const displayCurrency = resolveDisplayCurrency(data);
 
   const renderPage = (page: CreditNotePDFPage) => `
     <div class="document-copy">
@@ -914,7 +931,7 @@ export async function generateCreditNoteHTML(
         }
         ${page.isFirstPage ? buildHeaderHtml(data) : buildContinuationHeader(data, page)}
         ${page.isFirstPage ? buildCustomerHtml(data, qrDataUrl) : ""}
-        ${buildItemsTableHtml(page)}
+        ${buildItemsTableHtml(page, displayCurrency)}
         ${page.isLastPage ? buildAssociatedDocumentsHtml(data) : ""}
         ${page.isLastPage ? buildSummaryHtml(data) : ""}
         ${page.isLastPage ? buildNotesHtml(data) : ""}

@@ -1284,7 +1284,7 @@ async function fetchActiveProductsForOrg(
   const { data, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, brand, calculated_sale_price, cost_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
+      "id, sku, name, brand, calculated_sale_price, cost_price, currency, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
     )
     .eq("organization_id", orgId)
     .eq("is_active", true)
@@ -1562,6 +1562,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       }),
       price: product.calculated_sale_price ?? 0,
       costPrice: product.cost_price ?? null,
+      currency: product.currency ?? "ARS",
       unitOfMeasure,
       tracksStockUnits,
       totalQuantity,
@@ -3588,7 +3589,9 @@ export async function dispatchSaleFromOrders(
 ): Promise<void> {
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount, credit_days, user_id")
+    .select(
+      "id, status, customer_id, total_amount, credit_days, user_id, currency"
+    )
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -3624,6 +3627,7 @@ export async function dispatchSaleFromOrders(
     customerId: sale.customer_id,
     totalAmount: Number(sale.total_amount ?? 0),
     creditDays: sale.credit_days ?? null,
+    currency: sale.currency ?? "ARS",
     dispatchedAt,
   });
 }
@@ -4257,6 +4261,19 @@ export async function deriveSaleCreditSupplier(
   return supplierIds.size === 1 ? [...supplierIds][0] : null;
 }
 
+export async function resolveSaleCurrency(
+  supabase: SupabaseServerClient,
+  saleId: string
+): Promise<string> {
+  const { data } = await supabase
+    .from("sales_orders")
+    .select("currency")
+    .eq("id", saleId)
+    .maybeSingle();
+
+  return data?.currency === "USD" ? "USD" : "ARS";
+}
+
 export async function deriveSupplierNameFromSale(
   supabase: SupabaseServerClient,
   saleId: string
@@ -4294,7 +4311,7 @@ async function cancelSaleReceivable(params: {
 
   const { data: receivable } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance")
+    .select("id, total_amount, pending_balance, currency")
     .eq("sales_order_id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -4336,6 +4353,7 @@ async function cancelSaleReceivable(params: {
       supplier_id: creditSupplierId,
       amount: creditAmount,
       remaining_amount: creditAmount,
+      currency: receivable.currency === "USD" ? "USD" : "ARS",
       source_payment_id: null,
       notes: `Saldo a favor generado por cancelación de venta ${saleId}`,
     });
@@ -4444,7 +4462,7 @@ export async function dispatchSaleOrder(
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount"
+      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount, currency"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4496,6 +4514,7 @@ export async function dispatchSaleOrder(
     customerId: sale.customer_id,
     totalAmount: Number(sale.total_amount ?? 0),
     creditDays: sale.credit_days ?? null,
+    currency: sale.currency ?? "ARS",
     dispatchedAt,
   });
 
@@ -5414,6 +5433,7 @@ type ReceivableUpdateContext = {
   totalAmount: number;
   dueDate: string | null;
   customerId: string | null;
+  currency: string;
 };
 
 function resolveReceivableUpdateContext(params: {
@@ -5434,7 +5454,12 @@ function resolveReceivableUpdateContext(params: {
     (params.updatedSale.customer_id as string | null) ??
     null;
 
-  return { totalAmount, dueDate, customerId };
+  return {
+    totalAmount,
+    dueDate,
+    customerId,
+    currency: params.updatedSale.currency ?? "ARS",
+  };
 }
 
 function resolveReceivableStatus(
@@ -5510,6 +5535,7 @@ async function createCustomerCreditFromSaleOverpayment(params: {
   saleId: string;
   customerId: string;
   amount: number;
+  currency: string;
 }): Promise<void> {
   const creditAmount = truncateMoney(Math.max(0, params.amount));
   if (creditAmount <= 0) {
@@ -5530,6 +5556,7 @@ async function createCustomerCreditFromSaleOverpayment(params: {
     supplier_id: creditSupplierId,
     amount: creditAmount,
     remaining_amount: creditAmount,
+    currency: params.currency === "USD" ? "USD" : "ARS",
     source_payment_id: null,
     notes: `Saldo a favor generado por devolución/edición de venta ${params.saleId}`,
   });
@@ -5616,6 +5643,7 @@ async function updateExistingReceivable(params: {
       saleId: params.saleId,
       customerId: params.context.customerId,
       amount: overpaidAmount,
+      currency: params.context.currency,
     });
   }
 }
@@ -5636,6 +5664,7 @@ async function insertReceivableIfNeeded(params: {
     sales_order_id: params.saleId,
     total_amount: truncateMoney(params.context.totalAmount),
     pending_balance: truncateMoney(params.context.totalAmount),
+    currency: params.context.currency ?? "ARS",
     due_date: params.context.dueDate,
     status:
       "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
@@ -5654,6 +5683,7 @@ async function updateReceivableForDispatchedSale(params: {
   totalAmount: number;
   creditDays: number | null;
   dispatchedAt: string;
+  currency?: string;
 }): Promise<void> {
   const dueDate = computeReceivableDueDateFromDispatch(
     params.dispatchedAt,
@@ -5663,6 +5693,7 @@ async function updateReceivableForDispatchedSale(params: {
     totalAmount: truncateMoney(params.totalAmount),
     dueDate,
     customerId: params.customerId,
+    currency: params.currency ?? "ARS",
   };
   const receivable = await fetchReceivableRecord({
     supabase: params.supabase,

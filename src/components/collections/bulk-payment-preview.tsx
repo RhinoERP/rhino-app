@@ -8,6 +8,10 @@ type BulkPaymentPreviewProps = {
   preview: BulkPaymentDistribution[] | undefined;
   isLoading: boolean;
   totalAmount: number;
+  /** Facturas en USD omitidas de la distribución (se cobran con el pago individual). */
+  excludedUsdCount?: number;
+  /** true cuando el cliente tiene deudas pendientes pero todas son en USD. */
+  usdOnly?: boolean;
 };
 
 function getAccountLabel(dist: BulkPaymentDistribution) {
@@ -111,6 +115,8 @@ export function BulkPaymentPreview({
   preview,
   isLoading,
   totalAmount,
+  excludedUsdCount = 0,
+  usdOnly = false,
 }: BulkPaymentPreviewProps) {
   const appliedAmount =
     preview?.reduce((sum, dist) => sum + dist.appliedAmount, 0) ?? 0;
@@ -120,6 +126,18 @@ export function BulkPaymentPreview({
     return (
       <div className="flex justify-center py-8">
         <Loader2Icon className="size-6 animate-spin" />
+      </div>
+    );
+  }
+
+  if (usdOnly) {
+    return (
+      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+        <p className="text-sm text-yellow-800">
+          Este cliente tiene deudas solo en USD. El pago masivo funciona
+          únicamente con deudas en ARS. Usá el pago individual para esas
+          facturas.
+        </p>
       </div>
     );
   }
@@ -136,6 +154,14 @@ export function BulkPaymentPreview({
 
   return (
     <div className="space-y-2">
+      {excludedUsdCount > 0 ? (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+          <p className="text-sm text-yellow-800">
+            Se omitieron {excludedUsdCount} factura(s) en USD. Usá el pago
+            individual para esas facturas.
+          </p>
+        </div>
+      ) : null}
       {preview.map((dist, index) => (
         <PreviewItem dist={dist} index={index} key={dist.accountId} />
       ))}

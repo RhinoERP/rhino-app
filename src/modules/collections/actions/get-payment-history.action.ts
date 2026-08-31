@@ -9,6 +9,9 @@ import type { Database } from "@/types/supabase";
 export type PaymentHistoryEntry = {
   id: string;
   amount: number;
+  currency?: string | null;
+  exchange_rate?: number | null;
+  amount_ars?: number | null;
   payment_method: Database["public"]["Enums"]["payment_method_type"];
   payment_date: string;
   reference_number: string | null;
@@ -58,6 +61,14 @@ const readNullableString = (
   key: string
 ): string | null => (typeof row[key] === "string" ? row[key] : null);
 
+const readNullableNumber = (
+  row: Record<string, unknown>,
+  key: string
+): number | null =>
+  typeof row[key] === "number" && Number.isFinite(row[key])
+    ? Number(row[key])
+    : null;
+
 function normalizePaymentRows(
   rows: Record<string, unknown>[] | null
 ): PaymentHistoryEntry[] {
@@ -68,6 +79,9 @@ function normalizePaymentRows(
   return rows.map((row) => ({
     id: String(row.id),
     amount: truncateMoney(Number(row.amount) || 0),
+    currency: readNullableString(row, "currency"),
+    exchange_rate: readNullableNumber(row, "exchange_rate"),
+    amount_ars: readNullableNumber(row, "amount_ars"),
     payment_method: normalizePaymentMethod(
       typeof row.payment_method === "string" ? row.payment_method : null
     ),
@@ -107,7 +121,7 @@ export async function getPaymentHistoryAction(
         await supabase
           .from("receivable_payments")
           .select(
-            "id, amount, payment_method, payment_date, reference_number, notes, created_at, receipt_number, receipt_pdf_url"
+            "id, amount, currency, exchange_rate, amount_ars, payment_method, payment_date, reference_number, notes, created_at, receipt_number, receipt_pdf_url"
           )
           .eq("organization_id", orgId)
           .eq("account_receivable_id", input.accountId)
@@ -129,7 +143,7 @@ export async function getPaymentHistoryAction(
     const { data: payablePayments, error: payableError } = await supabase
       .from("payable_payments" as never)
       .select(
-        "id, amount, payment_method, payment_date, reference_number, notes, created_at, invoice_pdf_url, invoice_filename"
+        "id, amount, currency, exchange_rate, amount_ars, payment_method, payment_date, reference_number, notes, created_at, invoice_pdf_url, invoice_filename"
       )
       .eq("organization_id", orgId)
       .eq("account_payable_id", input.accountId)

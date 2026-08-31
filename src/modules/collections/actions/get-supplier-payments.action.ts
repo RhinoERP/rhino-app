@@ -10,6 +10,7 @@ export type SupplierPaymentEntry = {
   id: string;
   account_payable_id: string | null;
   amount: number;
+  currency?: string;
   payment_method: string;
   payment_date: string;
   reference_number: string | null;
@@ -66,6 +67,13 @@ const parsePurchaseNumber = (
 const getAccountFromRow = (row: Record<string, unknown>) =>
   row.accounts_payable as Record<string, unknown> | null;
 
+const getCurrencyFromAccount = (
+  account: Record<string, unknown> | null
+): string | undefined => {
+  const currency = account?.currency;
+  return typeof currency === "string" ? currency : undefined;
+};
+
 const getOrderFromAccount = (account: Record<string, unknown> | null) => {
   const orderField = account?.purchase_order as
     | Record<string, unknown>
@@ -88,6 +96,7 @@ const normalizePaymentRow = (
         ? row.account_payable_id
         : null,
     amount: truncateMoney(Number(row.amount) || 0),
+    currency: getCurrencyFromAccount(account),
     payment_method: normalizePaymentMethod(
       typeof row.payment_method === "string" ? row.payment_method : null
     ),
@@ -148,6 +157,7 @@ export async function getSupplierPaymentsAction(
         accounts_payable!inner(
           supplier_id,
           purchase_order_id,
+          currency,
           purchase_order:purchase_orders(purchase_number)
         )
       `

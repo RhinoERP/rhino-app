@@ -25,6 +25,7 @@ export type PriceListItem = {
   product_id: string;
   sku: string;
   price: number;
+  currency?: string;
   purchase_price?: number;
   product_margin?: number | null;
   calculated_sale_price?: number | null;
@@ -40,6 +41,7 @@ export type PriceListWithItems = PriceList & {
 export type ImportPriceListItem = {
   sku: string;
   price: number;
+  currency?: string;
 };
 
 export type ImportPriceListResult = {

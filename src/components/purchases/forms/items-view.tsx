@@ -70,6 +70,7 @@ function VariantItemCard({
   index,
   product,
   variantMeta,
+  currency = "ARS",
   onRemoveItem,
   onUpdateUnitCost,
   onVariantStockChange,
@@ -79,6 +80,7 @@ function VariantItemCard({
   index: number;
   product: ProductWithPrice | undefined;
   variantMeta: VariantMeta | undefined;
+  currency?: string;
   onRemoveItem: (index: number) => void;
   onUpdateUnitCost: (index: number, cost: number) => void;
   onVariantStockChange: (
@@ -199,7 +201,9 @@ function VariantItemCard({
 
         <div className="flex flex-col items-start gap-1">
           <span className="text-muted-foreground text-xs">Subtotal</span>
-          <p className="font-medium">{formatCurrency(item.subtotal)}</p>
+          <p className="font-medium">
+            {formatCurrency(item.subtotal, currency)}
+          </p>
         </div>
       </div>
     </div>
@@ -210,6 +214,7 @@ function NonVariantItemRow({
   item,
   index,
   product,
+  currency = "ARS",
   onRemoveItem,
   onUpdateQuantity,
   onUpdateUnitCost,
@@ -219,6 +224,7 @@ function NonVariantItemRow({
   item: PurchaseItem;
   index: number;
   product: ProductWithPrice | undefined;
+  currency?: string;
   onRemoveItem: (index: number) => void;
   onUpdateQuantity: (index: number, quantity: number) => void;
   onUpdateUnitCost: (index: number, cost: number) => void;
@@ -359,7 +365,7 @@ function NonVariantItemRow({
 
       <div className="flex flex-col items-start gap-1 sm:items-end">
         <span className="text-muted-foreground text-xs">Subtotal</span>
-        <p className="font-medium">{formatCurrency(item.subtotal)}</p>
+        <p className="font-medium">{formatCurrency(item.subtotal, currency)}</p>
       </div>
 
       <div className="flex items-center justify-start sm:justify-end">
@@ -389,6 +395,7 @@ type RenderItemProps = {
   item: PurchaseItem;
   index: number;
   products: ProductWithPrice[];
+  currency?: string;
   variantMetaMap: Record<string, VariantMeta>;
   onRemoveItem: (index: number) => void;
   handleUpdateDiscount: (index: number, percent: number) => void;
@@ -408,6 +415,7 @@ function renderPurchaseItem(props: RenderItemProps) {
     item,
     index,
     products,
+    currency = "ARS",
     variantMetaMap,
     onRemoveItem,
     handleUpdateDiscount,
@@ -423,6 +431,7 @@ function renderPurchaseItem(props: RenderItemProps) {
   if (isVariantItem) {
     return (
       <VariantItemCard
+        currency={currency}
         index={index}
         item={item}
         key={`${item.product_id}-${index}`}
@@ -438,6 +447,7 @@ function renderPurchaseItem(props: RenderItemProps) {
 
   return (
     <NonVariantItemRow
+      currency={currency}
       index={index}
       item={item}
       key={`${item.product_id}-${index}`}
@@ -454,6 +464,7 @@ function renderPurchaseItem(props: RenderItemProps) {
 type ItemsViewProps = {
   items: PurchaseItem[];
   products: ProductWithPrice[];
+  currency?: string;
   variantMetaMap: Record<string, VariantMeta>;
   onRemoveItem: (index: number) => void;
   handleUpdateDiscount: (index: number, percent: number) => void;
@@ -471,6 +482,7 @@ type ItemsViewProps = {
 export function ItemsView({
   items,
   products,
+  currency = "ARS",
   variantMetaMap,
   onRemoveItem,
   handleUpdateDiscount,
@@ -502,6 +514,7 @@ export function ItemsView({
             item,
             index,
             products,
+            currency,
             variantMetaMap,
             onRemoveItem,
             handleUpdateDiscount,

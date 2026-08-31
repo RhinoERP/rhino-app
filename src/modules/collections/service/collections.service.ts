@@ -7,6 +7,7 @@ import type { Database } from "@/types/supabase";
 import type {
   BulkPaymentDistribution,
   BulkPaymentInput,
+  BulkPaymentPreviewResponse,
   BulkPaymentResult,
   CollectionAccountStatus,
   CollectionExportItem,
@@ -115,6 +116,7 @@ type PayableRow = {
   purchase_order_id: string;
   total_amount: number;
   pending_balance: number;
+  currency?: string | null;
   due_date: string;
   status?: string | null;
   created_at?: string | null;
@@ -353,6 +355,7 @@ function mapPayableAccount(
     purchase_order_id: row.purchase_order_id,
     total_amount: total,
     pending_balance: pending,
+    currency: row.currency ?? "ARS",
     due_date: row.due_date,
     status,
     created_at: row.created_at,
@@ -1001,6 +1004,7 @@ function mapReceivableAccount(
     sales_order_id: row.sales_order_id,
     total_amount: total,
     pending_balance: pending,
+    currency: row.currency ?? "ARS",
     due_date: row.due_date,
     status,
     created_at: row.created_at,
@@ -1148,6 +1152,7 @@ const PAYABLES_SELECT = `
   purchase_order_id,
   total_amount,
   pending_balance,
+  currency,
   due_date,
   status,
   created_at,
@@ -1641,6 +1646,9 @@ function insertBulkPayments(
         organization_id: orgId,
         account_receivable_id: p.account_receivable_id,
         amount: truncateMoney(p.amount),
+        currency: "ARS",
+        exchange_rate: null,
+        amount_ars: truncateMoney(p.amount),
         payment_method: paymentMethodValue,
         payment_date: paymentDateValue,
         reference_number: sanitizedReference,
@@ -1733,6 +1741,7 @@ async function saveCreditBalance(options: {
     customer_id: customerId,
     amount: truncateMoney(creditBalance),
     remaining_amount: truncateMoney(creditBalance),
+    currency: "ARS",
     source_payment_id: null,
     notes: creditNotes,
     supplier_id: supplierId ?? null,
@@ -1787,6 +1796,7 @@ export async function processBulkPayment(
       total_amount,
       pending_balance,
       due_date,
+      currency,
       sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
@@ -1816,14 +1826,28 @@ export async function processBulkPayment(
     };
   }
 
-  // Calculate distribution (FIFO)
+  const arsAccounts = validPendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+  const excludedUsdCount = validPendingAccounts.length - arsAccounts.length;
+
+  if (arsAccounts.length === 0) {
+    return {
+      success: false,
+      error:
+        "Este cliente tiene deudas solo en USD. Usá el pago individual para esas facturas.",
+      code: "usd_only",
+    };
+  }
+
+  // Calculate distribution (FIFO) solo sobre cuentas ARS
   const {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateDistributions(validPendingAccounts, normalizedTotalAmount);
+  } = calculateDistributions(arsAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -1910,6 +1934,7 @@ export async function processBulkPayment(
     creditBalance,
     affectedAccounts: distributions.length,
     distributions,
+    excludedUsdCount: excludedUsdCount > 0 ? excludedUsdCount : undefined,
   };
 }
 
@@ -1917,11 +1942,11 @@ export async function calculateBulkPaymentDistribution(
   orgSlug: string,
   customerId: string,
   totalAmount: number
-): Promise<BulkPaymentDistribution[]> {
+): Promise<BulkPaymentPreviewResponse> {
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
   if (normalizedTotalAmount <= 0) {
-    return [];
+    return { distributions: [], excludedUsdCount: 0, usdOnly: false };
   }
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -1939,6 +1964,7 @@ export async function calculateBulkPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
+      currency,
       sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
@@ -1958,13 +1984,19 @@ export async function calculateBulkPaymentDistribution(
   );
 
   if (validPendingAccounts.length === 0) {
-    return [];
+    return { distributions: [], excludedUsdCount: 0, usdOnly: false };
   }
+
+  const arsAccounts = validPendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+  const excludedUsdCount = validPendingAccounts.length - arsAccounts.length;
+  const usdOnly = arsAccounts.length === 0;
 
   let remainingAmount = normalizedTotalAmount;
   const distributions: BulkPaymentDistribution[] = [];
 
-  for (const account of validPendingAccounts) {
+  for (const account of arsAccounts) {
     if (remainingAmount <= 0) {
       break;
     }
@@ -1997,7 +2029,7 @@ export async function calculateBulkPaymentDistribution(
     remainingAmount = truncateMoney(remainingAmount - appliedAmount);
   }
 
-  return distributions;
+  return { distributions, excludedUsdCount, usdOnly };
 }
 
 /**
@@ -2921,7 +2953,7 @@ export async function getReceivablesMetrics(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return { pendingReceivables: 0, collected: 0, overdueReceivables: 0 };
+    return { byCurrency: [] };
   }
 
   const accessContext = await resolveCollectionsAccessContext(
@@ -2936,6 +2968,7 @@ export async function getReceivablesMetrics(
       id,
       pending_balance,
       total_amount,
+      currency,
       due_date,
       sale:sales_orders(status, user_id)
     `
@@ -2945,7 +2978,7 @@ export async function getReceivablesMetrics(
 
   if (error) {
     console.error("Error fetching receivables metrics:", error.message);
-    return { pendingReceivables: 0, collected: 0, overdueReceivables: 0 };
+    return { byCurrency: [] };
   }
 
   const visible = (lightRows ?? []).filter(
@@ -2958,28 +2991,43 @@ export async function getReceivablesMetrics(
   );
 
   const today = new Date();
-  let pendingReceivables = 0;
-  let collected = 0;
-  let overdueReceivables = 0;
+  const byCurrency = new Map<
+    string,
+    {
+      pendingReceivables: number;
+      collected: number;
+      overdueReceivables: number;
+    }
+  >();
 
   for (const r of visible) {
+    const currency = r.currency ?? "ARS";
+    const bucket = byCurrency.get(currency) ?? {
+      pendingReceivables: 0,
+      collected: 0,
+      overdueReceivables: 0,
+    };
     const total = truncateMoney(Number(r.total_amount ?? 0));
     const pending = truncateMoney(Math.max(0, Number(r.pending_balance ?? 0)));
-    pendingReceivables += pending;
-    collected += total - pending;
+    bucket.pendingReceivables += pending;
+    bucket.collected += total - pending;
 
     if (pending > 0 && r.due_date) {
       const due = new Date(r.due_date.split("T")[0]);
       if (due.getTime() < today.getTime()) {
-        overdueReceivables += pending;
+        bucket.overdueReceivables += pending;
       }
     }
+    byCurrency.set(currency, bucket);
   }
 
   return {
-    pendingReceivables: truncateMoney(pendingReceivables),
-    collected,
-    overdueReceivables: truncateMoney(overdueReceivables),
+    byCurrency: Array.from(byCurrency.entries()).map(([currency, b]) => ({
+      currency,
+      pendingReceivables: truncateMoney(b.pendingReceivables),
+      collected: b.collected,
+      overdueReceivables: truncateMoney(b.overdueReceivables),
+    })),
   };
 }
 
@@ -2990,7 +3038,7 @@ export async function getPayablesMetrics(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return { pendingPayables: 0, overduePayables: 0 };
+    return { byCurrency: [] };
   }
 
   const accessContext = await resolveCollectionsAccessContext(
@@ -2999,41 +3047,53 @@ export async function getPayablesMetrics(
   );
 
   if (accessContext.scope !== "all") {
-    return { pendingPayables: 0, overduePayables: 0 };
+    return { byCurrency: [] };
   }
 
   const { data: lightRows, error } = await supabase
     .from("accounts_payable" as never)
-    .select("id, pending_balance, due_date")
+    .select("id, pending_balance, currency, due_date")
     .eq("organization_id", org.id);
 
   if (error) {
     console.error("Error fetching payables metrics:", error.message);
-    return { pendingPayables: 0, overduePayables: 0 };
+    return { byCurrency: [] };
   }
 
   const today = new Date();
-  let pendingPayables = 0;
-  let overduePayables = 0;
+  const byCurrency = new Map<
+    string,
+    { pendingPayables: number; overduePayables: number }
+  >();
 
   for (const r of (lightRows ?? []) as Array<{
     pending_balance: number;
+    currency?: string | null;
     due_date: string;
   }>) {
+    const currency = r.currency ?? "ARS";
+    const bucket = byCurrency.get(currency) ?? {
+      pendingPayables: 0,
+      overduePayables: 0,
+    };
     const pending = truncateMoney(Math.max(0, Number(r.pending_balance ?? 0)));
-    pendingPayables += pending;
+    bucket.pendingPayables += pending;
 
     if (pending > 0 && r.due_date) {
       const due = new Date(r.due_date.split("T")[0]);
       if (due.getTime() < today.getTime()) {
-        overduePayables += pending;
+        bucket.overduePayables += pending;
       }
     }
+    byCurrency.set(currency, bucket);
   }
 
   return {
-    pendingPayables: truncateMoney(pendingPayables),
-    overduePayables: truncateMoney(overduePayables),
+    byCurrency: Array.from(byCurrency.entries()).map(([currency, b]) => ({
+      currency,
+      pendingPayables: truncateMoney(b.pendingPayables),
+      overduePayables: truncateMoney(b.overduePayables),
+    })),
   };
 }
 

@@ -306,6 +306,7 @@ export function ReceivablesTable({
           accountId={directPaymentAccount.id}
           counterpartyId={directPaymentAccount.customer.id}
           counterpartyName={directPaymentAccount.customer.business_name}
+          currency={directPaymentAccount.currency}
           dueDate={directPaymentAccount.due_date}
           onOpenChange={(open) => {
             if (!open) {

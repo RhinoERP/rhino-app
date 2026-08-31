@@ -2,6 +2,13 @@
 # Exit on any error
 set -e
 
+# Skip during merge/rebase: git stash dentro del hook borra MERGE_HEAD
+if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] \
+   || [ -d "$(git rev-parse --git-dir)/rebase-merge" ] \
+   || [ -d "$(git rev-parse --git-dir)/rebase-apply" ]; then
+  exit 0
+fi
+
 # Check if there are any staged files
 if [ -z "$(git diff --cached --name-only)" ]; then
   echo "No staged files to format"

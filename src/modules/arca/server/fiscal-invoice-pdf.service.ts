@@ -21,6 +21,7 @@ import {
   buildArcaQrPayload as buildSharedArcaQrPayload,
 } from "../arca-qr";
 import { ArcaValidationError } from "../errors";
+import { readAuthorizedFiscalCurrency } from "../fiscal-currency";
 import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
 import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
 
@@ -217,6 +218,9 @@ function buildArcaQrPayload(params: {
   organization: OrganizationSummary;
   request: StoredWsfeRequest | null;
 }): ArcaQrPayload {
+  const fiscalCurrency = readAuthorizedFiscalCurrency(
+    params.sale.arca_request_json
+  );
   const issuerCuit = Number(
     (params.organization.cuit ?? "").replace(/\D/g, "")
   );
@@ -251,8 +255,8 @@ function buildArcaQrPayload(params: {
     voucherTypeCode: params.sale.arca_voucher_type_code,
     voucherNumber: params.sale.arca_voucher_number,
     totalAmount: params.sale.total_amount,
-    currency: params.request?.MonId ?? "PES",
-    currencyRate: params.request?.MonCotiz ?? 1,
+    currency: fiscalCurrency.code,
+    currencyRate: fiscalCurrency.rate,
     receiverDocumentType: params.request?.DocTipo ?? null,
     receiverDocumentNumber: params.request?.DocNro ?? null,
     authorizationCode: params.sale.arca_cae,
@@ -306,7 +310,10 @@ function paginateInvoiceItems(
   }));
 }
 
-function generateInvoiceItemsRows(items: SalesOrderItemDetail[]): string {
+function generateInvoiceItemsRows(
+  items: SalesOrderItemDetail[],
+  currency: string
+): string {
   return items
     .map((item) => {
       const quantityLabel = formatQuantityValue(item.quantity);
@@ -325,21 +332,21 @@ function generateInvoiceItemsRows(items: SalesOrderItemDetail[]): string {
           <td class="cell-right">${quantityLabel}</td>
           <td class="cell-center">${displayValue(item.unitOfMeasure)}</td>
           <td class="cell-right">${weightLabel ?? "—"}</td>
-          <td class="cell-right">${formatCurrency(item.unitPrice)}</td>
+          <td class="cell-right">${formatCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatDiscountPercent(item.discountPercent)}</td>
-          <td class="cell-right cell-amount">${formatCurrency(item.subtotal)}</td>
+          <td class="cell-right cell-amount">${formatCurrency(item.subtotal, currency)}</td>
         </tr>
       `;
     })
     .join("");
 }
 
-function generateTaxesRows(sale: SalesOrderDetail): string {
+function generateTaxesRows(sale: SalesOrderDetail, currency: string): string {
   if (sale.taxes.length === 0) {
     return `
       <tr>
         <td>Impuestos</td>
-        <td class="cell-right">${formatCurrency(0)}</td>
+        <td class="cell-right">${formatCurrency(0, currency)}</td>
       </tr>
     `;
   }
@@ -349,14 +356,17 @@ function generateTaxesRows(sale: SalesOrderDetail): string {
       (tax) => `
         <tr>
           <td>${escapeHtml(formatTaxAmountLabel(tax.name, tax.rate))}</td>
-          <td class="cell-right">${formatCurrency(tax.taxAmount)}</td>
+          <td class="cell-right">${formatCurrency(tax.taxAmount, currency)}</td>
         </tr>
       `
     )
     .join("");
 }
 
-function generateInvoiceItemsTable(page: FiscalInvoicePage): string {
+function generateInvoiceItemsTable(
+  page: FiscalInvoicePage,
+  currency: string
+): string {
   const title = page.isFirstPage
     ? "Detalle de productos"
     : `Detalle de productos - continuación ${page.pageNumber}`;
@@ -379,7 +389,7 @@ function generateInvoiceItemsTable(page: FiscalInvoicePage): string {
             </tr>
           </thead>
           <tbody>
-            ${generateInvoiceItemsRows(page.items)}
+            ${generateInvoiceItemsRows(page.items, currency)}
           </tbody>
         </table>
       </div>
@@ -401,6 +411,8 @@ async function generateFiscalInvoiceHtml(params: {
   }
 
   const request = extractWsfeRequest(sale.arca_request_json);
+  const fiscalCurrency = readAuthorizedFiscalCurrency(sale.arca_request_json);
+  const displayCurrency = fiscalCurrency.code === "DOL" ? "USD" : "ARS";
   const qrPayload = buildArcaQrPayload({
     sale,
     organization,
@@ -487,7 +499,7 @@ async function generateFiscalInvoiceHtml(params: {
             <div class="voucher-row"><span>Fecha de emisión</span><strong>${formatDateOnly(issueDate)}</strong></div>
             <div class="voucher-row"><span>Fecha de venta</span><strong>${formatDateOnly(sale.sale_date)}</strong></div>
             <div class="voucher-row"><span>Venta interna</span><strong>#${sale.sale_number ?? "—"}</strong></div>
-            <div class="voucher-row"><span>Moneda</span><strong>ARS</strong></div>
+            <div class="voucher-row"><span>Moneda</span><strong>${displayCurrency}</strong></div>
           </div>
         </section>
       </header>
@@ -571,22 +583,22 @@ async function generateFiscalInvoiceHtml(params: {
               <tbody>
                 <tr>
                   <td>Importe neto gravado</td>
-                  <td class="cell-right">${formatCurrency(sale.sub_total ?? 0)}</td>
+                  <td class="cell-right">${formatCurrency(sale.sub_total ?? 0, displayCurrency)}</td>
                 </tr>
                 ${
                   sale.global_discount_amount && sale.global_discount_amount > 0
                     ? `
                 <tr>
                   <td>Bonificación global</td>
-                  <td class="cell-right">-${formatCurrency(sale.global_discount_amount)}</td>
+                  <td class="cell-right">-${formatCurrency(sale.global_discount_amount, displayCurrency)}</td>
                 </tr>
                 `
                     : ""
                 }
-                ${generateTaxesRows(sale)}
+                ${generateTaxesRows(sale, displayCurrency)}
                 <tr>
                   <td>Importe total</td>
-                  <td class="cell-right">${formatCurrency(sale.total_amount)}</td>
+                  <td class="cell-right">${formatCurrency(sale.total_amount, displayCurrency)}</td>
                 </tr>
               </tbody>
             </table>
@@ -633,7 +645,7 @@ async function generateFiscalInvoiceHtml(params: {
       ${issuerLogoUrl ? `<img src="${escapeHtml(issuerLogoUrl)}" alt="" aria-hidden="true" class="watermark" />` : ""}
       ${page.isFirstPage ? renderFullHeader() : renderContinuationHeader(page)}
       ${page.isFirstPage ? renderCustomerDetails() : ""}
-      ${generateInvoiceItemsTable(page)}
+      ${generateInvoiceItemsTable(page, displayCurrency)}
       ${page.isLastPage ? renderSummary() : ""}
       ${renderFooter(page)}
     </div>

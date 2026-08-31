@@ -36,6 +36,7 @@ export async function updateQuoteAction(
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
+        currency: values.currency,
         unitPrice: item.unitPrice,
         variants: item.variants.map((v) => ({
           talle: v.talle,

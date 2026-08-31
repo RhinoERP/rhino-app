@@ -2614,6 +2614,7 @@ export function SaleDetail({
         <SalesAdvanceCard
           canIssueBalance={isConfirmedSale}
           canManage={canManageSale}
+          currency={sale.currency}
           orgSlug={orgSlug}
           saleId={sale.id}
           total={sale.total_amount}
@@ -3836,7 +3837,8 @@ export function SaleDetail({
                           ? truncateMoney(
                               summaryTotals.subtotal + itemsExtrasTotal
                             )
-                          : summaryTotals.subtotal
+                          : summaryTotals.subtotal,
+                        sale.currency
                       )}
                     </span>
                   </div>
@@ -3850,7 +3852,7 @@ export function SaleDetail({
                           totals.adjustmentsTotal < 0 ? "text-destructive" : ""
                         )}
                       >
-                        {formatCurrency(totals.adjustmentsTotal)}
+                        {formatCurrency(totals.adjustmentsTotal, sale.currency)}
                       </span>
                     </div>
                   ) : null}
@@ -3866,20 +3868,24 @@ export function SaleDetail({
                       summaryTotals.globalDiscountAmount > 0 ? (
                         <span className="text-muted-foreground text-xs">
                           {summaryTotals.lineDiscountAmount > 0
-                            ? `Prod: -${formatCurrency(summaryTotals.lineDiscountAmount)}`
+                            ? `Prod: -${formatCurrency(summaryTotals.lineDiscountAmount, sale.currency)}`
                             : ""}
                           {summaryTotals.lineDiscountAmount > 0 &&
                           summaryTotals.globalDiscountAmount > 0
                             ? " · "
                             : ""}
                           {summaryTotals.globalDiscountAmount > 0
-                            ? `Orden: -${formatCurrency(summaryTotals.globalDiscountAmount)}`
+                            ? `Orden: -${formatCurrency(summaryTotals.globalDiscountAmount, sale.currency)}`
                             : ""}
                         </span>
                       ) : null}
                     </div>
                     <span className="font-medium">
-                      -{formatCurrency(summaryTotals.totalDiscountAmount)}
+                      -
+                      {formatCurrency(
+                        summaryTotals.totalDiscountAmount,
+                        sale.currency
+                      )}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -3887,7 +3893,10 @@ export function SaleDetail({
                       Subtotal con desc.
                     </span>
                     <span>
-                      {formatCurrency(summaryTotals.discountedSubtotal)}
+                      {formatCurrency(
+                        summaryTotals.discountedSubtotal,
+                        sale.currency
+                      )}
                     </span>
                   </div>
                   {summaryTotals.taxDetails.map(({ tax, amount }) => (
@@ -3898,12 +3907,14 @@ export function SaleDetail({
                       <span className="text-muted-foreground">
                         {tax.name} ({tax.rate}%)
                       </span>
-                      <span>{formatCurrency(amount)}</span>
+                      <span>{formatCurrency(amount, sale.currency)}</span>
                     </div>
                   ))}
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>
-                    <span>{formatCurrency(summaryTotals.total)}</span>
+                    <span>
+                      {formatCurrency(summaryTotals.total, sale.currency)}
+                    </span>
                   </div>
                   <p className="text-muted-foreground text-xs">
                     Vence el {formatDateOnly(dueDate)}
@@ -3998,7 +4009,10 @@ export function SaleDetail({
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Total</span>
                     <span>
-                      {formatCurrency(sale.receivable.total_amount ?? 0)}
+                      {formatCurrency(
+                        sale.receivable.total_amount ?? 0,
+                        sale.currency
+                      )}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -4011,7 +4025,10 @@ export function SaleDetail({
                           : "text-orange-600"
                       )}
                     >
-                      {formatCurrency(sale.receivable.pending_balance ?? 0)}
+                      {formatCurrency(
+                        sale.receivable.pending_balance ?? 0,
+                        sale.currency
+                      )}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -4022,7 +4039,8 @@ export function SaleDetail({
                           0,
                           (sale.receivable.total_amount ?? 0) -
                             (sale.receivable.pending_balance ?? 0)
-                        )
+                        ),
+                        sale.currency
                       )}
                     </span>
                   </div>

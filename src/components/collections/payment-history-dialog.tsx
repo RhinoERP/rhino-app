@@ -52,7 +52,34 @@ type PaymentHistoryDialogProps = {
   accountId: string;
   type: "receivable" | "payable";
   totalAmount: number;
+  currency?: string;
 };
+
+function PaymentAmountLabel({
+  payment,
+  currency,
+}: {
+  payment: PaymentHistoryEntry;
+  currency: string;
+}) {
+  return (
+    <div>
+      <p className="font-semibold">
+        {formatCurrency(payment.amount, currency)}
+      </p>
+      {payment.currency === "USD" &&
+      payment.amount_ars !== null &&
+      payment.amount_ars !== undefined ? (
+        <p className="text-muted-foreground text-xs">
+          {formatCurrency(payment.amount_ars, "ARS")}
+          {payment.exchange_rate
+            ? ` (TC ${payment.exchange_rate.toFixed(2)})`
+            : ""}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function PaymentHistoryDialog({
   trigger,
@@ -65,6 +92,7 @@ export function PaymentHistoryDialog({
   accountId,
   type,
   totalAmount,
+  currency = "ARS",
 }: PaymentHistoryDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -199,7 +227,7 @@ export function PaymentHistoryDialog({
             <p>
               Saldo pendiente:{" "}
               <span className="font-medium">
-                {formatCurrency(pendingBalance)}
+                {formatCurrency(pendingBalance, currency)}
               </span>
             </p>
           ) : null}
@@ -248,9 +276,7 @@ export function PaymentHistoryDialog({
                 key={payment.id}
               >
                 <div className="flex items-center justify-between gap-4">
-                  <p className="font-semibold">
-                    {formatCurrency(payment.amount)}
-                  </p>
+                  <PaymentAmountLabel currency={currency} payment={payment} />
                   <p className="text-muted-foreground text-xs">
                     {formatDateOnly(payment.payment_date)}
                   </p>
@@ -275,6 +301,7 @@ export function PaymentHistoryDialog({
                       accountId={accountId}
                       counterpartyId={counterpartyId}
                       counterpartyName={counterpartyName}
+                      currency={currency}
                       dueDate={dueDate}
                       existingPayment={payment}
                       onCompleted={() => {
@@ -338,7 +365,9 @@ export function PaymentHistoryDialog({
             <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
             <AlertDialogDescription>
               Esta acción no se puede deshacer. El pago de{" "}
-              {paymentToDelete ? formatCurrency(paymentToDelete.amount) : ""}{" "}
+              {paymentToDelete
+                ? formatCurrency(paymentToDelete.amount, currency)
+                : ""}{" "}
               será eliminado y el saldo pendiente se actualizará
               automáticamente.
             </AlertDialogDescription>

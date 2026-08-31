@@ -16,6 +16,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { formatCurrency } from "@/lib/format";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 
 type SalesMobileCardProps = {
@@ -98,11 +99,7 @@ function SalesMobileCard({ sale, orgSlug }: SalesMobileCardProps) {
           <div className="rounded-md bg-primary/10 px-3 py-2">
             <div className="text-muted-foreground text-xs">Monto Total</div>
             <div className="font-bold text-primary text-xl tabular-nums">
-              $
-              {(sale.total_amount ?? 0).toLocaleString("es-AR", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+              {formatCurrency(sale.total_amount ?? 0, sale.currency)}
             </div>
           </div>
 

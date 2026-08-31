@@ -360,6 +360,7 @@ async function ensureReceivable(params: {
   customerId: string;
   amount: number;
   dueDate: string;
+  currency?: string;
 }) {
   const { data: existing, error: existingError } = await params.supabase
     .from("accounts_receivable")
@@ -382,6 +383,7 @@ async function ensureReceivable(params: {
       sales_order_id: params.saleId,
       total_amount: params.amount,
       pending_balance: params.amount,
+      currency: params.currency ?? "ARS",
       due_date: params.dueDate,
       status: "PENDING",
     })
@@ -769,7 +771,7 @@ export async function issuePreventaBalanceInvoice(
     await supabase
       .from("sales_orders")
       .select(
-        "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date"
+        "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date, currency"
       )
       .eq("organization_id", org.id)
       .eq("parent_sales_order_id" as never, sale.id)
@@ -836,7 +838,7 @@ export async function issuePreventaBalanceInvoice(
         created_by: userId,
       } as never)
       .select(
-        "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date"
+        "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date, currency"
       )
       .single();
     if (documentError || !data) {
@@ -845,7 +847,7 @@ export async function issuePreventaBalanceInvoice(
           await supabase
             .from("sales_orders")
             .select(
-              "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date"
+              "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date, currency"
             )
             .eq("organization_id", org.id)
             .eq("parent_sales_order_id" as never, sale.id)
@@ -946,6 +948,7 @@ export async function issuePreventaBalanceInvoice(
     saleId: balanceDocument.id,
     customerId: balanceDocument.customer_id,
     amount: balance,
+    currency: balanceDocument.currency ?? "ARS",
     dueDate: balanceDocument.sale_date,
   });
 
@@ -1385,7 +1388,7 @@ export async function issueSalesAdvance(
     const { data: sale } = await supabase
       .from("sales_orders")
       .select(
-        "id, organization_id, customer_id, sale_date, expiration_date, invoice_number, total_amount, total_tax_amount"
+        "id, organization_id, customer_id, sale_date, expiration_date, invoice_number, total_amount, total_tax_amount, currency"
       )
       .eq("id", advance.advance_sales_order_id)
       .single();
@@ -1398,6 +1401,7 @@ export async function issueSalesAdvance(
       saleId: sale.id,
       customerId: sale.customer_id,
       amount: money(sale.total_amount),
+      currency: sale.currency ?? "ARS",
       dueDate: sale.sale_date,
     });
     await registerAdvanceInvoiceAccounting({
@@ -1520,7 +1524,7 @@ export async function settleSalesAdvance(
     const { data: finalSale } = await supabase
       .from("sales_orders")
       .select(
-        "id, customer_id, sale_date, total_amount, arca_status, invoice_type"
+        "id, customer_id, sale_date, total_amount, currency, arca_status, invoice_type"
       )
       .eq("id", advance.final_sales_order_id)
       .eq("organization_id", org.id)
@@ -1544,6 +1548,7 @@ export async function settleSalesAdvance(
       saleId: finalSale.id,
       customerId: finalSale.customer_id,
       amount: money(finalSale.total_amount),
+      currency: finalSale.currency ?? "ARS",
       dueDate: finalSale.sale_date,
     });
     await updateAdvance(supabase, org.id, advance.id, {
@@ -1630,6 +1635,7 @@ export async function settleSalesAdvance(
           customer_id: finalSale.customer_id,
           amount: money(advance.amount),
           remaining_amount: money(advance.amount),
+          currency: finalSale.currency === "USD" ? "USD" : "ARS",
           credit_note_id: advance.credit_note_id,
           notes: `Saldo a favor por liquidación de anticipo ${advance.id}`,
         })

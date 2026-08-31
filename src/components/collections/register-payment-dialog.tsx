@@ -70,6 +70,7 @@ type RegisterPaymentDialogProps = {
   type: "receivable" | "payable";
   pendingBalance: number;
   totalAmount: number;
+  currency?: string;
   counterpartyName: string;
   counterpartyId: string;
   supplierId?: string | null;
@@ -111,6 +112,7 @@ function CreditSection({
   supplierId,
   isFetchingCredit,
   creditAmount,
+  currency = "ARS",
   onCreditAmountChange,
   onUseAllCredit,
 }: {
@@ -121,6 +123,7 @@ function CreditSection({
   supplierId: string | null | undefined;
   isFetchingCredit: boolean;
   creditAmount: string;
+  currency?: string;
   onCreditAmountChange: (value: string) => void;
   onUseAllCredit: () => void;
 }) {
@@ -132,7 +135,7 @@ function CreditSection({
             <div>
               <p className="font-medium">Crédito disponible por proveedor</p>
               <p className="text-muted-foreground text-xs">
-                {formatCurrency(creditBalance)}
+                {formatCurrency(creditBalance, currency)}
               </p>
             </div>
             <Button
@@ -164,7 +167,7 @@ function CreditSection({
                       : ""
                   }
                 >
-                  {formatCurrency(entry.amount)}
+                  {formatCurrency(entry.amount, currency)}
                 </span>
               </div>
             ))}
@@ -180,7 +183,7 @@ function CreditSection({
               </p>
             ) : (
               <p className="text-muted-foreground text-xs">
-                {formatCurrency(creditBalance)}
+                {formatCurrency(creditBalance, currency)}
               </p>
             )}
           </div>
@@ -208,7 +211,7 @@ function CreditSection({
           value={creditAmount}
         />
         <p className="text-muted-foreground text-xs">
-          Máximo aplicable: {formatCurrency(availableCredit)}
+          Máximo aplicable: {formatCurrency(availableCredit, currency)}
         </p>
       </div>
     </div>
@@ -220,6 +223,7 @@ function EndorsedChecksSection({
   selectedIds,
   totalSelected,
   pendingBalance,
+  currency = "ARS",
   onToggle,
 }: {
   checks: Array<{
@@ -234,6 +238,7 @@ function EndorsedChecksSection({
   selectedIds: string[];
   totalSelected: number;
   pendingBalance: number;
+  currency?: string;
   onToggle: (id: string, checked: boolean) => void;
 }) {
   const selectedSet = new Set(selectedIds);
@@ -254,7 +259,7 @@ function EndorsedChecksSection({
         <div className="text-right text-xs">
           <p className="text-muted-foreground">Saldo restante</p>
           <p className="font-medium text-foreground">
-            {formatCurrency(remainingBalance)}
+            {formatCurrency(remainingBalance, currency)}
           </p>
         </div>
       </div>
@@ -307,7 +312,7 @@ function EndorsedChecksSection({
                     {check.fecha_vencimiento.slice(0, 10)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {formatCurrency(Number(check.importe))}
+                    {formatCurrency(Number(check.importe), currency)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -322,7 +327,7 @@ function EndorsedChecksSection({
           seleccionado{selectedIds.length !== 1 ? "s" : ""}
         </span>
         <span className="font-semibold tabular-nums">
-          Total: {formatCurrency(totalSelected)}
+          Total: {formatCurrency(totalSelected, currency)}
         </span>
       </div>
     </div>
@@ -477,6 +482,7 @@ export function RegisterPaymentDialog({
   type,
   pendingBalance,
   totalAmount,
+  currency = "ARS",
   counterpartyName,
   counterpartyId,
   supplierId,
@@ -500,6 +506,7 @@ export function RegisterPaymentDialog({
     formatMoneyInput(pendingBalance)
   );
   const [creditAmount, setCreditAmount] = useState<string>("0");
+  const [exchangeRate, setExchangeRate] = useState<string>("");
   const [paymentDate, setPaymentDate] = useState<string>(
     () => new Date().toISOString().split("T")[0]
   );
@@ -569,18 +576,49 @@ export function RegisterPaymentDialog({
   );
 
   const availablePaymentMethodOptions = useMemo(() => {
-    if (isEditMode) {
-      return paymentMethodOptions.filter(
-        (option) => option.value !== "cheque_endosado"
-      );
-    }
-    if (type !== "payable") {
+    if (isEditMode || type !== "payable" || currency === "USD") {
       return paymentMethodOptions.filter(
         (option) => option.value !== "cheque_endosado"
       );
     }
     return paymentMethodOptions;
-  }, [isEditMode, type]);
+  }, [isEditMode, type, currency]);
+
+  const isUsdDebt = currency === "USD";
+
+  useEffect(() => {
+    if (isEditMode || !isUsdDebt || !open) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/blue")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data) => {
+        if (!cancelled && data?.venta) {
+          setExchangeRate(String(data.venta));
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, isUsdDebt, open]);
+
+  const equivalenteARS = useMemo(() => {
+    const parsedAmount = truncateMoney(Number(amount));
+    const parsedRate = Number(exchangeRate);
+    if (
+      !Number.isFinite(parsedAmount) ||
+      parsedAmount <= 0 ||
+      !Number.isFinite(parsedRate) ||
+      parsedRate <= 0
+    ) {
+      return null;
+    }
+    return truncateMoney(parsedAmount * parsedRate);
+  }, [amount, exchangeRate]);
 
   const selectedReceivedChecks = useMemo(
     () =>
@@ -650,6 +688,7 @@ export function RegisterPaymentDialog({
       setPaymentMethod("efectivo");
       setAmount(formatMoneyInput(pendingBalance));
       setCreditAmount("0");
+      setExchangeRate("");
       setPaymentDate(new Date().toISOString().split("T")[0]);
       setReferenceNumber("");
       setNotes("");
@@ -870,6 +909,19 @@ export function RegisterPaymentDialog({
     return null;
   };
 
+  const validateExchangeRate = ({ parsedAmount }: { parsedAmount: number }) => {
+    if (isEditMode || !isUsdDebt || parsedAmount <= 0) {
+      return null;
+    }
+
+    const parsedExchangeRate = Number(exchangeRate);
+    if (!Number.isFinite(parsedExchangeRate) || parsedExchangeRate <= 0) {
+      return "Debe ingresar el tipo de cambio para deudas en USD.";
+    }
+
+    return null;
+  };
+
   const getValidationError = ({
     parsedAmount,
     parsedCredit,
@@ -887,6 +939,7 @@ export function RegisterPaymentDialog({
         ? validateIssuedCheckFields()
         : null,
       validateEndorsedCheckFields({ parsedAmount, parsedCredit }),
+      validateExchangeRate({ parsedAmount }),
     ];
 
     return errors.find(Boolean) ?? null;
@@ -896,6 +949,12 @@ export function RegisterPaymentDialog({
     parsedAmount: number;
     parsedCredit: number;
   }) => {
+    const parsedExchangeRate = Number(exchangeRate);
+    const normalizedExchangeRate =
+      isUsdDebt && Number.isFinite(parsedExchangeRate) && parsedExchangeRate > 0
+        ? parsedExchangeRate
+        : undefined;
+
     if (existingPayment) {
       return updatePaymentAction({
         orgSlug,
@@ -903,6 +962,7 @@ export function RegisterPaymentDialog({
         paymentId: existingPayment.id,
         type,
         amount: params.parsedAmount,
+        exchangeRate: normalizedExchangeRate,
         paymentMethod,
         paymentDate,
         referenceNumber,
@@ -927,6 +987,7 @@ export function RegisterPaymentDialog({
       type,
       amount: params.parsedAmount,
       creditAmount: params.parsedCredit,
+      exchangeRate: normalizedExchangeRate,
       paymentMethod,
       operationId: getOperationId(),
       paymentDate,
@@ -1322,7 +1383,7 @@ export function RegisterPaymentDialog({
                         Nuevo saldo pendiente
                       </p>
                       <p className="font-semibold">
-                        {formatCurrency(completedPendingBalance)}
+                        {formatCurrency(completedPendingBalance, currency)}
                       </p>
                     </div>
                   ) : null}
@@ -1457,10 +1518,10 @@ export function RegisterPaymentDialog({
                       Saldo pendiente
                     </p>
                     <p className="font-semibold">
-                      {formatCurrency(pendingBalance)}
+                      {formatCurrency(pendingBalance, currency)}
                     </p>
                     <p className="text-muted-foreground text-xs">
-                      Total: {formatCurrency(totalAmount)}
+                      Total: {formatCurrency(totalAmount, currency)}
                     </p>
                   </div>
                 </div>
@@ -1489,12 +1550,43 @@ export function RegisterPaymentDialog({
                   />
                 </div>
 
+                {!isEditMode && isUsdDebt ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="exchangeRate">
+                      Tipo de cambio (USD → ARS)
+                    </Label>
+                    <Input
+                      id="exchangeRate"
+                      inputMode="decimal"
+                      min={0}
+                      onChange={(event) => setExchangeRate(event.target.value)}
+                      placeholder="Ej: 1200"
+                      step="0.01"
+                      type="number"
+                      value={exchangeRate}
+                    />
+                    {equivalenteARS !== null ? (
+                      <p className="text-muted-foreground text-xs">
+                        Recibís:{" "}
+                        <span className="font-medium text-foreground">
+                          {formatCurrency(equivalenteARS, "ARS")}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-muted-foreground text-xs">
+                        Ingresá la cotización para ver el equivalente en ARS.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+
                 {showCreditSection ? (
                   <CreditSection
                     availableCredit={maxCreditForCurrentSelection}
                     bySupplier={bySupplier}
                     creditAmount={creditAmount}
                     creditBalance={creditBalance}
+                    currency={currency}
                     isFetchingCredit={isFetchingCredit}
                     onCreditAmountChange={(value) => {
                       setCreditAmount(value);
@@ -1513,6 +1605,7 @@ export function RegisterPaymentDialog({
                 {!isEditMode && type === "payable" && isEndorsedCheckMethod ? (
                   <EndorsedChecksSection
                     checks={receivedChecks}
+                    currency={currency}
                     onToggle={toggleReceivedCheck}
                     pendingBalance={pendingBalance}
                     selectedIds={selectedReceivedCheckIds}
