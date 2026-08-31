@@ -155,7 +155,10 @@ export default async function CollectionsPage({
     fullReceivables = collectionsData.receivables;
     fullPayables = collectionsData.payables;
     receivableCustomerIds = new Set(
-      fullReceivables.map((r) => r.customer.id).filter(Boolean)
+      fullReceivables
+        .filter((r) => r.status !== "PAID")
+        .map((r) => r.customer.id)
+        .filter(Boolean)
     );
     creditOnlyCustomers = await getCreditOnlyCustomers(
       orgSlug,

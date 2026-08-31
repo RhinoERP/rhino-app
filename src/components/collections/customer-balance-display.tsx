@@ -15,7 +15,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency } from "@/lib/format";
-import type { CustomerCreditApiResponse } from "@/modules/collections/types";
+import type {
+  CreditBreakdownEntry,
+  CustomerCreditApiResponse,
+} from "@/modules/collections/types";
 
 type CustomerBalanceDisplayProps = {
   orgSlug: string;
@@ -79,6 +82,7 @@ export function CustomerBalanceDisplay({
   const totalPending = byCurrency.reduce((sum, e) => sum + e.amount, 0);
   const hasCredit = creditBalance > 0;
   const isInFavor = totalPending < 0;
+  const isCreditOnly = hasCredit && totalPending <= 0;
 
   if (isInFavor) {
     return (
@@ -94,6 +98,28 @@ export function CustomerBalanceDisplay({
         </p>
         <p className="font-semibold text-green-600">
           {formatCurrency(Math.abs(totalPending))}
+        </p>
+      </div>
+    );
+  }
+
+  if (isCreditOnly) {
+    return (
+      <div className="text-right">
+        <p className="text-green-600 text-xs">
+          <span className="inline-flex items-center gap-1">
+            Saldo a favor
+            <InfoTooltip
+              content="El cliente no tiene deudas pendientes y cuenta con un crédito disponible para futuras compras."
+              label="¿Qué es saldo a favor?"
+            />
+          </span>
+        </p>
+        <p className="font-semibold text-green-600">
+          {formatCurrency(creditBalance)}
+          {showBreakdown && (
+            <CreditBreakdownPopover bySupplier={creditResponse.bySupplier} />
+          )}
         </p>
       </div>
     );
@@ -120,37 +146,7 @@ export function CustomerBalanceDisplay({
           <span className="inline-flex items-center gap-1">
             ({`Crédito: ${formatCurrency(creditBalance)}`})
             {showBreakdown && (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    className="ml-0.5 h-4 w-4 p-0"
-                    size="icon"
-                    variant="ghost"
-                  >
-                    <CaretDownIcon className="size-3" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-52 p-3" side="top">
-                  <div className="space-y-2">
-                    <p className="font-medium text-xs">Crédito por proveedor</p>
-                    <div className="space-y-1.5">
-                      {creditResponse.bySupplier.map((entry) => (
-                        <div
-                          className="flex items-center justify-between text-xs"
-                          key={entry.supplierId ?? "null"}
-                        >
-                          <span className="text-muted-foreground">
-                            {entry.supplierName}
-                          </span>
-                          <span className="font-medium tabular-nums">
-                            {formatCurrency(entry.amount)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <CreditBreakdownPopover bySupplier={creditResponse.bySupplier} />
             )}
             <span className="ml-1 inline-flex">
               <InfoTooltip
@@ -181,5 +177,41 @@ export function CustomerBalanceDisplay({
         ))}
       </div>
     </div>
+  );
+}
+
+function CreditBreakdownPopover({
+  bySupplier,
+}: {
+  bySupplier: CreditBreakdownEntry[];
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button className="ml-0.5 h-4 w-4 p-0" size="icon" variant="ghost">
+          <CaretDownIcon className="size-3" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-52 p-3" side="top">
+        <div className="space-y-2">
+          <p className="font-medium text-xs">Crédito por proveedor</p>
+          <div className="space-y-1.5">
+            {bySupplier.map((entry) => (
+              <div
+                className="flex items-center justify-between text-xs"
+                key={entry.supplierId ?? "null"}
+              >
+                <span className="text-muted-foreground">
+                  {entry.supplierName}
+                </span>
+                <span className="font-medium tabular-nums">
+                  {formatCurrency(entry.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
