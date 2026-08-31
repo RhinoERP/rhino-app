@@ -9,6 +9,11 @@ import {
   createSupplierInvoiceSchema,
   deleteSupplierInvoice,
 } from "../service/supplier-invoices.service";
+import type { SupplierInvoice } from "../supplier-invoices.types";
+
+export type CreateSupplierInvoiceActionResult =
+  | { success: true; invoice: SupplierInvoice }
+  | { success: false; error: string };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
@@ -101,7 +106,9 @@ async function removeUploadedPdf(path: string): Promise<void> {
   }
 }
 
-export async function createSupplierInvoiceAction(formData: FormData) {
+export async function createSupplierInvoiceAction(
+  formData: FormData
+): Promise<CreateSupplierInvoiceActionResult> {
   const orgSlug = nullableValue(formData.get("orgSlug"));
   if (!orgSlug) {
     return { success: false, error: "Organización no especificada" };
