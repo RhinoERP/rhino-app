@@ -282,7 +282,7 @@ function AddSalesDialog({
         <DialogHeader>
           <DialogTitle>Agregar ventas a la hoja de ruta</DialogTitle>
           <DialogDescription>
-            Seleccioná las ventas confirmadas o despachadas que viajan con{" "}
+            Seleccioná las ventas confirmadas que viajan con{" "}
             {routeSheet.carrier?.name ?? "el transporte"}.
           </DialogDescription>
         </DialogHeader>
@@ -449,11 +449,7 @@ function AddSalesDialog({
                       <span className="font-medium text-sm">
                         #{sale.sale_number ?? "—"}
                       </span>
-                      {sale.status === "CONFIRMED" ? (
-                        <Badge variant="secondary">Confirmada</Badge>
-                      ) : (
-                        <Badge variant="outline">Despachada</Badge>
-                      )}
+                      <Badge variant="secondary">Confirmada</Badge>
                     </div>
                     <p className="truncate text-muted-foreground text-sm">
                       {sale.customer_name}
@@ -464,21 +460,15 @@ function AddSalesDialog({
                     {formatCurrency(sale.total_amount)}
                   </span>
 
-                  {sale.status === "CONFIRMED" ? (
-                    <div className="w-full shrink-0 sm:w-36">
-                      <Input
-                        onChange={(ev) =>
-                          updateRemittance(sale.id, ev.target.value)
-                        }
-                        placeholder="N° de remito"
-                        value={remittances[sale.id] ?? ""}
-                      />
-                    </div>
-                  ) : (
-                    <Badge className="shrink-0" variant="outline">
-                      {sale.remittance_number ?? "Sin remito"}
-                    </Badge>
-                  )}
+                  <div className="w-full shrink-0 sm:w-36">
+                    <Input
+                      onChange={(ev) =>
+                        updateRemittance(sale.id, ev.target.value)
+                      }
+                      placeholder="N° de remito"
+                      value={remittances[sale.id] ?? ""}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
