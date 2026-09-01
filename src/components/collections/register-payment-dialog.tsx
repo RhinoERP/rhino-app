@@ -591,7 +591,7 @@ export function RegisterPaymentDialog({
       return;
     }
     let cancelled = false;
-    fetch("/api/exchange-rate/blue")
+    fetch("/api/exchange-rate/usd")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((data) => {
         if (!cancelled && data?.venta) {

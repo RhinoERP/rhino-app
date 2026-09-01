@@ -20,8 +20,8 @@ function formatWeight(value: number): string {
   return value % 1 === 0 ? value.toString() : value.toFixed(1);
 }
 
-async function fetchBlueRate(): Promise<number> {
-  const res = await fetch("/api/exchange-rate/blue");
+async function fetchUsdRate(): Promise<number> {
+  const res = await fetch("/api/exchange-rate/usd");
   if (!res.ok) {
     throw new Error("Error al obtener la cotización");
   }
@@ -30,12 +30,12 @@ async function fetchBlueRate(): Promise<number> {
 }
 
 export function StockMetricsCards({ metrics }: StockMetricsProps) {
-  const [blueRate, setBlueRate] = useState<number | null>(null);
+  const [usdRate, setUsdRate] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchBlueRate()
-      .then(setBlueRate)
-      .catch(() => setBlueRate(null));
+    fetchUsdRate()
+      .then(setUsdRate)
+      .catch(() => setUsdRate(null));
   }, []);
 
   return (
@@ -162,13 +162,13 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
             </CardHeader>
             <CardContent>
               <div className="truncate font-bold text-xl">
-                {blueRate
-                  ? formatCurrency(metrics.totalStockValue / blueRate, "USD")
+                {usdRate
+                  ? formatCurrency(metrics.totalStockValue / usdRate, "USD")
                   : "—"}
               </div>
               <p className="text-muted-foreground text-xs">
-                {blueRate
-                  ? `Dólar blue: ${formatCurrency(blueRate)}`
+                {usdRate
+                  ? `Dólar BNA: ${formatCurrency(usdRate)}`
                   : "Cotización no disponible"}
               </p>
             </CardContent>
