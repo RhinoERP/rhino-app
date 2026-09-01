@@ -307,11 +307,17 @@ function AddSalesDialog({
                 >
                   Ciudad
                 </label>
-                <Select onValueChange={setCity} value={city}>
+                <Select
+                  onValueChange={(value) =>
+                    setCity(value === "__all__" ? "" : value)
+                  }
+                  value={city}
+                >
                   <SelectTrigger id="rs-filter-city">
                     <SelectValue placeholder="Todas" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__all__">Todas</SelectItem>
                     {cityOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
@@ -328,11 +334,17 @@ function AddSalesDialog({
                 >
                   Ciudad de entrega
                 </label>
-                <Select onValueChange={setDeliveryCity} value={deliveryCity}>
+                <Select
+                  onValueChange={(value) =>
+                    setDeliveryCity(value === "__all__" ? "" : value)
+                  }
+                  value={deliveryCity}
+                >
                   <SelectTrigger id="rs-filter-delivery-city">
                     <SelectValue placeholder="Todas" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__all__">Todas</SelectItem>
                     {deliveryCityOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
@@ -349,11 +361,17 @@ function AddSalesDialog({
                 >
                   Provincia
                 </label>
-                <Select onValueChange={setProvince} value={province}>
+                <Select
+                  onValueChange={(value) =>
+                    setProvince(value === "__all__" ? "" : value)
+                  }
+                  value={province}
+                >
                   <SelectTrigger id="rs-filter-province">
                     <SelectValue placeholder="Todas" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__all__">Todas</SelectItem>
                     {provinceOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
@@ -370,11 +388,17 @@ function AddSalesDialog({
                 >
                   Transporte
                 </label>
-                <Select onValueChange={setCarrierId} value={carrierId}>
+                <Select
+                  onValueChange={(value) =>
+                    setCarrierId(value === "__all__" ? "" : value)
+                  }
+                  value={carrierId}
+                >
                   <SelectTrigger id="rs-filter-carrier">
                     <SelectValue placeholder="Todos" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
                     {carriers.map((carrier) => (
                       <SelectItem key={carrier.id} value={carrier.id}>
                         {carrier.name}
