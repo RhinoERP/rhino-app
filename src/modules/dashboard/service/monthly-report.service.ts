@@ -12,8 +12,11 @@ export type MonthlyReportData = {
   totalBilled: number;
   totalCollected: number;
   pendingCollection: number;
-  topClients: Array<{ name: string; value: number }>;
-  topProducts: Array<{ name: string; value: number }>;
+  totalBilledUSD: number;
+  totalCollectedUSD: number;
+  pendingCollectionUSD: number;
+  topClients: Array<{ name: string; value: number; valueUsd?: number }>;
+  topProducts: Array<{ name: string; value: number; valueUsd?: number }>;
   outOfStockCount: number;
   delayedOrdersCount: number;
   lowStockCount: number;
@@ -52,21 +55,41 @@ export async function generateMonthlyReportData(
   const { data: receivables } = await supabase
     .from("accounts_receivable")
     .select(
-      "total_amount, pending_balance, status, sales_orders!inner(dispatched_at)"
+      "total_amount, pending_balance, currency, status, sales_orders!inner(dispatched_at)"
     )
     .eq("organization_id", organizationId)
     .gte("sales_orders.dispatched_at", startDate.toISOString())
     .lte("sales_orders.dispatched_at", endDate.toISOString());
 
+  const isUsd = (r: { currency?: string | null }) =>
+    (r.currency ?? "ARS").toUpperCase() === "USD";
+
   const totalBilled =
-    receivables?.reduce((sum, r) => sum + r.total_amount, 0) ?? 0;
+    receivables?.reduce((sum, r) => sum + (isUsd(r) ? 0 : r.total_amount), 0) ??
+    0;
+  const totalBilledUSD =
+    receivables?.reduce((sum, r) => sum + (isUsd(r) ? r.total_amount : 0), 0) ??
+    0;
   const totalCollected =
     receivables?.reduce(
-      (sum, r) => sum + (r.total_amount - r.pending_balance),
+      (sum, r) => sum + (isUsd(r) ? 0 : r.total_amount - r.pending_balance),
+      0
+    ) ?? 0;
+  const totalCollectedUSD =
+    receivables?.reduce(
+      (sum, r) => sum + (isUsd(r) ? r.total_amount - r.pending_balance : 0),
       0
     ) ?? 0;
   const pendingCollection =
-    receivables?.reduce((sum, r) => sum + r.pending_balance, 0) ?? 0;
+    receivables?.reduce(
+      (sum, r) => sum + (isUsd(r) ? 0 : r.pending_balance),
+      0
+    ) ?? 0;
+  const pendingCollectionUSD =
+    receivables?.reduce(
+      (sum, r) => sum + (isUsd(r) ? r.pending_balance : 0),
+      0
+    ) ?? 0;
 
   // Get top clients by revenue
   const { data: topClientsData } = await supabase
@@ -74,6 +97,7 @@ export async function generateMonthlyReportData(
     .select(
       `
       total_amount,
+      currency,
       customers!inner (
         id,
         name
@@ -88,7 +112,10 @@ export async function generateMonthlyReportData(
     .limit(100);
 
   // Aggregate by customer
-  const clientsMap = new Map<string, { name: string; value: number }>();
+  const clientsMap = new Map<
+    string,
+    { name: string; value: number; valueUsd: number }
+  >();
   if (topClientsData) {
     for (const order of topClientsData) {
       if (
@@ -100,12 +127,18 @@ export async function generateMonthlyReportData(
         const customerId = customer.id;
         const customerName = customer.name;
         const existing = clientsMap.get(customerId);
+        const isUsdOrder = (order.currency ?? "ARS").toUpperCase() === "USD";
         if (existing) {
-          existing.value += order.total_amount;
+          if (isUsdOrder) {
+            existing.valueUsd += order.total_amount;
+          } else {
+            existing.value += order.total_amount;
+          }
         } else {
           clientsMap.set(customerId, {
             name: customerName,
-            value: order.total_amount,
+            value: isUsdOrder ? 0 : order.total_amount,
+            valueUsd: isUsdOrder ? order.total_amount : 0,
           });
         }
       }
@@ -113,8 +146,9 @@ export async function generateMonthlyReportData(
   }
 
   const topClients = Array.from(clientsMap.values())
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
+    .sort((a, b) => b.value + b.valueUsd - (a.value + a.valueUsd))
+    .slice(0, 5)
+    .map((c) => ({ name: c.name, value: c.value, valueUsd: c.valueUsd }));
 
   // Get top products by revenue
   const { data: topProductsData } = await supabase
@@ -123,6 +157,7 @@ export async function generateMonthlyReportData(
       `
       quantity,
       unit_price,
+      currency,
       products!inner (
         id,
         name
@@ -139,26 +174,39 @@ export async function generateMonthlyReportData(
     .limit(500);
 
   // Aggregate by product
-  const productsMap = new Map<string, { name: string; value: number }>();
+  const productsMap = new Map<
+    string,
+    { name: string; value: number; valueUsd: number }
+  >();
   if (topProductsData) {
     for (const item of topProductsData) {
       if (item.products && "name" in item.products) {
         const productId = item.products.id as string;
         const productName = item.products.name as string;
         const revenue = item.quantity * item.unit_price;
+        const isUsdItem = (item.currency ?? "ARS").toUpperCase() === "USD";
         const existing = productsMap.get(productId);
         if (existing) {
-          existing.value += revenue;
+          if (isUsdItem) {
+            existing.valueUsd += revenue;
+          } else {
+            existing.value += revenue;
+          }
         } else {
-          productsMap.set(productId, { name: productName, value: revenue });
+          productsMap.set(productId, {
+            name: productName,
+            value: isUsdItem ? 0 : revenue,
+            valueUsd: isUsdItem ? revenue : 0,
+          });
         }
       }
     }
   }
 
   const topProducts = Array.from(productsMap.values())
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
+    .sort((a, b) => b.value + b.valueUsd - (a.value + a.valueUsd))
+    .slice(0, 5)
+    .map((p) => ({ name: p.name, value: p.value, valueUsd: p.valueUsd }));
 
   // Get operational alerts - using current data (not historical)
   // Query product lots to calculate stock
@@ -243,6 +291,9 @@ export async function generateMonthlyReportData(
     totalBilled,
     totalCollected,
     pendingCollection,
+    totalBilledUSD,
+    totalCollectedUSD,
+    pendingCollectionUSD,
     topClients,
     topProducts,
     outOfStockCount,

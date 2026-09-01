@@ -19,6 +19,7 @@ import {
 type TopPerformer = {
   name: string;
   value: number;
+  valueUsd?: number;
 };
 
 type MonthlyReportEmailProps = {
@@ -29,6 +30,9 @@ type MonthlyReportEmailProps = {
   totalBilled: number;
   totalCollected: number;
   pendingCollection: number;
+  totalBilledUSD?: number;
+  totalCollectedUSD?: number;
+  pendingCollectionUSD?: number;
   // Top performers
   topClients: TopPerformer[];
   topProducts: TopPerformer[];
@@ -45,6 +49,9 @@ export function MonthlyReportEmail({
   totalBilled,
   totalCollected,
   pendingCollection,
+  totalBilledUSD,
+  totalCollectedUSD,
+  pendingCollectionUSD,
   topClients,
   topProducts,
   outOfStockCount,
@@ -74,7 +81,7 @@ export function MonthlyReportEmail({
                   <td style={tableCell}>
                     <Text style={tableLabel}>Total Facturado</Text>
                     <Text style={tableValue}>
-                      {formatCurrency(totalBilled)}
+                      {formatDualCurrency(totalBilled, totalBilledUSD)}
                     </Text>
                   </td>
                 </tr>
@@ -82,7 +89,7 @@ export function MonthlyReportEmail({
                   <td style={tableCell}>
                     <Text style={tableLabel}>Total Cobrado</Text>
                     <Text style={tableValue}>
-                      {formatCurrency(totalCollected)}
+                      {formatDualCurrency(totalCollected, totalCollectedUSD)}
                     </Text>
                   </td>
                 </tr>
@@ -90,7 +97,10 @@ export function MonthlyReportEmail({
                   <td style={tableCell}>
                     <Text style={tableLabel}>Pendiente de Cobro</Text>
                     <Text style={tableValueWarning}>
-                      {formatCurrency(pendingCollection)}
+                      {formatDualCurrency(
+                        pendingCollection,
+                        pendingCollectionUSD
+                      )}
                     </Text>
                   </td>
                 </tr>
@@ -113,7 +123,7 @@ export function MonthlyReportEmail({
                           <Text style={topItemRank}>{index + 1}.</Text>
                           <Text style={topItemName}>{client.name}</Text>
                           <Text style={topItemValue}>
-                            {formatCurrency(client.value)}
+                            {formatDualCurrency(client.value, client.valueUsd)}
                           </Text>
                         </td>
                       </tr>
@@ -132,7 +142,10 @@ export function MonthlyReportEmail({
                           <Text style={topItemRank}>{index + 1}.</Text>
                           <Text style={topItemName}>{product.name}</Text>
                           <Text style={topItemValue}>
-                            {formatCurrency(product.value)}
+                            {formatDualCurrency(
+                              product.value,
+                              product.valueUsd
+                            )}
                           </Text>
                         </td>
                       </tr>
@@ -182,13 +195,20 @@ export function MonthlyReportEmail({
 }
 
 // Helper function for currency formatting
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number, currency = "ARS"): string {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
-    currency: "ARS",
+    currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+function formatDualCurrency(amount: number, amountUsd?: number): string {
+  if (amountUsd && amountUsd > 0) {
+    return `${formatCurrency(amount)} / ${formatCurrency(amountUsd, "USD")}`;
+  }
+  return formatCurrency(amount);
 }
 
 // Styles

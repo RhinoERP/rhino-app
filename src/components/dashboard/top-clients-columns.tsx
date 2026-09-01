@@ -50,9 +50,15 @@ export function createTopClientsColumns(): ColumnDef<TopClient>[] {
       ),
       cell: ({ row }) => {
         const amount = row.getValue("total_amount") as number;
+        const amountUsd = row.original.total_amount_usd;
         return (
-          <div className="text-right font-semibold tabular-nums">
-            {formatCurrency(amount)}
+          <div className="text-right tabular-nums">
+            <div className="font-semibold">{formatCurrency(amount)}</div>
+            {amountUsd > 0 && (
+              <div className="text-muted-foreground text-xs">
+                {formatCurrency(amountUsd, "USD")}
+              </div>
+            )}
           </div>
         );
       },
