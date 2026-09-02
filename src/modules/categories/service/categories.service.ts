@@ -1,4 +1,3 @@
-import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Category, CategoryAccountingRule } from "../types";
@@ -152,7 +151,7 @@ async function getCategoryAccountingRulesByOrgId(
     return [];
   }
 
-  const supabase = createAdminClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("category_accounting_rules" as never)
     .select("category_id, account_code")
@@ -203,7 +202,7 @@ export async function upsertCategoryAccountingRule(
   }
 
   const normalizedAccountCode = accountCode?.trim() || null;
-  const supabase = createAdminClient();
+  const supabase = await createClient();
 
   if (!normalizedAccountCode) {
     const { error: deleteError } = await supabase

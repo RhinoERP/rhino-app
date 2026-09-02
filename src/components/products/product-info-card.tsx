@@ -262,14 +262,22 @@ export function ProductInfoCard({
                   <span className="text-muted-foreground">Precio de venta</span>
                   <span className="font-semibold">{formattedSalePrice}</span>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Costo</span>
-                  <span className="font-semibold">{formattedCostPrice}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Margen (%)</span>
-                  <span className="font-semibold">{formattedProfitMargin}</span>
-                </div>
+                {canManageInventory ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Costo</span>
+                      <span className="font-semibold">
+                        {formattedCostPrice}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Margen (%)</span>
+                      <span className="font-semibold">
+                        {formattedProfitMargin}
+                      </span>
+                    </div>
+                  </>
+                ) : null}
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">
                     Unidad de medida

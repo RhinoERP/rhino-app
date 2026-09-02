@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateCategoryInput,
   updateCategoryById,
@@ -27,6 +28,7 @@ export type UpdateCategoryActionParams = {
 export async function updateCategoryAction(
   params: UpdateCategoryActionParams
 ): Promise<UpdateCategoryActionResult> {
+  await ensure("inventory.manage", params.orgSlug);
   try {
     const categoryData: Omit<CreateCategoryInput, "orgSlug"> = {
       name: params.name,

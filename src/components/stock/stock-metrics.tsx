@@ -8,6 +8,7 @@ import {
   ScalesIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import type { StockMetrics } from "@/modules/inventory/types";
@@ -31,6 +32,8 @@ async function fetchUsdRate(): Promise<number> {
 
 export function StockMetricsCards({ metrics }: StockMetricsProps) {
   const [usdRate, setUsdRate] = useState<number | null>(null);
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
 
   useEffect(() => {
     fetchUsdRate()
@@ -124,7 +127,7 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
         </Card>
       )}
 
-      {metrics.totalStockValue > 0 && (
+      {metrics.totalStockValue > 0 && canManageInventory && (
         <>
           <Card className="min-w-60 flex-1">
             <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">

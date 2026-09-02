@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateCategoryInput,
   createCategoryForOrg,
@@ -23,6 +24,7 @@ export type CreateCategoryActionParams = {
 export async function createCategoryAction(
   params: CreateCategoryActionParams
 ): Promise<CreateCategoryActionResult> {
+  await ensure("inventory.manage", params.orgSlug);
   try {
     const categoryData: CreateCategoryInput = {
       orgSlug: params.orgSlug,

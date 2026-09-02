@@ -3,6 +3,7 @@
 import { CircleDollarSign } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -96,6 +97,8 @@ export function ProductSalePriceCard({
   salePrice,
 }: ProductSalePriceCardProps) {
   const router = useRouter();
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [marginInput, setMarginInput] = useState(
@@ -206,6 +209,25 @@ export function ProductSalePriceCard({
       router.refresh();
     });
   };
+
+  if (!canManageInventory) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <div className="flex items-center gap-2">
+            <div className="rounded-full bg-emerald-500/10 p-2 text-emerald-500">
+              <CircleDollarSign className="h-4 w-4" />
+            </div>
+            <CardTitle className="text-base">Precio de venta</CardTitle>
+          </div>
+          <div className="text-right">
+            <p className="font-semibold text-2xl">{formatMoney(salePrice)}</p>
+            <p className="text-muted-foreground text-sm">Por unidad</p>
+          </div>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
