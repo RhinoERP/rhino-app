@@ -402,7 +402,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <AppLogo />
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center">
           <NotificationBell orgSlug={orgSlug} />
           <OrganizationSwitcher
             organizations={organizations}

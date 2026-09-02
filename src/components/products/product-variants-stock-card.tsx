@@ -315,7 +315,7 @@ export function ProductVariantsStockCard({
 
       {/* ── Adjust Stock Modal ───────────────────────────────────────────── */}
       <Dialog onOpenChange={setAdjustOpen} open={adjustOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[90%]">
           <DialogHeader>
             <DialogTitle>Ajustar stock por variante</DialogTitle>
             <DialogDescription>

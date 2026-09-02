@@ -345,7 +345,7 @@ function QuoteDetailCard({
         <CardTitle className="text-base">Detalle del presupuesto</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
           <div>
             <p className="text-muted-foreground text-xs">Cliente</p>
             <p className="mt-0.5 font-medium">
@@ -654,8 +654,10 @@ export function QuoteEditWrapper({
               onClick={generateAndDownloadPDF}
               variant="outline"
             >
-              <DownloadSimpleIcon className="mr-1.5 h-4 w-4" />
-              {isGenerating ? "Generando..." : "Descargar presupuesto"}
+              <DownloadSimpleIcon className="h-4 w-4" />
+              <span className="ml-1.5 hidden sm:inline">
+                {isGenerating ? "Generando..." : "Descargar presupuesto"}
+              </span>
             </Button>
           </div>
         </div>
