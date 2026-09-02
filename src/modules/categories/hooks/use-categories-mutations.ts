@@ -57,7 +57,10 @@ export function useCategoryMutations(orgSlug: string) {
 
   const deleteCategory = useMutation({
     mutationFn: async (categoryId: string) => {
-      const result = await deleteCategoryAction({ categoryId });
+      const result = await deleteCategoryAction({
+        categoryId,
+        orgSlug,
+      });
 
       if (!result.success) {
         throw new Error(result.error || "No se pudo eliminar la categoría");

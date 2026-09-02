@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { deleteCategoryById } from "../service/categories.service";
 
 export type DeleteCategoryActionResult = {
@@ -9,6 +10,7 @@ export type DeleteCategoryActionResult = {
 
 export type DeleteCategoryActionParams = {
   categoryId: string;
+  orgSlug: string;
 };
 
 /**
@@ -17,6 +19,7 @@ export type DeleteCategoryActionParams = {
 export async function deleteCategoryAction(
   params: DeleteCategoryActionParams
 ): Promise<DeleteCategoryActionResult> {
+  await ensure("inventory.manage", params.orgSlug);
   try {
     await deleteCategoryById(params.categoryId);
 
