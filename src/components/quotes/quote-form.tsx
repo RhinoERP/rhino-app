@@ -11,7 +11,14 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { usePermissions } from "@/components/auth/permissions-provider";
 
@@ -976,7 +983,7 @@ export function QuoteForm({
 
   return (
     <div className="grid gap-6 lg:grid-cols-12">
-      <div className="flex flex-col gap-6 lg:col-span-8">
+      <div className="flex flex-col gap-6 lg:col-span-9">
         <Form {...form}>
           <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
             {/* Detalles principales del presupuesto */}
@@ -988,7 +995,7 @@ export function QuoteForm({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <FormField
                     control={form.control}
                     name="customerId"
@@ -1133,13 +1140,13 @@ export function QuoteForm({
                           <PopoverTrigger asChild>
                             <Button
                               aria-expanded={isTaxesPickerOpen}
-                              className="h-auto min-h-9 w-full justify-between text-left font-normal"
+                              className="h-auto min-h-9 w-full justify-between gap-2 text-left font-normal"
                               id="taxes"
                               role="combobox"
                               type="button"
                               variant="outline"
                             >
-                              <div className="flex flex-wrap items-center gap-1.5 pr-2.5">
+                              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                                 {selectedTaxes.length > 0 ? (
                                   selectedTaxes.map((tax) => (
                                     <Badge
@@ -1150,7 +1157,7 @@ export function QuoteForm({
                                       {tax.name} ({tax.rate}%)
                                       <span
                                         aria-hidden="true"
-                                        className="ml-1 flex h-5 w-5 items-center justify-center rounded-sm transition-colors hover:bg-muted"
+                                        className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm transition-colors hover:bg-muted"
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           handleTaxToggle(tax.id);
@@ -1161,12 +1168,12 @@ export function QuoteForm({
                                     </Badge>
                                   ))
                                 ) : (
-                                  <span className="text-muted-foreground">
+                                  <span className="truncate text-muted-foreground">
                                     Seleccione impuestos (opcional)
                                   </span>
                                 )}
                               </div>
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent
@@ -1364,8 +1371,8 @@ export function QuoteForm({
 
                   {/* Tabla de ítems seleccionados */}
                   {fields.length > 0 ? (
-                    <div className="rounded-md border">
-                      <Table>
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table className="min-w-[640px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead>Producto</TableHead>
@@ -1395,8 +1402,8 @@ export function QuoteForm({
                               selectedTaxes
                             );
                             return (
-                              <>
-                                <TableRow key={field.id}>
+                              <Fragment key={field.id}>
+                                <TableRow>
                                   <ProductInfoCell item={item} />
                                   <TableCell>
                                     <div className="flex flex-wrap gap-1">
@@ -1633,7 +1640,7 @@ export function QuoteForm({
                                     </div>
                                   </TableCell>
                                 </TableRow>
-                              </>
+                              </Fragment>
                             );
                           })}
                         </TableBody>
@@ -1692,7 +1699,7 @@ export function QuoteForm({
       </div>
 
       {/* Panel lateral / Resumen */}
-      <div className="flex flex-col gap-6 lg:col-span-4">
+      <div className="flex flex-col gap-6 lg:col-span-3">
         <Card className="sticky top-6">
           <CardHeader>
             <CardTitle>Resumen</CardTitle>
