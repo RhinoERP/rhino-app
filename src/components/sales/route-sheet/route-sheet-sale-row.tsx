@@ -20,6 +20,7 @@ import type { RouteSheetSale } from "@/modules/route-sheets/types";
 
 type RouteSheetSaleRowProps = {
   canManage: boolean;
+  isPending: boolean;
   orgSlug: string;
   sale: RouteSheetSale;
   isRemoving: boolean;
@@ -28,12 +29,15 @@ type RouteSheetSaleRowProps = {
 
 export function RouteSheetSaleRow({
   canManage,
+  isPending,
   orgSlug,
   sale,
   isRemoving,
   onRemove,
 }: RouteSheetSaleRowProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const canRemove = canManage && isPending;
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
@@ -56,7 +60,7 @@ export function RouteSheetSaleRow({
         <span className="font-medium text-sm tabular-nums">
           {formatCurrency(sale.total_amount)}
         </span>
-        {canManage && (
+        {canRemove && (
           <Button
             aria-label="Quitar venta de la hoja de ruta"
             disabled={isRemoving}
@@ -69,7 +73,7 @@ export function RouteSheetSaleRow({
         )}
       </div>
 
-      {canManage && (
+      {canRemove && (
         <AlertDialog onOpenChange={setConfirmOpen} open={confirmOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>

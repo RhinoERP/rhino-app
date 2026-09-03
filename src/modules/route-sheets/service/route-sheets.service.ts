@@ -229,6 +229,83 @@ export async function getRouteSheetPageData(
   return { routeSheets, availableSales };
 }
 
+export async function getRouteSheetWithSales(
+  orgSlug: string,
+  routeSheetId: string
+): Promise<RouteSheetWithSales> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canRead) {
+    throw new Error("No tienes permisos para ver hojas de ruta");
+  }
+
+  let salesQuery = supabase
+    .from("sales_orders")
+    .select(SALES_SELECT)
+    .eq("organization_id", org.id)
+    .eq("route_sheet_id", routeSheetId);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    salesQuery = salesQuery.eq("user_id", accessContext.userId);
+  }
+
+  const [
+    { data: sheet, error: sheetError },
+    { data: sales, error: salesError },
+  ] = await Promise.all([
+    supabase
+      .from("route_sheets")
+      .select("*, carrier:carriers(id, name)")
+      .eq("id", routeSheetId)
+      .eq("organization_id", org.id)
+      .maybeSingle(),
+    salesQuery,
+  ]);
+
+  if (sheetError || !sheet) {
+    throw new Error(
+      sheetError
+        ? `Error al obtener la hoja de ruta: ${sheetError.message}`
+        : "Hoja de ruta no encontrada"
+    );
+  }
+
+  if (salesError) {
+    throw new Error(`Error al obtener las ventas: ${salesError.message}`);
+  }
+
+  const routeSales = (sales ?? []) as unknown as SalesOrderSale[];
+
+  if (accessContext.scope === "own" && routeSales.length === 0) {
+    throw new Error("No tienes permisos para ver esta hoja de ruta");
+  }
+
+  const sortedSales = routeSales.map(toRouteSheetSale).sort((a, b) =>
+    String(a.sale_number ?? "").localeCompare(
+      String(b.sale_number ?? ""),
+      undefined,
+      {
+        numeric: true,
+      }
+    )
+  );
+
+  return {
+    ...sheet,
+    carrier: Array.isArray(sheet.carrier)
+      ? (sheet.carrier[0] ?? null)
+      : (sheet.carrier ?? null),
+    sales: sortedSales,
+  };
+}
+
 export async function createRouteSheet(
   input: CreateRouteSheetInput
 ): Promise<Database["public"]["Tables"]["route_sheets"]["Row"]> {
@@ -449,9 +526,9 @@ export async function addSalesToRouteSheet(
 
   const sheet = await getRouteSheetForOrg(org.id, routeSheetId);
 
-  if (sheet.status === "COMPLETED") {
+  if (sheet.status !== "PENDING") {
     throw new Error(
-      "No se pueden agregar ventas a una hoja de ruta completada"
+      "Solo se pueden agregar ventas a una hoja de ruta pendiente"
     );
   }
 
@@ -617,7 +694,13 @@ export async function removeSaleFromRouteSheet(
     throw new Error("No tienes permisos para gestionar hojas de ruta");
   }
 
-  await getRouteSheetForOrg(org.id, routeSheetId);
+  const sheet = await getRouteSheetForOrg(org.id, routeSheetId);
+
+  if (sheet.status !== "PENDING") {
+    throw new Error(
+      "Solo se pueden quitar ventas de una hoja de ruta pendiente"
+    );
+  }
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
@@ -676,7 +759,11 @@ export async function deleteRouteSheet(
     throw new Error("No tienes permisos para eliminar hojas de ruta");
   }
 
-  await getRouteSheetForOrg(org.id, routeSheetId);
+  const sheet = await getRouteSheetForOrg(org.id, routeSheetId);
+
+  if (sheet.status !== "PENDING") {
+    throw new Error("Solo se pueden eliminar hojas de ruta pendientes");
+  }
 
   const { error: clearError } = await supabase
     .from("sales_orders")

@@ -18,9 +18,11 @@ import { RouteSheetDialog } from "./route-sheet-dialog";
 
 export function RouteSheetView({
   canManage,
+  canRead,
   orgSlug,
 }: {
   canManage: boolean;
+  canRead: boolean;
   orgSlug: string;
 }) {
   const { data, isLoading, isError } = useRouteSheets(orgSlug);
@@ -64,6 +66,7 @@ export function RouteSheetView({
         {data.routeSheets.map((routeSheet) => (
           <RouteSheetCarrierGroup
             canManage={canManage}
+            canRead={canRead}
             key={routeSheet.id}
             orgSlug={orgSlug}
             routeSheet={routeSheet}
