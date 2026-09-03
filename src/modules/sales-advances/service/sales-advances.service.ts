@@ -8,7 +8,7 @@ import {
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
-import { assertCanManageOrganizationArca } from "@/modules/arca/server/access";
+import { assertCanIssueOrganizationArca } from "@/modules/arca/server/access";
 import { emitCreditNote } from "@/modules/arca/server/credit-note-invoicing.service";
 import { emitSaleInvoice } from "@/modules/arca/server/sale-invoicing.service";
 import { createCreditNote } from "@/modules/credit-notes/service/credit-notes.service";
@@ -291,7 +291,7 @@ async function assertCanManageAdvance(params: {
     throw new Error("Solo puedes gestionar anticipos de tus propias ventas");
   }
   if (params.requiresArca) {
-    await assertCanManageOrganizationArca(params.orgSlug);
+    await assertCanIssueOrganizationArca(params.orgSlug);
   }
 }
 

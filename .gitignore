@@ -47,6 +47,8 @@ next-env.d.ts
 
 # Local docs
 /docs
+!/docs/
+!/docs/whatsapp-agent.md
 
 #pmpm-workspace
 pnpm-workspace.yaml

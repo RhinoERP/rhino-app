@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { SalesAdvanceWorkspace } from "@/components/sales/detail/sales-advance-workspace";
+import { getCurrentUserOrganizationArcaAccess } from "@/modules/arca/server/access";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getSalesAccessContext,
@@ -23,9 +24,10 @@ export default async function SalesAdvancePage({
 }: SalesAdvancePageProps) {
   const { orgSlug, saleId } = await params;
   const { advanceId } = await searchParams;
-  const [org, access] = await Promise.all([
+  const [org, access, arcaAccess] = await Promise.all([
     getOrganizationBySlug(orgSlug),
     getSalesAccessContext(orgSlug),
+    getCurrentUserOrganizationArcaAccess(orgSlug),
   ]);
   if (!org || org.sales_advances_enabled === false || !access.canRead) {
     notFound();
@@ -44,6 +46,9 @@ export default async function SalesAdvancePage({
   return (
     <SalesAdvanceWorkspace
       advanceId={advance.id}
+      canIssueArca={
+        arcaAccess.canManage || arcaAccess.permissions.includes("arca.issue")
+      }
       canManage={sale.access.canManage}
       initialAdvance={advance}
       orgSlug={orgSlug}

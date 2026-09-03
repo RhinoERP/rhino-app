@@ -1,5 +1,6 @@
 packages:
   - services/accounting
+  - services/whatsapp-agent
 allowBuilds:
   esbuild: false
   msw: true

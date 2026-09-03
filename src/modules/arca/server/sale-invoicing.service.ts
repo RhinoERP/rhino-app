@@ -39,7 +39,10 @@ import type {
   ArcaSaleInvoiceValidationResult,
 } from "../types";
 import { normalizeCuit, validateOrganizationCuit } from "../validation";
-import { getCurrentUserOrganizationArcaAccess } from "./access";
+import {
+  assertCanIssueOrganizationArca,
+  getCurrentUserOrganizationArcaAccess,
+} from "./access";
 import {
   createArcaClientFromCredentials,
   isArcaCertificateExpired,
@@ -1392,6 +1395,7 @@ export async function emitSaleInvoice(params: {
   orgSlug: string;
   saleId: string;
 }): Promise<ArcaSaleInvoiceResult> {
+  await assertCanIssueOrganizationArca(params.orgSlug);
   const validation = await validateSaleForArcaInvoicing(params);
 
   if (validation.kind === "already_authorized") {

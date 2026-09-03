@@ -20,7 +20,10 @@ import {
 } from "../errors";
 import type { ArcaCreditNoteInvoiceResult } from "../types";
 import { validateOrganizationCuit } from "../validation";
-import { getCurrentUserOrganizationArcaAccess } from "./access";
+import {
+  assertCanIssueOrganizationArca,
+  getCurrentUserOrganizationArcaAccess,
+} from "./access";
 import {
   createArcaClientFromCredentials,
   isArcaCertificateExpired,
@@ -921,6 +924,7 @@ export async function emitCreditNote(params: {
   orgSlug: string;
   creditNoteId: string;
 }): Promise<ArcaCreditNoteInvoiceResult> {
+  await assertCanIssueOrganizationArca(params.orgSlug);
   const validation = await validateCreditNoteForArca(params);
 
   if (validation.kind === "already_authorized") {

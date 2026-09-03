@@ -100,6 +100,25 @@ export async function assertCanManageOrganizationArca(
   return access.organization;
 }
 
+/**
+ * Authorizes fiscal issuance without exposing ARCA settings, credentials, or
+ * organization administration. Organization administrators retain this
+ * capability implicitly.
+ */
+export async function assertCanIssueOrganizationArca(
+  orgSlug: string
+): Promise<OrganizationArcaAccess> {
+  const access = await getCurrentUserOrganizationArcaAccess(orgSlug);
+
+  if (!(access.canManage || access.permissions.includes("arca.issue"))) {
+    throw new ArcaAuthorizationError(
+      "Necesitás permiso para emitir comprobantes en ARCA."
+    );
+  }
+
+  return access.organization;
+}
+
 export async function assertCanManageArcaOperatorProfiles(): Promise<void> {
   const superAdmin = await isSuperAdmin();
 

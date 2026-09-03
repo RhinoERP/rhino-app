@@ -35,6 +35,7 @@ type SalesAdvanceWorkspaceProps = {
   advanceId: string;
   initialAdvance: SalesAdvance;
   canManage: boolean;
+  canIssueArca: boolean;
 };
 
 function getSaleLabel(sale: SalesAdvanceWorkspaceProps["sale"]) {
@@ -54,6 +55,7 @@ export function SalesAdvanceWorkspace({
   advanceId,
   initialAdvance,
   canManage,
+  canIssueArca,
 }: SalesAdvanceWorkspaceProps) {
   const { data, refetch } = useSalesAdvanceById(orgSlug, advanceId);
   const advance = data ?? initialAdvance;
@@ -90,6 +92,16 @@ export function SalesAdvanceWorkspace({
   };
 
   const saleLabel = getSaleLabel(sale);
+
+  const issueAdvance = async () => {
+    const result = await issueSalesAdvanceAction({
+      orgSlug,
+      advanceId: advance.id,
+    });
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -200,17 +212,15 @@ export function SalesAdvanceWorkspace({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            {canRetryIssuance && canManage ? (
-              <Button
-                disabled={pending}
-                onClick={() =>
-                  run(() =>
-                    issueSalesAdvanceAction({ orgSlug, advanceId: advance.id })
-                  )
-                }
-              >
+            {canRetryIssuance && canManage && canIssueArca ? (
+              <Button disabled={pending} onClick={() => run(issueAdvance)}>
                 Emitir factura de anticipo
               </Button>
+            ) : null}
+            {canRetryIssuance && canManage && !canIssueArca ? (
+              <p className="self-center text-muted-foreground text-sm">
+                Necesitás permiso para emitir comprobantes en ARCA.
+              </p>
             ) : null}
             {advance.status === "INVOICED" ? (
               <Button asChild variant="outline">

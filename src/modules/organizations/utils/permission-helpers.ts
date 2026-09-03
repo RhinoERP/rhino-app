@@ -32,6 +32,13 @@ function buildPermissionTooltip(
     );
   }
 
+  if (key === "arca.issue") {
+    return (
+      description ??
+      "Permite emitir comprobantes fiscales en ARCA sin acceder a la configuración, credenciales ni miembros de la organización."
+    );
+  }
+
   if (resource === "sales") {
     if (key === "sales.read") {
       return "Permite ver solo las ventas creadas por el propio usuario.";
@@ -271,6 +278,7 @@ function humanizeAction(
       "commissions.read": "Ver comisiones",
       "accounting.read": "Ver contabilidad",
       "accounting.manage": "Gestionar contabilidad",
+      "arca.issue": "Emitir comprobantes",
       "columns.view_supplier": "Ver columna Proveedor (Inventario)",
       "columns.view_cost": "Ver columna Costo (Precios)",
       "columns.view_margin": "Ver columna Margen (Precios)",

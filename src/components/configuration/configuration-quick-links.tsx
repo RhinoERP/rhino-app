@@ -10,6 +10,7 @@ import {
   ShoppingCartSimpleIcon,
   UserGearIcon,
   UsersIcon,
+  WhatsappLogo,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import {
@@ -107,6 +108,13 @@ export function ConfigurationQuickLinks({
         "Define el ambiente, el punto de venta y las credenciales ARCA de tu organización",
       icon: LightningIcon,
       href: `/org/${orgSlug}/configuracion/arca`,
+    },
+    {
+      title: "WhatsApp comercial",
+      description:
+        "Configurá el número, lista de precios y responsable del asistente comercial",
+      icon: WhatsappLogo,
+      href: `/org/${orgSlug}/whatsapp/configuracion`,
     },
   ];
   const moduleFlags = {
