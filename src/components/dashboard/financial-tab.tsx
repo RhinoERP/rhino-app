@@ -38,6 +38,27 @@ type FinancialTabProps = {
   filters?: DashboardFilters;
 };
 
+function DualCurrencyAmount({
+  ars,
+  usd,
+  className,
+}: {
+  ars: number;
+  usd?: number;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <div className="font-bold text-2xl">{formatCurrency(ars)}</div>
+      {usd != null && usd > 0 && (
+        <div className="text-muted-foreground text-xs">
+          {formatCurrency(usd, "USD")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function FinancialTab({
   orgSlug,
   startDate,
@@ -102,9 +123,10 @@ export function FinancialTab({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl">
-              {formatCurrency(breakdown.invoicing.total)}
-            </div>
+            <DualCurrencyAmount
+              ars={breakdown.invoicing.total}
+              className="font-bold text-2xl"
+            />
             <p className="text-muted-foreground text-xs">
               Distribuidora + venta directa
             </p>
@@ -123,9 +145,11 @@ export function FinancialTab({
             <CardTitle className="font-medium text-sm">Cobrado</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl text-green-600">
-              {formatCurrency(balance.collected)}
-            </div>
+            <DualCurrencyAmount
+              ars={balance.collected}
+              className="text-green-600"
+              usd={balance.collectedUSD}
+            />
             <p className="text-muted-foreground text-xs">Ingresos efectivos</p>
           </CardContent>
         </Card>
@@ -139,9 +163,11 @@ export function FinancialTab({
             <CardTitle className="font-medium text-sm">Por Cobrar</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl text-yellow-600">
-              {formatCurrency(balance.toCollect)}
-            </div>
+            <DualCurrencyAmount
+              ars={balance.toCollect}
+              className="text-yellow-600"
+              usd={balance.toCollectUSD}
+            />
             <p className="text-muted-foreground text-xs">Cuentas pendientes</p>
           </CardContent>
         </Card>
@@ -158,9 +184,11 @@ export function FinancialTab({
             <CardTitle className="font-medium text-sm">Por Pagar</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl text-red-600">
-              {formatCurrency(balance.toPay)}
-            </div>
+            <DualCurrencyAmount
+              ars={balance.toPay}
+              className="text-red-600"
+              usd={balance.toPayUSD}
+            />
             <p className="text-muted-foreground text-xs">Obligaciones</p>
           </CardContent>
         </Card>
@@ -184,9 +212,11 @@ export function FinancialTab({
             </div>
             <div className="space-y-2">
               <p className="text-muted-foreground text-sm">Ganancia Neta</p>
-              <p className="font-bold text-2xl text-green-600">
-                {formatCurrency(balance.margin.amount)}
-              </p>
+              <DualCurrencyAmount
+                ars={balance.margin.amount}
+                className="text-green-600"
+                usd={balance.margin.amountUSD}
+              />
             </div>
           </div>
         </CardContent>
@@ -220,106 +250,99 @@ export function FinancialTab({
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 0-7 days */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">Vigente (0-7 días)</span>
-              <span className="font-semibold text-sm">
-                {formatCurrency(balance.aging.days1_7)}
-              </span>
-            </div>
-            <Progress
-              className="h-2"
-              value={
-                totalDebt > 0 ? (balance.aging.days1_7 / totalDebt) * 100 : 0
-              }
-            />
-          </div>
-
-          {/* 8-14 days */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">8-14 días</span>
-              <span className="font-semibold text-blue-600 text-sm">
-                {formatCurrency(balance.aging.days8_14)}
-              </span>
-            </div>
-            <Progress
-              className="h-2 [&>div]:bg-blue-500"
-              value={
-                totalDebt > 0 ? (balance.aging.days8_14 / totalDebt) * 100 : 0
-              }
-            />
-          </div>
-
-          {/* 15-30 days */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">15-30 días</span>
-              <span className="font-semibold text-sm text-yellow-600">
-                {formatCurrency(balance.aging.days15_30)}
-              </span>
-            </div>
-            <Progress
-              className="h-2 [&>div]:bg-yellow-500"
-              value={
-                totalDebt > 0 ? (balance.aging.days15_30 / totalDebt) * 100 : 0
-              }
-            />
-          </div>
-
-          {/* 31-60 days */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">31-60 días</span>
-              <span className="font-semibold text-orange-600 text-sm">
-                {formatCurrency(balance.aging.days31_60)}
-              </span>
-            </div>
-            <Progress
-              className="h-2 [&>div]:bg-orange-500"
-              value={
-                totalDebt > 0 ? (balance.aging.days31_60 / totalDebt) * 100 : 0
-              }
-            />
-          </div>
-
-          {/* Over 60 days */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">60+ días</span>
-              <span className="font-semibold text-red-700 text-sm">
-                {formatCurrency(balance.aging.over60)}
-              </span>
-            </div>
-            <Progress
-              className="h-2 [&>div]:bg-red-700"
-              value={
-                totalDebt > 0 ? (balance.aging.over60 / totalDebt) * 100 : 0
-              }
-            />
-          </div>
-
-          {balance.aging.over60 > 0 && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-4 dark:bg-red-950/10">
-              <WarningIcon
-                className="mt-0.5 size-5 text-red-600"
-                weight="duotone"
-              />
-              <div>
-                <p className="font-semibold text-red-900 text-sm dark:text-red-100">
-                  Atención: Deuda Vencida
-                </p>
-                <p className="text-red-700 text-sm dark:text-red-300">
-                  Hay {formatCurrency(balance.aging.over60)} en cuentas con más
-                  de 60 días de antigüedad. Se recomienda acción inmediata de
-                  cobranza.
-                </p>
-              </div>
-            </div>
-          )}
+          <AgingRow
+            amount={balance.aging.days1_7}
+            barClassName="h-2"
+            label="Vigente (0-7 días)"
+            totalDebt={totalDebt}
+            usd={balance.aging.days1_7USD}
+          />
+          <AgingRow
+            amount={balance.aging.days8_14}
+            barClassName="h-2 [&>div]:bg-blue-500"
+            label="8-14 días"
+            totalDebt={totalDebt}
+            usd={balance.aging.days8_14USD}
+          />
+          <AgingRow
+            amount={balance.aging.days15_30}
+            barClassName="h-2 [&>div]:bg-yellow-500"
+            label="15-30 días"
+            totalDebt={totalDebt}
+            usd={balance.aging.days15_30USD}
+          />
+          <AgingRow
+            amount={balance.aging.days31_60}
+            barClassName="h-2 [&>div]:bg-orange-500"
+            label="31-60 días"
+            totalDebt={totalDebt}
+            usd={balance.aging.days31_60USD}
+          />
+          <AgingRow
+            alert={balance.aging.over60 > 0}
+            amount={balance.aging.over60}
+            barClassName="h-2 [&>div]:bg-red-700"
+            label="60+ días"
+            totalDebt={totalDebt}
+            usd={balance.aging.over60USD}
+          />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function AgingRow({
+  label,
+  amount,
+  usd,
+  totalDebt,
+  barClassName,
+  alert = false,
+}: {
+  label: string;
+  amount: number;
+  usd: number;
+  totalDebt: number;
+  barClassName: string;
+  alert?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-sm">{label}</span>
+        <span className="text-right">
+          <span className="block font-semibold text-sm">
+            {formatCurrency(amount)}
+          </span>
+          {usd > 0 && (
+            <span className="block text-muted-foreground text-xs">
+              {formatCurrency(usd, "USD")}
+            </span>
+          )}
+        </span>
+      </div>
+      <Progress
+        className={barClassName}
+        value={totalDebt > 0 ? (amount / totalDebt) * 100 : 0}
+      />
+      {alert && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-4 dark:bg-red-950/10">
+          <WarningIcon
+            className="mt-0.5 size-5 text-red-600"
+            weight="duotone"
+          />
+          <div>
+            <p className="font-semibold text-red-900 text-sm dark:text-red-100">
+              Atención: Deuda Vencida
+            </p>
+            <p className="text-red-700 text-sm dark:text-red-300">
+              Hay {formatCurrency(amount)} en cuentas con más de 60 días de
+              antigüedad. Se recomienda acción inmediata de cobranza.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

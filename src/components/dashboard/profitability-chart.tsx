@@ -53,6 +53,7 @@ function CustomTooltip({
       Ganancia: number;
       margen: number;
       orderCount: number;
+      currency?: string;
     };
   }>;
 }) {
@@ -61,6 +62,7 @@ function CustomTooltip({
   }
 
   const itemData = payload[0].payload;
+  const currency = itemData.currency ?? "ARS";
 
   return (
     <div className="rounded-lg border bg-background p-3 shadow-lg">
@@ -75,7 +77,7 @@ function CustomTooltip({
             <span className="text-muted-foreground">Ventas:</span>
           </div>
           <span className="font-semibold text-emerald-600">
-            {formatCurrency(itemData.Ventas)}
+            {formatCurrency(itemData.Ventas, currency)}
           </span>
         </div>
         <div className="flex items-center justify-between gap-4">
@@ -87,7 +89,7 @@ function CustomTooltip({
             <span className="text-muted-foreground">Ganancia:</span>
           </div>
           <span className="font-semibold text-blue-600">
-            {formatCurrency(itemData.Ganancia)}
+            {formatCurrency(itemData.Ganancia, currency)}
           </span>
         </div>
         <div className="border-t pt-1.5">
@@ -121,6 +123,7 @@ function SingleChart({
     Ganancia: Number(item.profit),
     margen: Number(item.margin_percent),
     orderCount: item.order_count,
+    currency: item.currency,
   }));
 
   return (

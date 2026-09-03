@@ -34,11 +34,13 @@ type AmountRow = {
   amount?: number | null;
   total_amount?: number | null;
   status?: string | null;
+  currency?: string | null;
 };
 
 type ReceivablePaymentRow = {
   amount: number | null;
   amount_ars?: number | null;
+  currency?: string | null;
   payment_method: string | null;
 };
 
@@ -102,6 +104,7 @@ type SalesOrderProfitabilityItem = {
 type SalesOrderProfitabilityRow = {
   id: string;
   status: string | null;
+  currency?: string | null;
   customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
   items: SalesOrderProfitabilityItem[] | null;
 };
@@ -119,6 +122,7 @@ type CustomerProfitabilitySalesOrderRow = {
   status: string | null;
   sub_total: number | null;
   total_amount: number | null;
+  currency?: string | null;
   customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
   items: CustomerProfitabilityItem[] | null;
 };
@@ -194,6 +198,8 @@ type ProfitabilityAccumulator = {
   label: string;
   revenue: number;
   cogs: number;
+  revenueUSD: number;
+  cogsUSD: number;
   orderIds: Set<string>;
 };
 
@@ -202,6 +208,8 @@ type CustomerProfitabilityAccumulator = {
   customerName: string;
   totalSales: number;
   totalCost: number;
+  totalSalesUSD: number;
+  totalCostUSD: number;
   orderIds: Set<string>;
 };
 
@@ -541,7 +549,7 @@ export async function getFinancialBreakdown(
 
   let normalSalesQuery = supabase
     .from("sales_orders")
-    .select("total_amount, status")
+    .select("total_amount, status, currency")
     .eq("organization_id", organizationId)
     .gte("sale_date", dateFrom)
     .lte("sale_date", dateTo)
@@ -568,6 +576,7 @@ export async function getFinancialBreakdown(
       `
         amount,
         amount_ars,
+        currency,
         payment_method,
         accounts_receivable!inner(customer_id)
       `
@@ -659,7 +668,8 @@ export async function getFinancialBreakdown(
   );
 
   const normalSalesAmount = normalSales.reduce(
-    (sum, sale) => sum + Number(sale.total_amount ?? 0),
+    (sum, sale) =>
+      sum + Number(sale.currency === "USD" ? 0 : (sale.total_amount ?? 0)),
     0
   );
   const directSalesAmount = directSales.reduce(
@@ -667,7 +677,13 @@ export async function getFinancialBreakdown(
     0
   );
   const receivableCash = receivableCashPayments.reduce(
-    (sum, payment) => sum + Number(payment.amount_ars ?? payment.amount ?? 0),
+    (sum, payment) =>
+      sum +
+      Number(
+        payment.currency === "USD"
+          ? (payment.amount_ars ?? payment.amount ?? 0)
+          : (payment.amount ?? 0)
+      ),
     0
   );
   const directSalesCash = directSalesCashPayments.reduce(
@@ -1111,6 +1127,7 @@ function addCustomerProfitabilityEvent(params: {
   customerName: string;
   revenue: number;
   cogs: number;
+  currency?: string | null;
   orderId?: string;
 }) {
   const current = params.rows.get(params.customerId) ?? {
@@ -1118,11 +1135,18 @@ function addCustomerProfitabilityEvent(params: {
     customerName: params.customerName,
     totalSales: 0,
     totalCost: 0,
+    totalSalesUSD: 0,
+    totalCostUSD: 0,
     orderIds: new Set<string>(),
   };
 
-  current.totalSales += params.revenue;
-  current.totalCost += params.cogs;
+  if (params.currency === "USD") {
+    current.totalSalesUSD += params.revenue;
+    current.totalCostUSD += params.cogs;
+  } else {
+    current.totalSales += params.revenue;
+    current.totalCost += params.cogs;
+  }
 
   if (params.orderId) {
     current.orderIds.add(params.orderId);
@@ -1146,6 +1170,8 @@ function buildCustomerProfitabilityRows(
         customerName: row.customerName,
         totalSales,
         totalProfit,
+        totalSalesUSD: toMoney(row.totalSalesUSD),
+        totalProfitUSD: toMoney(row.totalSalesUSD - row.totalCostUSD),
         marginPercent,
         orderCount: row.orderIds.size,
         status: getCustomerProfitabilityStatus(marginPercent),
@@ -1332,6 +1358,7 @@ function addCustomerProfitabilitySalesRows(params: {
       ...customerKey,
       revenue: getCustomerProfitabilitySaleRevenue(sale),
       cogs,
+      currency: sale.currency,
       orderId: sale.id,
     });
   }
@@ -1473,6 +1500,7 @@ export async function getCustomerProfitabilityDashboard(
           customer_id,
           sub_total,
           total_amount,
+          currency,
           customer:customers(id, business_name, fantasy_name),
           items:sales_order_items(
             product_id,
@@ -1592,11 +1620,19 @@ export async function getCustomerProfitabilityDashboard(
   const totalProfit = toMoney(
     customers.reduce((total, customer) => total + customer.totalProfit, 0)
   );
+  const totalSalesUSD = toMoney(
+    customers.reduce((total, customer) => total + customer.totalSalesUSD, 0)
+  );
+  const totalProfitUSD = toMoney(
+    customers.reduce((total, customer) => total + customer.totalProfitUSD, 0)
+  );
 
   return {
     kpis: {
       totalSales,
       totalProfit,
+      totalSalesUSD,
+      totalProfitUSD,
       averageMarginPercent:
         totalSales > 0 ? toMoney((totalProfit / totalSales) * 100) : 0,
       activeCustomers: customers.length,
@@ -1646,17 +1682,26 @@ function addProfitabilityLine(params: {
   saleId: string;
   revenue: number;
   cogs: number;
+  currency?: string | null;
 }) {
-  const { rows, label, saleId, revenue, cogs } = params;
+  const { rows, label, saleId, revenue, cogs, currency } = params;
   const current = rows.get(label) ?? {
     label,
     revenue: 0,
     cogs: 0,
+    revenueUSD: 0,
+    cogsUSD: 0,
     orderIds: new Set<string>(),
   };
 
-  current.revenue += revenue;
-  current.cogs += cogs;
+  if (currency === "USD") {
+    current.revenueUSD += revenue;
+    current.cogsUSD += cogs;
+  } else {
+    current.revenue += revenue;
+    current.cogs += cogs;
+  }
+
   current.orderIds.add(saleId);
   rows.set(label, current);
 }
@@ -1697,18 +1742,45 @@ function buildProfitabilityResponse(
   rows: Map<string, ProfitabilityAccumulator>
 ): ProfitabilityMetricsResponse {
   return Array.from(rows.values())
-    .map<ProfitabilityMetric>((row) => {
-      const revenue = toMoney(row.revenue);
-      const cogs = toMoney(row.cogs);
-      const profit = toMoney(revenue - cogs);
+    .flatMap<ProfitabilityMetric>((row) => {
+      const arsRevenue = toMoney(row.revenue);
+      const arsCogs = toMoney(row.cogs);
+      const arsProfit = toMoney(arsRevenue - arsCogs);
+      const usdRevenue = toMoney(row.revenueUSD);
+      const usdCogs = toMoney(row.cogsUSD);
+      const usdProfit = toMoney(usdRevenue - usdCogs);
 
-      return {
-        label: row.label,
-        revenue,
-        profit,
-        margin_percent: revenue > 0 ? toMoney((profit / revenue) * 100) : 0,
-        order_count: row.orderIds.size,
-      };
+      const metrics: ProfitabilityMetric[] = [];
+
+      if (arsRevenue > 0) {
+        metrics.push({
+          label: row.label,
+          revenue: arsRevenue,
+          revenue_usd: 0,
+          profit: arsProfit,
+          profit_usd: 0,
+          margin_percent:
+            arsRevenue > 0 ? toMoney((arsProfit / arsRevenue) * 100) : 0,
+          order_count: row.orderIds.size,
+          currency: "ARS",
+        });
+      }
+
+      if (usdRevenue > 0) {
+        metrics.push({
+          label: row.label,
+          revenue: usdRevenue,
+          revenue_usd: usdRevenue,
+          profit: usdProfit,
+          profit_usd: usdProfit,
+          margin_percent:
+            usdRevenue > 0 ? toMoney((usdProfit / usdRevenue) * 100) : 0,
+          order_count: row.orderIds.size,
+          currency: "USD",
+        });
+      }
+
+      return metrics;
     })
     .sort((a, b) => b.profit - a.profit)
     .slice(0, 10);
@@ -1781,6 +1853,7 @@ function addSalesOrderProfitabilityRows(params: {
         saleId: sale.id,
         revenue: Number(item.subtotal ?? 0),
         cogs: costPrice * getSalesOrderCostQuantity(item),
+        currency: sale.currency,
       });
     }
   }
@@ -1859,6 +1932,7 @@ export async function getProfitabilityMetrics(
         `
           id,
           status,
+          currency,
           customer:customers(id, business_name, fantasy_name),
           items:sales_order_items(
             product_id,
