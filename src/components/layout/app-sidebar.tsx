@@ -145,7 +145,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Hoja de Ruta",
           url: `/org/${orgSlug}/hoja-de-ruta`,
           icon: <MapPinIcon weight="duotone" />,
-          requiredPermission: "sales.read",
+          requiredPermission: [
+            "sales.read",
+            "sales.read.all",
+            "sales.manage",
+            "sales.manage.all",
+          ],
           module: "wholesale",
         },
         {
