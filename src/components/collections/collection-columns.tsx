@@ -158,6 +158,20 @@ export function createReceivableColumns(
       },
     },
     {
+      id: "empresa",
+      accessorFn: (row) => row.customer.business_name || null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Empresa" />
+      ),
+      cell: ({ row }) => (
+        <div className="text-sm">
+          {row.original.customer.business_name || "—"}
+        </div>
+      ),
+      enableSorting: true,
+      enableColumnFilter: false,
+    },
+    {
       id: "seller",
       accessorFn: (row) =>
         row.seller?.name || row.seller?.email || row.seller?.id || null,
