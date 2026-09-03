@@ -191,21 +191,28 @@ export async function getRouteSheetPageData(
     salesByRouteSheet.set(routeSheetId, list);
   }
 
-  const routeSheets: RouteSheetWithSales[] = (sheets ?? []).map((sheet) => ({
-    ...sheet,
-    carrier: Array.isArray(sheet.carrier)
-      ? (sheet.carrier[0] ?? null)
-      : (sheet.carrier ?? null),
-    sales: (salesByRouteSheet.get(sheet.id) ?? []).sort((a, b) =>
-      String(a.sale_number ?? "").localeCompare(
-        String(b.sale_number ?? ""),
-        undefined,
-        {
-          numeric: true,
-        }
-      )
-    ),
-  }));
+  const routeSheets: RouteSheetWithSales[] = (sheets ?? [])
+    .filter((sheet) => {
+      if (accessContext.scope === "own") {
+        return salesByRouteSheet.has(sheet.id);
+      }
+      return true;
+    })
+    .map((sheet) => ({
+      ...sheet,
+      carrier: Array.isArray(sheet.carrier)
+        ? (sheet.carrier[0] ?? null)
+        : (sheet.carrier ?? null),
+      sales: (salesByRouteSheet.get(sheet.id) ?? []).sort((a, b) =>
+        String(a.sale_number ?? "").localeCompare(
+          String(b.sale_number ?? ""),
+          undefined,
+          {
+            numeric: true,
+          }
+        )
+      ),
+    }));
 
   const availableSales = ((available ?? []) as unknown as SalesOrderSale[])
     .map(toRouteSheetSale)
@@ -295,7 +302,7 @@ export async function updateRouteSheetStatus(
 
   const { data: sheet, error: sheetError } = await supabase
     .from("route_sheets")
-    .select("id, status")
+    .select("id, carrier_id, status")
     .eq("id", routeSheetId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -314,6 +321,18 @@ export async function updateRouteSheetStatus(
     throw new Error("Transición de estado no permitida");
   }
 
+  const shouldDispatch = current === "PENDING" && status === "IN_PROGRESS";
+
+  if (shouldDispatch) {
+    await dispatchPendingRouteSheetSales({
+      orgSlug,
+      orgId: org.id,
+      routeSheetId,
+      carrierId: sheet.carrier_id,
+      accessContext,
+    });
+  }
+
   const { error } = await supabase
     .from("route_sheets")
     .update({
@@ -325,6 +344,67 @@ export async function updateRouteSheetStatus(
 
   if (error) {
     throw new Error(`No se pudo actualizar la hoja de ruta: ${error.message}`);
+  }
+}
+
+async function dispatchPendingRouteSheetSales(params: {
+  orgSlug: string;
+  orgId: string;
+  routeSheetId: string;
+  carrierId: string | null;
+  accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
+}): Promise<void> {
+  const { orgSlug, orgId, routeSheetId, carrierId, accessContext } = params;
+
+  const supabase = await createClient();
+
+  const { data: sales, error: salesError } = await supabase
+    .from("sales_orders")
+    .select("id, status, remittance_number, user_id")
+    .eq("organization_id", orgId)
+    .eq("route_sheet_id", routeSheetId)
+    .eq("status", "CONFIRMED");
+
+  if (salesError) {
+    throw new Error(
+      `Error al obtener las ventas de la hoja de ruta: ${salesError.message}`
+    );
+  }
+
+  const pendingSales = sales ?? [];
+
+  const unauthorizedSale = pendingSales.find(
+    (sale) =>
+      !isOwnSale(
+        accessContext.userId,
+        sale.user_id,
+        accessContext.isOrganizationAdmin,
+        accessContext.canManageAll
+      )
+  );
+  if (unauthorizedSale) {
+    throw new Error(
+      "Esta hoja incluye ventas de otro usuario que no podés despachar. Pedí a un administrador que comience la hoja."
+    );
+  }
+
+  const missingRemittance = pendingSales.find(
+    (sale) => !sale.remittance_number?.trim()
+  );
+  if (missingRemittance) {
+    throw new Error(
+      "Una o más ventas de esta hoja no tienen número de remito asignado. Asigná los remitos y volvé a intentar."
+    );
+  }
+
+  for (const sale of pendingSales) {
+    await dispatchSaleOrder({
+      orgSlug,
+      saleId: sale.id,
+      remittanceNumber: sale.remittance_number as string,
+      carrierId,
+      routeSheetId,
+    });
   }
 }
 
@@ -407,13 +487,10 @@ export async function addSalesToRouteSheet(
     }
 
     await assignSaleToRoute({
-      orgSlug,
       orgId: org.id,
       routeSheetId,
-      carrierId: sheet.carrier_id,
       sale,
       remittance: remittances[saleId],
-      accessContext,
       supabase,
     });
   }
@@ -475,84 +552,41 @@ function assertSaleEligibleForRouteSheet(params: {
 
   const status = sale.status as SalesOrderStatus;
 
-  if (status === "CONFIRMED" && !remittance?.trim()) {
-    throw new Error("Falta el número de remito para la venta seleccionada");
-  }
-
-  if (status === "DISPATCH" && !sale.remittance_number?.trim()) {
-    throw new Error("La venta despachada no tiene número de remito");
-  }
-
-  if (status !== "CONFIRMED" && status !== "DISPATCH") {
+  if (status !== "CONFIRMED") {
     throw new Error(
-      "Solo las ventas confirmadas o despachadas pueden agregarse a la hoja de ruta"
+      "Solo las ventas confirmadas pueden agregarse a la hoja de ruta"
     );
+  }
+
+  if (!remittance?.trim()) {
+    throw new Error("Falta el número de remito para la venta seleccionada");
   }
 }
 
 type AssignSaleToRouteParams = {
-  orgSlug: string;
   orgId: string;
   routeSheetId: string;
-  carrierId: string;
   sale: RouteSheetSaleRow;
   remittance: string | undefined;
-  accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
   supabase: Awaited<ReturnType<typeof createClient>>;
 };
 
 async function assignSaleToRoute({
-  orgSlug,
   orgId,
   routeSheetId,
-  carrierId,
   sale,
   remittance,
-  accessContext,
   supabase,
 }: AssignSaleToRouteParams): Promise<void> {
-  const status = sale.status as SalesOrderStatus;
-
-  if (status === "CONFIRMED") {
-    if (!remittance?.trim()) {
-      throw new Error("Falta el número de remito para la venta seleccionada");
-    }
-
-    await dispatchSaleOrder({
-      orgSlug,
-      saleId: sale.id,
-      remittanceNumber: remittance.trim(),
-      carrierId,
-      routeSheetId,
-    });
-    return;
-  }
-
-  if (status !== "DISPATCH") {
-    throw new Error(
-      "Solo las ventas confirmadas o despachadas pueden agregarse a la hoja de ruta"
-    );
-  }
-
-  if (
-    !isOwnSale(
-      accessContext.userId,
-      sale.user_id,
-      accessContext.isOrganizationAdmin,
-      accessContext.canManageAll
-    )
-  ) {
-    throw new Error("Solo podés agregar tus propias ventas");
-  }
-
-  if (!sale.remittance_number?.trim()) {
-    throw new Error("La venta despachada no tiene número de remito");
+  if (!remittance?.trim()) {
+    throw new Error("Falta el número de remito para la venta seleccionada");
   }
 
   const { error: updateError } = await supabase
     .from("sales_orders")
     .update({
       route_sheet_id: routeSheetId,
+      remittance_number: remittance.trim(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", sale.id)
