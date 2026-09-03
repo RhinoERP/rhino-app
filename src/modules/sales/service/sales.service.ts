@@ -4519,6 +4519,36 @@ export async function cancelSaleOrder(
   return { status: "CANCELLED", wasUpdated: true };
 }
 
+async function fetchSaleForDispatch(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string,
+  accessContext: SalesAccessContext
+) {
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select(
+      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount, currency"
+    )
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleError) {
+    throw new Error(
+      `Error obteniendo la venta para despachar: ${saleError.message}`
+    );
+  }
+
+  if (!sale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
+
+  return sale;
+}
+
 export async function dispatchSaleOrder(
   input: DispatchSaleOrderInput
 ): Promise<{ status: SalesOrderStatus }> {
@@ -4541,26 +4571,12 @@ export async function dispatchSaleOrder(
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
-  const { data: sale, error: saleError } = await supabase
-    .from("sales_orders")
-    .select(
-      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount, currency"
-    )
-    .eq("id", saleId)
-    .eq("organization_id", org.id)
-    .maybeSingle();
-
-  if (saleError) {
-    throw new Error(
-      `Error obteniendo la venta para despachar: ${saleError.message}`
-    );
-  }
-
-  if (!sale) {
-    throw new Error("Venta no encontrada");
-  }
-
-  assertCanManageSale(accessContext, sale.user_id ?? null);
+  const sale = await fetchSaleForDispatch(
+    supabase,
+    org.id,
+    saleId,
+    accessContext
+  );
 
   const currentStatus = sale.status as SalesOrderStatus;
 
