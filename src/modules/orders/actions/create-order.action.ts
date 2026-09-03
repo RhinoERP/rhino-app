@@ -47,17 +47,19 @@ async function createOrder(
   }
 
   const year = new Date().getFullYear();
-  const { count, error: countError } = await supabase
-    .from("orders")
-    .select("*", { count: "exact", head: true })
-    .eq("organization_id", orgId)
-    .gte("created_at", `${year}-01-01T00:00:00Z`);
 
-  if (countError) {
-    throw new Error(`Error al generar número de pedido: ${countError.message}`);
+  const { data: nextSequence, error: seqError } = await supabase.rpc(
+    "generate_order_number",
+    { p_org_id: orgId }
+  );
+
+  if (seqError || !nextSequence) {
+    throw new Error(
+      `Error al generar número de pedido: ${seqError?.message ?? "Error desconocido"}`
+    );
   }
 
-  const sequence = String((count ?? 0) + 1).padStart(4, "0");
+  const sequence = String(nextSequence).padStart(4, "0");
   const orderNumber = `ORD-${year}-${sequence}`;
 
   const { data: order, error: orderError } = await supabase

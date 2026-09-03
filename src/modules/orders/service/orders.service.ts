@@ -1178,6 +1178,74 @@ export async function getStockForOrder(
   });
 }
 
+async function compensateFailedOrderConversion(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  quoteId: string;
+  salesOrderId: string;
+  createdOrderId: string | null;
+}): Promise<void> {
+  const { supabase, orgId, quoteId, salesOrderId, createdOrderId } = params;
+
+  if (createdOrderId) {
+    await supabase
+      .from("order_status_history")
+      .delete()
+      .eq("order_id", createdOrderId);
+
+    await supabase
+      .from("orders")
+      .delete()
+      .eq("id", createdOrderId)
+      .eq("organization_id", orgId);
+  }
+
+  const { data: saleItemIds } = await supabase
+    .from("sales_order_items")
+    .select("id")
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  const itemIds = (saleItemIds ?? []).map((item) => item.id);
+
+  if (itemIds.length > 0) {
+    await supabase
+      .from("sales_order_item_extras")
+      .delete()
+      .in("sales_order_item_id", itemIds);
+  }
+
+  await supabase
+    .from("sales_order_item_taxes")
+    .delete()
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  await supabase
+    .from("sales_order_taxes")
+    .delete()
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  await supabase
+    .from("sales_order_items")
+    .delete()
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  await supabase
+    .from("sales_orders")
+    .delete()
+    .eq("id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  await supabase
+    .from("quotes")
+    .update({ status: "APPROVED", updated_at: new Date().toISOString() })
+    .eq("id", quoteId)
+    .eq("organization_id", orgId);
+}
+
 export async function createOrderAndSaleFromQuote(
   orgSlug: string,
   quoteId: string
@@ -1209,56 +1277,78 @@ export async function createOrderAndSaleFromQuote(
 
   const salesOrderId = await convertQuoteToSalesOrder(quoteId, orgSlug);
 
-  const year = new Date().getFullYear();
+  let createdOrderId: string | null = null;
 
-  const { count, error: countError } = await supabase
-    .from("orders")
-    .select("*", { count: "exact", head: true })
-    .eq("organization_id", org.id)
-    .gte("created_at", `${year}-01-01T00:00:00Z`);
+  try {
+    const year = new Date().getFullYear();
 
-  if (countError) {
-    throw new Error(`Error al generar número de pedido: ${countError.message}`);
-  }
-
-  const sequence = String((count ?? 0) + 1).padStart(4, "0");
-  const orderNumber = `ORD-${year}-${sequence}`;
-
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .insert({
-      organization_id: org.id,
-      quote_id: quoteId,
-      sales_order_id: salesOrderId,
-      order_number: orderNumber,
-      status: "PENDING_FINANCE",
-      purchase_order_file: purchaseOrderFile,
-      created_by: user.id,
-    })
-    .select("id")
-    .single();
-
-  if (orderError || !order) {
-    throw new Error(
-      `Error al crear el pedido: ${orderError?.message ?? "Error desconocido"}`
+    // Número de pedido atómico por organización. Reemplaza el conteo
+    // COUNT-based que chocaba con `orders_organization_id_number_key`
+    // tras borrar/cancelar pedidos.
+    const { data: nextSequence, error: seqError } = await supabase.rpc(
+      "generate_order_number",
+      { p_org_id: org.id }
     );
-  }
 
-  const { error: historyError } = await supabase
-    .from("order_status_history")
-    .insert({
-      order_id: order.id,
-      to_status: "PENDING_FINANCE",
-      notes: "Pedido creado desde presupuesto aprobado",
-      changed_by: user.id,
-      changed_at: new Date().toISOString(),
+    if (seqError || !nextSequence) {
+      throw new Error(
+        `Error al generar número de pedido: ${seqError?.message ?? "Error desconocido"}`
+      );
+    }
+
+    const sequence = String(nextSequence).padStart(4, "0");
+    const orderNumber = `ORD-${year}-${sequence}`;
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        organization_id: org.id,
+        quote_id: quoteId,
+        sales_order_id: salesOrderId,
+        order_number: orderNumber,
+        status: "PENDING_FINANCE",
+        purchase_order_file: purchaseOrderFile,
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+
+    if (orderError || !order) {
+      throw new Error(
+        `Error al crear el pedido: ${orderError?.message ?? "Error desconocido"}`
+      );
+    }
+
+    createdOrderId = order.id;
+
+    const { error: historyError } = await supabase
+      .from("order_status_history")
+      .insert({
+        order_id: order.id,
+        to_status: "PENDING_FINANCE",
+        notes: "Pedido creado desde presupuesto aprobado",
+        changed_by: user.id,
+        changed_at: new Date().toISOString(),
+      });
+
+    if (historyError) {
+      throw new Error(`Error al registrar historial: ${historyError.message}`);
+    }
+
+    return { orderId: order.id, orderNumber, salesOrderId };
+  } catch (error) {
+    // Si falla la creación del pedido, se revierte la preventa creada y el
+    // quote vuelve a APPROVED para que el usuario pueda reintentar sin dejar
+    // estados a medias (venta en preventa huérfana + quote CONVERTED).
+    await compensateFailedOrderConversion({
+      supabase,
+      orgId: org.id,
+      quoteId,
+      salesOrderId,
+      createdOrderId,
     });
-
-  if (historyError) {
-    throw new Error(`Error al registrar historial: ${historyError.message}`);
+    throw error;
   }
-
-  return { orderId: order.id, orderNumber, salesOrderId };
 }
 
 export async function updateOrderStatus(
