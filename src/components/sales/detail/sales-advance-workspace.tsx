@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ArcaInvoiceDownloadButton } from "@/components/arca/invoices/arca-invoice-download-button";
+import { ArcaInvoicePreviewButton } from "@/components/arca/invoices/arca-invoice-preview-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -187,12 +189,27 @@ export function SalesAdvanceWorkspace({
             <div className="space-y-2 rounded-md border p-4 text-sm">
               <p className="font-medium">Comprobantes ARCA</p>
               {advance.advanceInvoiceNumber ? (
-                <p className="text-muted-foreground">
-                  Factura de anticipo: {advance.advanceInvoiceNumber}
-                  {advance.advanceArcaCae
-                    ? ` · CAE ${advance.advanceArcaCae}`
-                    : ""}
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-muted-foreground">
+                    Factura de anticipo: {advance.advanceInvoiceNumber}
+                    {advance.advanceArcaCae
+                      ? ` · CAE ${advance.advanceArcaCae}`
+                      : ""}
+                  </p>
+                  {advance.advanceSalesOrderId ? (
+                    <div className="flex items-center gap-2">
+                      <ArcaInvoicePreviewButton
+                        invoiceNumber={advance.advanceInvoiceNumber}
+                        orgSlug={orgSlug}
+                        saleId={advance.advanceSalesOrderId}
+                      />
+                      <ArcaInvoiceDownloadButton
+                        orgSlug={orgSlug}
+                        saleId={advance.advanceSalesOrderId}
+                      />
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {advance.creditNoteNumber ? (
                 <p className="text-muted-foreground">

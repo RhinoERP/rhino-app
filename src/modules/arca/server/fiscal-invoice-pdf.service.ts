@@ -67,6 +67,11 @@ type FiscalInvoicePage = {
   isLastPage: boolean;
 };
 
+type CommercialPreventaDetail = {
+  saleNumber: number | null;
+  items: SalesOrderItemDetail[];
+};
+
 function escapeHtml(value: string | null | undefined): string {
   if (!value) {
     return "";
@@ -365,15 +370,23 @@ function generateTaxesRows(sale: SalesOrderDetail, currency: string): string {
 
 function generateInvoiceItemsTable(
   page: FiscalInvoicePage,
-  currency: string
+  currency: string,
+  options?: { title?: string; description?: string }
 ): string {
-  const title = page.isFirstPage
-    ? "Detalle de productos"
-    : `Detalle de productos - continuación ${page.pageNumber}`;
+  const title =
+    options?.title ??
+    (page.isFirstPage
+      ? "Detalle de productos"
+      : `Detalle de productos - continuación ${page.pageNumber}`);
 
   return `
     <section class="detail-table-block">
       <div class="block-title">${escapeHtml(title)}</div>
+      ${
+        options?.description
+          ? `<p class="table-note">${escapeHtml(options.description)}</p>`
+          : ""
+      }
       <div class="table-wrap">
         <table>
           <thead>
@@ -401,8 +414,9 @@ async function generateFiscalInvoiceHtml(params: {
   sale: SalesOrderDetail;
   organization: OrganizationSummary;
   branding: ArcaInvoiceBranding;
+  commercialPreventaDetail?: CommercialPreventaDetail | null;
 }): Promise<string> {
-  const { sale, organization, branding } = params;
+  const { sale, organization, branding, commercialPreventaDetail } = params;
 
   if (sale.arca_status !== "authorized") {
     throw new ArcaValidationError(
@@ -463,6 +477,9 @@ async function generateFiscalInvoiceHtml(params: {
         ).padStart(8, "0")}`
       : (sale.invoice_number ?? "—");
   const invoicePages = paginateInvoiceItems(sale.items);
+  const commercialPreventaPages = commercialPreventaDetail?.items.length
+    ? paginateInvoiceItems(commercialPreventaDetail.items)
+    : [];
   const renderFullHeader = (): string => `
       <header class="invoice-header">
         <section class="issuer-panel">
@@ -648,6 +665,31 @@ async function generateFiscalInvoiceHtml(params: {
       ${generateInvoiceItemsTable(page, displayCurrency)}
       ${page.isLastPage ? renderSummary() : ""}
       ${renderFooter(page)}
+    </div>
+  </div>
+  `;
+  const renderCommercialPreventaPage = (page: FiscalInvoicePage): string => `
+  <div class="document-copy">
+    <div class="sheet">
+      ${issuerLogoUrl ? `<img src="${escapeHtml(issuerLogoUrl)}" alt="" aria-hidden="true" class="watermark" />` : ""}
+      <header class="continuation-header">
+        <div>
+          <p class="continuation-title">Detalle comercial de la preventa</p>
+          <p class="continuation-meta">Comprobante fiscal asociado: ${escapeHtml(invoiceTypeLabel)} Nº ${escapeHtml(pointAndNumber)}</p>
+        </div>
+        <div class="continuation-page">Anexo ${page.pageNumber}/${commercialPreventaPages.length}</div>
+      </header>
+      ${generateInvoiceItemsTable(page, displayCurrency, {
+        title:
+          commercialPreventaPages.length > 1 && !page.isFirstPage
+            ? `Detalle comercial de la preventa - continuación ${page.pageNumber}`
+            : "Detalle comercial de la preventa",
+        description: `Productos correspondientes a la venta interna #${commercialPreventaDetail?.saleNumber ?? "—"}. Este detalle es informativo y no modifica el comprobante ARCA de anticipo.`,
+      })}
+      <footer class="commercial-footer">
+        <p>Este anexo detalla los productos comprometidos en la preventa. El comprobante fiscal autorizado por ARCA registra el anticipo de producción.</p>
+        <p>Factura asociada: ${escapeHtml(pointAndNumber)} · CAE ${displayValue(sale.arca_cae)}</p>
+      </footer>
     </div>
   </div>
   `;
@@ -878,6 +920,15 @@ async function generateFiscalInvoiceHtml(params: {
       overflow: hidden;
       break-inside: avoid;
     }
+    .table-note {
+      margin: 0;
+      padding: 4px 6px;
+      border-bottom: 1px solid #d1d5db;
+      color: #4b5563;
+      background: #f9fafb;
+      font-size: 9px;
+      line-height: 1.3;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -1074,10 +1125,22 @@ async function generateFiscalInvoiceHtml(params: {
       font-size: 12px;
       font-weight: 700;
     }
+    .commercial-footer {
+      margin-top: auto;
+      padding-top: 7px;
+      border-top: 1px solid #4b5563;
+      color: #4b5563;
+      font-size: 9px;
+      line-height: 1.35;
+    }
+    .commercial-footer p {
+      margin: 0 0 3px;
+    }
   </style>
 </head>
 <body>
   ${invoicePages.map(renderInvoicePage).join("")}
+  ${commercialPreventaPages.map(renderCommercialPreventaPage).join("")}
 </body>
 </html>
   `;
@@ -1100,6 +1163,11 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
     throw new ArcaValidationError("Organización no encontrada.");
   }
 
+  const commercialPreventaDetail =
+    sale.document_type === "ADVANCE" && sale.parent_sales_order_id
+      ? await getSalesOrderById(params.orgSlug, sale.parent_sales_order_id)
+      : null;
+
   const arcaSettings = await getOrganizationArcaSettingsByOrganizationId(
     organization.id
   );
@@ -1112,6 +1180,12 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
       issuerLogoUrl: arcaSettings?.issuer_logo_data_url ?? null,
       issuerLegalAddress: arcaSettings?.issuer_legal_address ?? null,
     },
+    commercialPreventaDetail: commercialPreventaDetail?.items.length
+      ? {
+          saleNumber: commercialPreventaDetail.sale_number,
+          items: commercialPreventaDetail.items,
+        }
+      : null,
   });
   const filename = `Factura_${sanitizeFilenamePart(
     sale.invoice_number ?? String(sale.sale_number ?? sale.id)
