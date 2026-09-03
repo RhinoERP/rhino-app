@@ -3,6 +3,7 @@
 import {
   CaretDownIcon,
   CaretRightIcon,
+  DownloadSimpleIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
@@ -48,24 +49,30 @@ const STATUS_ACTION_LABEL: Partial<Record<RouteSheetStatus, string>> = {
 
 type RouteSheetHeaderProps = {
   canManage: boolean;
+  canRead: boolean;
   routeSheet: RouteSheetWithSales;
   expanded: boolean;
   isUpdatingStatus: boolean;
   isDeleting: boolean;
+  isDownloading: boolean;
   onToggleExpand: () => void;
   onUpdateStatus: (status: RouteSheetStatus) => void;
   onDelete: () => void;
+  onDownload: () => void;
 };
 
 export function RouteSheetHeader({
   canManage,
+  canRead,
   routeSheet,
   expanded,
   isUpdatingStatus,
   isDeleting,
+  isDownloading,
   onToggleExpand,
   onUpdateStatus,
   onDelete,
+  onDownload,
 }: RouteSheetHeaderProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -132,7 +139,19 @@ export function RouteSheetHeader({
           </Button>
         ) : null}
 
-        {canManage && (
+        {canRead && routeSheet.sales.length > 0 && (
+          <Button
+            disabled={isDownloading}
+            onClick={onDownload}
+            size="sm"
+            variant="outline"
+          >
+            <DownloadSimpleIcon className="mr-1 h-4 w-4" weight="bold" />
+            {isDownloading ? "Descargando..." : "Descargar"}
+          </Button>
+        )}
+
+        {canManage && routeSheet.status === "PENDING" && (
           <Button
             aria-label="Eliminar hoja de ruta"
             disabled={isDeleting}

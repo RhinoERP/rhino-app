@@ -27,6 +27,7 @@ import { formatCurrency } from "@/lib/format";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
+import { useRouteSheetPdf } from "@/modules/route-sheets/hooks/use-route-sheet-pdf";
 import { useRouteSheets } from "@/modules/route-sheets/hooks/use-route-sheets";
 import { useRouteSheetMutations } from "@/modules/route-sheets/hooks/use-route-sheets-mutations";
 import type {
@@ -38,6 +39,7 @@ import { RouteSheetSaleRow } from "./route-sheet-sale-row";
 
 type RouteSheetCarrierGroupProps = {
   canManage: boolean;
+  canRead: boolean;
   orgSlug: string;
   routeSheet: RouteSheetWithSales;
 };
@@ -529,15 +531,19 @@ function AddSalesDialog({
 
 export function RouteSheetCarrierGroup({
   canManage,
+  canRead,
   orgSlug,
   routeSheet,
 }: RouteSheetCarrierGroupProps) {
   const { updateStatus, removeSale, deleteRouteSheet } =
     useRouteSheetMutations(orgSlug);
+  const { downloadRouteSheet, isDownloading } = useRouteSheetPdf({ orgSlug });
   const [expanded, setExpanded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
 
-  const isCompleted = routeSheet.status === "COMPLETED";
+  const handleDownload = () => {
+    downloadRouteSheet(routeSheet.id);
+  };
 
   const handleUpdateStatus = async (status: RouteSheetWithSales["status"]) => {
     try {
@@ -586,10 +592,13 @@ export function RouteSheetCarrierGroup({
       <CardContent className="p-4">
         <RouteSheetHeader
           canManage={canManage}
+          canRead={canRead}
           expanded={expanded}
           isDeleting={deleteRouteSheet.isPending}
+          isDownloading={isDownloading}
           isUpdatingStatus={updateStatus.isPending}
           onDelete={handleDelete}
+          onDownload={handleDownload}
           onToggleExpand={() => setExpanded((prev) => !prev)}
           onUpdateStatus={handleUpdateStatus}
           routeSheet={routeSheet}
@@ -605,6 +614,7 @@ export function RouteSheetCarrierGroup({
               routeSheet.sales.map((sale) => (
                 <RouteSheetSaleRow
                   canManage={canManage}
+                  isPending={routeSheet.status === "PENDING"}
                   isRemoving={removeSale.isPending}
                   key={sale.id}
                   onRemove={() => handleRemoveSale(sale.id)}
@@ -614,7 +624,7 @@ export function RouteSheetCarrierGroup({
               ))
             )}
 
-            {canManage && !isCompleted && (
+            {canManage && routeSheet.status === "PENDING" && (
               <Button
                 onClick={() => setAddOpen(true)}
                 size="sm"
