@@ -499,7 +499,7 @@ export async function getUserOrganizations(): Promise<Organization[]> {
   const { data: memberships, error } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled)"
+      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled)"
     )
     .eq("user_id", user.id);
 
@@ -542,7 +542,7 @@ export async function resolveUserRedirect(): Promise<string> {
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled)"
+      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled)"
     )
     .eq("user_id", user.id)
     .eq("is_active", true);
@@ -636,7 +636,7 @@ export async function getOrganizationLayoutData(
     supabase
       .from("organization_members")
       .select(
-        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled)"
+        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled)"
       )
       .eq("user_id", userId)
       .eq("is_active", true),

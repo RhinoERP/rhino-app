@@ -152,7 +152,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
             "sales.manage",
             "sales.manage.all",
           ],
-          module: "wholesale",
+          module: "route_sheets",
         },
         {
           title: "Clientes",
