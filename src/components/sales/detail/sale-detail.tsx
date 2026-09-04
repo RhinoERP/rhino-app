@@ -2974,6 +2974,19 @@ export function SaleDetail({
                     />
                   </div>
                 ) : null}
+                {sale.route_sheet ? (
+                  <div className="space-x-2">
+                    <Label>Hoja de ruta</Label>
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-md border px-3 py-2 font-medium text-sm hover:bg-accent hover:text-accent-foreground"
+                      href={`/org/${orgSlug}/hoja-de-ruta`}
+                    >
+                      <Truck className="h-4 w-4" />
+                      {sale.route_sheet.carrier?.name ?? "Sin transportista"} —{" "}
+                      {sale.route_sheet.scheduled_date}
+                    </Link>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="observations">Observaciones</Label>
                   <textarea
