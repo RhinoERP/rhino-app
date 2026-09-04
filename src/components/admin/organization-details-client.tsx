@@ -150,6 +150,7 @@ export function OrganizationDetailsClient({
     configuredSalesAdvancesEnabled,
     organization.commissions_enabled,
     configuredRemittanceMaskPrintingEnabled,
+    organization.route_sheets_enabled,
   ]);
 
   const handleToggleStatus = async () => {
