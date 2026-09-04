@@ -3,6 +3,7 @@ import { PreSaleForm } from "@/components/sales/forms/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
   getSaleProducts,
   getSalesAccessContext,
@@ -34,6 +35,10 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
   );
 
   if (!organization) {
+    notFound();
+  }
+
+  if (isOrganizationModuleEnabled(organization, "production")) {
     notFound();
   }
 

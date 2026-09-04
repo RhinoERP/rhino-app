@@ -132,6 +132,7 @@ type SalesDataTableProps = {
   sellerOptions?: { value: string; label: string }[];
   carrierOptions?: { value: string; label: string }[];
   supplierOptions?: { value: string; label: string }[];
+  isProductionEnabled?: boolean;
 };
 
 function MobileSalesFilters({
@@ -269,6 +270,7 @@ export function SalesDataTable({
   sellerOptions = [],
   carrierOptions = [],
   supplierOptions = [],
+  isProductionEnabled = false,
 }: SalesDataTableProps) {
   const isMobile = useIsMobile();
   const [_rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -451,11 +453,18 @@ export function SalesDataTable({
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Button asChild>
-              <Link href={`/org/${orgSlug}/preventa/nueva`}>
-                Nueva preventa
-              </Link>
-            </Button>
+            {isProductionEnabled ? (
+              <EmptyDescription>
+                Con el módulo de producción activado, las ventas se crean a
+                través de un pedido.
+              </EmptyDescription>
+            ) : (
+              <Button asChild>
+                <Link href={`/org/${orgSlug}/preventa/nueva`}>
+                  Nueva preventa
+                </Link>
+              </Button>
+            )}
           </EmptyContent>
         </Empty>
       </div>
