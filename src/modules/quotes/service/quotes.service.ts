@@ -354,7 +354,7 @@ function buildQuoteInsertPayload({
     advance_payment_percentage: input.advancePaymentEnabled
       ? (input.advancePaymentPercentage ?? null)
       : null,
-    target_margin_list_id: input.targetMarginListId ?? null,
+    price_level_id: input.priceLevelId ?? null,
   };
 }
 
@@ -614,7 +614,7 @@ async function createCancelledVersion(
       observations: original.observations,
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
-      target_margin_list_id: original.target_margin_list_id,
+      price_level_id: original.price_level_id,
       advance_payment:
         ((original as Record<string, unknown>).advance_payment as boolean) ??
         false,
@@ -1125,7 +1125,8 @@ export async function convertQuoteToSalesOrder(
       preventa_status: "APROBADA",
       is_historical: false,
       observations: quote.observations,
-      sales_price_list_id: quote.target_margin_list_id ?? null,
+      sales_price_list_id: quote.sales_price_list_id ?? null,
+      price_level_id: quote.price_level_id ?? null,
       commercial_snapshot: {
         quoteId,
         customerId: quote.customer_id,

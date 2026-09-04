@@ -2823,6 +2823,7 @@ export async function createPreSaleOrder(
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
       sales_price_list_id: input.salesPriceListId ?? null,
+      price_level_id: input.priceLevelId ?? null,
       status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
       created_by: userId,
     })
@@ -4132,6 +4133,7 @@ export async function confirmSaleOrder(
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
       sales_price_list_id: input.salesPriceListId ?? null,
+      price_level_id: input.priceLevelId ?? null,
       status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
       updated_at: new Date().toISOString(),
       ...(accountingInformalEntryId
@@ -4703,6 +4705,9 @@ function buildSaleUpdateData(
   }
   if (input.salesPriceListId !== undefined) {
     updateData.sales_price_list_id = input.salesPriceListId;
+  }
+  if (input.priceLevelId !== undefined) {
+    updateData.price_level_id = input.priceLevelId;
   }
 
   return updateData;

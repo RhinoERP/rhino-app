@@ -77,7 +77,7 @@ export default async function CommissionsPage({
         <div>
           <h1 className="font-heading text-2xl">Comisiones</h1>
           <p className="text-muted-foreground text-sm">
-            Comisiones generadas por ventas despachadas.
+            Comisiones generadas por los cobros registrados.
           </p>
         </div>
       </div>

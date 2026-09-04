@@ -56,7 +56,6 @@ type SalesPriceListOption = {
   name: string;
   type: string;
   value: number;
-  is_target_margin?: boolean;
 };
 
 type PricingGridDataTableProps = {
@@ -94,7 +93,7 @@ async function exportToExcel(
     return {
       ...item,
       finalPrice: selectedList
-        ? applySalesPriceListAdjustment(base, selectedList, item.cost_price)
+        ? applySalesPriceListAdjustment(base, selectedList)
         : base,
     };
   });
@@ -236,18 +235,11 @@ export function PricingGridDataTable({
       return lists
         .filter((l: { status?: string }) => l.status === "Active")
         .map(
-          (l: {
-            id: string;
-            name: string;
-            type: string;
-            value: number;
-            is_target_margin?: boolean;
-          }) => ({
+          (l: { id: string; name: string; type: string; value: number }) => ({
             id: l.id,
             name: l.name,
             type: l.type ?? "PERCENTAGE",
             value: l.value ?? 0,
-            is_target_margin: l.is_target_margin,
           })
         );
     },
@@ -431,7 +423,6 @@ export function PricingGridDataTable({
           ? {
               type: selectedList.type,
               value: selectedList.value,
-              isTargetMargin: selectedList.is_target_margin ?? false,
             }
           : null,
       }),
