@@ -210,6 +210,7 @@ export default async function OrganizationPage({
       <SellerMobileHome
         orgSlug={orgSlug}
         posEnabled={currentOrganization.pos_enabled ?? true}
+        productionEnabled={currentOrganization.production_enabled ?? false}
         userName={user?.user_metadata?.full_name as string | undefined}
         wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
       />

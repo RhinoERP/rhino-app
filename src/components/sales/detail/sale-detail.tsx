@@ -235,6 +235,7 @@ type SaleDetailProps = {
   salesAdvancesEnabled: boolean;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
+  isProductionEnabled: boolean;
 };
 
 type SellerOption = Pick<OrganizationMember, "user_id" | "user">;
@@ -842,6 +843,7 @@ export function SaleDetail({
   salesAdvancesEnabled,
   saleReturns,
   creditNotes,
+  isProductionEnabled,
 }: SaleDetailProps) {
   const router = useRouter();
   const [accountingPayload, setAccountingPayload] =
@@ -881,6 +883,7 @@ export function SaleDetail({
   );
   const hasOrderLevelRemitos = (dispatchProgress?.events.length ?? 0) > 0;
   const isOrderFlowWithRemitos = Boolean(relatedOrder) && hasOrderLevelRemitos;
+  const isProductionLocked = isProductionEnabled;
   const canEditSale =
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale);
@@ -1781,6 +1784,9 @@ export function SaleDetail({
   }, [isSavingDraft]);
 
   const confirmButtonTitle = useMemo(() => {
+    if (isProductionLocked) {
+      return "El estado de la venta se actualiza automáticamente según el pedido.";
+    }
     if (relatedOrder) {
       return "Esta venta pertenece a un pedido. Continúa desde el flujo de pedidos.";
     }
@@ -1789,7 +1795,7 @@ export function SaleDetail({
     }
     // biome-ignore lint/nursery/noUselessUndefined: undefined omits the title attribute intentionally
     return undefined;
-  }, [relatedOrder, isDraftSale]);
+  }, [isProductionLocked, relatedOrder, isDraftSale]);
 
   const toggleEditingDetails = async () => {
     if (!canManageSale) {
@@ -1884,6 +1890,13 @@ export function SaleDetail({
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates permissions, accounting preview/auto-confirm, and sale confirmation in a single handler
   const handleConfirm = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -1981,6 +1994,13 @@ export function SaleDetail({
   };
 
   const handleDispatch = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -2019,6 +2039,13 @@ export function SaleDetail({
   };
 
   const handleDeliver = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -2299,9 +2326,14 @@ export function SaleDetail({
           ) : null}
           {canManageSale && isDispatchedSale && !relatedOrder ? (
             <Button
-              disabled={isDeliverMutationPending}
+              disabled={isDeliverMutationPending || isProductionLocked}
               onClick={handleDeliver}
               size="sm"
+              title={
+                isProductionLocked
+                  ? "El estado de la venta se actualiza automáticamente según el pedido."
+                  : undefined
+              }
               type="button"
               variant="outline"
             >
@@ -2312,9 +2344,14 @@ export function SaleDetail({
           ) : null}
           {canManageSale && isConfirmedSale && !relatedOrder ? (
             <Button
-              disabled={isDispatching}
+              disabled={isDispatching || isProductionLocked}
               onClick={() => setIsDispatchDialogOpen(true)}
               size="sm"
+              title={
+                isProductionLocked
+                  ? "El estado de la venta se actualiza automáticamente según el pedido."
+                  : undefined
+              }
               type="button"
             >
               <Truck className="mr-2 h-4 w-4" />
@@ -3953,7 +3990,7 @@ export function SaleDetail({
                 {canManageSale ? (
                   <Button
                     className="w-full justify-between"
-                    disabled={!canConfirm || isSaving}
+                    disabled={!canConfirm || isSaving || isProductionLocked}
                     onClick={handleConfirm}
                     title={confirmButtonTitle}
                     type="button"

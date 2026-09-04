@@ -10,6 +10,7 @@ type SellerMobileHomeProps = {
   userName?: string;
   wholesaleEnabled: boolean;
   posEnabled: boolean;
+  productionEnabled: boolean;
 };
 
 export function SellerMobileHome({
@@ -17,6 +18,7 @@ export function SellerMobileHome({
   userName,
   wholesaleEnabled,
   posEnabled,
+  productionEnabled,
 }: SellerMobileHomeProps) {
   const getGreeting = (): string => {
     const hour = new Date().getHours();
@@ -40,6 +42,7 @@ export function SellerMobileHome({
       description: "Registrar una nueva venta",
       requiresWholesale: true,
       requiresPos: false,
+      requiresNoProduction: true,
     },
     {
       icon: ChartLine,
@@ -49,6 +52,7 @@ export function SellerMobileHome({
       description: "Ver historial de ventas",
       requiresWholesale: true,
       requiresPos: false,
+      requiresNoProduction: false,
     },
     {
       icon: Receipt,
@@ -58,6 +62,7 @@ export function SellerMobileHome({
       description: "Registrar una venta de mostrador",
       requiresWholesale: false,
       requiresPos: true,
+      requiresNoProduction: false,
     },
     {
       icon: Package,
@@ -67,12 +72,16 @@ export function SellerMobileHome({
       description: "Ver productos disponibles",
       requiresWholesale: false,
       requiresPos: false,
+      requiresNoProduction: false,
     },
   ].filter((button) => {
     if (button.requiresWholesale && !wholesaleEnabled) {
       return false;
     }
     if (button.requiresPos && !posEnabled) {
+      return false;
+    }
+    if (button.requiresNoProduction && productionEnabled) {
       return false;
     }
     return true;
