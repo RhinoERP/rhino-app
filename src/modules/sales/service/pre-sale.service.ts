@@ -14,6 +14,7 @@ type PreSaleDeletionValidation = {
   sale_number: number | null;
   invoice_number: string | null;
   remittance_number: string | null;
+  arca_status: string | null;
 };
 
 function buildSaleMovementReasonCandidates(sale: PreSaleDeletionValidation) {
@@ -158,7 +159,7 @@ export async function deletePreSale(orgSlug: string, id: string) {
   const { data: preSale, error: preSaleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, remittance_number, user_id"
+      "id, status, sale_number, invoice_number, remittance_number, arca_status, user_id"
     )
     .eq("id", id)
     .eq("organization_id", org.id)
@@ -177,6 +178,12 @@ export async function deletePreSale(orgSlug: string, id: string) {
     (!accessContext.userId || preSale.user_id !== accessContext.userId)
   ) {
     throw new Error("Solo puedes gestionar tus propias ventas");
+  }
+
+  if (preSale.arca_status === "authorized") {
+    throw new Error(
+      "No se puede eliminar una preventa que tiene una factura ARCA emitida. Conservála como cancelada para mantener la trazabilidad fiscal."
+    );
   }
 
   const validatedPreSale = preSale as PreSaleDeletionValidation;
