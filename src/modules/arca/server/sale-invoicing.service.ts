@@ -6,12 +6,17 @@ import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import { sendSaleInvoiceEmail } from "@/modules/email/service/send-sale-invoice-email";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
   isArcaSupportedInvoiceType,
   isFacturaAInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
+import { canIssueArcaInvoiceForPreventa } from "@/modules/sales/preventa-invoicing";
 import { regenerateAuthorizedSaleRemittances } from "@/modules/sales/remittance-regeneration";
-import { regenerateSaleLevelRemito } from "@/modules/sales/service/sales.service";
+import {
+  ensureReceivableForAuthorizedPreventaInvoice,
+  regenerateSaleLevelRemito,
+} from "@/modules/sales/service/sales.service";
 import type { Database, Json } from "@/types/supabase";
 import { formatDateToArcaDateNumber } from "../arca-qr";
 import {
@@ -90,6 +95,8 @@ type LoadedSale = {
   organizationId: string;
   status: OrderStatus;
   saleDate: string;
+  expirationDate: string | null;
+  creditDays: number | null;
   invoiceType: InvoiceType;
   invoiceNumber: string | null;
   subTotal: number | null;
@@ -123,6 +130,8 @@ type LoadedSaleQueryRecord = {
   organization_id: string;
   status: OrderStatus;
   sale_date: string;
+  expiration_date: string | null;
+  credit_days: number | null;
   invoice_type: InvoiceType;
   invoice_number: string | null;
   sub_total: number | null;
@@ -675,6 +684,8 @@ function normalizeLoadedSale(data: {
   organization_id: string;
   status: OrderStatus;
   sale_date: string;
+  expiration_date: string | null;
+  credit_days: number | null;
   invoice_type: InvoiceType;
   invoice_number: string | null;
   sub_total: number | null;
@@ -743,6 +754,8 @@ function normalizeLoadedSale(data: {
     organizationId: data.organization_id,
     status: data.status,
     saleDate: data.sale_date,
+    expirationDate: data.expiration_date,
+    creditDays: data.credit_days,
     invoiceType: data.invoice_type,
     invoiceNumber: data.invoice_number,
     subTotal: toNullableMoney(data.sub_total),
@@ -776,6 +789,8 @@ async function loadSaleForArcaInvoicing(params: {
         organization_id,
         status,
         sale_date,
+        expiration_date,
+        credit_days,
         invoice_type,
         invoice_number,
         sub_total,
@@ -848,6 +863,8 @@ async function loadSaleForArcaInvoicing(params: {
       organization_id: saleData.organization_id,
       status: saleData.status,
       sale_date: saleData.sale_date,
+      expiration_date: saleData.expiration_date,
+      credit_days: saleData.credit_days,
       invoice_type: saleData.invoice_type,
       invoice_number: saleData.invoice_number,
       sub_total: saleData.sub_total,
@@ -953,6 +970,20 @@ export async function validateSaleForArcaInvoicing(params: {
     await loadSaleForArcaInvoicing(params);
 
   if (sale.arcaStatus === "authorized") {
+    if (sale.status === "DRAFT") {
+      await ensureReceivableForAuthorizedPreventaInvoice({
+        supabase: await createClient(),
+        orgId: organizationId,
+        saleId: sale.id,
+        customerId: sale.customer.id,
+        totalAmount: sale.totalAmount,
+        currency: sale.currency,
+        saleDate: sale.saleDate,
+        expirationDate: sale.expirationDate,
+        creditDays: sale.creditDays,
+      });
+    }
+
     return {
       kind: "already_authorized",
       result: toArcaSaleInvoiceResult(sale, {
@@ -968,9 +999,17 @@ export async function validateSaleForArcaInvoicing(params: {
   }
 
   if (sale.status === "DRAFT") {
-    throw new ArcaValidationError(
-      "No se puede emitir ARCA para una preventa en borrador."
-    );
+    const orgSettings = await getOrgSettings(params.orgSlug);
+    if (
+      !canIssueArcaInvoiceForPreventa(
+        sale.status,
+        orgSettings.allow_preventa_arca_invoicing
+      )
+    ) {
+      throw new ArcaValidationError(
+        "No se puede emitir ARCA para una preventa en borrador porque esta organización no habilitó la facturación previa a la confirmación."
+      );
+    }
   }
 
   if (sale.status === "CANCELLED") {
@@ -1277,6 +1316,7 @@ async function persistAuthorizedInvoice(params: {
   };
   requestJson: Json;
   responseJson: Json;
+  preventaSale?: LoadedSale;
 }): Promise<ArcaSaleInvoiceResult> {
   const supabase = await createClient();
   const now = new Date().toISOString();
@@ -1316,6 +1356,20 @@ async function persistAuthorizedInvoice(params: {
   }
 
   const persistedSale = data as PersistedAuthorizedSale;
+
+  if (params.preventaSale) {
+    await ensureReceivableForAuthorizedPreventaInvoice({
+      supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
+      customerId: params.preventaSale.customer.id,
+      totalAmount: params.preventaSale.totalAmount,
+      currency: params.preventaSale.currency,
+      saleDate: params.preventaSale.saleDate,
+      expirationDate: params.preventaSale.expirationDate,
+      creditDays: params.preventaSale.creditDays,
+    });
+  }
 
   const { data: accountingLink } = await supabase
     .from("sales_orders" as never)
@@ -1538,6 +1592,7 @@ export async function emitSaleInvoice(params: {
     authorization,
     requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
+    preventaSale: context.sale.status === "DRAFT" ? context.sale : undefined,
   });
 
   const supabase = await createClient();

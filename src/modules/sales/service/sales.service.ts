@@ -24,6 +24,7 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
+import { hasFullFiscalReversal } from "../preventa-invoicing";
 import { uploadSalesDocument } from "../server/documents-storage.service";
 import { renderRemittancePdfDocument } from "../server/remittance-pdf-renderer.service";
 import type {
@@ -3953,7 +3954,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4001,6 +4002,18 @@ export async function confirmSaleOrder(
       throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
     }
 
+    return {
+      status: "CONFIRMED",
+      saleId,
+      totalAmount: existingSale.total_amount ?? 0,
+    };
+  }
+
+  // ARCA already authorized the commercial payload while this sale was still a
+  // preventa. Confirm using the persisted lines only: client input must never
+  // be able to mutate the authorized invoice as part of the stock transition.
+  if (existingSale.arca_status === "authorized") {
+    await confirmIncompleteSaleWithStockDeduction(supabase, org.id, saleId);
     return {
       status: "CONFIRMED",
       saleId,
@@ -4306,8 +4319,9 @@ async function cancelSaleReceivable(params: {
   orgId: string;
   saleId: string;
   customerId: string | null | undefined;
+  skipCustomerCredit?: boolean;
 }): Promise<void> {
-  const { supabase, orgId, saleId, customerId } = params;
+  const { supabase, orgId, saleId, customerId, skipCustomerCredit } = params;
 
   const { data: receivable } = await supabase
     .from("accounts_receivable")
@@ -4343,7 +4357,7 @@ async function cancelSaleReceivable(params: {
     );
   }
 
-  if (paidAmount > 0 && customerId) {
+  if (!skipCustomerCredit && paidAmount > 0 && customerId) {
     const creditAmount = truncateMoney(paidAmount);
     const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
 
@@ -4357,6 +4371,45 @@ async function cancelSaleReceivable(params: {
       source_payment_id: null,
       notes: `Saldo a favor generado por cancelación de venta ${saleId}`,
     });
+  }
+}
+
+async function assertAuthorizedPreventaCanBeCancelled(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  saleTotal: number;
+}): Promise<void> {
+  const { data: creditNotes, error } = await params.supabase
+    .from("credit_notes")
+    .select("amount")
+    .eq("organization_id", params.orgId)
+    .eq("sales_order_id", params.saleId)
+    .eq("arca_status", "authorized")
+    .neq("status", "CANCELLED");
+
+  if (error) {
+    throw new Error(
+      `No se pudo validar las notas de crédito de la preventa: ${error.message}`
+    );
+  }
+
+  const authorizedCreditAmount = truncateMoney(
+    (creditNotes ?? []).reduce(
+      (total, creditNote) => total + Number(creditNote.amount ?? 0),
+      0
+    )
+  );
+
+  if (
+    !hasFullFiscalReversal({
+      saleTotal: truncateMoney(params.saleTotal),
+      authorizedCreditAmount,
+    })
+  ) {
+    throw new Error(
+      "No se puede cancelar una preventa con factura ARCA. Emití y autorizá una Nota de Crédito por el total facturado antes de cancelarla."
+    );
   }
 }
 
@@ -4382,7 +4435,7 @@ export async function cancelSaleOrder(
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, user_id, customer_id")
+    .select("id, status, user_id, customer_id, arca_status, total_amount")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -4401,6 +4454,18 @@ export async function cancelSaleOrder(
 
   if (sale.status === "CANCELLED") {
     return { status: sale.status, wasUpdated: false };
+  }
+
+  const isAuthorizedPreventa =
+    sale.status === "DRAFT" && sale.arca_status === "authorized";
+
+  if (isAuthorizedPreventa) {
+    await assertAuthorizedPreventaCanBeCancelled({
+      supabase,
+      orgId: org.id,
+      saleId,
+      saleTotal: Number(sale.total_amount ?? 0),
+    });
   }
 
   const shouldRestock =
@@ -4432,6 +4497,7 @@ export async function cancelSaleOrder(
     orgId: org.id,
     saleId,
     customerId,
+    skipCustomerCredit: isAuthorizedPreventa,
   });
 
   return { status: "CANCELLED", wasUpdated: true };
@@ -5675,6 +5741,46 @@ async function insertReceivableIfNeeded(params: {
   }
 }
 
+export async function ensureReceivableForAuthorizedPreventaInvoice(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  totalAmount: number;
+  currency: string;
+  saleDate: string;
+  expirationDate: string | null;
+  creditDays: number | null;
+}): Promise<void> {
+  const dueDate = computeDueDate(
+    params.saleDate,
+    params.expirationDate,
+    params.creditDays
+  );
+  const context: ReceivableUpdateContext = {
+    totalAmount: truncateMoney(params.totalAmount),
+    dueDate,
+    customerId: params.customerId,
+    currency: params.currency,
+  };
+  const receivable = await fetchReceivableRecord({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+  });
+
+  if (receivable) {
+    return;
+  }
+
+  await insertReceivableIfNeeded({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+    context,
+  });
+}
+
 async function updateReceivableForDispatchedSale(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -5702,13 +5808,6 @@ async function updateReceivableForDispatchedSale(params: {
   });
 
   if (receivable) {
-    await updateExistingReceivable({
-      supabase: params.supabase,
-      orgId: params.orgId,
-      saleId: params.saleId,
-      receivable,
-      context,
-    });
     return;
   }
 
