@@ -29,7 +29,10 @@ import {
 } from "@/components/ui/table";
 import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
-import type { CommissionSeller } from "@/modules/commissions/types";
+import type {
+  CommissionSale,
+  CommissionSeller,
+} from "@/modules/commissions/types";
 import { createCommissionsColumns } from "./columns";
 
 type CommissionsDataTableProps = {
@@ -47,6 +50,9 @@ export function CommissionsDataTable({
 }: CommissionsDataTableProps) {
   const everHadData = useRef(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [expandedPayments, setExpandedPayments] = useState<Set<string>>(
+    new Set()
+  );
   const [search, setSearch] = useQueryState(
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
@@ -82,6 +88,40 @@ export function CommissionsDataTable({
     });
   };
 
+  const togglePayments = (saleId: string) => {
+    setExpandedPayments((prev) => {
+      const next = new Set(prev);
+      if (next.has(saleId)) {
+        next.delete(saleId);
+      } else {
+        next.add(saleId);
+      }
+      return next;
+    });
+  };
+
+  const statusBadge = (status: CommissionSale["status"]) => {
+    const styles: Record<CommissionSale["status"], string> = {
+      PENDING: "bg-amber-100 text-amber-700",
+      PARTIAL: "bg-blue-100 text-blue-700",
+      PAID: "bg-green-100 text-green-700",
+      VOID: "bg-muted text-muted-foreground",
+    };
+    const labels: Record<CommissionSale["status"], string> = {
+      PENDING: "Pendiente",
+      PARTIAL: "Parcial",
+      PAID: "Pagada",
+      VOID: "Anulada",
+    };
+    return (
+      <span
+        className={`inline-block rounded-full px-2 py-0.5 font-medium text-[10px] ${styles[status]}`}
+      >
+        {labels[status]}
+      </span>
+    );
+  };
+
   if (data.length === 0 && !everHadData.current && !search) {
     return (
       <div className="rounded-md border">
@@ -92,7 +132,7 @@ export function CommissionsDataTable({
             </EmptyMedia>
             <EmptyTitle>No hay comisiones</EmptyTitle>
             <EmptyDescription>
-              No hay ventas despachadas este mes con comisiones registradas.
+              No hay cobros registrados este mes con comisiones.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -180,34 +220,106 @@ export function CommissionsDataTable({
                       {formatCurrency(seller.totalCommission)}
                     </TableCell>
                   </TableRow>
-                  {isExpanded &&
-                    seller.sales.map((sale) => (
-                      <TableRow className="bg-muted/30" key={sale.id}>
-                        <TableCell />
-                        <TableCell className="pl-8">
-                          <div className="font-medium text-xs">
-                            #{sale.saleNumber || "—"}
-                          </div>
-                          <div className="text-muted-foreground text-xs">
-                            {sale.customerName}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-xs">
-                          {sale.dispatchedAt
-                            ? formatDate(sale.dispatchedAt)
-                            : "—"}
-                        </TableCell>
-                        <TableCell className="text-right text-xs">
-                          {formatCurrency(sale.subTotal)}
-                        </TableCell>
-                        <TableCell className="text-right text-xs">
-                          {sale.commissionRate}%
-                        </TableCell>
-                        <TableCell className="text-right text-green-600 text-xs">
-                          {formatCurrency(sale.commissionAmount)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                  {isExpanded && (
+                    <TableRow className="bg-muted/30">
+                      <TableCell />
+                      <TableCell colSpan={5}>
+                        <div className="space-y-2 py-1">
+                          {seller.sales.length === 0 && (
+                            <p className="text-muted-foreground text-xs">
+                              Sin ventas con comisión en este período.
+                            </p>
+                          )}
+                          {seller.sales.map((sale) => {
+                            const isPaymentsOpen = expandedPayments.has(
+                              sale.id
+                            );
+                            return (
+                              <div
+                                className="rounded-md border bg-background p-3"
+                                key={sale.id}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        aria-label="Ver pagos"
+                                        className="flex items-center"
+                                        onClick={() => togglePayments(sale.id)}
+                                        type="button"
+                                      >
+                                        {isPaymentsOpen ? (
+                                          <CaretDownIcon className="h-4 w-4" />
+                                        ) : (
+                                          <CaretRightIcon className="h-4 w-4" />
+                                        )}
+                                      </button>
+                                      <span className="font-medium text-xs">
+                                        #{sale.saleNumber || "—"}
+                                      </span>
+                                      {statusBadge(sale.status)}
+                                    </div>
+                                    <div className="pl-6 text-muted-foreground text-xs">
+                                      {sale.customerName}
+                                      {sale.invoiceNumber
+                                        ? ` · ${sale.invoiceNumber}`
+                                        : ""}
+                                    </div>
+                                    <div className="pl-6 text-muted-foreground text-xs">
+                                      {sale.dispatchedAt
+                                        ? `Despachada ${formatDate(sale.dispatchedAt)}`
+                                        : "Sin despacho"}
+                                    </div>
+                                  </div>
+                                  <div className="text-right text-xs">
+                                    <div>
+                                      Subtotal {formatCurrency(sale.subTotal)}
+                                    </div>
+                                    <div>Tasa {sale.commissionRate}%</div>
+                                    <div className="font-medium">
+                                      Comisión total{" "}
+                                      {formatCurrency(sale.totalCommission)}
+                                    </div>
+                                    <div className="text-green-600">
+                                      Cobrada{" "}
+                                      {formatCurrency(sale.paidCommission)}
+                                    </div>
+                                    <div className="text-muted-foreground">
+                                      Pendiente{" "}
+                                      {formatCurrency(sale.remainingCommission)}
+                                    </div>
+                                  </div>
+                                </div>
+                                {isPaymentsOpen &&
+                                  sale.payments.map((payment) => (
+                                    <div
+                                      className="mt-2 flex items-center justify-between border-t px-6 py-1.5 text-xs"
+                                      key={payment.id}
+                                    >
+                                      <div className="flex items-center gap-4">
+                                        <span className="font-medium">
+                                          {payment.paidAt
+                                            ? formatDate(payment.paidAt)
+                                            : "—"}
+                                        </span>
+                                        <span>
+                                          {formatCurrency(payment.paidAmount)}
+                                        </span>
+                                      </div>
+                                      <span className="text-green-600">
+                                        {formatCurrency(
+                                          payment.commissionAmount
+                                        )}
+                                      </span>
+                                    </div>
+                                  ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </>
               );
             })}

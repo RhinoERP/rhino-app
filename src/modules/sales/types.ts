@@ -112,6 +112,7 @@ export type ConfirmSaleOrderInput = {
   globalDiscountPercentage?: number | null;
   accountingInformalEntryId?: string | null;
   salesPriceListId?: string | null;
+  priceLevelId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };
@@ -127,6 +128,7 @@ export type CreatePreSaleOrderInput = {
   invoiceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;
+  priceLevelId?: string | null;
   items: PreSaleItemInput[];
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
@@ -158,6 +160,7 @@ export type UpdateSaleOrderInput = {
   remittanceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;
+  priceLevelId?: string | null;
   globalDiscountPercentage?: number | null;
   items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];

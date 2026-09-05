@@ -1,4 +1,3 @@
-import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type {
@@ -20,8 +19,6 @@ type SalesPriceListRow = {
   percentage?: number | null;
   type?: SalesPriceListType | null;
   value?: number | null;
-  extra_commission_rate?: number | null;
-  is_target_margin?: boolean | null;
 };
 
 function getPriceListTypeAndValue(priceList: {
@@ -59,26 +56,7 @@ function mapSalesPriceListRow(item: SalesPriceListRow): SalesPriceList {
     value,
     is_active: item.is_active ?? true,
     status,
-    extra_commission_rate: item.extra_commission_rate ?? null,
-    is_target_margin: item.is_target_margin ?? false,
   };
-}
-
-function applySalesPriceListValue(
-  basePrice: number,
-  type: SalesPriceListType,
-  value: number,
-  opts: { isTargetMargin?: boolean; costPrice?: number } = {}
-): number {
-  if (opts.isTargetMargin && opts.costPrice !== undefined) {
-    return truncateMoney(opts.costPrice * (1 + value / 100));
-  }
-
-  if (type === "PRICE") {
-    return truncateMoney(Math.max(0, basePrice + value));
-  }
-
-  return truncateMoney(basePrice * (1 + value / 100));
 }
 
 /**
@@ -186,8 +164,6 @@ export async function createSalesPriceList(
       valid_from: input.valid_from,
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
-      extra_commission_rate: input.extraCommissionRate ?? 0,
-      is_target_margin: input.isTargetMargin ?? false,
     })
     .select("*")
     .single();
@@ -244,8 +220,6 @@ export async function updateSalesPriceList(
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
       updated_at: new Date().toISOString(),
-      extra_commission_rate: input.extraCommissionRate ?? 0,
-      is_target_margin: input.isTargetMargin ?? false,
     })
     .eq("id", priceListId)
     .eq("organization_id", org.id)
@@ -291,120 +265,4 @@ export async function deleteSalesPriceList(
       `Error eliminando lista de precios de venta: ${error.message}`
     );
   }
-}
-
-/**
- * Calculates the sale price for a product based on the customer's price list.
- * Returns the base price if the customer has no price list assigned.
- */
-export async function getProductSalePrice(
-  orgSlug: string,
-  productId: string,
-  customerId: string | null
-): Promise<number> {
-  if (!customerId) {
-    // If no customer, return base price
-    const org = await getOrganizationBySlug(orgSlug);
-    if (!org?.id) {
-      throw new Error("Organización no encontrada");
-    }
-
-    const supabase = await createClient();
-    const { data: productData } = await supabase
-      .from("products_with_price")
-      .select("calculated_sale_price")
-      .eq("id", productId)
-      .maybeSingle();
-
-    return productData?.calculated_sale_price ?? 0;
-  }
-
-  const org = await getOrganizationBySlug(orgSlug);
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-
-  const supabase = await createClient();
-
-  // Get customer and their price list
-  const { data: customer, error: customerError } = await supabase
-    .from("customers")
-    .select("sales_price_list_id")
-    .eq("id", customerId)
-    .eq("organization_id", org.id)
-    .maybeSingle();
-
-  if (customerError) {
-    throw new Error(`Error obteniendo cliente: ${customerError.message}`);
-  }
-
-  if (!customer?.sales_price_list_id) {
-    // No price list assigned, return base price
-    const { data: productData } = await supabase
-      .from("products_with_price")
-      .select("calculated_sale_price")
-      .eq("id", productId)
-      .maybeSingle();
-
-    return productData?.calculated_sale_price ?? 0;
-  }
-
-  // Get the price list
-  const { data: priceList, error: priceListError } = await supabase
-    .from("sales_price_lists")
-    .select("percentage, type, value, is_active, valid_from")
-    .eq("id", customer.sales_price_list_id)
-    .eq("organization_id", org.id)
-    .maybeSingle();
-
-  if (priceListError) {
-    throw new Error(
-      `Error obteniendo lista de precios: ${priceListError.message}`
-    );
-  }
-
-  if (!priceList?.is_active) {
-    // Price list is not active, return base price
-    const { data: productData } = await supabase
-      .from("products_with_price")
-      .select("calculated_sale_price")
-      .eq("id", productId)
-      .maybeSingle();
-
-    return productData?.calculated_sale_price ?? 0;
-  }
-
-  // Check if price list is valid (valid_from <= today)
-  const today = new Date().toISOString().split("T")[0];
-  if (priceList.valid_from > today) {
-    // Price list is scheduled for future, return base price
-    const { data: productData } = await supabase
-      .from("products_with_price")
-      .select("calculated_sale_price")
-      .eq("id", productId)
-      .maybeSingle();
-
-    return productData?.calculated_sale_price ?? 0;
-  }
-
-  // Get base product price
-  const { data: baseProduct, error: productError } = await supabase
-    .from("products_with_price")
-    .select("calculated_sale_price")
-    .eq("id", productId)
-    .maybeSingle();
-
-  if (productError) {
-    throw new Error(`Error obteniendo producto: ${productError.message}`);
-  }
-
-  if (!baseProduct?.calculated_sale_price) {
-    return 0;
-  }
-
-  const basePrice = baseProduct.calculated_sale_price;
-  const { type, value } = getPriceListTypeAndValue(priceList);
-  const adjustedPrice = applySalesPriceListValue(basePrice, type, value);
-
-  return adjustedPrice;
 }

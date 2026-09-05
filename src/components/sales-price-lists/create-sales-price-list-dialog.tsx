@@ -41,7 +41,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { createSalesPriceListAction } from "@/modules/sales-price-lists/actions/create-sales-price-list.action";
 import { updateSalesPriceListAction } from "@/modules/sales-price-lists/actions/update-sales-price-list.action";
@@ -62,8 +61,6 @@ const salesPriceListSchema = z
     }),
     is_active: z.boolean(),
     notes: z.string().optional(),
-    extraCommissionRate: z.number().min(0).max(100).optional(),
-    isTargetMargin: z.boolean(),
   })
   .superRefine((values, context) => {
     if (values.type === "PERCENTAGE") {
@@ -94,7 +91,6 @@ type SalesPriceListDialogProps = {
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  commissionsEnabled?: boolean;
 };
 
 export function CreateSalesPriceListDialog({
@@ -104,7 +100,6 @@ export function CreateSalesPriceListDialog({
   trigger,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
-  commissionsEnabled = false,
 }: SalesPriceListDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -124,18 +119,12 @@ export function CreateSalesPriceListDialog({
       valid_from: new Date(),
       is_active: true,
       notes: "",
-      extraCommissionRate: 0,
-      isTargetMargin: false,
     },
   });
 
   const selectedType = form.watch("type") as SalesPriceListType;
-  const isTargetMargin = form.watch("isTargetMargin");
 
   const getValueLabel = () => {
-    if (isTargetMargin) {
-      return "Margen objetivo (%)";
-    }
     if (selectedType === "PRICE") {
       return "Ajuste fijo ($)";
     }
@@ -143,9 +132,6 @@ export function CreateSalesPriceListDialog({
   };
 
   const getValuePlaceholder = () => {
-    if (isTargetMargin) {
-      return "45";
-    }
     if (selectedType === "PRICE") {
       return "1500";
     }
@@ -153,9 +139,6 @@ export function CreateSalesPriceListDialog({
   };
 
   const getValueHint = () => {
-    if (isTargetMargin) {
-      return "Margen directo sobre el costo del producto. Ej: 45 = se vende con 45% de margen sobre costo.";
-    }
     if (selectedType === "PRICE") {
       return "Puede ser positivo (+) o negativo (-). Se suma/resta sobre el precio base.";
     }
@@ -172,8 +155,6 @@ export function CreateSalesPriceListDialog({
           valid_from: data.valid_from ? new Date(data.valid_from) : new Date(),
           is_active: data.is_active ?? true,
           notes: data.notes ?? "",
-          extraCommissionRate: data.extra_commission_rate ?? 0,
-          isTargetMargin: data.is_target_margin ?? false,
         });
       } else {
         form.reset({
@@ -183,8 +164,6 @@ export function CreateSalesPriceListDialog({
           valid_from: new Date(),
           is_active: true,
           notes: "",
-          extraCommissionRate: 0,
-          isTargetMargin: false,
         });
       }
     },
@@ -209,8 +188,6 @@ export function CreateSalesPriceListDialog({
       valid_from: format(values.valid_from, "yyyy-MM-dd"),
       is_active: values.is_active,
       notes: values.notes || null,
-      extraCommissionRate: values.extraCommissionRate ?? 0,
-      isTargetMargin: values.isTargetMargin,
     });
 
     if (!result.success) {
@@ -229,8 +206,6 @@ export function CreateSalesPriceListDialog({
       valid_from: format(values.valid_from, "yyyy-MM-dd"),
       is_active: values.is_active,
       notes: values.notes || null,
-      extraCommissionRate: values.extraCommissionRate ?? 0,
-      isTargetMargin: values.isTargetMargin,
     };
 
     const result = await createSalesPriceListAction(input);
@@ -335,65 +310,31 @@ export function CreateSalesPriceListDialog({
 
               <FormField
                 control={form.control}
-                name="isTargetMargin"
+                name="type"
                 render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
-                    <div className="space-y-0.5">
-                      <FormLabel className="text-base">
-                        Margen sobre costo
-                      </FormLabel>
-                      <p className="text-muted-foreground text-xs">
-                        El valor representa el margen final directo sobre el
-                        costo, sin depender del margen de la lista de compra.
-                      </p>
-                    </div>
+                  <FormItem>
+                    <FormLabel>Tipo de ajuste</FormLabel>
                     <FormControl>
-                      <Switch
-                        checked={field.value}
+                      <Select
                         disabled={isSubmitting}
-                        onCheckedChange={(checked) => {
-                          field.onChange(checked);
-                          if (checked) {
-                            form.setValue("type", "PERCENTAGE");
-                          }
-                        }}
-                      />
+                        onValueChange={(value) =>
+                          field.onChange(value as SalesPriceListType)
+                        }
+                        value={field.value}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecciona un tipo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PERCENTAGE">Porcentaje</SelectItem>
+                          <SelectItem value="PRICE">Ajuste fijo</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
-
-              <div className={isTargetMargin ? "invisible" : ""}>
-                <FormField
-                  control={form.control}
-                  name="type"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tipo de ajuste</FormLabel>
-                      <FormControl>
-                        <Select
-                          disabled={isSubmitting}
-                          onValueChange={(value) =>
-                            field.onChange(value as SalesPriceListType)
-                          }
-                          value={field.value}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selecciona un tipo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="PERCENTAGE">
-                              Porcentaje
-                            </SelectItem>
-                            <SelectItem value="PRICE">Ajuste fijo</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
 
               <FormField
                 control={form.control}
@@ -419,36 +360,6 @@ export function CreateSalesPriceListDialog({
                   </FormItem>
                 )}
               />
-
-              {commissionsEnabled && (
-                <FormField
-                  control={form.control}
-                  name="extraCommissionRate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Comisión extra (%)</FormLabel>
-                      <FormControl>
-                        <Input
-                          disabled={isSubmitting}
-                          onChange={(e) =>
-                            field.onChange(
-                              Number.parseFloat(e.target.value) || 0
-                            )
-                          }
-                          placeholder="0"
-                          type="number"
-                          value={field.value === 0 ? "" : field.value}
-                        />
-                      </FormControl>
-                      <p className="text-muted-foreground text-xs">
-                        Porcentaje adicional de comisión para el vendedor al
-                        usar esta lista. 0 = sin extra.
-                      </p>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
 
               <FormField
                 control={form.control}

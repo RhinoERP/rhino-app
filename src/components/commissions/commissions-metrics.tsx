@@ -49,7 +49,7 @@ export function CommissionsMetrics({ metrics }: CommissionMetricsProps) {
             {formatCurrency(metrics.totalCommission)}
           </div>
           <p className="text-muted-foreground text-xs">
-            {metrics.totalSales} ventas despachadas
+            {metrics.totalSales} cobros comisionados
           </p>
         </CardContent>
       </Card>
@@ -86,7 +86,9 @@ export function CommissionsMetrics({ metrics }: CommissionMetricsProps) {
         </CardHeader>
         <CardContent>
           <div className="font-bold text-2xl">{metrics.totalSales}</div>
-          <p className="text-muted-foreground text-xs">Despachadas este mes</p>
+          <p className="text-muted-foreground text-xs">
+            Cobros comisionados del mes
+          </p>
         </CardContent>
       </Card>
     </div>
