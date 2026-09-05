@@ -8,6 +8,18 @@ export function canIssueArcaInvoiceForPreventa(
   return status === "DRAFT" && enabled;
 }
 
+export function isArcaInvoiceEligibleSaleStatus(
+  status: PreSaleStatus,
+  allowPreventaInvoicing: boolean
+): boolean {
+  return (
+    status === "CONFIRMED" ||
+    status === "DISPATCH" ||
+    status === "DELIVERED" ||
+    canIssueArcaInvoiceForPreventa(status, allowPreventaInvoicing)
+  );
+}
+
 export function isAuthorizedPreventaInvoice(
   status: PreSaleStatus,
   arcaStatus: ArcaStatus

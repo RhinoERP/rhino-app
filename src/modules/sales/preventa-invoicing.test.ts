@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canIssueArcaInvoiceForPreventa,
   hasFullFiscalReversal,
+  isArcaInvoiceEligibleSaleStatus,
   isAuthorizedPreventaInvoice,
 } from "./preventa-invoicing";
 
@@ -10,6 +11,15 @@ describe("preventa fiscal invoicing policy", () => {
     expect(canIssueArcaInvoiceForPreventa("DRAFT", true)).toBe(true);
     expect(canIssueArcaInvoiceForPreventa("DRAFT", false)).toBe(false);
     expect(canIssueArcaInvoiceForPreventa("CONFIRMED", true)).toBe(false);
+  });
+
+  it("keeps normal sale statuses eligible and adds only configured drafts", () => {
+    expect(isArcaInvoiceEligibleSaleStatus("CONFIRMED", false)).toBe(true);
+    expect(isArcaInvoiceEligibleSaleStatus("DISPATCH", false)).toBe(true);
+    expect(isArcaInvoiceEligibleSaleStatus("DELIVERED", false)).toBe(true);
+    expect(isArcaInvoiceEligibleSaleStatus("DRAFT", false)).toBe(false);
+    expect(isArcaInvoiceEligibleSaleStatus("DRAFT", true)).toBe(true);
+    expect(isArcaInvoiceEligibleSaleStatus("CANCELLED", true)).toBe(false);
   });
 
   it("recognizes an authorized draft-preventa invoice", () => {

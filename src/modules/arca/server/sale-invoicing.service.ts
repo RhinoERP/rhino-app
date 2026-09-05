@@ -11,7 +11,10 @@ import {
   isArcaSupportedInvoiceType,
   isFacturaAInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
-import { canIssueArcaInvoiceForPreventa } from "@/modules/sales/preventa-invoicing";
+import {
+  canIssueArcaInvoiceForPreventa,
+  isArcaInvoiceEligibleSaleStatus,
+} from "@/modules/sales/preventa-invoicing";
 import { regenerateAuthorizedSaleRemittances } from "@/modules/sales/remittance-regeneration";
 import {
   ensureReceivableForAuthorizedPreventaInvoice,
@@ -250,8 +253,6 @@ type ArcaVoucherRequest = {
     Importe: number;
   }>;
 };
-
-const SUPPORTED_STATUS: OrderStatus[] = ["CONFIRMED", "DISPATCH", "DELIVERED"];
 
 const ARCA_VOUCHER_TYPE_MAP: Partial<Record<InvoiceType, number>> = {
   FACTURA_A: 1,
@@ -998,14 +999,11 @@ export async function validateSaleForArcaInvoicing(params: {
     );
   }
 
+  let allowPreventaInvoicing = false;
   if (sale.status === "DRAFT") {
     const orgSettings = await getOrgSettings(params.orgSlug);
-    if (
-      !canIssueArcaInvoiceForPreventa(
-        sale.status,
-        orgSettings.allow_preventa_arca_invoicing
-      )
-    ) {
+    allowPreventaInvoicing = orgSettings.allow_preventa_arca_invoicing;
+    if (!canIssueArcaInvoiceForPreventa(sale.status, allowPreventaInvoicing)) {
       throw new ArcaValidationError(
         "No se puede emitir ARCA para una preventa en borrador porque esta organización no habilitó la facturación previa a la confirmación."
       );
@@ -1018,7 +1016,7 @@ export async function validateSaleForArcaInvoicing(params: {
     );
   }
 
-  if (!SUPPORTED_STATUS.includes(sale.status)) {
+  if (!isArcaInvoiceEligibleSaleStatus(sale.status, allowPreventaInvoicing)) {
     throw new ArcaValidationError(
       "La venta no está en un estado válido para emitir ARCA."
     );

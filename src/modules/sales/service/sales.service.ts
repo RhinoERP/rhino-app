@@ -3468,7 +3468,8 @@ async function applyStockAdjustments(
 export async function confirmIncompleteSaleWithStockDeduction(
   supabase: SupabaseServerClient,
   orgId: string,
-  saleId: string
+  saleId: string,
+  accountingInformalEntryId?: string
 ): Promise<void> {
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
@@ -3566,6 +3567,9 @@ export async function confirmIncompleteSaleWithStockDeduction(
       status: "CONFIRMED",
       preventa_status: "CONVERTIDA_A_VENTA",
       updated_at: new Date().toISOString(),
+      ...(accountingInformalEntryId
+        ? { accounting_informal_entry_id: accountingInformalEntryId }
+        : {}),
     } as never)
     .eq("id", saleId)
     .eq("organization_id", orgId);
@@ -3954,7 +3958,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4013,7 +4017,33 @@ export async function confirmSaleOrder(
   // preventa. Confirm using the persisted lines only: client input must never
   // be able to mutate the authorized invoice as part of the stock transition.
   if (existingSale.arca_status === "authorized") {
-    await confirmIncompleteSaleWithStockDeduction(supabase, org.id, saleId);
+    const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+      input.orgSlug
+    );
+    const accountingInformalEntryId = accountingIntegrationEnabled
+      ? (input.accountingInformalEntryId ??
+        existingSale.accounting_informal_entry_id ??
+        undefined)
+      : undefined;
+
+    await confirmIncompleteSaleWithStockDeduction(
+      supabase,
+      org.id,
+      saleId,
+      accountingInformalEntryId
+    );
+
+    if (accountingInformalEntryId) {
+      try {
+        await formalizarEntry(accountingInformalEntryId, org.id);
+      } catch (formalizeError) {
+        console.error(
+          "No se pudo formalizar el asiento informal al confirmar una preventa facturada en ARCA",
+          formalizeError
+        );
+      }
+    }
+
     return {
       status: "CONFIRMED",
       saleId,
