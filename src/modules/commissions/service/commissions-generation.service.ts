@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import type { createClient } from "@/lib/supabase/server";
+import { getSupplierCommissionRateMap } from "./supplier-commission-rates.service";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -24,6 +25,7 @@ type CommissionInsertRow = {
   sales_price_list_id: string | null;
   base_commission_rate: number;
   extra_commission_rate: number;
+  supplier_commission_rate: number;
   commission_amount: number;
   paid_amount: number;
 };
@@ -84,6 +86,8 @@ function buildCommissionRows(params: {
   saleMap: Map<string, SaleForCommission>;
   baseRateMap: Map<string, number>;
   extraRateMap: Map<string, number>;
+  supplierRateMap: Map<string, number>;
+  supplierBySale: Map<string, string>;
 }): CommissionInsertRow[] {
   const {
     orgId,
@@ -92,6 +96,8 @@ function buildCommissionRows(params: {
     saleMap,
     baseRateMap,
     extraRateMap,
+    supplierRateMap,
+    supplierBySale,
   } = params;
   const result: CommissionInsertRow[] = [];
 
@@ -112,7 +118,11 @@ function buildCommissionRows(params: {
     const extraRate = sale.price_level_id
       ? (extraRateMap.get(sale.price_level_id) ?? 0)
       : 0;
-    const rate = baseRate + extraRate;
+    const supplierId = supplierBySale.get(account.sales_order_id);
+    const supplierRate = supplierId
+      ? (supplierRateMap.get(`${sale.user_id}|${supplierId}`) ?? 0)
+      : 0;
+    const rate = baseRate + extraRate + supplierRate;
 
     if (rate <= 0) {
       continue;
@@ -128,6 +138,7 @@ function buildCommissionRows(params: {
       sales_price_list_id: sale.sales_price_list_id ?? null,
       base_commission_rate: baseRate,
       extra_commission_rate: extraRate,
+      supplier_commission_rate: supplierRate,
       commission_amount: commissionAmount,
       paid_amount: payment.amount,
     });
@@ -137,9 +148,54 @@ function buildCommissionRows(params: {
 }
 
 /**
+ * Resuelve el proveedor de cada venta en UNA query (items → products.supplier_id).
+ * Si una venta no tiene proveedor o tiene varios, se omite (tasa por proveedor = 0).
+ */
+async function fetchSaleSuppliers(
+  supabase: SupabaseClient,
+  saleIds: string[]
+): Promise<Map<string, string>> {
+  const supplierBySale = new Map<string, string>();
+
+  if (saleIds.length === 0) {
+    return supplierBySale;
+  }
+
+  const { data: saleItems } = (await supabase
+    .from("sales_order_items")
+    .select("sales_order_id, products!inner(supplier_id)")
+    .in("sales_order_id", saleIds)
+    .not("product_id", "is", null)) as {
+    data: Array<{
+      sales_order_id: string;
+      products: { supplier_id: string | null } | null;
+    }> | null;
+  };
+
+  const suppliersBySale = new Map<string, Set<string>>();
+  for (const item of saleItems ?? []) {
+    const supplierId = item.products?.supplier_id;
+    if (!supplierId) {
+      continue;
+    }
+    const set = suppliersBySale.get(item.sales_order_id) ?? new Set<string>();
+    set.add(supplierId);
+    suppliersBySale.set(item.sales_order_id, set);
+  }
+
+  for (const [saleId, suppliers] of suppliersBySale.entries()) {
+    if (suppliers.size === 1) {
+      supplierBySale.set(saleId, [...suppliers][0]);
+    }
+  }
+
+  return supplierBySale;
+}
+
+/**
  * Genera las comisiones correspondientes a una o más pagos aplicados a ventas.
  * - Una fila por pago (comisión sobre lo cobrado).
- * - Tasa = base del vendedor + delta del nivel de lista usado en la venta.
+ * - Tasa = base del vendedor + delta del nivel de lista + tasa vendedor × proveedor.
  */
 export async function generateCommissions(
   supabase: SupabaseClient,
@@ -191,6 +247,22 @@ export async function generateCommissions(
     orgId
   );
 
+  // Resolver el proveedor de cada venta en una sola query (sin N+1).
+  const supplierBySale = await fetchSaleSuppliers(supabase, saleIds);
+
+  const supplierPairs = sales
+    .filter((s) => supplierBySale.has(s.id))
+    .map((s) => ({
+      seller_id: s.user_id,
+      supplier_id: supplierBySale.get(s.id) as string,
+    }));
+
+  const supplierRateMap = await getSupplierCommissionRateMap(
+    supabase,
+    orgId,
+    supplierPairs
+  );
+
   const commissionRows = buildCommissionRows({
     orgId,
     insertedPayments,
@@ -198,6 +270,8 @@ export async function generateCommissions(
     saleMap,
     baseRateMap,
     extraRateMap,
+    supplierRateMap,
+    supplierBySale,
   });
 
   if (commissionRows.length > 0) {

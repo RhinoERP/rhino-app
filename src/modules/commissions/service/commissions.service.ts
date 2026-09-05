@@ -374,35 +374,65 @@ export async function getCommissionsPaginated(
   const supabase = await createClient();
   const { monthStart, monthEnd } = getMonthRange(params.month);
 
-  let query = supabase
+  // 1. Todos los vendedores únicos con comisiones en el período.
+  let userQuery = supabase
+    .from("commissions")
+    .select("user_id")
+    .eq("organization_id", org.id)
+    .gte("created_at", monthStart)
+    .lte("created_at", `${monthEnd}T23:59:59`);
+
+  if (params.sellerId) {
+    userQuery = userQuery.eq("user_id", params.sellerId);
+  }
+
+  const { data: userRows, error: userError } = await userQuery;
+
+  if (userError) {
+    throw new Error(
+      `Error fetching commission sellers: ${userError?.message ?? "No data"}`
+    );
+  }
+
+  let allUserIds = [...new Set((userRows ?? []).map((r) => r.user_id))];
+
+  // 2. Búsqueda por nombre de vendedor (server-side).
+  if (params.search) {
+    const term = params.search.toLowerCase();
+    const allNameMap = await fetchSellerNames(supabase, allUserIds, org.id);
+    allUserIds = allUserIds.filter((id) =>
+      (allNameMap.get(id) ?? "").toLowerCase().includes(term)
+    );
+  }
+
+  const totalCount = allUserIds.length;
+
+  // 3. Paginar por vendedor en memoria.
+  const pageUserIds = allUserIds.slice((page - 1) * pageSize, page * pageSize);
+
+  if (pageUserIds.length === 0) {
+    return { data: [], totalCount, page, pageSize };
+  }
+
+  // 4. Traer las filas de comisión de los vendedores de la página (sin range,
+  //    para armar las cards por venta completas).
+  const { data: commissionRows, error } = await supabase
     .from("commissions")
     .select(
       `id, user_id, sales_order_id, base_commission_rate, extra_commission_rate,
-       commission_amount, paid_amount, created_at`,
-      { count: "exact" }
+       commission_amount, paid_amount, created_at`
     )
     .eq("organization_id", org.id)
+    .in("user_id", pageUserIds)
     .gte("created_at", monthStart)
     .lte("created_at", `${monthEnd}T23:59:59`)
     .order("created_at", { ascending: false });
-
-  if (params.sellerId) {
-    query = query.eq("user_id", params.sellerId);
-  }
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  query = query.range(from, to);
-
-  const { data: commissionRows, error, count } = await query;
 
   if (error || !commissionRows) {
     throw new Error(
       `Error fetching commissions: ${error?.message ?? "No data"}`
     );
   }
-
-  const totalCount = count ?? 0;
 
   const userIds = [...new Set(commissionRows.map((c) => c.user_id))];
   const saleIds = [...new Set(commissionRows.map((c) => c.sales_order_id))];
@@ -447,12 +477,7 @@ export async function getCommissionsPaginated(
     receivableStatusMap,
   });
 
-  let sellers = Array.from(sellerMap.values());
-
-  if (params.search) {
-    const term = params.search.toLowerCase();
-    sellers = sellers.filter((s) => s.sellerName.toLowerCase().includes(term));
-  }
+  const sellers = Array.from(sellerMap.values());
 
   const sorted = sortSellers(sellers, params);
 
@@ -511,11 +536,25 @@ export async function getAllCommissionsForExport(
   orgSlug: string,
   month?: string
 ): Promise<CommissionSeller[]> {
-  const result = await getCommissionsPaginated(orgSlug, {
+  const PAGE_SIZE = 100;
+  const all: CommissionSeller[] = [];
+
+  const first = await getCommissionsPaginated(orgSlug, {
     page: 1,
-    pageSize: 10_000, // Max rows: silently truncates data beyond this limit
+    pageSize: PAGE_SIZE,
     month,
   });
+  all.push(...first.data);
 
-  return result.data;
+  const pageCount = Math.max(1, Math.ceil(first.totalCount / PAGE_SIZE));
+  for (let page = 2; page <= pageCount; page += 1) {
+    const result = await getCommissionsPaginated(orgSlug, {
+      page,
+      pageSize: PAGE_SIZE,
+      month,
+    });
+    all.push(...result.data);
+  }
+
+  return all;
 }

@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CommissionsMetrics } from "@/components/commissions/commissions-metrics";
+import { Button } from "@/components/ui/button";
 import {
   getCommissionMetrics,
   getCommissionsPaginated,
@@ -80,6 +82,13 @@ export default async function CommissionsPage({
             Comisiones generadas por los cobros registrados.
           </p>
         </div>
+        {org?.supplier_differentiated_credits === true && (
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/org/${orgSlug}/comisiones/proveedores`}>
+              Comisiones por proveedor
+            </Link>
+          </Button>
+        )}
       </div>
       <CommissionsMetrics metrics={metrics} />
       <CommissionsDataTable
