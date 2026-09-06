@@ -125,9 +125,9 @@ describe("remittance mask data", () => {
       buildRemittanceMaskData(remittanceWithItems())
     );
 
-    expect(html).toContain(".date-month { left: 150.9mm;");
-    expect(html).toContain(".date-year { left: 165.5mm;");
-    expect(html).toContain(".customer-name { left: 32.1mm; top: 71.4mm;");
+    expect(html).toContain(".date-month { left: 153.9mm;");
+    expect(html).toContain(".date-year { left: 168.5mm;");
+    expect(html).toContain(".customer-name { left: 32.1mm; top: 70.4mm;");
   });
 
   it("sums all item quantities as packages and truncates the declared value", () => {
