@@ -3,6 +3,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   Calendar,
+  ChevronRight,
   DollarSign,
   FileDigit,
   Hash,
@@ -17,7 +18,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { formatDateTime } from "@/lib/utils";
-import type { AuthorizedArcaInvoiceListItem } from "@/modules/arca/server/invoices.service";
+import type {
+  ArcaRelatedFiscalDocument,
+  AuthorizedArcaInvoiceListItem,
+} from "@/modules/arca/server/invoices.service";
 import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 import type { InvoiceType } from "@/modules/sales/types";
 import { ArcaInvoiceDownloadButton } from "./arca-invoice-download-button";
@@ -119,8 +123,13 @@ function isEmptyDateRangeFilterValue(value: unknown): boolean {
   return value.every((item) => !item);
 }
 
-function formatArcaPointAndVoucher(
-  invoice: AuthorizedArcaInvoiceListItem
+type ArcaVoucherFields = Pick<
+  AuthorizedArcaInvoiceListItem,
+  "arca_point_of_sale" | "arca_voucher_number"
+>;
+
+export function formatArcaPointAndVoucher(
+  invoice: ArcaVoucherFields | ArcaRelatedFiscalDocument
 ): string {
   if (!(invoice.arca_point_of_sale && invoice.arca_voucher_number)) {
     return "—";
@@ -129,6 +138,47 @@ function formatArcaPointAndVoucher(
   return `${String(invoice.arca_point_of_sale).padStart(4, "0")} / ${String(
     invoice.arca_voucher_number
   ).padStart(8, "0")}`;
+}
+
+export function getArcaInvoiceTypeLabel(invoiceType: InvoiceType): string {
+  return invoiceTypeLabels[invoiceType] ?? invoiceType;
+}
+
+function getFiscalDocuments(invoice: AuthorizedArcaInvoiceListItem) {
+  const documents = [...invoice.related_documents];
+  if (invoice.is_primary_authorized) {
+    documents.unshift({
+      id: invoice.id,
+      source: invoice.source === "pos_sale" ? "sales_order" : invoice.source,
+      kind: "balance",
+      invoice_number: invoice.invoice_number,
+      invoice_type: invoice.invoice_type,
+      arca_authorized_at: invoice.arca_authorized_at,
+      arca_cae: invoice.arca_cae,
+      arca_point_of_sale: invoice.arca_point_of_sale,
+      arca_voucher_number: invoice.arca_voucher_number,
+      total_amount: invoice.total_amount,
+    });
+  }
+  return documents;
+}
+
+function matchesRelatedText(
+  invoice: AuthorizedArcaInvoiceListItem,
+  value: unknown,
+  getValue: (document: ReturnType<typeof getFiscalDocuments>[number]) => string
+): boolean {
+  const filterValues = Array.isArray(value) ? value : [value];
+  const normalizedFilters = filterValues
+    .map((item) => String(item ?? "").toLocaleLowerCase())
+    .filter(Boolean);
+  if (!normalizedFilters.length) {
+    return true;
+  }
+  return getFiscalDocuments(invoice).some((document) => {
+    const target = getValue(document).toLocaleLowerCase();
+    return normalizedFilters.every((filter) => target.includes(filter));
+  });
 }
 
 function getInvoiceEmailDetail(invoice: AuthorizedArcaInvoiceListItem): string {
@@ -185,7 +235,51 @@ export function createArcaInvoiceColumns(
     return true;
   };
 
+  const matchesRelatedDateRange = (
+    invoice: AuthorizedArcaInvoiceListItem,
+    filterValue: unknown
+  ): boolean =>
+    getFiscalDocuments(invoice).some((document) =>
+      filterByDateRange(
+        document.arca_authorized_at,
+        parseTimestamp,
+        filterValue
+      )
+    );
+
   return [
+    {
+      id: "expander",
+      size: 40,
+      header: () => null,
+      cell: ({ row }) => {
+        const documentsCount = row.original.related_documents.length;
+        if (!documentsCount) {
+          return null;
+        }
+        const expanded = row.getIsExpanded();
+        return (
+          <Button
+            aria-label={`${expanded ? "Ocultar" : "Mostrar"} ${documentsCount} comprobante${documentsCount === 1 ? "" : "s"} asociado${documentsCount === 1 ? "" : "s"}`}
+            className="size-8"
+            onClick={(event) => {
+              event.stopPropagation();
+              row.toggleExpanded();
+            }}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronRight
+              className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`}
+            />
+          </Button>
+        );
+      },
+      enableColumnFilter: false,
+      enableSorting: false,
+      enableHiding: false,
+    },
     {
       id: "sale_number",
       accessorFn: (row) => String(row.sale_number ?? ""),
@@ -205,6 +299,7 @@ export function createArcaInvoiceColumns(
             className="block font-mono text-sm transition-colors hover:text-blue-600"
             href={href}
           >
+            {invoice.group_kind === "preventa" ? "Preventa " : ""}
             {saleNumber}
           </Link>
         );
@@ -214,19 +309,24 @@ export function createArcaInvoiceColumns(
         variant: "text",
         icon: Hash,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: false,
     },
     {
       id: "invoice_number",
-      accessorFn: (row) => row.invoice_number ?? "",
+      accessorFn: (row) =>
+        getFiscalDocuments(row)
+          .map((document) => document.invoice_number ?? "")
+          .join(" "),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Factura" />
       ),
       cell: ({ row }) => (
         <div className="font-mono text-sm">
-          {row.original.invoice_number ?? "—"}
+          {row.original.is_primary_authorized
+            ? (row.original.invoice_number ?? "—")
+            : "—"}
         </div>
       ),
       meta: {
@@ -234,9 +334,15 @@ export function createArcaInvoiceColumns(
         variant: "text",
         icon: FileDigit,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: false,
+      filterFn: (row, _id, value) =>
+        matchesRelatedText(
+          row.original,
+          value,
+          (document) => document.invoice_number ?? ""
+        ),
     },
     {
       id: "customer",
@@ -312,14 +418,14 @@ export function createArcaInvoiceColumns(
     },
     {
       id: "arca_authorized_at",
-      accessorKey: "arca_authorized_at",
+      accessorKey: "latest_authorized_at",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Emitida en" />
       ),
       cell: ({ row }) => (
         <div>
-          {row.original.arca_authorized_at
-            ? formatDateTime(row.original.arca_authorized_at)
+          {row.original.latest_authorized_at
+            ? formatDateTime(row.original.latest_authorized_at)
             : "—"}
         </div>
       ),
@@ -332,22 +438,22 @@ export function createArcaInvoiceColumns(
       enableSorting: true,
       enableHiding: false,
       filterFn: (row, _id, value) =>
-        filterByDateRange(
-          row.original.arca_authorized_at,
-          parseTimestamp,
-          value
-        ),
+        matchesRelatedDateRange(row.original, value),
     },
     {
       id: "invoice_type",
-      accessorKey: "invoice_type",
+      accessorFn: (row) =>
+        getFiscalDocuments(row)
+          .map((document) => document.invoice_type)
+          .join(" "),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Comprobante" />
       ),
       cell: ({ row }) => (
         <div>
-          {invoiceTypeLabels[row.original.invoice_type] ??
-            row.original.invoice_type}
+          {row.original.is_primary_authorized
+            ? getArcaInvoiceTypeLabel(row.original.invoice_type)
+            : "—"}
         </div>
       ),
       meta: {
@@ -364,9 +470,11 @@ export function createArcaInvoiceColumns(
       enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
-      filterFn: (row, id, value) => {
+      filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
-        return filterValues.includes(row.getValue(id));
+        return getFiscalDocuments(row.original).some((document) =>
+          filterValues.includes(document.invoice_type)
+        );
       },
     },
     {
@@ -400,31 +508,49 @@ export function createArcaInvoiceColumns(
     },
     {
       id: "arca_cae",
-      accessorFn: (row) => row.arca_cae ?? "",
+      accessorFn: (row) =>
+        getFiscalDocuments(row)
+          .map((document) => document.arca_cae ?? "")
+          .join(" "),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="CAE" />
       ),
       cell: ({ row }) => (
-        <div className="font-mono text-sm">{row.original.arca_cae ?? "—"}</div>
+        <div className="font-mono text-sm">
+          {row.original.is_primary_authorized
+            ? (row.original.arca_cae ?? "—")
+            : "—"}
+        </div>
       ),
       meta: {
         label: "CAE",
         variant: "text",
         icon: Ticket,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
+      filterFn: (row, _id, value) =>
+        matchesRelatedText(
+          row.original,
+          value,
+          (document) => document.arca_cae ?? ""
+        ),
     },
     {
       id: "point_and_voucher",
-      accessorFn: (row) => formatArcaPointAndVoucher(row),
+      accessorFn: (row) =>
+        getFiscalDocuments(row)
+          .map((document) => formatArcaPointAndVoucher(document))
+          .join(" "),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Punto / Número" />
       ),
       cell: ({ row }) => (
         <div className="font-mono text-sm">
-          {formatArcaPointAndVoucher(row.original)}
+          {row.original.is_primary_authorized
+            ? formatArcaPointAndVoucher(row.original)
+            : "—"}
         </div>
       ),
       meta: {
@@ -432,9 +558,11 @@ export function createArcaInvoiceColumns(
         variant: "text",
         icon: Hash,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: false,
       enableHiding: true,
+      filterFn: (row, _id, value) =>
+        matchesRelatedText(row.original, value, formatArcaPointAndVoucher),
     },
     {
       id: "invoice_email_status",
@@ -446,7 +574,10 @@ export function createArcaInvoiceColumns(
         <DataTableColumnHeader column={column} label="Email" />
       ),
       cell: ({ row }) => {
-        if (row.original.source === "pos_sale") {
+        if (
+          row.original.source === "pos_sale" ||
+          !row.original.is_primary_authorized
+        ) {
           return (
             <div className="text-muted-foreground text-sm">No disponible</div>
           );
@@ -500,7 +631,9 @@ export function createArcaInvoiceColumns(
       ),
       cell: ({ row }) => (
         <div className="text-right font-semibold">
-          {formatCurrency(row.original.total_amount)}
+          {row.original.is_primary_authorized
+            ? formatCurrency(row.original.total_amount)
+            : "—"}
         </div>
       ),
       meta: {
@@ -515,35 +648,50 @@ export function createArcaInvoiceColumns(
     {
       id: "download",
       header: () => <div className="text-right">Acciones</div>,
-      cell: ({ row }) =>
-        row.original.source === "pos_sale" ? (
-          <div className="flex justify-end">
-            <Button asChild size="sm" type="button" variant="outline">
-              <Link href={`/org/${orgSlug}/venta-directa/${row.original.id}`}>
-                Ver detalle
-              </Link>
-            </Button>
-          </div>
-        ) : (
+      cell: ({ row }) => {
+        const invoice = row.original;
+        if (!invoice.is_primary_authorized) {
+          return (
+            <div className="flex justify-end">
+              <Button asChild size="sm" type="button" variant="outline">
+                <Link href={`/org/${orgSlug}/ventas/${invoice.id}`}>
+                  Ver detalle
+                </Link>
+              </Button>
+            </div>
+          );
+        }
+
+        if (invoice.source === "pos_sale") {
+          return (
+            <div className="flex justify-end">
+              <Button asChild size="sm" type="button" variant="outline">
+                <Link href={`/org/${orgSlug}/venta-directa/${invoice.id}`}>
+                  Ver detalle
+                </Link>
+              </Button>
+            </div>
+          );
+        }
+
+        return (
           <div className="flex justify-end gap-2">
             <ArcaInvoicePreviewButton
-              invoiceNumber={row.original.invoice_number}
+              invoiceNumber={invoice.invoice_number}
               orgSlug={orgSlug}
-              saleId={row.original.id}
+              saleId={invoice.id}
             />
-            <ArcaInvoiceDownloadButton
-              orgSlug={orgSlug}
-              saleId={row.original.id}
-            />
+            <ArcaInvoiceDownloadButton orgSlug={orgSlug} saleId={invoice.id} />
             <ArcaInvoiceEmailButton
-              customerEmail={row.original.customer.email}
-              invoiceEmailRecipient={row.original.invoice_email_recipient}
-              invoiceEmailStatus={row.original.invoice_email_status}
+              customerEmail={invoice.customer.email}
+              invoiceEmailRecipient={invoice.invoice_email_recipient}
+              invoiceEmailStatus={invoice.invoice_email_status}
               orgSlug={orgSlug}
-              saleId={row.original.id}
+              saleId={invoice.id}
             />
           </div>
-        ),
+        );
+      },
       enableColumnFilter: false,
       enableSorting: false,
       enableHiding: false,

@@ -130,7 +130,7 @@ export function ArcaInvoicePreviewButton({
       </Button>
 
       <Dialog onOpenChange={handleOpenChange} open={open}>
-        <DialogContent className="flex h-[90dvh] max-w-6xl flex-col gap-0 overflow-hidden p-0">
+        <DialogContent className="flex h-[92dvh] w-[96vw] max-w-[96vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1440px]">
           <DialogHeader className="border-b px-6 py-4 text-left">
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{description}</DialogDescription>
