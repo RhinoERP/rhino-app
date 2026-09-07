@@ -10,6 +10,13 @@ export type PaginatedResult<T> = {
   pageSize: number;
 };
 
+export type CommissionPayment = {
+  id: string;
+  paidAmount: number;
+  commissionAmount: number;
+  paidAt: string | null;
+};
+
 export type CommissionSale = {
   id: string;
   saleNumber: number | null;
@@ -18,8 +25,15 @@ export type CommissionSale = {
   dispatchedAt: string | null;
   subTotal: number;
   commissionRate: number;
-  commissionAmount: number;
-  paidAmount: number;
+  /** Comisión total de referencia = subTotal × tasa (lo que se gana si se cobra todo). */
+  totalCommission: number;
+  /** Comisión ya generada = Σ comisiones por pago recibido. */
+  paidCommission: number;
+  /** totalCommission − paidCommission. */
+  remainingCommission: number;
+  /** Estado derivado de la cuenta corriente de la venta. */
+  status: "PENDING" | "PARTIAL" | "PAID" | "VOID";
+  payments: CommissionPayment[];
 };
 
 export type CommissionSeller = {

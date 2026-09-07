@@ -30,9 +30,9 @@ export async function createQuoteAction(
       advancePaymentPercentage: values.advancePaymentEnabled
         ? (values.advancePaymentPercentage ?? null)
         : null,
-      targetMarginListId:
-        values.targetMarginListId && values.targetMarginListId !== "none"
-          ? values.targetMarginListId
+      priceLevelId:
+        values.priceLevelId && values.priceLevelId !== "none"
+          ? values.priceLevelId
           : null,
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
       invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",

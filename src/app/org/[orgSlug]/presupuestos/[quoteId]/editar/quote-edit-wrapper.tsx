@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
 import {
   getQuoteVersionsAction,
@@ -227,7 +228,7 @@ function buildDefaultValues(
   return {
     customerId: quote.customer_id,
     salesPriceListId: customer?.sales_price_list_id ?? "none",
-    targetMarginListId: quote.target_margin_list_id ?? "none",
+    priceLevelId: quote.price_level_id ?? "none",
     currency: quote.currency as "ARS" | "USD",
     exchangeRate: quote.exchange_rate,
     invoiceType: (quote as Record<string, unknown>).invoice_type as
@@ -255,6 +256,7 @@ type QuoteEditWrapperProps = {
   customers: Customer[];
   products: SaleProduct[];
   salesPriceLists: SalesPriceList[];
+  priceLevels: PriceLevel[];
   hasProduction: boolean;
 };
 
@@ -522,6 +524,7 @@ export function QuoteEditWrapper({
   customers,
   products,
   salesPriceLists,
+  priceLevels,
   hasProduction,
 }: QuoteEditWrapperProps) {
   const { editQuote, isPending } = useEditQuote(orgSlug, quote.id);
@@ -729,6 +732,7 @@ export function QuoteEditWrapper({
         onFileSelect={setSelectedFile}
         onSubmit={handleSubmit}
         orgSlug={orgSlug}
+        priceLevels={priceLevels}
         products={products}
         salesPriceLists={salesPriceLists}
         selectedDesignFile={selectedDesignFile}

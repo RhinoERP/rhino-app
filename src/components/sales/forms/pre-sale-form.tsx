@@ -67,7 +67,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import {
   hasActiveBrowserSession,
@@ -80,6 +79,12 @@ import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-ass
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
+import { usePriceLevels } from "@/modules/price-levels/hooks/use-price-levels";
+import {
+  calculateSalePrice,
+  type SalePriceAdjustment,
+} from "@/modules/price-levels/service/price-calculator";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import { getPriceListItemsBatchAction } from "@/modules/price-lists/actions/get-price-list-items-batch.action";
 import type { PriceListItemBasic } from "@/modules/price-lists/service/price-lists.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
@@ -102,7 +107,7 @@ import {
   type InputUnit,
 } from "@/modules/sales/utils/sale-calculations";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
-import type { SalesPriceListType } from "@/modules/sales-price-lists/types";
+import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
@@ -417,50 +422,90 @@ const getModifierKey = (): string => {
   return "Ctrl";
 };
 
-type PriceListAssignment = { type: SalesPriceListType; value: number };
+type PriceLevelAssignment = {
+  level: PriceLevel | null;
+  adjustments: SalePriceAdjustment[];
+};
 
-function applyPriceListAssignment(
-  basePrice: number,
-  assignment: PriceListAssignment | null
-): number {
-  if (!assignment) {
-    return basePrice;
-  }
-
-  if (assignment.type === "PRICE") {
-    return truncateMoney(Math.max(0, basePrice + assignment.value));
-  }
-
-  return truncateMoney(basePrice * (1 + assignment.value / 100));
+function buildPriceLevelAssignment(
+  level: PriceLevel | null,
+  adjustment: SalesPriceList | null
+): PriceLevelAssignment {
+  return {
+    level,
+    adjustments: adjustment
+      ? [{ type: adjustment.type, value: adjustment.value }]
+      : [],
+  };
 }
 
-function buildProductPriceMap(
-  products: SaleProduct[],
-  supplierPriceMap: Map<string, PriceListAssignment>,
-  supplierPriceListItems: Map<string, Map<string, PriceListItemBasic>>,
-  fallback: PriceListAssignment | null
-): Map<string, number> {
+function resolveAssignment(
+  assignment: CustomerSupplierAssignment,
+  priceLevels: PriceLevel[],
+  salesPriceLists: SalesPriceList[]
+): PriceLevelAssignment {
+  const level = assignment.price_level_id
+    ? (priceLevels.find((pl) => pl.id === assignment.price_level_id) ?? null)
+    : null;
+  const adjustment = assignment.sales_price_list_id
+    ? (salesPriceLists.find((pl) => pl.id === assignment.sales_price_list_id) ??
+      null)
+    : null;
+  return buildPriceLevelAssignment(level, adjustment);
+}
+
+function buildProductPriceMap({
+  products,
+  supplierAssignmentMap,
+  supplierPriceListItems,
+  fallback,
+  overrideLevel,
+}: {
+  products: SaleProduct[];
+  supplierAssignmentMap: Map<string, PriceLevelAssignment>;
+  supplierPriceListItems: Map<string, Map<string, PriceListItemBasic>>;
+  fallback: PriceLevelAssignment;
+  overrideLevel?: PriceLevel | null;
+}): Map<string, number> {
   const priceMap = new Map<string, number>();
   for (const product of products) {
-    let basePrice = product.price;
+    let costPrice = product.costPrice ?? null;
     if (product.supplierId != null) {
       const item = supplierPriceListItems
         .get(product.supplierId)
         ?.get(product.id);
       if (item) {
-        basePrice =
-          item.margin != null
-            ? truncateMoney(item.costPrice * (1 + item.margin / 100))
-            : item.costPrice;
+        costPrice = item.costPrice;
       }
     }
 
-    const assignment =
-      product.supplierId != null && supplierPriceMap.has(product.supplierId)
-        ? (supplierPriceMap.get(product.supplierId) as PriceListAssignment)
-        : fallback;
+    let assignment: PriceLevelAssignment;
+    if (overrideLevel) {
+      // Sale-level override: use the chosen level for all products, keeping the
+      // customer's adjustments (special lists) applied on top.
+      assignment = {
+        level: overrideLevel,
+        adjustments: fallback.adjustments,
+      };
+    } else if (
+      product.supplierId != null &&
+      supplierAssignmentMap.has(product.supplierId)
+    ) {
+      assignment = supplierAssignmentMap.get(
+        product.supplierId
+      ) as PriceLevelAssignment;
+    } else {
+      assignment = fallback;
+    }
 
-    priceMap.set(product.id, applyPriceListAssignment(basePrice, assignment));
+    const { price } = calculateSalePrice({
+      basePrice: product.price,
+      costPrice,
+      level: assignment.level,
+      adjustments: assignment.adjustments,
+    });
+
+    priceMap.set(product.id, price);
   }
   return priceMap;
 }
@@ -484,6 +529,21 @@ const normalizeSearchValue = (value: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+
+function composePaymentObservations(
+  observations: string,
+  options: Array<{ value: string; label: string }>,
+  paymentMethod: string
+): string {
+  const paymentLabel =
+    options.find((option) => option.value === paymentMethod)?.label ??
+    paymentMethod;
+  const paymentHint = `[Método de pago sugerido: ${paymentLabel}]`;
+  const normalizedObservations = observations.trim();
+  return normalizedObservations
+    ? `${paymentHint}\n${normalizedObservations}`
+    : paymentHint;
+}
 
 const toSearchTokens = (value: string) => {
   const normalized = normalizeSearchValue(value);
@@ -522,6 +582,7 @@ export function PreSaleForm({
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
+  const [selectedPriceLevelId, setSelectedPriceLevelId] = useState<string>("");
   const [productPrices, setProductPrices] = useState<Map<string, number>>(
     new Map()
   );
@@ -616,6 +677,7 @@ export function PreSaleForm({
   }, [initialSellerId, sellerId, sellerOptions]);
 
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
+  const { data: priceLevels = [] } = usePriceLevels(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const featureEnabled = orgSettings?.configurable_price_lists_enabled ?? false;
   const enabledPaymentMethodOptions = useMemo(() => {
@@ -649,7 +711,18 @@ export function PreSaleForm({
     selectedCustomer?.fantasy_name ||
     selectedCustomer?.business_name ||
     "Sin cliente";
-  const customerPriceList = useMemo(() => {
+  const customerLevel = useMemo(() => {
+    if (!selectedCustomer?.price_level_id) {
+      return null;
+    }
+    return (
+      priceLevels.find(
+        (level) => level.id === selectedCustomer.price_level_id
+      ) ?? null
+    );
+  }, [selectedCustomer, priceLevels]);
+
+  const customerAdjustment = useMemo(() => {
     if (!selectedCustomer?.sales_price_list_id) {
       return null;
     }
@@ -660,26 +733,20 @@ export function PreSaleForm({
     );
   }, [selectedCustomer, salesPriceLists]);
 
-  // Per-supplier price list map derived from customer assignments (only when feature enabled)
-  const supplierPriceMap = useMemo(() => {
-    const map = new Map<string, PriceListAssignment>();
+  // Per-supplier level + adjustment map derived from customer assignments (only when feature enabled)
+  const supplierAssignmentMap = useMemo(() => {
+    const map = new Map<string, PriceLevelAssignment>();
     for (const assignment of customerAssignments) {
-      if (!assignment.sales_price_list_id) {
+      if (!(assignment.price_level_id || assignment.sales_price_list_id)) {
         continue;
       }
-      const priceList = salesPriceLists.find(
-        (pl) => pl.id === assignment.sales_price_list_id
+      map.set(
+        assignment.supplier_id,
+        resolveAssignment(assignment, priceLevels, salesPriceLists)
       );
-      if (priceList) {
-        // No is_active / valid_from filter — explicit assignment always overrides
-        map.set(assignment.supplier_id, {
-          type: priceList.type,
-          value: priceList.value,
-        });
-      }
     }
     return map;
-  }, [customerAssignments, salesPriceLists]);
+  }, [customerAssignments, priceLevels, salesPriceLists]);
 
   // Fetch assignments + purchase price list items when customer changes
   useEffect(() => {
@@ -744,7 +811,7 @@ export function PreSaleForm({
     };
   }, [orgSlug, customerId, featureEnabled]);
 
-  // Calculate product prices when customer or price list changes
+  // Calculate product prices when customer or price level changes
   useEffect(() => {
     if (products.length === 0) {
       setProductPrices(new Map());
@@ -753,20 +820,25 @@ export function PreSaleForm({
 
     setIsLoadingPrices(true);
     try {
-      // If the customer has an explicitly-assigned price list, use it regardless of
-      // is_active or valid_from — same principle as supplier assignments.
-      const fallback: PriceListAssignment | null =
-        selectedCustomer?.sales_price_list_id && customerPriceList
-          ? { type: customerPriceList.type, value: customerPriceList.value }
-          : null;
+      // If the customer has an explicitly-assigned level and/or adjustment, use it
+      // regardless of is_active or valid_from — same principle as supplier assignments.
+      const fallback: PriceLevelAssignment = buildPriceLevelAssignment(
+        customerLevel,
+        customerAdjustment
+      );
+
+      const overrideLevel = selectedPriceLevelId
+        ? (priceLevels.find((pl) => pl.id === selectedPriceLevelId) ?? null)
+        : null;
 
       setProductPrices(
-        buildProductPriceMap(
+        buildProductPriceMap({
           products,
-          supplierPriceMap,
+          supplierAssignmentMap,
           supplierPriceListItems,
-          fallback
-        )
+          fallback,
+          overrideLevel,
+        })
       );
     } catch (priceError) {
       console.error("Error calculating product prices:", priceError);
@@ -778,10 +850,12 @@ export function PreSaleForm({
     }
   }, [
     products,
-    selectedCustomer,
-    customerPriceList,
-    supplierPriceMap,
+    customerLevel,
+    customerAdjustment,
+    supplierAssignmentMap,
     supplierPriceListItems,
+    selectedPriceLevelId,
+    priceLevels,
   ]);
 
   // Update items when product prices change
@@ -1441,28 +1515,19 @@ export function PreSaleForm({
         return;
       }
 
-      const selectedTaxPayload = selectedTaxes.map((tax) => ({
-        taxId: tax.id,
-        name: tax.name,
-        rate: tax.rate,
-      }));
-      const paymentLabel =
-        paymentMethodOptions.find((option) => option.value === paymentMethod)
-          ?.label ?? paymentMethod;
-      const paymentHint = `[Método de pago sugerido: ${paymentLabel}]`;
-      const normalizedObservations = observations.trim();
-      const composedObservations = normalizedObservations
-        ? `${paymentHint}\n${normalizedObservations}`
-        : paymentHint;
-
-      await createPreSale.mutateAsync({
+      const payload = {
         customerId,
         sellerId,
         saleDate: saleDateString,
         expirationDate: expirationDateString || null,
         creditDays: normalizedExpirationDays,
         invoiceType,
-        observations: composedObservations,
+        observations: composePaymentObservations(
+          observations,
+          paymentMethodOptions,
+          paymentMethod
+        ),
+        priceLevelId: selectedPriceLevelId || null,
         items: items.map((item) =>
           buildPreSaleItemPayload(item, calculateItemTotals)
         ),
@@ -1471,8 +1536,16 @@ export function PreSaleForm({
           100
         ),
         globalDiscountAmount: totals.globalDiscountAmount,
-        taxes: selectedTaxPayload.length ? selectedTaxPayload : undefined,
-      });
+        taxes: selectedTaxes.length
+          ? selectedTaxes.map((tax) => ({
+              taxId: tax.id,
+              name: tax.name,
+              rate: tax.rate,
+            }))
+          : undefined,
+      };
+
+      await createPreSale.mutateAsync(payload);
 
       setSuccessMessage("Preventa creada correctamente");
       setItems([]);
@@ -1513,6 +1586,7 @@ export function PreSaleForm({
 
   const handleCustomerSelect = (id: string) => {
     setCustomerId(id);
+    setSelectedPriceLevelId("");
     setIsCustomerPickerOpen(false);
     // Prices will be recalculated in the useEffect above
   };
@@ -1529,6 +1603,7 @@ export function PreSaleForm({
         customer.assigned_seller_id !== id
       ) {
         setCustomerId("");
+        setSelectedPriceLevelId("");
       }
     }
   };
@@ -1793,12 +1868,18 @@ export function PreSaleForm({
                     <p className="text-muted-foreground text-xs">
                       Selecciona el cliente de esta preventa.
                     </p>
-                    {customerPriceList && (
+                    {customerLevel && (
+                      <p className="text-muted-foreground text-xs">
+                        <span className="font-medium">Nivel de lista:</span>{" "}
+                        {customerLevel.name} ({customerLevel.margin}% de margen)
+                      </p>
+                    )}
+                    {customerAdjustment && (
                       <p className="text-muted-foreground text-xs">
                         <span className="font-medium">Lista de precios:</span>{" "}
-                        {customerPriceList.name} (
-                        {customerPriceList.percentage > 0 ? "+" : ""}
-                        {customerPriceList.percentage}%)
+                        {customerAdjustment.name} (
+                        {customerAdjustment.percentage > 0 ? "+" : ""}
+                        {customerAdjustment.percentage}%)
                       </p>
                     )}
                   </div>
@@ -1866,6 +1947,40 @@ export function PreSaleForm({
                   </p>
                 </div>
               </div>
+
+              {priceLevels.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="priceLevel">Nivel de lista</Label>
+                  <Select
+                    onValueChange={(value) =>
+                      setSelectedPriceLevelId(value === "none" ? "" : value)
+                    }
+                    value={selectedPriceLevelId || "none"}
+                  >
+                    <SelectTrigger className="w-full" id="priceLevel">
+                      <SelectValue placeholder="Elegir nivel de lista" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        {customerLevel
+                          ? `Por defecto del cliente (${customerLevel.name})`
+                          : "Lista base (margen del producto)"}
+                      </SelectItem>
+                      {priceLevels
+                        .filter((level) => level.is_active)
+                        .map((level) => (
+                          <SelectItem key={level.id} value={level.id}>
+                            {level.name} — {level.margin}% de margen
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    El nivel define el margen al que se vende y la comisión del
+                    vendedor. Por defecto usa el nivel asignado al cliente.
+                  </p>
+                </div>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
