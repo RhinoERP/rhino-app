@@ -10,6 +10,7 @@ import {
   PercentIcon,
   ReceiptIcon,
   ShoppingCartSimpleIcon,
+  StorefrontIcon,
   TruckIcon,
   UserGearIcon,
   UsersIcon,
@@ -106,6 +107,12 @@ const configNavItems: ConfigNavItem[] = [
     title: "Condiciones de Venta",
     url: (slug: string) => `/org/${slug}/configuracion/condiciones-de-venta`,
     icon: CalendarCheckIcon,
+    requiredPermission: ADMIN_PERMISSION,
+  },
+  {
+    title: "Catálogo Distribuidor",
+    url: (slug: string) => `/org/${slug}/configuracion/catalogo-distribuidor`,
+    icon: StorefrontIcon,
     requiredPermission: ADMIN_PERMISSION,
   },
   {

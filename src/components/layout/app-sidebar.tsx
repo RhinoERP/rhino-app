@@ -16,6 +16,7 @@ import {
   ShoppingCartIcon,
   SparkleIcon,
   SquaresFourIcon,
+  StorefrontIcon,
   TreeStructureIcon,
   TruckIcon,
   UploadSimpleIcon,
@@ -249,6 +250,17 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/stock`,
           icon: <PackageIcon weight="duotone" />,
           requiredPermission: ["inventory.read", "inventory.read.all"],
+        },
+      ],
+    },
+    {
+      title: "Catálogo",
+      items: [
+        {
+          title: "Catálogo Distribuidor",
+          url: `/org/${orgSlug}/catalogo-distribuidor`,
+          icon: <StorefrontIcon weight="duotone" />,
+          requiredPermission: "distributor.catalog",
         },
       ],
     },

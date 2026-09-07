@@ -78,6 +78,7 @@ export const organizationSettingsSchema = z.object({
       "FACTURA_E",
     ])
     .default("NOTA_DE_VENTA"),
+  distributor_catalog_margin: z.number().min(0).max(100).default(30),
 });
 
 export type OrganizationSettingsData = z.infer<
@@ -111,6 +112,7 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   non_invoiced_payment_methods: [],
   sales_default_payment_method: "efectivo",
   sales_default_invoice_type: "NOTA_DE_VENTA",
+  distributor_catalog_margin: 30,
 };
 
 export function getRemittanceFinalVisibility(
