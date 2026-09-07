@@ -178,6 +178,7 @@ export type FinancialBalanceResponse = {
 export type FinancialBreakdownResponse = {
   invoicing: {
     total: number;
+    totalUSD: number;
     normalSales: number;
     directSales: number;
     normalSalesCount: number;
@@ -288,25 +289,6 @@ export type WeeklyFlowProjection = {
 };
 
 export type CashFlowProjectionResponse = WeeklyFlowProjection[];
-
-// ============================================================================
-// Profitability Metrics (RPC: get_profitability_metrics)
-// ============================================================================
-
-export type ProfitabilityGroupBy = "CLIENT" | "BRAND" | "PRODUCT";
-
-export type ProfitabilityMetric = {
-  label: string;
-  revenue: number;
-  revenue_usd: number;
-  profit: number;
-  profit_usd: number;
-  margin_percent: number;
-  order_count: number;
-  currency: string;
-};
-
-export type ProfitabilityMetricsResponse = ProfitabilityMetric[];
 
 // ============================================================================
 // Customer Profitability Dashboard

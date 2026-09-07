@@ -23,9 +23,6 @@ import type {
   LowStockProduct,
   OrderStatusBoardResponse,
   PayableAlertItem,
-  ProfitabilityGroupBy,
-  ProfitabilityMetric,
-  ProfitabilityMetricsResponse,
   StockHealthAlertsResponse,
   TopPerformersResponse,
 } from "@/types/dashboard";
@@ -81,32 +78,10 @@ type DirectSalesCashRegisterAccumulator =
     sessionIds: Set<string>;
   };
 
-type ProfitabilityProduct = {
-  id: string;
-  name: string | null;
-  brand: string | null;
-};
-
 type ProfitabilityCustomer = {
   id: string;
   business_name: string | null;
   fantasy_name: string | null;
-};
-
-type SalesOrderProfitabilityItem = {
-  product_id: string | null;
-  quantity: number | null;
-  unit_quantity: number | null;
-  subtotal: number | null;
-  product: ProfitabilityProduct | ProfitabilityProduct[] | null;
-};
-
-type SalesOrderProfitabilityRow = {
-  id: string;
-  status: string | null;
-  currency?: string | null;
-  customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
-  items: SalesOrderProfitabilityItem[] | null;
 };
 
 type CustomerProfitabilityItem = {
@@ -178,29 +153,6 @@ type CustomerProfitabilityPosReturnRow = {
     | CustomerProfitabilityReturnSale[]
     | null;
   items: CustomerProfitabilityReturnItem[] | null;
-};
-
-type PosSaleProfitabilityItem = {
-  product_id: string | null;
-  quantity: number | null;
-  subtotal: number | null;
-  product: ProfitabilityProduct | ProfitabilityProduct[] | null;
-};
-
-type PosSaleProfitabilityRow = {
-  id: string;
-  status: string | null;
-  customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
-  items: PosSaleProfitabilityItem[] | null;
-};
-
-type ProfitabilityAccumulator = {
-  label: string;
-  revenue: number;
-  cogs: number;
-  revenueUSD: number;
-  cogsUSD: number;
-  orderIds: Set<string>;
 };
 
 type CustomerProfitabilityAccumulator = {
@@ -672,6 +624,11 @@ export async function getFinancialBreakdown(
       sum + Number(sale.currency === "USD" ? 0 : (sale.total_amount ?? 0)),
     0
   );
+  const normalSalesUSD = normalSales.reduce(
+    (sum, sale) =>
+      sum + Number(sale.currency === "USD" ? (sale.total_amount ?? 0) : 0),
+    0
+  );
   const directSalesAmount = directSales.reduce(
     (sum, sale) => sum + Number(sale.total_amount ?? 0),
     0
@@ -694,6 +651,7 @@ export async function getFinancialBreakdown(
   return {
     invoicing: {
       total: toMoney(normalSalesAmount + directSalesAmount),
+      totalUSD: toMoney(normalSalesUSD),
       normalSales: toMoney(normalSalesAmount),
       directSales: toMoney(directSalesAmount),
       normalSalesCount: normalSales.length,
@@ -1642,70 +1600,6 @@ export async function getCustomerProfitabilityDashboard(
   };
 }
 
-function getProductLabel(product: ProfitabilityProduct | null) {
-  return product?.name?.trim() || "Conceptos sin producto";
-}
-
-function getBrandLabel(product: ProfitabilityProduct | null) {
-  return product?.brand?.trim() || "Sin marca";
-}
-
-function getProfitabilityLabel(params: {
-  groupBy: ProfitabilityGroupBy;
-  customer: ProfitabilityCustomer | null;
-  product: ProfitabilityProduct | null;
-}) {
-  const { groupBy, customer, product } = params;
-
-  if (groupBy === "CLIENT") {
-    return getCustomerLabel(customer);
-  }
-
-  if (groupBy === "BRAND") {
-    return getBrandLabel(product);
-  }
-
-  return getProductLabel(product);
-}
-
-function getSalesOrderCostQuantity(item: SalesOrderProfitabilityItem) {
-  return Number(item.unit_quantity ?? item.quantity ?? 0);
-}
-
-function getPosSaleCostQuantity(item: PosSaleProfitabilityItem) {
-  return Number(item.quantity ?? 0);
-}
-
-function addProfitabilityLine(params: {
-  rows: Map<string, ProfitabilityAccumulator>;
-  label: string;
-  saleId: string;
-  revenue: number;
-  cogs: number;
-  currency?: string | null;
-}) {
-  const { rows, label, saleId, revenue, cogs, currency } = params;
-  const current = rows.get(label) ?? {
-    label,
-    revenue: 0,
-    cogs: 0,
-    revenueUSD: 0,
-    cogsUSD: 0,
-    orderIds: new Set<string>(),
-  };
-
-  if (currency === "USD") {
-    current.revenueUSD += revenue;
-    current.cogsUSD += cogs;
-  } else {
-    current.revenue += revenue;
-    current.cogs += cogs;
-  }
-
-  current.orderIds.add(saleId);
-  rows.set(label, current);
-}
-
 async function fetchProfitabilityCostPrices(
   supabase: Awaited<ReturnType<typeof createClient>>,
   organizationId: string,
@@ -1738,54 +1632,6 @@ async function fetchProfitabilityCostPrices(
   );
 }
 
-function buildProfitabilityResponse(
-  rows: Map<string, ProfitabilityAccumulator>
-): ProfitabilityMetricsResponse {
-  return Array.from(rows.values())
-    .flatMap<ProfitabilityMetric>((row) => {
-      const arsRevenue = toMoney(row.revenue);
-      const arsCogs = toMoney(row.cogs);
-      const arsProfit = toMoney(arsRevenue - arsCogs);
-      const usdRevenue = toMoney(row.revenueUSD);
-      const usdCogs = toMoney(row.cogsUSD);
-      const usdProfit = toMoney(usdRevenue - usdCogs);
-
-      const metrics: ProfitabilityMetric[] = [];
-
-      if (arsRevenue > 0) {
-        metrics.push({
-          label: row.label,
-          revenue: arsRevenue,
-          revenue_usd: 0,
-          profit: arsProfit,
-          profit_usd: 0,
-          margin_percent:
-            arsRevenue > 0 ? toMoney((arsProfit / arsRevenue) * 100) : 0,
-          order_count: row.orderIds.size,
-          currency: "ARS",
-        });
-      }
-
-      if (usdRevenue > 0) {
-        metrics.push({
-          label: row.label,
-          revenue: usdRevenue,
-          revenue_usd: usdRevenue,
-          profit: usdProfit,
-          profit_usd: usdProfit,
-          margin_percent:
-            usdRevenue > 0 ? toMoney((usdProfit / usdRevenue) * 100) : 0,
-          order_count: row.orderIds.size,
-          currency: "USD",
-        });
-      }
-
-      return metrics;
-    })
-    .sort((a, b) => b.profit - a.profit)
-    .slice(0, 10);
-}
-
 function getCostPrice(params: {
   productId: string | null;
   costPricesByProductId: Map<string, number | null>;
@@ -1806,101 +1652,11 @@ function getCostPrice(params: {
   return Number(costPrice ?? 0);
 }
 
-function getProfitabilityProductIds(params: {
-  sales: SalesOrderProfitabilityRow[];
-  posSales: PosSaleProfitabilityRow[];
-}) {
-  const { sales, posSales } = params;
-
-  return [
-    ...sales.flatMap((sale) =>
-      (sale.items ?? [])
-        .map((item) => item.product_id)
-        .filter((productId): productId is string => Boolean(productId))
-    ),
-    ...posSales.flatMap((sale) =>
-      (sale.items ?? [])
-        .map((item) => item.product_id)
-        .filter((productId): productId is string => Boolean(productId))
-    ),
-  ];
-}
-
-function addSalesOrderProfitabilityRows(params: {
-  rows: Map<string, ProfitabilityAccumulator>;
-  sales: SalesOrderProfitabilityRow[];
-  groupBy: ProfitabilityGroupBy;
-  costPricesByProductId: Map<string, number | null>;
-  missingCostProductIds: Set<string>;
-}) {
-  const { rows, sales, groupBy, costPricesByProductId, missingCostProductIds } =
-    params;
-
-  for (const sale of sales) {
-    const customer = firstOrNull(sale.customer);
-
-    for (const item of sale.items ?? []) {
-      const product = firstOrNull(item.product);
-      const costPrice = getCostPrice({
-        productId: item.product_id,
-        costPricesByProductId,
-        missingCostProductIds,
-      });
-
-      addProfitabilityLine({
-        rows,
-        label: getProfitabilityLabel({ groupBy, customer, product }),
-        saleId: sale.id,
-        revenue: Number(item.subtotal ?? 0),
-        cogs: costPrice * getSalesOrderCostQuantity(item),
-        currency: sale.currency,
-      });
-    }
-  }
-}
-
-function addPosSaleProfitabilityRows(params: {
-  rows: Map<string, ProfitabilityAccumulator>;
-  posSales: PosSaleProfitabilityRow[];
-  groupBy: ProfitabilityGroupBy;
-  costPricesByProductId: Map<string, number | null>;
-  missingCostProductIds: Set<string>;
-}) {
-  const {
-    rows,
-    posSales,
-    groupBy,
-    costPricesByProductId,
-    missingCostProductIds,
-  } = params;
-
-  for (const sale of posSales) {
-    const customer = firstOrNull(sale.customer);
-
-    for (const item of sale.items ?? []) {
-      const product = firstOrNull(item.product);
-      const costPrice = getCostPrice({
-        productId: item.product_id,
-        costPricesByProductId,
-        missingCostProductIds,
-      });
-
-      addProfitabilityLine({
-        rows,
-        label: getProfitabilityLabel({ groupBy, customer, product }),
-        saleId: sale.id,
-        revenue: Number(item.subtotal ?? 0),
-        cogs: costPrice * getPosSaleCostQuantity(item),
-      });
-    }
-  }
-}
-
 function warnMissingProfitabilityCosts(params: {
   organizationId: string;
   dateFrom: string;
   dateTo: string;
-  groupBy: ProfitabilityGroupBy;
+  groupBy: string;
   missingCostProductIds: Set<string>;
 }) {
   const { missingCostProductIds, ...context } = params;
@@ -1913,110 +1669,6 @@ function warnMissingProfitabilityCosts(params: {
     ...context,
     productIds: Array.from(missingCostProductIds),
   });
-}
-
-export async function getProfitabilityMetrics(
-  organizationId: string,
-  startDate: Date,
-  endDate: Date,
-  groupBy: ProfitabilityGroupBy = "CLIENT"
-): Promise<ProfitabilityMetricsResponse> {
-  const supabase = await createClient();
-  const dateFrom = toDateOnly(startDate);
-  const dateTo = toDateOnly(endDate);
-
-  const [salesResult, posSalesResult] = await Promise.all([
-    supabase
-      .from("sales_orders")
-      .select(
-        `
-          id,
-          status,
-          currency,
-          customer:customers(id, business_name, fantasy_name),
-          items:sales_order_items(
-            product_id,
-            quantity,
-            unit_quantity,
-            subtotal,
-            product:products(id, name, brand)
-          )
-        `
-      )
-      .eq("organization_id", organizationId)
-      .gte("sale_date", dateFrom)
-      .lte("sale_date", dateTo)
-      .neq("is_historical", true),
-    supabase
-      .from("pos_sales")
-      .select(
-        `
-          id,
-          status,
-          customer:customers(id, business_name, fantasy_name),
-          items:pos_sale_items(
-            product_id,
-            quantity,
-            subtotal,
-            product:products(id, name, brand)
-          )
-        `
-      )
-      .eq("organization_id", organizationId)
-      .gte("sale_date", dateFrom)
-      .lte("sale_date", dateTo),
-  ]);
-
-  if (salesResult.error) {
-    throw new Error(
-      `Failed to fetch sales profitability rows: ${salesResult.error.message}`
-    );
-  }
-
-  if (posSalesResult.error) {
-    throw new Error(
-      `Failed to fetch direct sales profitability rows: ${posSalesResult.error.message}`
-    );
-  }
-
-  const sales = (
-    (salesResult.data ?? []) as SalesOrderProfitabilityRow[]
-  ).filter((sale) => isActiveTransaction(sale.status));
-  const posSales = (
-    (posSalesResult.data ?? []) as PosSaleProfitabilityRow[]
-  ).filter((sale) => isActiveTransaction(sale.status));
-
-  const costPricesByProductId = await fetchProfitabilityCostPrices(
-    supabase,
-    organizationId,
-    getProfitabilityProductIds({ sales, posSales })
-  );
-  const missingCostProductIds = new Set<string>();
-  const rows = new Map<string, ProfitabilityAccumulator>();
-
-  addSalesOrderProfitabilityRows({
-    rows,
-    sales,
-    groupBy,
-    costPricesByProductId,
-    missingCostProductIds,
-  });
-  addPosSaleProfitabilityRows({
-    rows,
-    posSales,
-    groupBy,
-    costPricesByProductId,
-    missingCostProductIds,
-  });
-  warnMissingProfitabilityCosts({
-    organizationId,
-    dateFrom,
-    dateTo,
-    groupBy,
-    missingCostProductIds,
-  });
-
-  return buildProfitabilityResponse(rows);
 }
 
 export async function getCollectionsAlerts(

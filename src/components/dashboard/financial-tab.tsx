@@ -126,6 +126,7 @@ export function FinancialTab({
             <DualCurrencyAmount
               ars={breakdown.invoicing.total}
               className="font-bold text-2xl"
+              usd={breakdown.invoicing.totalUSD}
             />
             <p className="text-muted-foreground text-xs">
               Distribuidora + venta directa

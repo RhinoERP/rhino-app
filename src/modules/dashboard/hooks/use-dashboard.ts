@@ -15,8 +15,6 @@ import type {
   FinancialBalanceResponse,
   FinancialBreakdownResponse,
   OrderStatusBoardResponse,
-  ProfitabilityGroupBy,
-  ProfitabilityMetricsResponse,
   StockHealthAlertsResponse,
   TopPerformersResponse,
 } from "@/types/dashboard";
@@ -156,50 +154,5 @@ export function useFinancialData(
       return response.json();
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
-  });
-}
-
-// ============================================================================
-// Profitability Metrics Hook
-// ============================================================================
-
-export function useProfitabilityMetrics(
-  orgSlug: string,
-  startDate: Date,
-  endDate: Date,
-  groupBy: ProfitabilityGroupBy
-) {
-  return useQuery<ProfitabilityMetricsResponse>({
-    queryKey: dashboardKeys.profitability(
-      orgSlug,
-      startDate.toISOString(),
-      endDate.toISOString(),
-      groupBy
-    ),
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString(),
-        groupBy,
-      });
-
-      const url = `/api/org/${orgSlug}/torre-de-control/profitability?${params.toString()}`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.error ||
-            `Failed to fetch profitability metrics: ${response.status}`
-        );
-      }
-
-      const data = await response.json();
-      return data;
-    },
-    staleTime: 1000 * 60 * 2, // 2 minutes
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
   });
 }

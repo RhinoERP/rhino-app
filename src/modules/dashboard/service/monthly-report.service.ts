@@ -5,6 +5,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 
+type TopPerformer = { name: string; value: number; valueUsd: number };
+
 export type MonthlyReportData = {
   organizationName: string;
   monthName: string;
@@ -15,12 +17,36 @@ export type MonthlyReportData = {
   totalBilledUSD: number;
   totalCollectedUSD: number;
   pendingCollectionUSD: number;
-  topClients: Array<{ name: string; value: number; valueUsd?: number }>;
-  topProducts: Array<{ name: string; value: number; valueUsd?: number }>;
+  topClients: {
+    ars: Array<{ name: string; value: number }>;
+    usd: Array<{ name: string; value: number }>;
+  };
+  topProducts: {
+    ars: Array<{ name: string; value: number }>;
+    usd: Array<{ name: string; value: number }>;
+  };
   outOfStockCount: number;
   delayedOrdersCount: number;
   lowStockCount: number;
 };
+
+function splitByCurrency(items: TopPerformer[]): {
+  ars: Array<{ name: string; value: number }>;
+  usd: Array<{ name: string; value: number }>;
+} {
+  return {
+    ars: items
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5)
+      .map((item) => ({ name: item.name, value: item.value })),
+    usd: items
+      .filter((item) => item.valueUsd > 0)
+      .sort((a, b) => b.valueUsd - a.valueUsd)
+      .slice(0, 5)
+      .map((item) => ({ name: item.name, value: item.valueUsd })),
+  };
+}
 
 /**
  * Generates monthly report data for a given organization
@@ -145,10 +171,7 @@ export async function generateMonthlyReportData(
     }
   }
 
-  const topClients = Array.from(clientsMap.values())
-    .sort((a, b) => b.value + b.valueUsd - (a.value + a.valueUsd))
-    .slice(0, 5)
-    .map((c) => ({ name: c.name, value: c.value, valueUsd: c.valueUsd }));
+  const topClients = splitByCurrency(Array.from(clientsMap.values()));
 
   // Get top products by revenue
   const { data: topProductsData } = await supabase
@@ -203,10 +226,7 @@ export async function generateMonthlyReportData(
     }
   }
 
-  const topProducts = Array.from(productsMap.values())
-    .sort((a, b) => b.value + b.valueUsd - (a.value + a.valueUsd))
-    .slice(0, 5)
-    .map((p) => ({ name: p.name, value: p.value, valueUsd: p.valueUsd }));
+  const topProducts = splitByCurrency(Array.from(productsMap.values()));
 
   // Get operational alerts - using current data (not historical)
   // Query product lots to calculate stock

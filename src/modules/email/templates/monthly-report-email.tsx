@@ -19,7 +19,6 @@ import {
 type TopPerformer = {
   name: string;
   value: number;
-  valueUsd?: number;
 };
 
 type MonthlyReportEmailProps = {
@@ -34,8 +33,8 @@ type MonthlyReportEmailProps = {
   totalCollectedUSD?: number;
   pendingCollectionUSD?: number;
   // Top performers
-  topClients: TopPerformer[];
-  topProducts: TopPerformer[];
+  topClients: { ars: TopPerformer[]; usd: TopPerformer[] };
+  topProducts: { ars: TopPerformer[]; usd: TopPerformer[] };
   // Operational alerts
   outOfStockCount: number;
   delayedOrdersCount: number;
@@ -113,46 +112,27 @@ export function MonthlyReportEmail({
             <Heading style={h2}>🏆 Top Performers</Heading>
 
             <Row style={row}>
-              <Column style={column}>
-                <Text style={h3}>Top 5 Clientes</Text>
-                <table style={table}>
-                  <tbody>
-                    {topClients.map((client, index) => (
-                      <tr key={client.name}>
-                        <td style={topItemCell}>
-                          <Text style={topItemRank}>{index + 1}.</Text>
-                          <Text style={topItemName}>{client.name}</Text>
-                          <Text style={topItemValue}>
-                            {formatDualCurrency(client.value, client.valueUsd)}
-                          </Text>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Column>
+              <TopPerformersColumn
+                items={topClients.ars}
+                title="Top 5 Clientes (ARS)"
+              />
+              <TopPerformersColumn
+                currency="USD"
+                items={topClients.usd}
+                title="Top 5 Clientes (USD)"
+              />
+            </Row>
 
-              <Column style={column}>
-                <Text style={h3}>Top 5 Productos</Text>
-                <table style={table}>
-                  <tbody>
-                    {topProducts.map((product, index) => (
-                      <tr key={product.name}>
-                        <td style={topItemCell}>
-                          <Text style={topItemRank}>{index + 1}.</Text>
-                          <Text style={topItemName}>{product.name}</Text>
-                          <Text style={topItemValue}>
-                            {formatDualCurrency(
-                              product.value,
-                              product.valueUsd
-                            )}
-                          </Text>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Column>
+            <Row style={row}>
+              <TopPerformersColumn
+                items={topProducts.ars}
+                title="Top 5 Productos (ARS)"
+              />
+              <TopPerformersColumn
+                currency="USD"
+                items={topProducts.usd}
+                title="Top 5 Productos (USD)"
+              />
             </Row>
           </Section>
 
@@ -191,6 +171,45 @@ export function MonthlyReportEmail({
         </Container>
       </Body>
     </Html>
+  );
+}
+
+function TopPerformersColumn({
+  title,
+  items,
+  currency = "ARS",
+}: {
+  title: string;
+  items: TopPerformer[];
+  currency?: string;
+}) {
+  return (
+    <Column style={column}>
+      <Text style={h3}>{title}</Text>
+      <table style={table}>
+        <tbody>
+          {items.length === 0 ? (
+            <tr>
+              <td style={topItemCell}>
+                <Text style={topItemName}>Sin datos</Text>
+              </td>
+            </tr>
+          ) : (
+            items.map((item, index) => (
+              <tr key={item.name}>
+                <td style={topItemCell}>
+                  <Text style={topItemRank}>{index + 1}.</Text>
+                  <Text style={topItemName}>{item.name}</Text>
+                  <Text style={topItemValue}>
+                    {formatCurrency(item.value, currency)}
+                  </Text>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </Column>
   );
 }
 
