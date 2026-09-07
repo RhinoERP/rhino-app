@@ -160,6 +160,10 @@ export default async function OrganizationPage({
       { path: `/org/${orgSlug}/proveedores`, permission: "suppliers.read" },
       { path: `/org/${orgSlug}/stock`, permission: "inventory.read" },
       {
+        path: `/org/${orgSlug}/catalogo-distribuidor`,
+        permission: "distributor.catalog",
+      },
+      {
         path: `/org/${orgSlug}/precios/listas-de-precios`,
         permission: "pricelists.read",
       },

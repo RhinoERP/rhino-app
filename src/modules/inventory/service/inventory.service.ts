@@ -1,3 +1,4 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -2987,4 +2988,107 @@ export async function updateProductVariantsForOrg(
       throw new Error(`Error al insertar variante: ${insertError.message}`);
     }
   }
+}
+
+export type DistributorCatalogItem = {
+  product_id: string;
+  sku: string;
+  name: string;
+  brand: string | null;
+  total_stock: number;
+  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  distributor_price: number | null;
+};
+
+/**
+ * Catálogo para usuarios distribuidores: productos activos con su stock y el
+ * precio de distribuidor (costo × (1 + margen/100)).
+ */
+function buildDistributorCatalogItem(
+  product: {
+    id: string | null;
+    sku: string | null;
+    name: string | null;
+    brand: string | null;
+    cost_price: number | null;
+  },
+  stock: {
+    total_stock: number | null;
+    unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  } | null,
+  marginPercent: number
+): DistributorCatalogItem | null {
+  if (!product.id) {
+    return null;
+  }
+
+  return {
+    product_id: product.id,
+    sku: product.sku ?? "",
+    name: product.name ?? "",
+    brand: product.brand ?? null,
+    total_stock: stock?.total_stock ?? 0,
+    unit_of_measure: stock?.unit_of_measure ?? null,
+    distributor_price:
+      product.cost_price != null
+        ? truncateMoney(product.cost_price * (1 + marginPercent / 100))
+        : null,
+  };
+}
+
+export async function getDistributorCatalog(
+  orgSlug: string,
+  marginPercent: number,
+  search?: string
+): Promise<DistributorCatalogItem[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const safeMargin = Number.isFinite(marginPercent) ? marginPercent : 0;
+
+  let productsQuery = supabase
+    .from("products_with_price")
+    .select("id, sku, name, brand, cost_price")
+    .eq("organization_id", org.id)
+    .eq("is_active", true);
+
+  if (search?.trim()) {
+    productsQuery = productsQuery.or(
+      `sku.ilike.%${search.trim()}%,name.ilike.%${search.trim()}%`
+    );
+  }
+
+  const [productsResult, stockResult] = await Promise.all([
+    productsQuery,
+    supabase
+      .from("view_stock_detail")
+      .select("product_id, total_stock, unit_of_measure")
+      .eq("organization_id", org.id)
+      .eq("is_active", true),
+  ]);
+
+  if (productsResult.error || stockResult.error) {
+    throw new Error("Error al obtener el catálogo de distribuidores");
+  }
+
+  const stockByProduct = new Map(
+    (stockResult.data ?? []).map((row) => [row.product_id, row])
+  );
+
+  const items = (productsResult.data ?? [])
+    .map((product) =>
+      buildDistributorCatalogItem(
+        product,
+        stockByProduct.get(product.id) ?? null,
+        safeMargin
+      )
+    )
+    .filter((item): item is DistributorCatalogItem => item !== null);
+
+  return items.sort((a, b) => a.name.localeCompare(b.name, "es"));
 }

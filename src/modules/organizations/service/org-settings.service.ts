@@ -59,6 +59,7 @@ export const OrgSettingsSchema = z.object({
       "FACTURA_E",
     ])
     .default("NOTA_DE_VENTA"),
+  distributor_catalog_margin: z.number().min(0).max(100).default(30),
 });
 
 export type OrgSettings = z.infer<typeof OrgSettingsSchema>;
