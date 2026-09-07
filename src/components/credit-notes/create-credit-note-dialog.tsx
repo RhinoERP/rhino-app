@@ -51,6 +51,7 @@ import { createReturnCreditNoteAction } from "@/modules/credit-notes/actions/cre
 import { getReturnCreditNoteSaleDetailAction } from "@/modules/credit-notes/actions/get-return-credit-note-sale-detail.action";
 import { creditNotesQueryKey } from "@/modules/credit-notes/queries/query-keys";
 import type { Customer } from "@/modules/customers/types";
+import { isAuthorizedPreventaInvoice } from "@/modules/sales/preventa-invoicing";
 import type {
   SalesOrderDetail,
   SalesOrderItemDetail,
@@ -718,7 +719,11 @@ export function CreateCreditNoteDialog({
   const [isSupplierPickerOpen, setIsSupplierPickerOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState("");
 
-  const eligibleSales = sales.filter((s) => ELIGIBLE_STATUSES.has(s.status));
+  const eligibleSales = sales.filter(
+    (sale) =>
+      ELIGIBLE_STATUSES.has(sale.status) ||
+      isAuthorizedPreventaInvoice(sale.status, sale.arca_status)
+  );
   const returnEligibleSales = sales.filter((s) =>
     RETURN_ELIGIBLE_STATUSES.has(s.status)
   );

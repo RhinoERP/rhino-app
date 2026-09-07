@@ -104,6 +104,7 @@ import {
   INVOICE_TYPE_OPTIONS,
   isArcaSupportedInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
+import { canIssueArcaInvoiceForPreventa } from "@/modules/sales/preventa-invoicing";
 import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type {
@@ -972,6 +973,8 @@ export function SaleDetail({
   const automaticAccountingEnabled =
     orgSettings?.automatic_accounting_enabled ?? false;
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
+  const allowPreventaArcaInvoicing =
+    orgSettings?.allow_preventa_arca_invoicing ?? false;
   const invoiceEmailDraft = useMemo(() => {
     const invoiceReference = getSaleInvoiceReference(sale);
     const templateValues = {
@@ -1304,7 +1307,11 @@ export function SaleDetail({
     ? buildSellerLabel(selectedSeller)
     : sale.seller?.name || sale.seller?.email || "Selecciona un vendedor";
   const canShowArcaCard =
-    isConfirmedSale || isDispatchedSale || isDeliveredSale || isArcaAuthorized;
+    isConfirmedSale ||
+    isDispatchedSale ||
+    isDeliveredSale ||
+    isArcaAuthorized ||
+    canIssueArcaInvoiceForPreventa(sale.status, allowPreventaArcaInvoicing);
   const hasCustomerCuit = Boolean(sale.customer.cuit?.trim());
   const hasCustomerTaxCondition = Boolean(sale.customer.tax_condition?.trim());
   const hasManualInvoiceNumber =

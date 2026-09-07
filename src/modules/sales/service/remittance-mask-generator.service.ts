@@ -184,11 +184,12 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
   .mask-page:last-child { break-after: auto; page-break-after: auto; }
   .field, .line-item { position: absolute; white-space: nowrap; }
   .document-number { left: 135.5mm; top: 41.4mm; font-size: 3.3mm; font-weight: 700; }
-  .date-day { left: 131.7mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
-  .date-month { left: 150.9mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
-  .date-year { left: 165.5mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
-  .customer-name { left: 32.1mm; top: 71.4mm; max-width: 91mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
-  .customer-address { left: 34.2mm; top: 78.2mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
+  /* The date fields share the same rightward correction for the preprinted form. */
+  .date-day { left: 134.7mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .date-month { left: 153.9mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .date-year { left: 168.5mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .customer-name { left: 32.1mm; top: 70.4mm; max-width: 91mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
+  .customer-address { left: 34.2mm; top: 77.2mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .carrier-name { left: 33mm; top: 85.1mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.2mm; font-weight: 700; }
   .tax-condition { left: 134mm; top: 71.4mm; max-width: 61mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .customer-cuit { left: 146mm; top: 78.2mm; max-width: 48mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }

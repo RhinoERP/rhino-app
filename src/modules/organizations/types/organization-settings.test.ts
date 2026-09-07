@@ -22,3 +22,21 @@ describe("organization remittance mask setting", () => {
     ).toBe(true);
   });
 });
+
+describe("organization preventa ARCA setting", () => {
+  it("defaults to disabled for existing organizations", () => {
+    expect(
+      organizationSettingsSchema.parse({}).allow_preventa_arca_invoicing
+    ).toBe(false);
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.allow_preventa_arca_invoicing).toBe(
+      false
+    );
+  });
+
+  it("accepts explicit enablement", () => {
+    expect(
+      organizationSettingsSchema.parse({ allow_preventa_arca_invoicing: true })
+        .allow_preventa_arca_invoicing
+    ).toBe(true);
+  });
+});

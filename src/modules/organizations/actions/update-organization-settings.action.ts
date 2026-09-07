@@ -77,6 +77,7 @@ export async function updateOrganizationSettings(
     }
 
     revalidatePath(`/org/${orgSlug}/configuracion`);
+    revalidatePath(`/org/${orgSlug}/configuracion/preventa`);
     revalidatePath(`/org/${orgSlug}/configuracion/contabilidad`);
     revalidatePath(`/org/${orgSlug}/configuracion/comprobantes`);
     revalidatePath(`/org/${orgSlug}/configuracion/emails-de-factura`);
