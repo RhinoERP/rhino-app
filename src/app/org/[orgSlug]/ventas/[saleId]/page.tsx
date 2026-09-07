@@ -89,6 +89,7 @@ export default async function SaleDetailPage({
         creditNotes={creditNotes}
         customers={customers}
         initialMode={initialMode}
+        isProductionEnabled={organization.production_enabled === true}
         organizationName={organization.name}
         orgSlug={orgSlug}
         products={products}
