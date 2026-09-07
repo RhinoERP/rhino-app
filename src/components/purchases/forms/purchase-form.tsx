@@ -38,6 +38,8 @@ import {
 import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseTaxSelector } from "./purchase-tax-selector";
 
 const purchaseFormSchema = z.object({
   supplier_id: z.string().min(1, "Debe seleccionar un proveedor"),
@@ -51,16 +53,22 @@ export type PurchaseFormValues = z.infer<typeof purchaseFormSchema>;
 
 type PurchaseFormProps = {
   suppliers: Supplier[];
+  taxes: Tax[];
   onSupplierChange: (supplierId: string | null) => void;
   selectedSupplierId: string | null;
   onFormChange: (values: Partial<PurchaseFormValues>) => void;
+  selectedTaxIds?: string[];
+  onTaxesChange?: (taxIds: string[]) => void;
 };
 
 export function PurchaseForm({
   suppliers,
+  taxes,
   onSupplierChange,
   selectedSupplierId,
   onFormChange,
+  selectedTaxIds = [],
+  onTaxesChange,
 }: PurchaseFormProps) {
   const [openSupplier, setOpenSupplier] = useState(false);
 
@@ -242,6 +250,20 @@ export function PurchaseForm({
             </FieldContent>
           </Field>
         </div>
+
+        <Field>
+          <FieldLabel htmlFor="taxes">Impuestos</FieldLabel>
+          <FieldContent>
+            <PurchaseTaxSelector
+              onTaxesChange={(taxIds) => onTaxesChange?.(taxIds)}
+              selectedTaxIds={selectedTaxIds}
+              taxes={taxes}
+            />
+            <FieldDescription>
+              Seleccione los impuestos que se aplicarán a esta compra
+            </FieldDescription>
+          </FieldContent>
+        </Field>
       </FieldGroup>
     </form>
   );
