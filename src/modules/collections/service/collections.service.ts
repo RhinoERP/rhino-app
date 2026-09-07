@@ -684,12 +684,9 @@ type SellerInfo = { id: string; name?: string | null; email?: string | null };
 
 async function buildSellersByUserId(
   orgSlug: string,
-  accessContext: CollectionsAccessContext
+  _accessContext: CollectionsAccessContext
 ): Promise<Map<string, SellerInfo>> {
   const map = new Map<string, SellerInfo>();
-  if (accessContext.scope !== "all") {
-    return map;
-  }
   try {
     const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
     for (const member of members) {
