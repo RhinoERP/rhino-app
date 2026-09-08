@@ -1,8 +1,11 @@
 "use client";
 
+import { CaretDown } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { DistributorCatalogItem } from "@/modules/inventory/service/inventory.service";
 
 function getUnitLabel(unitOfMeasure: string | null): string {
@@ -20,6 +23,34 @@ function getUnitLabel(unitOfMeasure: string | null): string {
 
 export function createDistributorCatalogColumns(): ColumnDef<DistributorCatalogItem>[] {
   return [
+    {
+      id: "expand",
+      cell: ({ row }) => {
+        if (!row.original.has_variants) {
+          return null;
+        }
+        return (
+          <Button
+            aria-label="Ver variantes"
+            className="h-7 w-7"
+            onClick={() => row.toggleExpanded()}
+            size="icon"
+            variant="ghost"
+          >
+            <CaretDown
+              className={cn(
+                "size-4 transition-transform",
+                row.getIsExpanded() ? "rotate-0" : "-rotate-90"
+              )}
+            />
+          </Button>
+        );
+      },
+      enableSorting: false,
+      enableHiding: false,
+      meta: { label: "" },
+      size: 40,
+    },
     {
       accessorKey: "sku",
       meta: { label: "SKU" },

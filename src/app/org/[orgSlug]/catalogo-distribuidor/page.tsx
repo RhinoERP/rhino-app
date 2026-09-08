@@ -44,7 +44,11 @@ export default async function DistributorCatalogPage({
         </p>
       </div>
 
-      <DistributorCatalogTable data={paginated.data} pageCount={pageCount} />
+      <DistributorCatalogTable
+        data={paginated.data}
+        orgSlug={orgSlug}
+        pageCount={pageCount}
+      />
     </div>
   );
 }
