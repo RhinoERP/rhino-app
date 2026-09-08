@@ -9,6 +9,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import {
   buildItemizedTaxPlan,
   type TaxableItemLine,
+  toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
@@ -114,6 +115,16 @@ function calculateGlobalDiscount(subtotalAmount: number, discountPercent = 0) {
     global_discount_amount,
     taxable_base_amount,
   };
+}
+
+type PurchaseTaxInput = Array<{
+  taxId: string;
+  name: string;
+  rate: number;
+}>;
+
+function resolvePurchaseFallbackTaxes(taxes?: PurchaseTaxInput) {
+  return taxes && taxes.length > 0 ? toFallbackItemTaxes(taxes) : undefined;
 }
 
 async function syncAccountsPayable(params: {
@@ -305,6 +316,7 @@ export type CreatePurchaseOrderInput = {
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>>;
   }[];
+  taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
 };
 
@@ -542,9 +554,12 @@ export async function createPurchaseOrder(
     };
   });
 
+  const fallbackTaxes = resolvePurchaseFallbackTaxes(input.taxes);
+
   const taxPlan = buildItemizedTaxPlan({
     lines: taxLines,
     globalDiscountAmount: global_discount_amount,
+    fallbackTaxes,
   });
 
   const total_tax_amount = taxPlan.totalTaxAmount;
@@ -2054,6 +2069,7 @@ export type UpdatePurchaseOrderInput = {
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
   }[];
+  taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
 };
 
@@ -2274,9 +2290,12 @@ export async function updatePurchaseOrder(
       input.global_discount_percentage ?? 0
     );
 
+    const updateFallbackTaxes = resolvePurchaseFallbackTaxes(input.taxes);
+
     const taxPlan = buildItemizedTaxPlan({
       lines: taxLines,
       globalDiscountAmount: global_discount_amount,
+      fallbackTaxes: updateFallbackTaxes,
     });
 
     calculateAndAddTotals(
