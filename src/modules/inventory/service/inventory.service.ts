@@ -2996,6 +2996,7 @@ export type DistributorCatalogItem = {
   sku: string;
   name: string;
   brand: string | null;
+  has_variants: boolean;
   total_stock: number;
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   distributor_price: number | null;
@@ -3029,6 +3030,7 @@ function buildDistributorCatalogItem(
     unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   },
   costPrice: number | null,
+  hasVariants: boolean,
   marginPercent: number
 ): DistributorCatalogItem | null {
   if (!item.product_id) {
@@ -3040,12 +3042,58 @@ function buildDistributorCatalogItem(
     sku: item.sku ?? "",
     name: item.product_name ?? "",
     brand: item.brand ?? null,
+    has_variants: hasVariants,
     total_stock: item.total_stock ?? 0,
     unit_of_measure: item.unit_of_measure ?? null,
     distributor_price:
       costPrice != null
         ? truncateMoney(costPrice * (1 + marginPercent / 100))
         : null,
+  };
+}
+
+async function fetchDistributorCatalogPriceMeta(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productIds: string[]
+): Promise<{
+  costByProduct: Map<string, number | null>;
+  hasVariantsByProduct: Map<string, boolean>;
+}> {
+  if (productIds.length === 0) {
+    return {
+      costByProduct: new Map<string, number | null>(),
+      hasVariantsByProduct: new Map<string, boolean>(),
+    };
+  }
+
+  const [costsResult, variantsResult] = await Promise.all([
+    supabase
+      .from("products_with_price")
+      .select("id, cost_price")
+      .eq("organization_id", orgId)
+      .in("id", productIds),
+    supabase
+      .from("products")
+      .select("id, has_variants")
+      .eq("organization_id", orgId)
+      .in("id", productIds),
+  ]);
+
+  if (costsResult.error || variantsResult.error) {
+    throw new Error("Error al obtener el catálogo de distribuidores");
+  }
+
+  return {
+    costByProduct: new Map<string, number | null>(
+      (costsResult.data ?? []).map((row) => [row.id ?? "", row.cost_price])
+    ),
+    hasVariantsByProduct: new Map<string, boolean>(
+      (variantsResult.data ?? []).map((row) => [
+        row.id,
+        row.has_variants ?? false,
+      ])
+    ),
   };
 }
 
@@ -3109,20 +3157,10 @@ export async function getDistributorCatalog(
     .filter((id): id is string => Boolean(id));
 
   let costByProduct = new Map<string, number | null>();
+  let hasVariantsByProduct = new Map<string, boolean>();
   if (productIds.length > 0) {
-    const { data: costs, error: costError } = await supabase
-      .from("products_with_price")
-      .select("id, cost_price")
-      .eq("organization_id", org.id)
-      .in("id", productIds);
-
-    if (costError) {
-      throw new Error("Error al obtener el catálogo de distribuidores");
-    }
-
-    costByProduct = new Map<string, number | null>(
-      (costs ?? []).map((row) => [row.id ?? "", row.cost_price])
-    );
+    ({ costByProduct, hasVariantsByProduct } =
+      await fetchDistributorCatalogPriceMeta(supabase, org.id, productIds));
   }
 
   const safeMargin = Number.isFinite(marginPercent) ? marginPercent : 0;
@@ -3132,6 +3170,7 @@ export async function getDistributorCatalog(
       buildDistributorCatalogItem(
         row,
         costByProduct.get(row.product_id ?? "") ?? null,
+        hasVariantsByProduct.get(row.product_id ?? "") ?? false,
         safeMargin
       )
     )
