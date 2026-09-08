@@ -79,7 +79,6 @@ import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-ass
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
-import { usePriceLevels } from "@/modules/price-levels/hooks/use-price-levels";
 import {
   calculateSalePrice,
   type SalePriceAdjustment,
@@ -126,6 +125,7 @@ type PreSaleFormProps = {
   sellers: OrganizationMember[];
   products: SaleProduct[];
   taxes: Tax[];
+  priceLevels: PriceLevel[];
 };
 
 type ItemState = {
@@ -578,6 +578,7 @@ export function PreSaleForm({
   sellers,
   products,
   taxes,
+  priceLevels,
 }: PreSaleFormProps) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
@@ -677,7 +678,6 @@ export function PreSaleForm({
   }, [initialSellerId, sellerId, sellerOptions]);
 
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
-  const { data: priceLevels = [] } = usePriceLevels(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const featureEnabled = orgSettings?.configurable_price_lists_enabled ?? false;
   const enabledPaymentMethodOptions = useMemo(() => {
