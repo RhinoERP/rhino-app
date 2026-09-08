@@ -98,7 +98,7 @@ export function createDistributorCatalogColumns(): ColumnDef<DistributorCatalogI
           <span className="text-muted-foreground text-sm">-</span>
         );
       },
-      enableSorting: true,
+      enableSorting: false,
     },
   ];
 }

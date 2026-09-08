@@ -9,6 +9,7 @@ import type {
   ProductDetail,
   ProductLotWithStatus,
   ProductVariantWithStock,
+  SortParam,
   StockFilters,
   StockItem,
   StockMetrics,
@@ -3000,38 +3001,50 @@ export type DistributorCatalogItem = {
   distributor_price: number | null;
 };
 
+const DISTRIBUTOR_CATALOG_SORT_COLUMNS: Record<string, string> = {
+  name: "product_name",
+  sku: "sku",
+  brand: "brand",
+  total_stock: "total_stock",
+};
+
+export type DistributorCatalogParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+};
+
 /**
  * Catálogo para usuarios distribuidores: productos activos con su stock y el
- * precio de distribuidor (costo × (1 + margen/100)).
+ * precio de distribuidor (costo × (1 + margen/100)). Paginado server-side.
  */
 function buildDistributorCatalogItem(
-  product: {
-    id: string | null;
+  item: {
+    product_id: string | null;
     sku: string | null;
-    name: string | null;
+    product_name: string | null;
     brand: string | null;
-    cost_price: number | null;
-  },
-  stock: {
     total_stock: number | null;
     unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-  } | null,
+  },
+  costPrice: number | null,
   marginPercent: number
 ): DistributorCatalogItem | null {
-  if (!product.id) {
+  if (!item.product_id) {
     return null;
   }
 
   return {
-    product_id: product.id,
-    sku: product.sku ?? "",
-    name: product.name ?? "",
-    brand: product.brand ?? null,
-    total_stock: stock?.total_stock ?? 0,
-    unit_of_measure: stock?.unit_of_measure ?? null,
+    product_id: item.product_id,
+    sku: item.sku ?? "",
+    name: item.product_name ?? "",
+    brand: item.brand ?? null,
+    total_stock: item.total_stock ?? 0,
+    unit_of_measure: item.unit_of_measure ?? null,
     distributor_price:
-      product.cost_price != null
-        ? truncateMoney(product.cost_price * (1 + marginPercent / 100))
+      costPrice != null
+        ? truncateMoney(costPrice * (1 + marginPercent / 100))
         : null,
   };
 }
@@ -3039,56 +3052,95 @@ function buildDistributorCatalogItem(
 export async function getDistributorCatalog(
   orgSlug: string,
   marginPercent: number,
-  search?: string
-): Promise<DistributorCatalogItem[]> {
+  params: DistributorCatalogParams
+): Promise<PaginatedResult<DistributorCatalogItem>> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return [];
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
   }
 
   const supabase = await createClient();
 
-  const safeMargin = Number.isFinite(marginPercent) ? marginPercent : 0;
-
-  let productsQuery = supabase
-    .from("products_with_price")
-    .select("id, sku, name, brand, cost_price")
+  let query = supabase
+    .from("view_stock_detail")
+    .select(
+      "product_id, sku, product_name, brand, total_stock, unit_of_measure",
+      { count: "exact" }
+    )
     .eq("organization_id", org.id)
     .eq("is_active", true);
 
-  if (search?.trim()) {
-    productsQuery = productsQuery.or(
-      `sku.ilike.%${search.trim()}%,name.ilike.%${search.trim()}%`
-    );
+  if (params.search?.trim()) {
+    const term = params.search.trim();
+    query = query.or(`sku.ilike.%${term}%,product_name.ilike.%${term}%`);
   }
 
-  const [productsResult, stockResult] = await Promise.all([
-    productsQuery,
-    supabase
-      .from("view_stock_detail")
-      .select("product_id, total_stock, unit_of_measure")
-      .eq("organization_id", org.id)
-      .eq("is_active", true),
-  ]);
+  let sorted = false;
+  for (const sort of params.sort ?? []) {
+    const column = DISTRIBUTOR_CATALOG_SORT_COLUMNS[sort.id];
+    if (column) {
+      query = query.order(column, { ascending: !sort.desc });
+      sorted = true;
+    }
+  }
+  if (!sorted) {
+    query = query.order("product_name");
+  }
 
-  if (productsResult.error || stockResult.error) {
+  const from = (params.page - 1) * params.pageSize;
+  query = query.range(from, from + params.pageSize - 1);
+
+  const { data, error, count } = await query;
+
+  if (error) {
     throw new Error("Error al obtener el catálogo de distribuidores");
   }
 
-  const stockByProduct = new Map(
-    (stockResult.data ?? []).map((row) => [row.product_id, row])
-  );
+  const rows = data ?? [];
 
-  const items = (productsResult.data ?? [])
-    .map((product) =>
+  const productIds = rows
+    .map((row) => row.product_id)
+    .filter((id): id is string => Boolean(id));
+
+  let costByProduct = new Map<string, number | null>();
+  if (productIds.length > 0) {
+    const { data: costs, error: costError } = await supabase
+      .from("products_with_price")
+      .select("id, cost_price")
+      .eq("organization_id", org.id)
+      .in("id", productIds);
+
+    if (costError) {
+      throw new Error("Error al obtener el catálogo de distribuidores");
+    }
+
+    costByProduct = new Map<string, number | null>(
+      (costs ?? []).map((row) => [row.id ?? "", row.cost_price])
+    );
+  }
+
+  const safeMargin = Number.isFinite(marginPercent) ? marginPercent : 0;
+
+  const items = rows
+    .map((row) =>
       buildDistributorCatalogItem(
-        product,
-        stockByProduct.get(product.id) ?? null,
+        row,
+        costByProduct.get(row.product_id ?? "") ?? null,
         safeMargin
       )
     )
     .filter((item): item is DistributorCatalogItem => item !== null);
 
-  return items.sort((a, b) => a.name.localeCompare(b.name, "es"));
+  return {
+    data: items,
+    totalCount: count ?? 0,
+    page: params.page,
+    pageSize: params.pageSize,
+  };
 }

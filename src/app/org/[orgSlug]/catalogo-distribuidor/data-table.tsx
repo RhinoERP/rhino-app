@@ -12,10 +12,12 @@ import { createDistributorCatalogColumns } from "./columns";
 
 type DistributorCatalogTableProps = {
   data: DistributorCatalogItem[];
+  pageCount: number;
 };
 
 export function DistributorCatalogTable({
   data,
+  pageCount,
 }: DistributorCatalogTableProps) {
   const [search, setSearch] = useQueryState(
     "search",
@@ -27,7 +29,7 @@ export function DistributorCatalogTable({
   const { table } = useDataTable<DistributorCatalogItem>({
     data,
     columns,
-    pageCount: 1,
+    pageCount,
     initialState: {
       pagination: {
         pageIndex: 0,
@@ -35,8 +37,8 @@ export function DistributorCatalogTable({
       },
     },
     getRowId: (row) => row.product_id,
-    manualPagination: false,
-    manualSorting: false,
+    manualPagination: true,
+    manualSorting: true,
     manualFiltering: true,
     shallow: false,
   });
