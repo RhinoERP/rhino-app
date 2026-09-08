@@ -51,6 +51,7 @@ type SalesOrderSale = Pick<
         city?: string | null;
         delivery_city?: string | null;
         province?: string | null;
+        preferred_carrier_id?: string | null;
       }
     | Array<{
         business_name?: string | null;
@@ -58,6 +59,7 @@ type SalesOrderSale = Pick<
         city?: string | null;
         delivery_city?: string | null;
         province?: string | null;
+        preferred_carrier_id?: string | null;
       }>
     | null;
 };
@@ -73,7 +75,7 @@ const SALES_SELECT = `
   sale_date,
   carrier_id,
   route_sheet_id,
-  customer:customers(business_name, fantasy_name, city, delivery_city, province)
+  customer:customers(business_name, fantasy_name, city, delivery_city, province, preferred_carrier_id)
 `;
 
 function normalizeCustomerName(customer: SalesOrderSale["customer"]): string {
@@ -83,7 +85,7 @@ function normalizeCustomerName(customer: SalesOrderSale["customer"]): string {
 
 function normalizeCustomerField(
   customer: SalesOrderSale["customer"],
-  field: "city" | "delivery_city" | "province"
+  field: "city" | "delivery_city" | "province" | "preferred_carrier_id"
 ): string | null {
   const normalized = Array.isArray(customer) ? customer[0] : customer;
   return normalized?.[field] || null;
@@ -101,6 +103,10 @@ function toRouteSheetSale(sale: SalesOrderSale): RouteSheetSale {
     dispatched_at: sale.dispatched_at,
     sale_date: sale.sale_date,
     carrier_id: sale.carrier_id,
+    preferred_carrier_id: normalizeCustomerField(
+      sale.customer,
+      "preferred_carrier_id"
+    ),
     customer_city: normalizeCustomerField(sale.customer, "city"),
     customer_delivery_city: normalizeCustomerField(
       sale.customer,

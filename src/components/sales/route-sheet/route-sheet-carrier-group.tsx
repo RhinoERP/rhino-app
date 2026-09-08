@@ -84,7 +84,7 @@ function makeSaleFilter(filter: SaleFilter) {
     const matchesProvince =
       !filter.province || sale.customer_province === filter.province;
     const matchesCarrier =
-      !filter.carrierId || sale.carrier_id === filter.carrierId;
+      !filter.carrierId || sale.preferred_carrier_id === filter.carrierId;
     const matchesFrom =
       !filter.dateFrom ||
       Boolean(sale.sale_date && sale.sale_date >= filter.dateFrom);
