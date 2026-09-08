@@ -1,3 +1,7 @@
+import {
+  parseSearchParams,
+  type SearchParamsInput,
+} from "@/lib/parse-search-params";
 import { getDistributorCatalog } from "@/modules/inventory/service/inventory.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
@@ -5,7 +9,7 @@ import { DistributorCatalogTable } from "./data-table";
 
 type DistributorCatalogPageProps = {
   params: Promise<{ orgSlug: string }>;
-  searchParams: Promise<{ search?: string }>;
+  searchParams: Promise<SearchParamsInput>;
 };
 
 export default async function DistributorCatalogPage({
@@ -13,14 +17,23 @@ export default async function DistributorCatalogPage({
   searchParams,
 }: DistributorCatalogPageProps) {
   const { orgSlug } = await params;
-  const { search } = await searchParams;
+  const sp = await searchParams;
 
   await guardOrganizationPermissionAccess(orgSlug, ["distributor.catalog"]);
+
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
 
   const settings = await getOrgSettings(orgSlug);
   const margin = settings.distributor_catalog_margin;
 
-  const data = await getDistributorCatalog(orgSlug, margin, search);
+  const paginated = await getDistributorCatalog(orgSlug, margin, {
+    page,
+    pageSize,
+    search,
+    sort,
+  });
+
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -31,7 +44,7 @@ export default async function DistributorCatalogPage({
         </p>
       </div>
 
-      <DistributorCatalogTable data={data} />
+      <DistributorCatalogTable data={paginated.data} pageCount={pageCount} />
     </div>
   );
 }
