@@ -16,6 +16,7 @@ export type RouteSheetSale = {
   dispatched_at: string | null;
   sale_date: string | null;
   carrier_id: string | null;
+  preferred_carrier_id: string | null;
   customer_city: string | null;
   customer_delivery_city: string | null;
   customer_province: string | null;
