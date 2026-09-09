@@ -51,6 +51,8 @@ import {
   createProductLotAction,
   createStockMovementAction,
 } from "@/modules/inventory/actions/stock.actions";
+import { useStockMovementsByVariant } from "@/modules/inventory/hooks/use-stock-movements-by-variant";
+import type { ProductVariantRow } from "@/modules/inventory/service/inventory.service";
 import type {
   Product,
   ProductLotWithStatus,
@@ -67,6 +69,7 @@ type StockMovementsCardProps = {
   orgSlug: string;
   productId: string;
   product: Product;
+  variants: ProductVariantRow[];
 };
 
 const movementLabels: Record<
@@ -119,6 +122,7 @@ export function StockMovementsCard({
   orgSlug,
   productId,
   product,
+  variants,
 }: StockMovementsCardProps) {
   const router = useRouter();
   const { can } = usePermissions();
@@ -340,52 +344,56 @@ export function StockMovementsCard({
     [lots]
   );
 
-  const enrichedMovements = useMemo(() => {
-    if (!tracksUnits) {
-      return movements;
-    }
+  const enrichMovementsWithUnits = useCallback(
+    (movementsToEnrich: StockMovementWithLot[]): StockMovementWithLot[] => {
+      if (!tracksUnits) {
+        return movementsToEnrich;
+      }
 
-    const lotUnits = new Map<string, number>();
-    for (const lot of lots) {
-      lotUnits.set(lot.id, lot.unit_quantity_available ?? 0);
-    }
+      const lotUnits = new Map<string, number>();
+      for (const lot of lots) {
+        lotUnits.set(lot.id, lot.unit_quantity_available ?? 0);
+      }
 
-    return movements.map((movement) => {
-      const currentUnits = lotUnits.get(movement.lot_id);
-      if (currentUnits == null || movement.unit_quantity == null) {
+      return movementsToEnrich.map((movement) => {
+        const currentUnits = lotUnits.get(movement.lot_id);
+        if (currentUnits == null || movement.unit_quantity == null) {
+          return {
+            ...movement,
+            unit_new_stock: null,
+            unit_previous_stock: null,
+          };
+        }
+
+        const unitNewStock = currentUnits;
+        const unitPreviousStock = unitNewStock - movement.unit_quantity;
+        lotUnits.set(movement.lot_id, unitPreviousStock);
+
         return {
           ...movement,
-          unit_new_stock: null,
-          unit_previous_stock: null,
+          unit_new_stock: unitNewStock,
+          unit_previous_stock: unitPreviousStock,
         };
-      }
+      });
+    },
+    [lots, tracksUnits]
+  );
 
-      const unitNewStock = currentUnits;
-      const unitPreviousStock = unitNewStock - movement.unit_quantity;
-      lotUnits.set(movement.lot_id, unitPreviousStock);
+  const enrichedMovements = useMemo(
+    () => enrichMovementsWithUnits(movements),
+    [enrichMovementsWithUnits, movements]
+  );
 
-      return {
-        ...movement,
-        unit_new_stock: unitNewStock,
-        unit_previous_stock: unitPreviousStock,
-      };
-    });
-  }, [lots, movements, tracksUnits]);
-
-  const variantOptions = useMemo(() => {
-    const seen = new Map<string, { color: string; talle: string }>();
-    for (const m of enrichedMovements) {
-      if (m.talle && m.color) {
-        const key = `${m.talle}__${m.color}`;
-        if (!seen.has(key)) {
-          seen.set(key, { color: m.color, talle: m.talle });
-        }
-      }
-    }
-    return Array.from(seen.entries())
-      .map(([key, v]) => ({ key, label: `${v.color} · ${v.talle}` }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [enrichedMovements]);
+  const variantOptions = useMemo(
+    () =>
+      variants
+        .map((variant) => ({
+          key: `${variant.talle}__${variant.color}`,
+          label: `${variant.color} · ${variant.talle}`,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [variants]
+  );
 
   const getLotDisplay = useCallback(
     (movement: StockMovementWithLot): string => {
@@ -397,14 +405,42 @@ export function StockMovementsCard({
     [getLotLabel]
   );
 
-  const filteredMovements = useMemo(() => {
+  const selectedVariant = useMemo(() => {
     if (selectedVariantFilter === "all") {
+      return null;
+    }
+    return (
+      variants.find(
+        (variant) =>
+          `${variant.talle}__${variant.color}` === selectedVariantFilter
+      ) ?? null
+    );
+  }, [selectedVariantFilter, variants]);
+
+  const hasVariantFilter =
+    product.has_variants && selectedVariantFilter !== "all";
+
+  const { data: variantMovements, isPending: variantMovementsPending } =
+    useStockMovementsByVariant(
+      orgSlug,
+      productId,
+      selectedVariant?.lotId ?? null,
+      hasVariantFilter
+    );
+
+  const movementsLoading = hasVariantFilter && variantMovementsPending;
+
+  const filteredMovements = useMemo(() => {
+    if (!hasVariantFilter) {
       return enrichedMovements;
     }
-    return enrichedMovements.filter(
-      (m) => `${m.talle}__${m.color}` === selectedVariantFilter
-    );
-  }, [enrichedMovements, selectedVariantFilter]);
+    return enrichMovementsWithUnits(variantMovements ?? []);
+  }, [
+    enrichMovementsWithUnits,
+    enrichedMovements,
+    hasVariantFilter,
+    variantMovements,
+  ]);
 
   const visibleMovements =
     filteredMovements && filteredMovements.length > 10
@@ -702,7 +738,17 @@ export function StockMovementsCard({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visibleMovements.length === 0 ? (
+              {movementsLoading && (
+                <TableRow>
+                  <TableCell
+                    className="py-10 text-center text-muted-foreground"
+                    colSpan={tracksUnits ? 6 : 5}
+                  >
+                    Cargando movimientos…
+                  </TableCell>
+                </TableRow>
+              )}
+              {!movementsLoading && visibleMovements.length === 0 && (
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
@@ -711,7 +757,9 @@ export function StockMovementsCard({
                     Aún no hay movimientos registrados para este producto.
                   </TableCell>
                 </TableRow>
-              ) : (
+              )}
+              {!movementsLoading &&
+                visibleMovements.length > 0 &&
                 visibleMovements.map((movement) => {
                   const meta = movementLabels[movement.type];
                   const baseChange = formatChange(
@@ -756,8 +804,7 @@ export function StockMovementsCard({
                       </TableCell>
                     </TableRow>
                   );
-                })
-              )}
+                })}
             </TableBody>
           </Table>
         </CardContent>
@@ -788,7 +835,17 @@ export function StockMovementsCard({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredMovements.length === 0 ? (
+                {movementsLoading && (
+                  <TableRow>
+                    <TableCell
+                      className="py-10 text-center text-muted-foreground"
+                      colSpan={tracksUnits ? 6 : 5}
+                    >
+                      Cargando movimientos…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!movementsLoading && filteredMovements.length === 0 && (
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
@@ -797,7 +854,9 @@ export function StockMovementsCard({
                       Aún no hay movimientos registrados para este producto.
                     </TableCell>
                   </TableRow>
-                ) : (
+                )}
+                {!movementsLoading &&
+                  filteredMovements.length > 0 &&
                   filteredMovements.map((movement) => {
                     const meta = movementLabels[movement.type];
                     const baseChange = formatChange(
@@ -834,8 +893,7 @@ export function StockMovementsCard({
                         </TableCell>
                       </TableRow>
                     );
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
           </div>

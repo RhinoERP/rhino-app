@@ -2060,12 +2060,16 @@ export async function getProductLotById(
 }
 
 /**
- * Gets stock movements for a product, ordered by newest first.
+ * Gets stock movements for a product (or a single variant lot), ordered by newest first.
+ *
+ * If `lotId` is provided, only movements for that lot are returned. The lot must
+ * belong to the given product, otherwise an empty list is returned.
  */
 export async function getStockMovementsForProduct(
   orgSlug: string,
   productId: string,
-  limit = 30
+  limit = 30,
+  lotId?: string
 ): Promise<StockMovementWithLot[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -2075,7 +2079,27 @@ export async function getStockMovementsForProduct(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const { data: lots, error: lotsError } = await supabase
+    .from("product_lots")
+    .select("id")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId);
+
+  if (lotsError) {
+    throw new Error(`Error fetching product lots: ${lotsError.message}`);
+  }
+
+  if (!lots || lots.length === 0) {
+    return [];
+  }
+
+  if (lotId && !lots.some((lot) => lot.id === lotId)) {
+    return [];
+  }
+
+  const lotIds = lots.map((lot) => lot.id);
+
+  const movementsQuery = supabase
     .from("stock_movements")
     .select(
       `
@@ -2098,9 +2122,13 @@ export async function getStockMovementsForProduct(
       `
     )
     .eq("organization_id", org.id)
-    .eq("product_lots.product_id", productId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .order("created_at", { ascending: false });
+
+  const filteredQuery = lotId
+    ? movementsQuery.eq("lot_id", lotId)
+    : movementsQuery.in("lot_id", lotIds);
+
+  const { data, error } = await filteredQuery.limit(limit);
 
   if (error) {
     throw new Error(`Error fetching stock movements: ${error.message}`);
