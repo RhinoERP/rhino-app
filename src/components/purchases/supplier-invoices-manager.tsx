@@ -317,8 +317,10 @@ function SupplierInvoiceDialog({
           <DialogHeader>
             <DialogTitle>Registrar factura de proveedor</DialogTitle>
             <DialogDescription>
-              El comprobante queda asociado a la orden de compra, sin modificar
-              la recepción de mercadería.
+              El comprobante queda asociado a la orden de compra. Si la OC
+              estaba pendiente de factura o se creó como nota, su cuenta por
+              pagar se actualizará con el total facturado, sin modificar la
+              recepción de mercadería.
             </DialogDescription>
           </DialogHeader>
 

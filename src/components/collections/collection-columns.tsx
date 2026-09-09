@@ -486,6 +486,38 @@ export function createPayableColumns(
       enableColumnFilter: false,
     },
     {
+      id: "payable_origin",
+      accessorFn: (row) => row.payableOrigin ?? "PURCHASE_NOTE",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Origen" />
+      ),
+      cell: ({ row }) => {
+        const invoiceBacked = row.original.payableOrigin === "SUPPLIER_INVOICE";
+        return (
+          <Badge
+            className="rounded-full"
+            variant={invoiceBacked ? "secondary" : "outline"}
+          >
+            {invoiceBacked ? "Factura" : "Nota de compra"}
+          </Badge>
+        );
+      },
+      meta: {
+        label: "Origen",
+        variant: "multiSelect",
+        options: [
+          { label: "Nota de compra", value: "PURCHASE_NOTE" },
+          { label: "Factura", value: "SUPPLIER_INVOICE" },
+        ],
+      },
+      enableSorting: false,
+      enableColumnFilter: true,
+      filterFn: (row, id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.getValue(id));
+      },
+    },
+    {
       id: "created_at",
       accessorKey: "created_at",
       header: ({ column }) => (

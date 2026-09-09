@@ -54,8 +54,13 @@ async function resolveAccessContext(
   };
 }
 
+export type PurchasePayableOrigin = "PURCHASE_NOTE" | "SUPPLIER_INVOICE";
+
 export type PurchaseOrder =
-  Database["public"]["Tables"]["purchase_orders"]["Row"];
+  Database["public"]["Tables"]["purchase_orders"]["Row"] & {
+    /** Added by the purchase-payable-origin migration. */
+    payable_origin?: PurchasePayableOrigin | null;
+  };
 export type PurchaseOrderItem =
   Database["public"]["Tables"]["purchase_order_items"]["Row"];
 export type ProductWithPrice =
@@ -139,11 +144,22 @@ async function syncAccountsPayable(params: {
     params;
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
-  const { data: purchaseOrderRow } = await supabase
+  const { data: purchaseOrderData } = await supabase
     .from("purchase_orders")
-    .select("currency")
+    .select("currency, payable_origin")
     .eq("id", purchaseOrderId)
     .maybeSingle();
+  const purchaseOrderRow = purchaseOrderData as {
+    currency?: string | null;
+    payable_origin?: PurchasePayableOrigin | null;
+  } | null;
+
+  // Once a supplier invoice exists, it is the sole authority for the debt.
+  // OC edits must keep affecting stock and pricing, never its payable balance.
+  if (purchaseOrderRow?.payable_origin === "SUPPLIER_INVOICE") {
+    return;
+  }
+
   const currency = purchaseOrderRow?.currency ?? "ARS";
 
   const { data: existingData, error: fetchError } = await supabase
@@ -307,6 +323,7 @@ export type CreatePurchaseOrderInput = {
   expiration_date?: string;
   remittance_number?: string;
   currency?: string;
+  payable_origin?: PurchasePayableOrigin;
   items: {
     product_id: string;
     quantity: number;
@@ -597,7 +614,8 @@ export async function createPurchaseOrder(
       global_discount_amount,
       total_amount,
       status: "ORDERED",
-    })
+      payable_origin: input.payable_origin ?? "PURCHASE_NOTE",
+    } as never)
     .select("*")
     .single();
 
@@ -916,14 +934,14 @@ export async function confirmDraftPurchaseOrder(params: {
 
   await updateDraftItemPrices(supabase, updatedItems, org.id);
 
-  if (params.expirationDate) {
+  if ((purchaseOrder as PurchaseOrder).payable_origin !== "SUPPLIER_INVOICE") {
     await syncAccountsPayable({
       supabase,
       orgId: org.id,
       supplierId: params.supplierId,
       purchaseOrderId: params.purchaseOrderId,
       totalAmount,
-      dueDate: params.expirationDate,
+      dueDate: params.expirationDate ?? purchaseOrder.purchase_date,
     });
   }
 

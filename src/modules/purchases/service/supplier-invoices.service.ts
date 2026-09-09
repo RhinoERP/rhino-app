@@ -169,6 +169,39 @@ export async function createSupplierInvoice(
   return data as unknown as SupplierInvoice;
 }
 
+export async function getPurchasePayableOrigin(params: {
+  orgSlug: string;
+  purchaseOrderId: string | null;
+}): Promise<"PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null> {
+  if (!params.purchaseOrderId) {
+    return null;
+  }
+
+  const [supabase, org] = await Promise.all([
+    createClient(),
+    getOrganizationBySlug(params.orgSlug),
+  ]);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .select("payable_origin")
+    .eq("id", params.purchaseOrderId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error("Orden de compra no encontrada");
+  }
+
+  return (
+    (data as { payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" })
+      .payable_origin ?? "PURCHASE_NOTE"
+  );
+}
+
 export async function attachSupplierInvoicePdf(params: {
   invoiceId: string;
   orgSlug: string;
@@ -196,6 +229,7 @@ export async function attachSupplierInvoicePdf(params: {
 export async function deleteSupplierInvoice(params: {
   invoiceId: string;
   orgSlug: string;
+  previousPayableOrigin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
 }): Promise<void> {
   const supabase = await createClient();
   const org = await getOrganizationBySlug(params.orgSlug);
@@ -203,10 +237,34 @@ export async function deleteSupplierInvoice(params: {
     return;
   }
 
+  const { data: invoice } = await supplierInvoicesTable(supabase)
+    .select("purchase_order_id")
+    .eq("id", params.invoiceId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
   await supplierInvoicesTable(supabase)
     .delete()
     .eq("id", params.invoiceId)
     .eq("organization_id", org.id);
+
+  const purchaseOrderId = (
+    invoice as { purchase_order_id?: string | null } | null
+  )?.purchase_order_id;
+  if (params.previousPayableOrigin && purchaseOrderId) {
+    const { error } = await supabase.rpc(
+      "cleanup_supplier_invoice_payable" as never,
+      {
+        p_purchase_order_id: purchaseOrderId,
+        p_previous_origin: params.previousPayableOrigin,
+      } as never
+    );
+    if (error) {
+      throw new Error(
+        `No se pudo reconciliar la cuenta por pagar: ${error.message}`
+      );
+    }
+  }
 }
 
 export function formatSupplierInvoiceReference(

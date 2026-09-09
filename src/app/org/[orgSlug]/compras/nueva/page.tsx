@@ -36,6 +36,7 @@ function NewPurchaseContent() {
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
   const [formValues, setFormValues] = useState<Partial<PurchaseFormValues>>({
     purchase_date: new Date(),
+    payable_origin: "PURCHASE_NOTE",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +132,9 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
-    let expirationDateStr: string | undefined;
+    // A note of purchase always creates a payable. With no explicit term its
+    // due date is the purchase date, matching the form's displayed fallback.
+    let expirationDateStr: string | undefined = purchaseDateStr;
     if (
       formValues.expiration_days &&
       formValues.expiration_days > 0 &&
@@ -150,6 +153,7 @@ function NewPurchaseContent() {
       purchase_date: purchaseDateStr,
       expiration_date: expirationDateStr,
       currency: purchaseCurrency,
+      payable_origin: formValues.payable_origin ?? "PURCHASE_NOTE",
       items: purchaseItems.map((item) => {
         const isWeightOrVolume =
           item.unit_of_measure === "KG" ||
