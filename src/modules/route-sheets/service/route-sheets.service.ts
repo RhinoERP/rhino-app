@@ -532,9 +532,9 @@ export async function addSalesToRouteSheet(
 
   const sheet = await getRouteSheetForOrg(org.id, routeSheetId);
 
-  if (sheet.status !== "PENDING") {
+  if (sheet.status !== "PENDING" && sheet.status !== "IN_PROGRESS") {
     throw new Error(
-      "Solo se pueden agregar ventas a una hoja de ruta pendiente"
+      "Solo se pueden agregar ventas a una hoja de ruta pendiente o en progreso"
     );
   }
 
@@ -576,6 +576,16 @@ export async function addSalesToRouteSheet(
       remittance: remittances[saleId],
       supabase,
     });
+
+    if (sheet.status === "IN_PROGRESS") {
+      await dispatchSaleOrder({
+        orgSlug,
+        saleId,
+        remittanceNumber: remittances[saleId]?.trim(),
+        carrierId: sheet.carrier_id,
+        routeSheetId,
+      });
+    }
   }
 }
 

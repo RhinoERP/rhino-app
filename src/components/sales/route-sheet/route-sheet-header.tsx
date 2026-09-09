@@ -61,6 +61,36 @@ type RouteSheetHeaderProps = {
   onDownload: () => void;
 };
 
+type StatusActionButtonProps = {
+  canManage: boolean;
+  nextStatus: RouteSheetStatus | null;
+  statusActionLabel: string;
+  isUpdatingStatus: boolean;
+  onClick: () => void;
+};
+
+function StatusActionButton({
+  canManage,
+  nextStatus,
+  statusActionLabel,
+  isUpdatingStatus,
+  onClick,
+}: StatusActionButtonProps) {
+  if (!(canManage && nextStatus)) {
+    return null;
+  }
+  return (
+    <Button
+      disabled={isUpdatingStatus}
+      onClick={onClick}
+      size="sm"
+      variant="outline"
+    >
+      {isUpdatingStatus ? "Actualizando..." : statusActionLabel}
+    </Button>
+  );
+}
+
 export function RouteSheetHeader({
   canManage,
   canRead,
@@ -75,6 +105,7 @@ export function RouteSheetHeader({
   onDownload,
 }: RouteSheetHeaderProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
 
   const totalAmount = truncateMoney(
     routeSheet.sales.reduce(
@@ -87,6 +118,14 @@ export function RouteSheetHeader({
 
   const nextStatus = STATUS_ACTION[routeSheet.status] ?? null;
   const statusActionLabel = STATUS_ACTION_LABEL[routeSheet.status] ?? "";
+
+  const handleStatusClick = () => {
+    if (routeSheet.status === "PENDING" && nextStatus === "IN_PROGRESS") {
+      setStartOpen(true);
+      return;
+    }
+    onUpdateStatus(nextStatus as RouteSheetStatus);
+  };
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -128,16 +167,13 @@ export function RouteSheetHeader({
           </p>
         </div>
 
-        {canManage && nextStatus ? (
-          <Button
-            disabled={isUpdatingStatus}
-            onClick={() => onUpdateStatus(nextStatus)}
-            size="sm"
-            variant="outline"
-          >
-            {isUpdatingStatus ? "Actualizando..." : statusActionLabel}
-          </Button>
-        ) : null}
+        <StatusActionButton
+          canManage={canManage}
+          isUpdatingStatus={isUpdatingStatus}
+          nextStatus={nextStatus}
+          onClick={handleStatusClick}
+          statusActionLabel={statusActionLabel}
+        />
 
         {canRead && routeSheet.sales.length > 0 && (
           <Button
@@ -183,6 +219,30 @@ export function RouteSheetHeader({
               onClick={onDelete}
             >
               {isDeleting ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog onOpenChange={setStartOpen} open={startOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Comenzar hoja de ruta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se despacharán todas las ventas confirmadas de esta hoja
+              utilizando el transporte de la hoja. Esta acción no se puede
+              deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isUpdatingStatus}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isUpdatingStatus}
+              onClick={() => onUpdateStatus("IN_PROGRESS")}
+            >
+              {isUpdatingStatus ? "Comenzando..." : "Comenzar"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

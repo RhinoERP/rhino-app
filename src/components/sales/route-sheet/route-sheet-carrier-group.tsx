@@ -3,6 +3,16 @@
 import { MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,6 +59,10 @@ type AddSalesDialogProps = {
   routeSheet: RouteSheetWithSales;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onRequestDispatchConfirm: (payload: {
+    saleIds: string[];
+    remittances: Record<string, string>;
+  }) => void;
 };
 
 function uniqueFilterOptions(values: (string | null | undefined)[]): {
@@ -103,11 +117,41 @@ function makeSaleFilter(filter: SaleFilter) {
   };
 }
 
+function makeRemittanceMap(
+  selected: RouteSheetSale[],
+  remittances: Record<string, string>
+): Record<string, string> {
+  const remitMap: Record<string, string> = {};
+  for (const sale of selected) {
+    if (sale.status === "CONFIRMED") {
+      remitMap[sale.id] = remittances[sale.id].trim();
+    }
+  }
+  return remitMap;
+}
+
+function validateSelection(
+  selected: RouteSheetSale[],
+  remittances: Record<string, string>
+): string | null {
+  if (selected.length === 0) {
+    return "Seleccioná al menos una venta";
+  }
+  const missing = selected.find(
+    (sale) => sale.status === "CONFIRMED" && !remittances[sale.id]?.trim()
+  );
+  if (missing) {
+    return "Completá el número de remito de las ventas seleccionadas";
+  }
+  return null;
+}
+
 function AddSalesDialog({
   orgSlug,
   routeSheet,
   open,
   onOpenChange,
+  onRequestDispatchConfirm,
 }: AddSalesDialogProps) {
   const { data } = useRouteSheets(orgSlug);
   const { addSales } = useRouteSheetMutations(orgSlug);
@@ -236,27 +280,20 @@ function AddSalesDialog({
   const handleSubmit = async () => {
     setErrorMessage(null);
     const selected = filteredSales.filter((sale) => selectedIds.has(sale.id));
-
-    if (selected.length === 0) {
-      setErrorMessage("Seleccioná al menos una venta");
+    const selectionError = validateSelection(selected, remittances);
+    if (selectionError) {
+      setErrorMessage(selectionError);
       return;
     }
 
-    const missing = selected.filter(
-      (sale) => sale.status === "CONFIRMED" && !remittances[sale.id]?.trim()
-    );
-    if (missing.length > 0) {
-      setErrorMessage(
-        "Completá el número de remito de las ventas seleccionadas"
-      );
-      return;
-    }
+    const remitMap = makeRemittanceMap(selected, remittances);
 
-    const remitMap: Record<string, string> = {};
-    for (const sale of selected) {
-      if (sale.status === "CONFIRMED") {
-        remitMap[sale.id] = remittances[sale.id].trim();
-      }
+    if (routeSheet.status === "IN_PROGRESS") {
+      onRequestDispatchConfirm({
+        saleIds: selected.map((sale) => sale.id),
+        remittances: remitMap,
+      });
+      return;
     }
 
     setIsPending(true);
@@ -290,6 +327,13 @@ function AddSalesDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          {routeSheet.status === "IN_PROGRESS" && (
+            <div className="rounded-md bg-amber-100/70 p-3 text-amber-800 text-sm">
+              Esta hoja ya fue comenzada. Las ventas que agregues se despacharán
+              inmediatamente al confirmar.
+            </div>
+          )}
+
           <div className="space-y-3 rounded-md border p-3">
             <div className="relative">
               <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
@@ -535,14 +579,48 @@ export function RouteSheetCarrierGroup({
   orgSlug,
   routeSheet,
 }: RouteSheetCarrierGroupProps) {
-  const { updateStatus, removeSale, deleteRouteSheet } =
+  const { updateStatus, addSales, removeSale, deleteRouteSheet } =
     useRouteSheetMutations(orgSlug);
   const { downloadRouteSheet, isDownloading } = useRouteSheetPdf({ orgSlug });
   const [expanded, setExpanded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [dispatchConfirmOpen, setDispatchConfirmOpen] = useState(false);
+  const [dispatchPayload, setDispatchPayload] = useState<{
+    saleIds: string[];
+    remittances: Record<string, string>;
+  } | null>(null);
 
   const handleDownload = () => {
     downloadRouteSheet(routeSheet.id);
+  };
+
+  const handleRequestDispatchConfirm = (payload: {
+    saleIds: string[];
+    remittances: Record<string, string>;
+  }) => {
+    setDispatchPayload(payload);
+    setDispatchConfirmOpen(true);
+  };
+
+  const handleConfirmDispatch = async () => {
+    if (!dispatchPayload) {
+      return;
+    }
+    try {
+      await addSales.mutateAsync({
+        routeSheetId: routeSheet.id,
+        ...dispatchPayload,
+      });
+      setAddOpen(false);
+      setDispatchConfirmOpen(false);
+      setDispatchPayload(null);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No se pudieron agregar las ventas a la hoja de ruta"
+      );
+    }
   };
 
   const handleUpdateStatus = async (status: RouteSheetWithSales["status"]) => {
@@ -624,26 +702,61 @@ export function RouteSheetCarrierGroup({
               ))
             )}
 
-            {canManage && routeSheet.status === "PENDING" && (
-              <Button
-                onClick={() => setAddOpen(true)}
-                size="sm"
-                variant="outline"
-              >
-                <PlusIcon className="mr-1 h-4 w-4" weight="bold" />
-                Agregar ventas
-              </Button>
-            )}
+            {canManage &&
+              (routeSheet.status === "PENDING" ||
+                routeSheet.status === "IN_PROGRESS") && (
+                <Button
+                  onClick={() => setAddOpen(true)}
+                  size="sm"
+                  variant="outline"
+                >
+                  <PlusIcon className="mr-1 h-4 w-4" weight="bold" />
+                  Agregar ventas
+                </Button>
+              )}
           </div>
         )}
       </CardContent>
 
       <AddSalesDialog
         onOpenChange={setAddOpen}
+        onRequestDispatchConfirm={handleRequestDispatchConfirm}
         open={addOpen}
         orgSlug={orgSlug}
         routeSheet={routeSheet}
       />
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setDispatchPayload(null);
+          }
+          setDispatchConfirmOpen(open);
+        }}
+        open={dispatchConfirmOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Agregar y despachar ventas?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta hoja de ruta ya fue comenzada. Las ventas seleccionadas se
+              despacharán inmediatamente al agregarlas, usando el transporte de
+              la hoja. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={addSales.isPending}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={addSales.isPending}
+              onClick={handleConfirmDispatch}
+            >
+              {addSales.isPending ? "Agregando..." : "Agregar y despachar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
