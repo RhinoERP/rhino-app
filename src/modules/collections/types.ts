@@ -76,7 +76,9 @@ export type PayableAccount = {
     purchase_number?: number | null;
     purchase_date?: string | null;
     total_amount?: number | null;
+    payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
   } | null;
+  payableOrigin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE";
   items?: CollectionExportItem[];
   type: "payable";
   // Discrepancy warning (if total differs from purchase order by >1%)

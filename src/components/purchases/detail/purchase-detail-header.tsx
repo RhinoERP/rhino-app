@@ -81,6 +81,19 @@ export function PurchaseStatusBadge({
   );
 }
 
+function PurchasePayableOriginBadge({
+  purchaseOrder,
+}: {
+  purchaseOrder: PurchaseOrder;
+}) {
+  const isInvoiceBacked = purchaseOrder.payable_origin === "SUPPLIER_INVOICE";
+  return (
+    <Badge variant={isInvoiceBacked ? "secondary" : "outline"}>
+      {isInvoiceBacked ? "Deuda según facturas" : "Deuda según nota de compra"}
+    </Badge>
+  );
+}
+
 type PurchaseDetailHeaderProps = {
   orgSlug: string;
   purchaseOrder: PurchaseOrder;
@@ -152,6 +165,8 @@ export function PurchaseDetailHeader({
             Volver a compras
           </Button>
         </Link>
+
+        <PurchasePayableOriginBadge purchaseOrder={purchaseOrder} />
 
         <div className="ml-auto flex gap-2">
           {canDownloadPdf && (

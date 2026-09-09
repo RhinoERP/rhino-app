@@ -8,6 +8,7 @@ import {
   createSupplierInvoice,
   createSupplierInvoiceSchema,
   deleteSupplierInvoice,
+  getPurchasePayableOrigin,
 } from "../service/supplier-invoices.service";
 import type { SupplierInvoice } from "../supplier-invoices.types";
 
@@ -133,7 +134,12 @@ export async function createSupplierInvoiceAction(
 
   let createdInvoiceId: string | null = null;
   let uploadedPdfPath: string | null = null;
+  let previousPayableOrigin: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null = null;
   try {
+    previousPayableOrigin = await getPurchasePayableOrigin({
+      orgSlug,
+      purchaseOrderId: parsed.data.purchaseOrderId,
+    });
     const invoice = await createSupplierInvoice(parsed.data);
     createdInvoiceId = invoice.id;
     const uploadedPdf = await uploadPdfIfPresent({
@@ -152,13 +158,22 @@ export async function createSupplierInvoiceAction(
     }
 
     revalidatePath(`/org/${orgSlug}/compras/facturas-proveedor`);
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
+    if (parsed.data.purchaseOrderId) {
+      revalidatePath(`/org/${orgSlug}/compras`);
+      revalidatePath(`/org/${orgSlug}/compras/${parsed.data.purchaseOrderId}`);
+    }
     return { success: true, invoice };
   } catch (error) {
     if (uploadedPdfPath) {
       await removeUploadedPdf(uploadedPdfPath);
     }
     if (createdInvoiceId) {
-      await deleteSupplierInvoice({ invoiceId: createdInvoiceId, orgSlug });
+      await deleteSupplierInvoice({
+        invoiceId: createdInvoiceId,
+        orgSlug,
+        previousPayableOrigin,
+      });
     }
     return {
       success: false,

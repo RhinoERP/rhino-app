@@ -43,6 +43,7 @@ import { PurchaseTaxSelector } from "./purchase-tax-selector";
 
 const purchaseFormSchema = z.object({
   supplier_id: z.string().min(1, "Debe seleccionar un proveedor"),
+  payable_origin: z.enum(["PURCHASE_NOTE", "SUPPLIER_INVOICE"]),
   purchase_date: z.date({
     message: "La fecha de compra es requerida",
   }),
@@ -76,6 +77,7 @@ export function PurchaseForm({
     resolver: zodResolver(purchaseFormSchema),
     defaultValues: {
       supplier_id: "",
+      payable_origin: "PURCHASE_NOTE",
       purchase_date: new Date(),
       expiration_days: null,
     },
@@ -171,6 +173,32 @@ export function PurchaseForm({
         </Field>
 
         <div className="grid gap-6 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="payable_origin">
+              Documento de compra
+            </FieldLabel>
+            <FieldContent>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                id="payable_origin"
+                onChange={(event) => {
+                  const payable_origin = event.target
+                    .value as PurchaseFormValues["payable_origin"];
+                  setValue("payable_origin", payable_origin);
+                  onFormChange({ payable_origin });
+                }}
+                value={watch("payable_origin")}
+              >
+                <option value="PURCHASE_NOTE">Nota de compra</option>
+                <option value="SUPPLIER_INVOICE">Factura pendiente</option>
+              </select>
+              <FieldDescription>
+                La nota genera deuda desde la OC. La factura pendiente la genera
+                al registrar el comprobante del proveedor.
+              </FieldDescription>
+            </FieldContent>
+          </Field>
+
           <Field>
             <FieldLabel htmlFor="purchase_date">
               Fecha de compra <span className="text-destructive">*</span>
