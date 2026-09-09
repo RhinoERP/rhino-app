@@ -6,6 +6,7 @@ import {
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import type { QueryBuilder } from "@/lib/query-builder";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
@@ -52,6 +53,18 @@ import { applySalesDateFilters } from "./sales-filters";
 import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Contexto de confianza para integraciones de sistema. No se expone a Server
+ * Actions ni al navegador: permite reutilizar el alta comercial sin una cookie
+ * de usuario, conservando un vendedor/actor de la organización.
+ */
+type TrustedPreSaleExecution = {
+  supabase: SupabaseServerClient;
+  organizationId: string;
+  actorId: string;
+  conversationId?: string;
+};
 
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
   "NOTA_DE_VENTA";
@@ -2689,7 +2702,8 @@ export async function getSalesOrderById(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: business logic involves several guarded steps
 export async function createPreSaleOrder(
-  input: CreatePreSaleOrderInput
+  input: CreatePreSaleOrderInput,
+  trustedExecution?: TrustedPreSaleExecution
 ): Promise<string> {
   const { orgSlug, customerId, sellerId, saleDate } = input;
 
@@ -2707,18 +2721,24 @@ export async function createPreSaleOrder(
     throw new Error("Agrega al menos un ítem a la preventa");
   }
 
-  const org = await getOrganizationBySlug(orgSlug);
+  const org = trustedExecution
+    ? { id: trustedExecution.organizationId }
+    : await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
 
-  const supabase = await createClient();
-  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
-  assertCanManageSales(accessContext);
-  const userId = await getCurrentUserId(supabase);
+  const supabase = trustedExecution?.supabase ?? (await createClient());
+  if (!trustedExecution) {
+    const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+    assertCanManageSales(accessContext);
+    const resolvedSellerId = sellerId || (await getCurrentUserId(supabase));
+    assertCanAssignSeller(accessContext, resolvedSellerId);
+  }
+  const userId =
+    trustedExecution?.actorId ?? (await getCurrentUserId(supabase));
   const resolvedSellerId = sellerId || userId;
-  assertCanAssignSeller(accessContext, resolvedSellerId);
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
@@ -2806,27 +2826,36 @@ export async function createPreSaleOrder(
 
   const invoiceType = input.invoiceType || defaultInvoiceType;
 
+  const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] = {
+    organization_id: org.id,
+    customer_id: customerId,
+    user_id: resolvedSellerId as string,
+    sale_date: saleDate,
+    credit_days: input.creditDays ?? null,
+    expiration_date: dueDate,
+    invoice_type: invoiceType,
+    invoice_number: sanitizeText(input.invoiceNumber),
+    observations: sanitizeText(input.observations),
+    sub_total: subTotalAmount,
+    total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
+    global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+    global_discount_amount: globalDiscountAmount,
+    total_amount: totalAmount,
+    sales_price_list_id: input.salesPriceListId ?? null,
+    status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
+    created_by: userId,
+  };
   const { data: order, error: orderError } = await supabase
     .from("sales_orders")
-    .insert({
-      organization_id: org.id,
-      customer_id: customerId,
-      user_id: resolvedSellerId as string,
-      sale_date: saleDate,
-      credit_days: input.creditDays ?? null,
-      expiration_date: dueDate,
-      invoice_type: invoiceType,
-      invoice_number: sanitizeText(input.invoiceNumber),
-      observations: sanitizeText(input.observations),
-      sub_total: subTotalAmount,
-      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
-      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
-      global_discount_amount: globalDiscountAmount,
-      total_amount: totalAmount,
-      sales_price_list_id: input.salesPriceListId ?? null,
-      status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
-      created_by: userId,
-    })
+    .insert(
+      trustedExecution?.conversationId
+        ? ({
+            ...orderValues,
+            source: "WHATSAPP",
+            conversation_id: trustedExecution.conversationId,
+          } as never)
+        : orderValues
+    )
     .select("id")
     .maybeSingle();
 
@@ -2873,6 +2902,44 @@ export async function createPreSaleOrder(
   }
 
   return saleOrderId;
+}
+
+/**
+ * Crea una preventa originada por WhatsApp. Sólo debe invocarse desde las
+ * herramientas internas del agente, después de validar una confirmación
+ * explícita del cliente y el contexto de conversación.
+ */
+export async function createWhatsAppPreSaleOrder(params: {
+  organizationId: string;
+  conversationId: string;
+  sellerId: string;
+  input: Omit<CreatePreSaleOrderInput, "sellerId">;
+}): Promise<string> {
+  const supabase = createAdminClient() as unknown as SupabaseServerClient;
+  try {
+    return await createPreSaleOrder(
+      { ...params.input, sellerId: params.sellerId },
+      {
+        supabase,
+        organizationId: params.organizationId,
+        actorId: params.sellerId,
+        conversationId: params.conversationId,
+      }
+    );
+  } catch (error) {
+    // El índice único por conversación resuelve dos confirmaciones simultáneas.
+    // Recuperar la fila ganadora preserva la idempotencia del agente.
+    const { data: existing } = await supabase
+      .from("sales_orders")
+      .select("id")
+      .eq("organization_id", params.organizationId)
+      .eq("conversation_id" as never, params.conversationId)
+      .maybeSingle();
+    if (existing?.id) {
+      return existing.id;
+    }
+    throw error;
+  }
 }
 
 type ProductStockMetadata = {

@@ -128,8 +128,8 @@ export function WhatsAppIntegrationConfigForm({
           Asistente comercial por WhatsApp
         </CardTitle>
         <CardDescription>
-          Definí el número y las reglas comerciales. La conexión con Meta se
-          habilita en la siguiente fase; esta pantalla no guarda credenciales.
+          Definí el número y las reglas comerciales. Las credenciales de Meta se
+          mantienen fuera de esta pantalla y nunca se exponen al navegador.
         </CardDescription>
       </CardHeader>
       <CardContent>

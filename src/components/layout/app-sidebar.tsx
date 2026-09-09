@@ -20,6 +20,7 @@ import {
   TruckIcon,
   UploadSimpleIcon,
   UsersIcon,
+  WhatsappLogoIcon,
 } from "@phosphor-icons/react/ssr";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -145,6 +146,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
           requiredPermission: ["customers.read", "customers.read.all"],
+        },
+        {
+          title: "WhatsApp",
+          url: `/org/${orgSlug}/whatsapp/conversaciones`,
+          icon: <WhatsappLogoIcon weight="duotone" />,
+          requiredPermission: "whatsapp.read",
         },
         {
           title: "Notas de Crédito",

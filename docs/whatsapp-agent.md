@@ -133,6 +133,19 @@ Los permisos del módulo distinguen lectura de inbox, atención de conversacione
 
 ## Backlog
 
+### Estado actual — 7 de septiembre de 2026
+
+| Fase | Estado | Alcance disponible en código |
+| --- | --- | --- |
+| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable y derivación. Faltan exponer horario y reglas comerciales en la UI, además del provisionamiento real de secretos. |
+| 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta/Railway. |
+| 3 — Asistente comercial | En curso | Worker con Responses API, herramientas comerciales acotadas, carrito persistente, cotización, confirmación explícita, preventa idempotente y auditoría. Falta una prueba end-to-end contra Meta y el proveedor de modelo. |
+| 4 — Operación humana | En curso | Inbox inicial, respuesta manual, derivación y pausa/reactivación explícita. Faltan asignación, alertas y vista detallada de historial. |
+| 5 — Métricas y tesis | Pendiente | Sin dashboard ni protocolo comparativo implementados. |
+
+La integración debe conservarse inactiva hasta que estén configuradas sus
+credenciales de producción y se complete una prueba real de punta a punta.
+
 ### Fase 1 — Fundación
 
 - Crear migraciones para tablas conversacionales, origen WhatsApp y vínculo a preventa.
