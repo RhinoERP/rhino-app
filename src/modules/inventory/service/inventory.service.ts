@@ -2092,7 +2092,8 @@ export async function getStockMovementsForProduct(
           id,
           lot_number,
           expiration_date,
-          product_id
+          product_id,
+          product_variants!product_variants_lot_id_fkey(talle, color)
         )
       `
     )
@@ -2107,19 +2108,31 @@ export async function getStockMovementsForProduct(
 
   return (data ?? [])
     .filter((movement) => movement.product_lots)
-    .map((movement) => ({
-      id: movement.id,
-      lot_id: movement.product_lots?.id ?? movement.lot_id,
-      lot_number: movement.product_lots?.lot_number ?? "-",
-      lot_expiration_date: movement.product_lots?.expiration_date ?? null,
-      type: movement.type,
-      quantity: movement.quantity,
-      previous_stock: movement.previous_stock,
-      new_stock: movement.new_stock,
-      unit_quantity: movement.unit_quantity ?? null,
-      reason: movement.reason,
-      created_at: movement.created_at,
-    }));
+    .map((movement) => {
+      const variant =
+        (
+          (movement.product_lots as Record<string, unknown>)
+            ?.product_variants as
+            | Array<{ talle: string; color: string }>
+            | undefined
+        )?.[0] ?? null;
+
+      return {
+        id: movement.id,
+        lot_id: movement.product_lots?.id ?? movement.lot_id,
+        lot_number: movement.product_lots?.lot_number ?? "-",
+        lot_expiration_date: movement.product_lots?.expiration_date ?? null,
+        talle: variant?.talle ?? null,
+        color: variant?.color ?? null,
+        type: movement.type,
+        quantity: movement.quantity,
+        previous_stock: movement.previous_stock,
+        new_stock: movement.new_stock,
+        unit_quantity: movement.unit_quantity ?? null,
+        reason: movement.reason,
+        created_at: movement.created_at,
+      };
+    });
 }
 
 export type CreateProductLotInput = {

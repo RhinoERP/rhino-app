@@ -105,6 +105,8 @@ export type StockMovementWithLot = {
   lot_id: string;
   lot_number: string;
   lot_expiration_date: string | null;
+  talle: string | null;
+  color: string | null;
   type: StockMovementDisplayType;
   quantity: number;
   previous_stock: number;

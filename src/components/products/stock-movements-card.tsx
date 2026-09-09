@@ -2,7 +2,13 @@
 
 import { ClockClockwise } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -132,6 +138,8 @@ export function StockMovementsCard({
   const [selectedMovement, setSelectedMovement] =
     useState<StockMovementWithLot | null>(null);
   const [viewAllOpen, setViewAllOpen] = useState(false);
+  const [selectedVariantFilter, setSelectedVariantFilter] =
+    useState<string>("all");
   const isWeightBased =
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
@@ -364,10 +372,44 @@ export function StockMovementsCard({
     });
   }, [lots, movements, tracksUnits]);
 
+  const variantOptions = useMemo(() => {
+    const seen = new Map<string, { color: string; talle: string }>();
+    for (const m of enrichedMovements) {
+      if (m.talle && m.color) {
+        const key = `${m.talle}__${m.color}`;
+        if (!seen.has(key)) {
+          seen.set(key, { color: m.color, talle: m.talle });
+        }
+      }
+    }
+    return Array.from(seen.entries())
+      .map(([key, v]) => ({ key, label: `${v.color} · ${v.talle}` }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [enrichedMovements]);
+
+  const getLotDisplay = useCallback(
+    (movement: StockMovementWithLot): string => {
+      if (movement.talle && movement.color) {
+        return `${movement.color} · ${movement.talle}`;
+      }
+      return getLotLabel[movement.lot_id] || movement.lot_number;
+    },
+    [getLotLabel]
+  );
+
+  const filteredMovements = useMemo(() => {
+    if (selectedVariantFilter === "all") {
+      return enrichedMovements;
+    }
+    return enrichedMovements.filter(
+      (m) => `${m.talle}__${m.color}` === selectedVariantFilter
+    );
+  }, [enrichedMovements, selectedVariantFilter]);
+
   const visibleMovements =
-    enrichedMovements && enrichedMovements.length > 10
-      ? enrichedMovements.slice(0, 10)
-      : enrichedMovements;
+    filteredMovements && filteredMovements.length > 10
+      ? filteredMovements.slice(0, 10)
+      : filteredMovements;
 
   return (
     <>
@@ -380,6 +422,26 @@ export function StockMovementsCard({
                 ? "Historial de stock. Ajustá el stock desde la grilla de variantes."
                 : "Historial y ajustes de stock"}
             </CardDescription>
+            {product.has_variants && variantOptions.length > 1 && (
+              <div className="pt-1">
+                <Select
+                  onValueChange={(value) => setSelectedVariantFilter(value)}
+                  value={selectedVariantFilter}
+                >
+                  <SelectTrigger className="h-7 w-auto min-w-[180px] text-xs">
+                    <SelectValue placeholder="Todas las variantes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las variantes</SelectItem>
+                    {variantOptions.map((opt) => (
+                      <SelectItem key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -674,7 +736,7 @@ export function StockMovementsCard({
                         {formatDateTime(movement.created_at)}
                       </TableCell>
                       <TableCell className="font-medium">
-                        {getLotLabel[movement.lot_id] || movement.lot_number}
+                        {getLotDisplay(movement)}
                       </TableCell>
                       <TableCell>
                         <Badge className={meta.className} variant="secondary">
@@ -726,7 +788,7 @@ export function StockMovementsCard({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {movements.length === 0 ? (
+                {filteredMovements.length === 0 ? (
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
@@ -736,7 +798,7 @@ export function StockMovementsCard({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  movements.map((movement) => {
+                  filteredMovements.map((movement) => {
                     const meta = movementLabels[movement.type];
                     const baseChange = formatChange(
                       movement.previous_stock,
@@ -752,7 +814,7 @@ export function StockMovementsCard({
                           {formatDateTime(movement.created_at)}
                         </TableCell>
                         <TableCell className="font-medium">
-                          {getLotLabel[movement.lot_id] || movement.lot_number}
+                          {getLotDisplay(movement)}
                         </TableCell>
                         <TableCell>
                           <Badge className={meta.className} variant="secondary">
@@ -809,7 +871,9 @@ export function StockMovementsCard({
                 </div>
                 <div className="space-y-1">
                   <p className="text-muted-foreground">Lote</p>
-                  <p className="font-medium">{selectedMovement.lot_number}</p>
+                  <p className="font-medium">
+                    {getLotDisplay(selectedMovement)}
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-muted-foreground">{stockDetailLabel}</p>
