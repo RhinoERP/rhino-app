@@ -456,6 +456,12 @@ async function dispatchPendingRouteSheetSales(params: {
 
   const pendingSales = sales ?? [];
 
+  if (pendingSales.length === 0) {
+    throw new Error(
+      "No se puede comenzar una hoja de ruta sin ventas asignadas"
+    );
+  }
+
   const unauthorizedSale = pendingSales.find(
     (sale) =>
       !isOwnSale(

@@ -66,6 +66,7 @@ type StatusActionButtonProps = {
   nextStatus: RouteSheetStatus | null;
   statusActionLabel: string;
   isUpdatingStatus: boolean;
+  disabled?: boolean;
   onClick: () => void;
 };
 
@@ -74,6 +75,7 @@ function StatusActionButton({
   nextStatus,
   statusActionLabel,
   isUpdatingStatus,
+  disabled,
   onClick,
 }: StatusActionButtonProps) {
   if (!(canManage && nextStatus)) {
@@ -81,7 +83,7 @@ function StatusActionButton({
   }
   return (
     <Button
-      disabled={isUpdatingStatus}
+      disabled={isUpdatingStatus || disabled}
       onClick={onClick}
       size="sm"
       variant="outline"
@@ -118,6 +120,8 @@ export function RouteSheetHeader({
 
   const nextStatus = STATUS_ACTION[routeSheet.status] ?? null;
   const statusActionLabel = STATUS_ACTION_LABEL[routeSheet.status] ?? "";
+  const canStartEmpty =
+    routeSheet.status === "PENDING" && routeSheet.sales.length === 0;
 
   const handleStatusClick = () => {
     if (routeSheet.status === "PENDING" && nextStatus === "IN_PROGRESS") {
@@ -169,6 +173,7 @@ export function RouteSheetHeader({
 
         <StatusActionButton
           canManage={canManage}
+          disabled={canStartEmpty}
           isUpdatingStatus={isUpdatingStatus}
           nextStatus={nextStatus}
           onClick={handleStatusClick}
