@@ -66,6 +66,7 @@ DECLARE
   v_overpayment numeric := 0;
   v_credit_used numeric := 0;
   v_credit_remaining numeric := 0;
+  v_credit_exists boolean := false;
 BEGIN
   SELECT * INTO v_purchase
   FROM public.purchase_orders
@@ -86,9 +87,68 @@ BEGIN
   WHERE purchase_order_id = p_purchase_order_id
     AND status = 'REGISTERED';
 
-  -- An invoice-less "Factura pendiente" does not create a payable. The
-  -- cleanup helper below handles explicit restoration to a purchase note.
+  -- An invoice-less "Factura pendiente" does not create a payable. If the
+  -- last linked invoice is removed or cancelled, remove the outstanding
+  -- payable too; payments already made remain represented by a paid record
+  -- and become supplier credit instead of leaving a phantom debt.
   IF v_invoice_count = 0 THEN
+    UPDATE public.purchase_orders
+    SET payable_origin = 'SUPPLIER_INVOICE', updated_at = now()
+    WHERE id = p_purchase_order_id;
+
+    SELECT * INTO v_payable
+    FROM public.accounts_payable
+    WHERE purchase_order_id = p_purchase_order_id
+    FOR UPDATE;
+
+    IF v_payable.id IS NULL THEN
+      RETURN;
+    END IF;
+
+    SELECT * INTO v_credit
+    FROM public.supplier_credits
+    WHERE source_purchase_order_id = p_purchase_order_id
+    FOR UPDATE;
+    v_credit_exists := FOUND;
+
+    v_applied := greatest(
+      0,
+      coalesce(v_payable.total_amount, 0) - coalesce(v_payable.pending_balance, 0)
+    );
+
+    IF v_applied = 0 THEN
+      DELETE FROM public.accounts_payable WHERE id = v_payable.id;
+      RETURN;
+    END IF;
+
+    -- Keep the payable only as a paid audit record because payments reference
+    -- it. Its outstanding balance is zero, so it no longer appears as debt.
+    UPDATE public.accounts_payable
+    SET total_amount = v_applied,
+        pending_balance = 0,
+        status = 'PAID'
+    WHERE id = v_payable.id;
+
+    IF v_credit_exists THEN
+      v_credit_used := greatest(0, coalesce(v_credit.amount, 0) - coalesce(v_credit.remaining_amount, 0));
+      v_credit_remaining := v_applied + greatest(0, coalesce(v_credit.remaining_amount, 0));
+      UPDATE public.supplier_credits
+      SET amount = v_credit_used + v_credit_remaining,
+          remaining_amount = v_credit_remaining,
+          currency = coalesce(v_purchase.currency, 'ARS'),
+          updated_at = now()
+      WHERE id = v_credit.id;
+    ELSE
+      INSERT INTO public.supplier_credits (
+        organization_id, supplier_id, amount, remaining_amount, currency,
+        source_payment_id, source_purchase_order_id, notes
+      ) VALUES (
+        v_purchase.organization_id, v_purchase.supplier_id, v_applied,
+        v_applied, coalesce(v_purchase.currency, 'ARS'), NULL,
+        p_purchase_order_id, 'Crédito generado al eliminar la última factura vinculada'
+      );
+    END IF;
+
     RETURN;
   END IF;
 
@@ -318,5 +378,24 @@ BEGIN
   IF NOT v_has_payments THEN
     DELETE FROM public.accounts_payable WHERE id = v_payable_id;
   END IF;
+END;
+$$;
+
+-- Existing linked invoices must enter the same invariant as new ones when the
+-- migration is applied. This is intentionally generic (not a one-off data
+-- patch): only OCs that already have registered supplier invoices are
+-- reconciled, preserving payments and creating a credit if applicable.
+DO $$
+DECLARE
+  v_purchase_order_id uuid;
+BEGIN
+  FOR v_purchase_order_id IN
+    SELECT DISTINCT purchase_order_id
+    FROM public.supplier_invoices
+    WHERE purchase_order_id IS NOT NULL
+      AND status = 'REGISTERED'
+  LOOP
+    PERFORM public.reconcile_purchase_payable_from_invoices(v_purchase_order_id);
+  END LOOP;
 END;
 $$;
