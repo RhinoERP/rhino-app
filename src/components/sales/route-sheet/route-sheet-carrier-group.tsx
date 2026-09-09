@@ -123,7 +123,7 @@ function makeRemittanceMap(
 ): Record<string, string> {
   const remitMap: Record<string, string> = {};
   for (const sale of selected) {
-    if (sale.status === "CONFIRMED") {
+    if (sale.status === "CONFIRMED" && remittances[sale.id]?.trim()) {
       remitMap[sale.id] = remittances[sale.id].trim();
     }
   }

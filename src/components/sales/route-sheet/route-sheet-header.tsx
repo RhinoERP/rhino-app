@@ -121,7 +121,8 @@ export function RouteSheetHeader({
   const nextStatus = STATUS_ACTION[routeSheet.status] ?? null;
   const statusActionLabel = STATUS_ACTION_LABEL[routeSheet.status] ?? "";
   const canStartEmpty =
-    routeSheet.status === "PENDING" && routeSheet.sales.length === 0;
+    routeSheet.status === "PENDING" &&
+    !routeSheet.sales.some((sale) => sale.status === "CONFIRMED");
 
   const handleStatusClick = () => {
     if (routeSheet.status === "PENDING" && nextStatus === "IN_PROGRESS") {

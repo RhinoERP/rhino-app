@@ -128,65 +128,18 @@ function isOwnSale(
   return Boolean(userId) && saleUserId === userId;
 }
 
-export async function getRouteSheetPageData(
-  orgSlug: string
-): Promise<RouteSheetPageData> {
-  const org = await getOrganizationBySlug(orgSlug);
+type RouteSheetCarrierEmbed =
+  | { id: string; name: string }
+  | Array<{ id: string; name: string }>
+  | null;
 
-  if (!org?.id) {
-    return { routeSheets: [], availableSales: [] };
-  }
-
-  const supabase = await createClient();
-  const accessContext = await getSalesAccessContext(orgSlug);
-
-  if (!accessContext.canRead) {
-    throw new Error("No tienes permisos para ver hojas de ruta");
-  }
-
-  let salesQuery = supabase
-    .from("sales_orders")
-    .select(SALES_SELECT)
-    .eq("organization_id", org.id)
-    .not("route_sheet_id", "is", null);
-
-  let availableQuery = supabase
-    .from("sales_orders")
-    .select(SALES_SELECT)
-    .eq("organization_id", org.id)
-    .is("route_sheet_id", null)
-    .eq("status", "CONFIRMED");
-
-  if (accessContext.scope === "own" && accessContext.userId) {
-    salesQuery = salesQuery.eq("user_id", accessContext.userId);
-    availableQuery = availableQuery.eq("user_id", accessContext.userId);
-  }
-
-  const [
-    { data: sheets, error: sheetsError },
-    { data: sales, error: salesError },
-    { data: available, error: availableError },
-  ] = await Promise.all([
-    supabase
-      .from("route_sheets")
-      .select("*, carrier:carriers(id, name)")
-      .eq("organization_id", org.id)
-      .order("scheduled_date", { ascending: false }),
-    salesQuery,
-    availableQuery,
-  ]);
-
-  if (sheetsError || salesError || availableError) {
-    throw new Error(
-      `Error al obtener hojas de ruta: ${
-        (sheetsError ?? salesError ?? availableError)?.message ??
-        "error desconocido"
-      }`
-    );
-  }
-
+function buildRouteSheetsWithSales(params: {
+  sheets: Array<RouteSheet & { carrier?: RouteSheetCarrierEmbed }>;
+  sales: SalesOrderSale[];
+  scope: "all" | "own";
+}): RouteSheetWithSales[] {
   const salesByRouteSheet = new Map<string, RouteSheetSale[]>();
-  for (const sale of (sales ?? []) as unknown as SalesOrderSale[]) {
+  for (const sale of params.sales) {
     const routeSheetId = (sale as { route_sheet_id?: string | null })
       .route_sheet_id;
     if (!routeSheetId) {
@@ -197,9 +150,9 @@ export async function getRouteSheetPageData(
     salesByRouteSheet.set(routeSheetId, list);
   }
 
-  const routeSheets: RouteSheetWithSales[] = (sheets ?? [])
+  return params.sheets
     .filter((sheet) => {
-      if (accessContext.scope === "own") {
+      if (params.scope === "own") {
         return salesByRouteSheet.has(sheet.id);
       }
       return true;
@@ -219,6 +172,86 @@ export async function getRouteSheetPageData(
         )
       ),
     }));
+}
+
+export async function getRouteSheetPageData(
+  orgSlug: string
+): Promise<RouteSheetPageData> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { routeSheets: [], availableSales: [] };
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canRead) {
+    throw new Error("No tienes permisos para ver hojas de ruta");
+  }
+
+  const { data: sheets, error: sheetsError } = await supabase
+    .from("route_sheets")
+    .select("*, carrier:carriers(id, name)")
+    .eq("organization_id", org.id)
+    .neq("status", "COMPLETED")
+    .order("scheduled_date", { ascending: false });
+
+  if (sheetsError) {
+    throw new Error(`Error al obtener hojas de ruta: ${sheetsError.message}`);
+  }
+
+  const activeSheets = (sheets ?? []) as Array<
+    RouteSheet & { carrier?: RouteSheetCarrierEmbed }
+  >;
+  const activeSheetIds = activeSheets.map((sheet) => sheet.id);
+
+  const salesPromise =
+    activeSheetIds.length > 0
+      ? (() => {
+          let query = supabase
+            .from("sales_orders")
+            .select(SALES_SELECT)
+            .eq("organization_id", org.id)
+            .in("route_sheet_id", activeSheetIds);
+
+          if (accessContext.scope === "own" && accessContext.userId) {
+            query = query.eq("user_id", accessContext.userId);
+          }
+
+          return query;
+        })()
+      : Promise.resolve({ data: [], error: null });
+
+  let availableQuery = supabase
+    .from("sales_orders")
+    .select(SALES_SELECT)
+    .eq("organization_id", org.id)
+    .is("route_sheet_id", null)
+    .eq("status", "CONFIRMED");
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    availableQuery = availableQuery.eq("user_id", accessContext.userId);
+  }
+
+  const [salesWithError, { data: available, error: availableError }] =
+    await Promise.all([salesPromise, availableQuery]);
+
+  const sales = salesWithError.data as unknown as SalesOrderSale[] | null;
+
+  if (salesWithError.error || availableError) {
+    throw new Error(
+      `Error al obtener hojas de ruta: ${
+        (salesWithError.error ?? availableError)?.message ?? "error desconocido"
+      }`
+    );
+  }
+
+  const routeSheets = buildRouteSheetsWithSales({
+    sheets: activeSheets,
+    sales: (sales ?? []) as unknown as SalesOrderSale[],
+    scope: accessContext.scope,
+  });
 
   const availableSales = ((available ?? []) as unknown as SalesOrderSale[])
     .map(toRouteSheetSale)
@@ -233,6 +266,162 @@ export async function getRouteSheetPageData(
     );
 
   return { routeSheets, availableSales };
+}
+
+export type SearchCompletedRouteSheetsInput = {
+  orgSlug: string;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  carrierId?: string | null;
+  saleNumber?: string | null;
+};
+
+type SearchClient = {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+};
+
+async function matchSheetIdsBySale(
+  client: SearchClient,
+  saleTerm: string
+): Promise<string[] | null> {
+  const { supabase, orgId } = client;
+
+  const { data: matchedSales, error: matchedError } = await supabase
+    .from("sales_orders")
+    .select("route_sheet_id")
+    .eq("organization_id", orgId)
+    .not("route_sheet_id", "is", null)
+    .filter("sale_number::text", "ilike", `%${saleTerm}%`);
+
+  if (matchedError) {
+    throw new Error(
+      `Error al buscar ventas completadas: ${matchedError.message}`
+    );
+  }
+
+  return [
+    ...new Set(
+      (matchedSales ?? [])
+        .map((sale) => sale.route_sheet_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+}
+
+async function fetchCompletedSheets(
+  client: SearchClient,
+  params: {
+    sheetIdsBySale: string[] | null;
+    dateFrom?: string | null;
+    dateTo?: string | null;
+    carrierId?: string | null;
+    limit: number;
+  }
+): Promise<Array<RouteSheet & { carrier?: RouteSheetCarrierEmbed }>> {
+  const { supabase, orgId } = client;
+  const { sheetIdsBySale, dateFrom, dateTo, carrierId, limit } = params;
+
+  let sheets = supabase
+    .from("route_sheets")
+    .select("*, carrier:carriers(id, name)")
+    .eq("organization_id", orgId)
+    .eq("status", "COMPLETED");
+
+  if (sheetIdsBySale) {
+    sheets = sheets.in("id", sheetIdsBySale);
+  }
+  if (carrierId) {
+    sheets = sheets.eq("carrier_id", carrierId);
+  }
+  if (dateFrom) {
+    sheets = sheets.gte("scheduled_date", dateFrom);
+  }
+  if (dateTo) {
+    sheets = sheets.lte("scheduled_date", dateTo);
+  }
+
+  const { data: sheetRows, error: sheetsError } = await sheets
+    .order("scheduled_date", { ascending: false })
+    .limit(limit);
+
+  if (sheetsError) {
+    throw new Error(
+      `Error al obtener hojas de ruta completadas: ${sheetsError.message}`
+    );
+  }
+
+  return (sheetRows ?? []) as Array<
+    RouteSheet & { carrier?: RouteSheetCarrierEmbed }
+  >;
+}
+
+export async function searchCompletedRouteSheets(
+  input: SearchCompletedRouteSheetsInput
+): Promise<RouteSheetWithSales[]> {
+  const { orgSlug, dateFrom, dateTo, carrierId, saleNumber } = input;
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canRead) {
+    throw new Error("No tienes permisos para ver hojas de ruta");
+  }
+
+  const client: SearchClient = { supabase, orgId: org.id };
+  const saleTerm = saleNumber?.trim();
+
+  const sheetIdsBySale = saleTerm
+    ? await matchSheetIdsBySale(client, saleTerm)
+    : null;
+
+  if (sheetIdsBySale && sheetIdsBySale.length === 0) {
+    return [];
+  }
+
+  const completedSheets = await fetchCompletedSheets(client, {
+    sheetIdsBySale,
+    dateFrom,
+    dateTo,
+    carrierId,
+    limit: saleTerm ? 50 : 10,
+  });
+
+  const completedSheetIds = completedSheets.map((sheet) => sheet.id);
+
+  if (completedSheetIds.length === 0) {
+    return [];
+  }
+
+  let salesQuery = supabase
+    .from("sales_orders")
+    .select(SALES_SELECT)
+    .eq("organization_id", org.id)
+    .in("route_sheet_id", completedSheetIds);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    salesQuery = salesQuery.eq("user_id", accessContext.userId);
+  }
+
+  const { data: sales, error: salesError } = await salesQuery;
+
+  if (salesError) {
+    throw new Error(
+      `Error al obtener las ventas de hojas completadas: ${salesError.message}`
+    );
+  }
+
+  return buildRouteSheetsWithSales({
+    sheets: completedSheets,
+    sales: (sales ?? ([] as unknown)) as SalesOrderSale[],
+    scope: accessContext.scope,
+  });
 }
 
 export async function getRouteSheetWithSales(
@@ -445,8 +634,7 @@ async function dispatchPendingRouteSheetSales(params: {
     .from("sales_orders")
     .select("id, status, remittance_number, user_id")
     .eq("organization_id", orgId)
-    .eq("route_sheet_id", routeSheetId)
-    .eq("status", "CONFIRMED");
+    .eq("route_sheet_id", routeSheetId);
 
   if (salesError) {
     throw new Error(
@@ -454,12 +642,18 @@ async function dispatchPendingRouteSheetSales(params: {
     );
   }
 
-  const pendingSales = sales ?? [];
+  const sheetSales = sales ?? [];
 
-  if (pendingSales.length === 0) {
+  if (sheetSales.length === 0) {
     throw new Error(
       "No se puede comenzar una hoja de ruta sin ventas asignadas"
     );
+  }
+
+  const pendingSales = sheetSales.filter((sale) => sale.status === "CONFIRMED");
+
+  if (pendingSales.length === 0) {
+    throw new Error("Las ventas de esta hoja ya fueron despachadas");
   }
 
   const unauthorizedSale = pendingSales.find(

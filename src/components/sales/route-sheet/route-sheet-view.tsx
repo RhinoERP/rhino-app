@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouteSheets } from "@/modules/route-sheets/hooks/use-route-sheets";
+import { CompletedRouteSheetsSection } from "./completed-route-sheets-section";
 import { RouteSheetCarrierGroup } from "./route-sheet-carrier-group";
 import { RouteSheetDialog } from "./route-sheet-dialog";
 
@@ -97,6 +98,12 @@ export function RouteSheetView({
       </div>
 
       {content}
+
+      <CompletedRouteSheetsSection
+        canManage={canManage}
+        canRead={canRead}
+        orgSlug={orgSlug}
+      />
 
       <RouteSheetDialog
         onOpenChange={setCreateOpen}
