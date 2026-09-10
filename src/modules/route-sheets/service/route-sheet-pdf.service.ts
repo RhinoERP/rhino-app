@@ -7,6 +7,9 @@ export type RouteSheetPdfRow = {
   customer: string;
   city: string | null;
   amount: number;
+  bultos: number | null;
+  unidades: number | null;
+  kilograms: number | null;
 };
 
 export type RouteSheetPdfData = {
@@ -21,6 +24,10 @@ export type RouteSheetPdfData = {
   statusLabel: string;
   rows: RouteSheetPdfRow[];
   total: number;
+};
+
+export type RouteSheetPdfOptions = {
+  includeAmounts?: boolean;
 };
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -40,7 +47,21 @@ const displayValue = (value: string | null | undefined, fallback = "—") => {
   return escapeHtml(trimmed || fallback);
 };
 
-export function generateRouteSheetHTML(data: RouteSheetPdfData): string {
+const formatQuantity = (value: number | null): string =>
+  value === null
+    ? "—"
+    : value.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+
+const formatKilograms = (value: number | null): string =>
+  value === null
+    ? "—"
+    : value.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+
+export function generateRouteSheetHTML(
+  data: RouteSheetPdfData,
+  options: RouteSheetPdfOptions = {}
+): string {
+  const includeAmounts = options.includeAmounts ?? true;
   const logoHtml = data.issuer.logoUrl
     ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="" class="logo" />`
     : "";
@@ -48,27 +69,54 @@ export function generateRouteSheetHTML(data: RouteSheetPdfData): string {
   const rowsHtml = data.rows
     .map((row) => {
       const date = row.date ? formatDateOnly(row.date) : "—";
+      const amountCell = includeAmounts
+        ? `<td class="c-amount">${escapeHtml(
+            formatCurrency(truncateMoney(row.amount))
+          )}</td>`
+        : "";
       return `
         <tr>
           <td class="c-date">${escapeHtml(date)}</td>
           <td class="c-document">${escapeHtml(row.document)}</td>
           <td class="c-customer">${escapeHtml(row.customer)}</td>
           <td class="c-city">${escapeHtml(row.city ?? "—")}</td>
-          <td class="c-amount">${escapeHtml(
-            formatCurrency(truncateMoney(row.amount))
-          )}</td>
+          <td class="c-qty">${escapeHtml(formatQuantity(row.bultos))}</td>
+          <td class="c-qty">${escapeHtml(formatQuantity(row.unidades))}</td>
+          <td class="c-qty">${escapeHtml(formatKilograms(row.kilograms))}</td>
+          ${amountCell}
         </tr>`;
     })
     .join("");
 
-  const emptyRows = Array.from({ length: Math.max(0, 8 - data.rows.length) })
+  const emptyRows = Array.from({
+    length: Math.max(0, 8 - data.rows.length),
+  })
     .map(
       () => `
         <tr class="empty-row">
-          <td></td><td></td><td></td><td></td><td></td>
+          <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+          ${includeAmounts ? "<td></td>" : ""}
         </tr>`
     )
     .join("");
+
+  const totalBultos = data.rows.reduce(
+    (sum, row) => sum + (row.bultos ?? 0),
+    0
+  );
+  const totalUnidades = data.rows.reduce(
+    (sum, row) => sum + (row.unidades ?? 0),
+    0
+  );
+  const totalKilograms = data.rows.reduce(
+    (sum, row) => sum + (row.kilograms ?? 0),
+    0
+  );
+  const amountFooterCell = includeAmounts
+    ? `<td class="c-amount">${escapeHtml(
+        formatCurrency(truncateMoney(data.total))
+      )}</td>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -128,11 +176,17 @@ export function generateRouteSheetHTML(data: RouteSheetPdfData): string {
     td { border-bottom: 1px solid #d8d8d8; padding: 7px 8px; font-size: 11px; vertical-align: top; }
     tr:last-child td { border-bottom: none; }
     .empty-row td { border-bottom: 1px solid #eee; }
-    .c-date { width: 15%; }
-    .c-document { width: 16%; }
-    .c-customer { width: 34%; }
-    .c-city { width: 18%; }
-    .c-amount { width: 17%; text-align: right; }
+    .c-date { width: 12%; }
+    .c-document { width: 14%; }
+    .c-customer { width: 25%; }
+    .c-city { width: 13%; }
+    .c-qty { width: 12%; text-align: right; }
+    .c-amount { width: 16%; text-align: right; overflow-wrap: anywhere; }
+    table.with-amounts .c-date { width: 10%; }
+    table.with-amounts .c-document { width: 12%; }
+    table.with-amounts .c-customer { width: 24%; }
+    table.with-amounts .c-city { width: 11%; }
+    table.with-amounts .c-qty { width: 9%; }
     tfoot td {
       border-top: 2px solid #222;
       background: #fafafa;
@@ -140,6 +194,7 @@ export function generateRouteSheetHTML(data: RouteSheetPdfData): string {
       font-size: 12px;
       text-align: right;
     }
+    tfoot td.c-total-label { text-align: right; }
     .footer {
       margin-top: 16px;
       display: flex;
@@ -187,14 +242,17 @@ export function generateRouteSheetHTML(data: RouteSheetPdfData): string {
   </div>
 
   <div class="table-wrap">
-    <table>
+    <table${includeAmounts ? ' class="with-amounts"' : ""}>
       <thead>
         <tr>
           <th class="c-date">Fecha</th>
           <th class="c-document">Comprobante</th>
           <th class="c-customer">Cliente</th>
           <th class="c-city">Localidad</th>
-          <th class="c-amount">Importe</th>
+          <th class="c-qty">Bultos</th>
+          <th class="c-qty">Unidades</th>
+          <th class="c-qty">Kg</th>
+          ${includeAmounts ? '<th class="c-amount">Importe</th>' : ""}
         </tr>
       </thead>
       <tbody>
@@ -203,8 +261,11 @@ export function generateRouteSheetHTML(data: RouteSheetPdfData): string {
       </tbody>
       <tfoot>
         <tr>
-          <td colspan="4" style="text-align:right;">Total</td>
-          <td>${escapeHtml(formatCurrency(truncateMoney(data.total)))}</td>
+          <td class="c-total-label" colspan="4">Total</td>
+          <td class="c-qty">${escapeHtml(formatQuantity(totalBultos))}</td>
+          <td class="c-qty">${escapeHtml(formatQuantity(totalUnidades))}</td>
+          <td class="c-qty">${escapeHtml(formatKilograms(totalKilograms))}</td>
+          ${amountFooterCell}
         </tr>
       </tfoot>
     </table>

@@ -589,9 +589,16 @@ export function RouteSheetCarrierGroup({
     saleIds: string[];
     remittances: Record<string, string>;
   } | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [includeAmounts, setIncludeAmounts] = useState(true);
 
   const handleDownload = () => {
-    downloadRouteSheet(routeSheet.id);
+    setDownloadOpen(true);
+  };
+
+  const handleConfirmDownload = async () => {
+    setDownloadOpen(false);
+    await downloadRouteSheet(routeSheet.id, { includeAmounts });
   };
 
   const handleRequestDispatchConfirm = (payload: {
@@ -725,6 +732,54 @@ export function RouteSheetCarrierGroup({
         orgSlug={orgSlug}
         routeSheet={routeSheet}
       />
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!(open || isDownloading)) {
+            setDownloadOpen(open);
+          }
+        }}
+        open={downloadOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Descargar hoja de ruta</DialogTitle>
+            <DialogDescription>
+              Elegí qué información incluir en el PDF.
+            </DialogDescription>
+          </DialogHeader>
+
+          <label
+            className="flex items-center gap-2 text-sm"
+            htmlFor="rs-download-importes"
+          >
+            <Checkbox
+              checked={includeAmounts}
+              id="rs-download-importes"
+              onCheckedChange={(checked) => setIncludeAmounts(checked === true)}
+            />
+            Incluir importes
+          </label>
+
+          <DialogFooter>
+            <Button
+              disabled={isDownloading}
+              onClick={() => setDownloadOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={isDownloading}
+              onClick={handleConfirmDownload}
+              type="button"
+            >
+              {isDownloading ? "Descargando..." : "Descargar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         onOpenChange={(open) => {
