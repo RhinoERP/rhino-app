@@ -59,6 +59,8 @@ type BulkSupplierPaymentDistribution = {
 const formSchema = z.object({
   supplierId: z.string().min(1, "Selecciona un proveedor"),
   totalAmount: z.number().positive("El monto debe ser mayor a cero"),
+  currency: z.enum(["ARS", "USD"]),
+  exchangeRate: z.string().optional(),
   paymentMethod: z.enum([
     "efectivo",
     "transferencia",
@@ -111,6 +113,8 @@ export function BulkSupplierPaymentDialog({
     defaultValues: {
       supplierId: preselectedSupplierId ?? "",
       totalAmount: 0,
+      currency: "ARS",
+      exchangeRate: "",
       paymentMethod: "efectivo",
       paymentDate: new Date(),
       referenceNumber: "",
@@ -126,6 +130,8 @@ export function BulkSupplierPaymentDialog({
   const supplierId = form.watch("supplierId");
   const totalAmount = form.watch("totalAmount");
   const paymentMethod = form.watch("paymentMethod");
+  const currency = form.watch("currency");
+  const exchangeRate = form.watch("exchangeRate");
   const showChequeFields =
     paymentMethod === "cheque" || paymentMethod === "e-cheq";
 
@@ -170,6 +176,7 @@ export function BulkSupplierPaymentDialog({
       orgSlug,
       supplierId,
       totalAmount,
+      currency,
     ],
     queryFn: async () => {
       if (!supplierId || totalAmount <= 0) {
@@ -177,7 +184,7 @@ export function BulkSupplierPaymentDialog({
       }
 
       const response = await fetch(
-        `/api/purchases/bulk-payment-preview?orgSlug=${orgSlug}&supplierId=${supplierId}&totalAmount=${totalAmount}`
+        `/api/purchases/bulk-payment-preview?orgSlug=${orgSlug}&supplierId=${supplierId}&totalAmount=${totalAmount}&currency=${currency}`
       );
 
       if (!response.ok) {
@@ -189,12 +196,35 @@ export function BulkSupplierPaymentDialog({
     enabled: Boolean(supplierId && totalAmount > 0),
   });
 
+  useEffect(() => {
+    if (currency !== "USD" || !open || exchangeRate) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/usd")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data) => {
+        if (!cancelled && data?.venta) {
+          form.setValue("exchangeRate", String(data.venta));
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currency, open, exchangeRate, form]);
+
   const mutation = useMutation({
     mutationFn: async (values: FormValues) => {
       const input = {
         orgSlug,
         supplierId: values.supplierId,
         totalAmount: values.totalAmount,
+        currency: values.currency,
+        exchangeRate:
+          values.currency === "USD" ? Number(values.exchangeRate) : null,
         paymentMethod: values.paymentMethod,
         paymentDate: format(values.paymentDate, "yyyy-MM-dd"),
         referenceNumber: values.referenceNumber,
@@ -371,6 +401,62 @@ export function BulkSupplierPaymentDialog({
                       </p>
                     </div>
                   )}
+
+                <FormField
+                  control={form.control}
+                  name="currency"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Moneda</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="ARS">Pesos (ARS)</SelectItem>
+                          <SelectItem value="USD">Dólares (USD)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        El lote se aplica solo a deudas de esta moneda.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {currency === "USD" && (
+                  <FormField
+                    control={form.control}
+                    name="exchangeRate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tipo de cambio (USD→ARS)</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="Ej. 1240.50"
+                            step="any"
+                            type="number"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {Number(exchangeRate) > 0 && totalAmount > 0
+                            ? `Equivalente en ARS: $${(
+                                totalAmount * Number(exchangeRate)
+                              ).toFixed(2)}`
+                            : "Cotización usada para valuar el pago en ARS."}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 <FormField
                   control={form.control}

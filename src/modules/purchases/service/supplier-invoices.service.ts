@@ -28,6 +28,19 @@ export const createSupplierInvoiceSchema = z
     subtotalAmount: money,
     taxAmount: money,
     totalAmount: money,
+    exchangeRate: z
+      .preprocess(
+        (value) =>
+          value === null || value === undefined || value === ""
+            ? undefined
+            : String(value),
+        z.string().optional()
+      )
+      .transform((value) => (value === undefined ? undefined : Number(value)))
+      .refine(
+        (value) => value === undefined || (Number.isFinite(value) && value > 0),
+        { message: "La cotización debe ser un número mayor a cero." }
+      ),
     notes: z.string().trim().max(2000).nullable(),
   })
   .superRefine((value, ctx) => {
@@ -79,7 +92,7 @@ export async function getSupplierInvoices(
 
   let query = supplierInvoicesTable(supabase)
     .select(
-      "id, organization_id, supplier_id, purchase_order_id, invoice_type, point_of_sale, invoice_number, invoice_date, due_date, subtotal_amount, tax_amount, total_amount, currency, status, invoice_pdf_url, invoice_filename, notes, created_at, created_by, supplier:suppliers(id, name), purchase_order:purchase_orders(id, purchase_number)"
+      "id, organization_id, supplier_id, purchase_order_id, invoice_type, point_of_sale, invoice_number, invoice_date, due_date, subtotal_amount, tax_amount, total_amount, currency, exchange_rate, status, invoice_pdf_url, invoice_filename, notes, created_at, created_by, supplier:suppliers(id, name), purchase_order:purchase_orders(id, purchase_number)"
     )
     .eq("organization_id", org.id)
     .order("invoice_date", { ascending: false })
@@ -125,19 +138,11 @@ export async function createSupplierInvoice(
   }
 
   if (input.purchaseOrderId) {
-    const { data: purchaseOrder } = await supabase
-      .from("purchase_orders")
-      .select("id, supplier_id")
-      .eq("id", input.purchaseOrderId)
-      .eq("organization_id", org.id)
-      .maybeSingle();
-
-    if (!purchaseOrder) {
-      throw new Error("Orden de compra no encontrada");
-    }
-    if (purchaseOrder.supplier_id !== input.supplierId) {
-      throw new Error("La orden de compra corresponde a otro proveedor");
-    }
+    await assertUsdExchangeRateForInvoice(supabase, org.id, {
+      purchaseOrderId: input.purchaseOrderId,
+      supplierId: input.supplierId,
+      exchangeRate: input.exchangeRate,
+    });
   }
 
   const { data, error } = await supplierInvoicesTable(supabase)
@@ -153,6 +158,7 @@ export async function createSupplierInvoice(
       subtotal_amount: truncateMoney(input.subtotalAmount),
       tax_amount: truncateMoney(input.taxAmount),
       total_amount: truncateMoney(input.totalAmount),
+      exchange_rate: input.exchangeRate ?? null,
       notes: input.notes,
       created_by: user.id,
     } as never)
@@ -167,6 +173,38 @@ export async function createSupplierInvoice(
   }
 
   return data as unknown as SupplierInvoice;
+}
+
+async function assertUsdExchangeRateForInvoice(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  input: {
+    purchaseOrderId: string;
+    supplierId: string;
+    exchangeRate?: number;
+  }
+) {
+  const { data: purchaseOrder } = await supabase
+    .from("purchase_orders")
+    .select("id, supplier_id, currency")
+    .eq("id", input.purchaseOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!purchaseOrder) {
+    throw new Error("Orden de compra no encontrada");
+  }
+  if (purchaseOrder.supplier_id !== input.supplierId) {
+    throw new Error("La orden de compra corresponde a otro proveedor");
+  }
+
+  const purchaseOrderCurrency =
+    (purchaseOrder as { currency?: string | null }).currency ?? "ARS";
+  if (purchaseOrderCurrency === "USD" && !input.exchangeRate) {
+    throw new Error(
+      "Debe ingresar el tipo de cambio para una factura en dólares."
+    );
+  }
 }
 
 export async function getPurchasePayableOrigin(params: {

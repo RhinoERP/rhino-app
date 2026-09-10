@@ -44,6 +44,7 @@ function parseInvoiceForm(formData: FormData, orgSlug: string) {
     subtotalAmount: formData.get("subtotalAmount"),
     taxAmount: formData.get("taxAmount"),
     totalAmount: formData.get("totalAmount"),
+    exchangeRate: formData.get("exchangeRate"),
     notes: nullableValue(formData.get("notes")),
   });
 }
