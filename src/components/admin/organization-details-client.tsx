@@ -104,6 +104,9 @@ export function OrganizationDetailsClient({
   const [commissionsEnabled, setCommissionsEnabled] = useState(
     organization.commissions_enabled ?? false
   );
+  const [routeSheetsEnabled, setRouteSheetsEnabled] = useState(
+    organization.route_sheets_enabled ?? false
+  );
 
   const [supplierDiffCredits, setSupplierDiffCredits] = useState(
     organization.supplier_differentiated_credits ?? false
@@ -133,6 +136,7 @@ export function OrganizationDetailsClient({
     setAccountingEnabled(organization.accounting_enabled ?? false);
     setSalesAdvancesEnabled(configuredSalesAdvancesEnabled);
     setCommissionsEnabled(organization.commissions_enabled ?? false);
+    setRouteSheetsEnabled(organization.route_sheets_enabled ?? false);
     setSupplierDiffCredits(
       organization.supplier_differentiated_credits ?? false
     );
@@ -146,6 +150,7 @@ export function OrganizationDetailsClient({
     configuredSalesAdvancesEnabled,
     organization.commissions_enabled,
     configuredRemittanceMaskPrintingEnabled,
+    organization.route_sheets_enabled,
   ]);
 
   const handleToggleStatus = async () => {
@@ -183,6 +188,7 @@ export function OrganizationDetailsClient({
     accountingEnabled !== (organization.accounting_enabled ?? false) ||
     salesAdvancesEnabled !== configuredSalesAdvancesEnabled ||
     commissionsEnabled !== (organization.commissions_enabled ?? false) ||
+    routeSheetsEnabled !== (organization.route_sheets_enabled ?? false) ||
     supplierDiffCredits !==
       (organization.supplier_differentiated_credits ?? false) ||
     remittanceMaskPrintingEnabled !== configuredRemittanceMaskPrintingEnabled;
@@ -201,6 +207,7 @@ export function OrganizationDetailsClient({
           accountingEnabled,
           salesAdvancesEnabled,
           commissionsEnabled,
+          routeSheetsEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
           remittanceMaskPrintingEnabled,
         },
@@ -547,6 +554,21 @@ export function OrganizationDetailsClient({
                   checked={commissionsEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setCommissionsEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Módulo de Hoja de Ruta</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita la hoja de ruta para agrupar y despachar ventas por
+                    transportista y fecha.
+                  </p>
+                </div>
+                <Switch
+                  checked={routeSheetsEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setRouteSheetsEnabled}
                 />
               </div>
 

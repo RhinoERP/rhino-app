@@ -138,6 +138,7 @@ export type DispatchSaleOrderInput = {
   saleId: string;
   remittanceNumber: string;
   carrierId?: string | null;
+  routeSheetId?: string | null;
 };
 
 export type DeliverSaleOrderInput = {
