@@ -359,8 +359,11 @@ function AddSalesDialog({
                   }
                   value={city}
                 >
-                  <SelectTrigger id="rs-filter-city">
-                    <SelectValue placeholder="Todas" />
+                  <SelectTrigger className="w-full min-w-0" id="rs-filter-city">
+                    <SelectValue
+                      className="min-w-0 truncate"
+                      placeholder="Todas"
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__all__">Todas</SelectItem>
@@ -386,8 +389,14 @@ function AddSalesDialog({
                   }
                   value={deliveryCity}
                 >
-                  <SelectTrigger id="rs-filter-delivery-city">
-                    <SelectValue placeholder="Todas" />
+                  <SelectTrigger
+                    className="w-full min-w-0"
+                    id="rs-filter-delivery-city"
+                  >
+                    <SelectValue
+                      className="min-w-0 truncate"
+                      placeholder="Todas"
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__all__">Todas</SelectItem>
@@ -413,8 +422,14 @@ function AddSalesDialog({
                   }
                   value={province}
                 >
-                  <SelectTrigger id="rs-filter-province">
-                    <SelectValue placeholder="Todas" />
+                  <SelectTrigger
+                    className="w-full min-w-0"
+                    id="rs-filter-province"
+                  >
+                    <SelectValue
+                      className="min-w-0 truncate"
+                      placeholder="Todas"
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__all__">Todas</SelectItem>
@@ -440,8 +455,14 @@ function AddSalesDialog({
                   }
                   value={carrierId}
                 >
-                  <SelectTrigger id="rs-filter-carrier">
-                    <SelectValue placeholder="Todos" />
+                  <SelectTrigger
+                    className="w-full min-w-0"
+                    id="rs-filter-carrier"
+                  >
+                    <SelectValue
+                      className="min-w-0 truncate"
+                      placeholder="Todos"
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__all__">Todos</SelectItem>
