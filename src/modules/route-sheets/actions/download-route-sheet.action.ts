@@ -1,6 +1,7 @@
 "use server";
 
 import { generateRouteSheetPdfDocument } from "../server/route-sheet-pdf-document.service";
+import type { RouteSheetPdfOptions } from "../service/route-sheet-pdf.service";
 
 type DownloadRouteSheetResult =
   | {
@@ -15,12 +16,14 @@ type DownloadRouteSheetResult =
 
 export async function downloadRouteSheetAction(
   orgSlug: string,
-  routeSheetId: string
+  routeSheetId: string,
+  options?: RouteSheetPdfOptions
 ): Promise<DownloadRouteSheetResult> {
   try {
     const pdfDoc = await generateRouteSheetPdfDocument({
       orgSlug,
       routeSheetId,
+      options,
     });
 
     return {

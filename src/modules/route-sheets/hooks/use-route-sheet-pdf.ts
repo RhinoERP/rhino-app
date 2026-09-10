@@ -3,15 +3,23 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { downloadRouteSheetAction } from "../actions/download-route-sheet.action";
+import type { RouteSheetPdfOptions } from "../service/route-sheet-pdf.service";
 
 export function useRouteSheetPdf({ orgSlug }: { orgSlug: string }) {
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const downloadRouteSheet = async (routeSheetId: string): Promise<void> => {
+  const downloadRouteSheet = async (
+    routeSheetId: string,
+    options?: RouteSheetPdfOptions
+  ): Promise<void> => {
     setIsDownloading(true);
 
     try {
-      const result = await downloadRouteSheetAction(orgSlug, routeSheetId);
+      const result = await downloadRouteSheetAction(
+        orgSlug,
+        routeSheetId,
+        options
+      );
 
       if (!result.success) {
         throw new Error(result.error ?? "Error al descargar la hoja de ruta");
