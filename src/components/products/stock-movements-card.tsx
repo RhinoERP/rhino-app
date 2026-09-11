@@ -447,6 +447,10 @@ export function StockMovementsCard({
       ? filteredMovements.slice(0, 10)
       : filteredMovements;
 
+  if (!canManageInventory) {
+    return null;
+  }
+
   return (
     <>
       <Card className="overflow-hidden">
