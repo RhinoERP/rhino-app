@@ -743,7 +743,7 @@ export function buildFacturaCompra(
   },
   options: {
     items?: LineaDesglosadaInput[];
-  } = {},
+  } & CurrencyFields = {},
   overrides: {
     referenciaTabla?: "purchase_orders" | "supplier_invoices";
     idempotencyKey?: string;
@@ -775,6 +775,7 @@ export function buildFacturaCompra(
       proveedorId: purchaseOrder.supplier_id,
       facturaNumero,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }
@@ -932,7 +933,7 @@ export function buildFacturaVentaManual(
   options: {
     items?: LineaDesglosadaInput[];
     tipoFactura?: "MANUAL" | "REMITO" | "ANTICIPO";
-  } = {}
+  } & CurrencyFields = {}
 ): EventoFacturaVenta {
   const montoNeto = totals.total - totals.totalTaxAmount;
   const facturaNumero = sale.invoice_number ?? `VTA-${sale.id.slice(0, 8)}`;
@@ -963,6 +964,7 @@ export function buildFacturaVentaManual(
       clienteId: sale.customer_id,
       facturaNumero,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }
@@ -986,7 +988,7 @@ export function buildNcVenta(
   options: {
     items?: LineaDesglosadaInput[];
     totalTaxAmount?: number;
-  } = {}
+  } & CurrencyFields = {}
 ): EventoNcVenta {
   const total = creditNote.amount;
   const saleTotal = linkedSale?.total_amount ?? 0;
@@ -1023,28 +1025,32 @@ export function buildNcVenta(
       clienteId: creditNote.customer_id,
       ventaId: creditNote.sales_order_id ?? undefined,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }
 
-export function buildNdVenta(debitNote: {
-  id: string;
-  organizationId: string;
-  customerId: string;
-  salesOrderId: string;
-  debitNoteNumber: string;
-  issueDate: string;
-  amount: number;
-  items: Array<{
-    netAmount: number;
-    taxAmount: number;
-    taxes: Array<{
-      name: string;
+export function buildNdVenta(
+  debitNote: {
+    id: string;
+    organizationId: string;
+    customerId: string;
+    salesOrderId: string;
+    debitNoteNumber: string;
+    issueDate: string;
+    amount: number;
+    items: Array<{
+      netAmount: number;
       taxAmount: number;
-      taxCodeSnapshot?: string | null;
+      taxes: Array<{
+        name: string;
+        taxAmount: number;
+        taxCodeSnapshot?: string | null;
+      }>;
     }>;
-  }>;
-}): EventoNdVenta {
+  },
+  options: CurrencyFields = {}
+): EventoNdVenta {
   const lineasDesglosadas = buildLineasDesglosadas(
     debitNote.items.map((item) => ({
       accountCode: null,
@@ -1084,6 +1090,7 @@ export function buildNdVenta(debitNote: {
       clienteId: debitNote.customerId,
       ventaId: debitNote.salesOrderId,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }

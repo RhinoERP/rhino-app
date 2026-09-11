@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const orgSlug = searchParams.get("orgSlug");
     const supplierId = searchParams.get("supplierId");
     const totalAmountStr = searchParams.get("totalAmount");
+    const currency = searchParams.get("currency") ?? "ARS";
 
     if (!(orgSlug && supplierId && totalAmountStr)) {
       return NextResponse.json(
@@ -27,7 +28,8 @@ export async function GET(request: NextRequest) {
     const distributions = await calculateBulkSupplierPaymentDistribution(
       orgSlug,
       supplierId,
-      totalAmount
+      totalAmount,
+      currency
     );
 
     return NextResponse.json(distributions);

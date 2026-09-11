@@ -1943,7 +1943,12 @@ export function SaleDetail({
         invoice_number: invoiceNumber || null,
       },
       { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
-      { items: buildSaleAccountingItems(items, totals.taxPlan) }
+      {
+        items: buildSaleAccountingItems(items, totals.taxPlan),
+        moneda: sale.currency === "USD" ? "USD" : "ARS",
+        tipoCambio: sale.exchange_rate,
+        montoUSD: sale.currency === "USD" ? totals.total : undefined,
+      }
     );
 
     if (automaticAccountingEnabled) {

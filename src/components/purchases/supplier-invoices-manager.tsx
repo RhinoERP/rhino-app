@@ -1,7 +1,7 @@
 "use client";
 
 import { FilePdfIcon, PlusIcon } from "@phosphor-icons/react";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
@@ -185,6 +185,7 @@ function SupplierInvoiceDialog({
   const [purchaseOrderId, setPurchaseOrderId] = useState("");
   const [subtotalAmount, setSubtotalAmount] = useState("0");
   const [taxAmount, setTaxAmount] = useState("0");
+  const [exchangeRate, setExchangeRate] = useState("");
   const [isPending, startTransition] = useTransition();
   const [accountingPayload, setAccountingPayload] =
     useState<EventoFacturaCompra | null>(null);
@@ -212,6 +213,46 @@ function SupplierInvoiceDialog({
     [subtotalAmount, taxAmount]
   );
 
+  const selectedPurchaseOrderCurrency = useMemo(
+    () =>
+      purchaseOrders.find(
+        (purchaseOrder) => purchaseOrder.id === purchaseOrderId
+      )?.currency ?? "ARS",
+    [purchaseOrders, purchaseOrderId]
+  );
+  const isUsdPurchaseOrder = selectedPurchaseOrderCurrency === "USD";
+
+  const equivalenteARS = useMemo(() => {
+    const parsedRate = Number(exchangeRate);
+    if (!isUsdPurchaseOrder) {
+      return null;
+    }
+    if (!Number.isFinite(parsedRate) || parsedRate <= 0) {
+      return null;
+    }
+    return ((Number.parseFloat(totalAmount) || 0) * parsedRate).toFixed(2);
+  }, [exchangeRate, isUsdPurchaseOrder, totalAmount]);
+
+  useEffect(() => {
+    if (!(isUsdPurchaseOrder && open) || exchangeRate) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/usd")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data) => {
+        if (!cancelled && data?.venta) {
+          setExchangeRate(String(data.venta));
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isUsdPurchaseOrder, open, exchangeRate]);
+
   function selectPurchaseOrder(value: string) {
     setPurchaseOrderId(value);
     const purchaseOrder = purchaseOrders.find((item) => item.id === value);
@@ -225,6 +266,7 @@ function SupplierInvoiceDialog({
     setPurchaseOrderId("");
     setSubtotalAmount("0");
     setTaxAmount("0");
+    setExchangeRate("");
   }
 
   async function tryAutoAccounting(
@@ -272,7 +314,11 @@ function SupplierInvoiceDialog({
           .join("-"),
         taxes: null,
       },
-      {},
+      {
+        moneda: invoice.currency === "USD" ? "USD" : "ARS",
+        tipoCambio: invoice.exchange_rate,
+        montoUSD: invoice.currency === "USD" ? invoice.total_amount : undefined,
+      },
       {
         referenciaTabla: "supplier_invoices",
         idempotencyKey: `FACTURA_COMPRA_SI_${invoice.id}`,
@@ -346,7 +392,11 @@ function SupplierInvoiceDialog({
                         4,
                         "0"
                       )}{" "}
-                      · {formatCurrency(purchaseOrder.total_amount)}
+                      ·{" "}
+                      {formatCurrency(
+                        purchaseOrder.total_amount,
+                        purchaseOrder.currency
+                      )}
                     </option>
                   ))}
                 </select>
@@ -459,6 +509,27 @@ function SupplierInvoiceDialog({
                 <Input disabled id="totalPreview" value={totalAmount} />
               </div>
             </div>
+
+            {isUsdPurchaseOrder && (
+              <div className="space-y-2">
+                <Label htmlFor="exchangeRate">Tipo de cambio (USD→ARS)</Label>
+                <Input
+                  id="exchangeRate"
+                  name="exchangeRate"
+                  onChange={(event) => setExchangeRate(event.target.value)}
+                  placeholder="Ej. 1240.50"
+                  required
+                  step="any"
+                  type="number"
+                  value={exchangeRate}
+                />
+                {equivalenteARS && (
+                  <p className="text-muted-foreground text-xs">
+                    Equivalente en ARS: {formatCurrency(Number(equivalenteARS))}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="file">Comprobante PDF</Label>

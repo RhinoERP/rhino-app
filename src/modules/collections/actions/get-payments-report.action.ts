@@ -15,6 +15,8 @@ export type PaymentReportEntry = {
   invoiceNumber: string | null;
   remittanceNumber: string | null;
   amount: number;
+  currency: string;
+  amountArs: number;
 };
 
 type GetPaymentsReportInput = {
@@ -27,6 +29,8 @@ type GetPaymentsReportInput = {
 type RawPayment = {
   id: string;
   amount: number;
+  currency: string;
+  amount_ars: number | null;
   payment_method: string;
   payment_date: string;
   reference_number: string | null;
@@ -161,6 +165,8 @@ function buildEntries(
       invoiceNumber: sale?.invoice_number ?? null,
       remittanceNumber: sale?.remittance_number ?? null,
       amount: truncateMoney(Number(p.amount)),
+      currency: p.currency ?? "ARS",
+      amountArs: truncateMoney(Number(p.amount_ars ?? p.amount)),
     };
   });
 }
@@ -186,7 +192,7 @@ export async function getPaymentsReportAction({
     let query = supabase
       .from("receivable_payments")
       .select(
-        "id, amount, payment_method, payment_date, reference_number, notes, account_receivable:accounts_receivable!inner(sales_order_id, customer_id)"
+        "id, amount, currency, amount_ars, payment_method, payment_date, reference_number, notes, account_receivable:accounts_receivable!inner(sales_order_id, customer_id)"
       )
       .eq("organization_id", org.id)
       .order("payment_date", { ascending: false });
