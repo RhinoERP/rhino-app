@@ -15,6 +15,8 @@ type SaleForCommission = {
   user_id: string;
   sales_price_list_id: string | null;
   price_level_id: string | null;
+  sub_total: number | null;
+  total_amount: number;
 };
 
 type CommissionInsertRow = {
@@ -79,6 +81,17 @@ async function fetchCommissionRates(
   return { baseRateMap, extraRateMap };
 }
 
+function computeProratedBase(
+  paymentAmount: number,
+  subTotal: number | null,
+  totalAmount: number | null
+): number {
+  if (!(subTotal && totalAmount) || subTotal <= 0 || totalAmount <= 0) {
+    return paymentAmount;
+  }
+  return (paymentAmount * subTotal) / totalAmount;
+}
+
 function buildCommissionRows(params: {
   orgId: string;
   insertedPayments: InsertedPayment[];
@@ -128,7 +141,12 @@ function buildCommissionRows(params: {
       continue;
     }
 
-    const commissionAmount = truncateMoney((payment.amount * rate) / 100);
+    const proratedBase = computeProratedBase(
+      payment.amount,
+      sale.sub_total,
+      sale.total_amount
+    );
+    const commissionAmount = truncateMoney((proratedBase * rate) / 100);
 
     result.push({
       organization_id: orgId,
@@ -224,7 +242,9 @@ export async function generateCommissions(
 
   const { data: sales } = (await supabase
     .from("sales_orders")
-    .select("id, user_id, sales_price_list_id, price_level_id")
+    .select(
+      "id, user_id, sales_price_list_id, price_level_id, sub_total, total_amount"
+    )
     .in("id", saleIds)
     .eq("organization_id", orgId)) as {
     data: SaleForCommission[] | null;
