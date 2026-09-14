@@ -18,6 +18,9 @@ export type QuotePDFData = {
   };
   items: (QuoteItemRow & {
     product_name?: string;
+    products?: {
+      brand: string | null;
+    } | null;
     quote_item_extras?: QuoteItemExtraRow[];
   })[];
   taxes: QuoteTaxRow[];
@@ -158,7 +161,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
       return `
     <tr>
       <td class="c-qty">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
-      <td class="c-desc">${displayValue(item.description ?? item.product_name)}${extrasHTML}</td>
+      <td class="c-desc">${displayValue(item.description ?? item.product_name)}${item.products?.brand ? ` <span class="brand">${displayValue(item.products.brand)}</span>` : ""}${extrasHTML}</td>
       <td class="c-right c-price">${formatCurrency(item.unit_price, currency)}</td>
       ${item.discount_percentage ? `<td class="c-right c-discount">${item.discount_percentage.toFixed(1)}%</td>` : ""}
       <td class="c-right c-bold c-amount">${formatCurrency(net, currency)}</td>
@@ -306,6 +309,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   .c-right { text-align: right; }
   .c-center { text-align: center; }
   .c-bold { font-weight: 700; }
+  .brand { font-size: 7.5px; color: var(--muted); margin-left: 2px; }
 
   /* ITEM EXTRAS */
   .item-extras {
