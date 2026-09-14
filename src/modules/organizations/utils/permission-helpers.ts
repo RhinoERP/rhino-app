@@ -213,6 +213,7 @@ function humanizeResource(resource: string): string {
     commissions: "Comisiones",
     accounting: "Contabilidad",
     quotes: "Presupuestos",
+    distributor: "Distribuidores",
   };
 
   return map[resource] ?? resource;
@@ -285,6 +286,7 @@ function humanizeAction(
       "inventory.view_supplier": "Ver columna Proveedor (Inventario)",
       "pricing.view_cost": "Ver columna Costo (Precios)",
       "pricing.view_margin": "Ver columna Margen (Precios)",
+      "distributor.catalog": "Ver catálogo",
     };
 
     if (specialLabels[key]) {

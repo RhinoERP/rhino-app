@@ -139,12 +139,14 @@ type PayableWithRelations = PayableRow & {
         purchase_number?: number | null;
         purchase_date?: string | null;
         total_amount?: number | null;
+        payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
         items?: PurchaseItemRaw[] | null;
       }
     | Array<{
         purchase_number?: number | null;
         purchase_date?: string | null;
         total_amount?: number | null;
+        payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
         items?: PurchaseItemRaw[] | null;
       }>
     | null;
@@ -306,12 +308,11 @@ async function fetchLastPayablePaymentDates(
 
 function getPayableDiscrepancy(params: {
   total: number;
-  pending: number;
   purchaseTotal: number | null;
 }): { hasDiscrepancy: boolean; discrepancyAmount?: number } {
-  const { total, pending, purchaseTotal } = params;
+  const { total, purchaseTotal } = params;
 
-  if (purchaseTotal === null || purchaseTotal <= 0 || pending <= 0) {
+  if (purchaseTotal === null || purchaseTotal <= 0) {
     return { hasDiscrepancy: false };
   }
 
@@ -345,7 +346,6 @@ function mapPayableAccount(
     : null;
   const discrepancy = getPayableDiscrepancy({
     total,
-    pending,
     purchaseTotal,
   });
 
@@ -363,6 +363,7 @@ function mapPayableAccount(
     last_payment_date: lastPaymentDate,
     supplier: normalizeSupplier(row),
     purchase,
+    payableOrigin: purchase?.payable_origin ?? "PURCHASE_NOTE",
     items: normalizePurchaseItems(row),
     type: "payable",
     hasDiscrepancy: discrepancy.hasDiscrepancy,
@@ -685,12 +686,9 @@ type SellerInfo = { id: string; name?: string | null; email?: string | null };
 
 async function buildSellersByUserId(
   orgSlug: string,
-  accessContext: CollectionsAccessContext
+  _accessContext: CollectionsAccessContext
 ): Promise<Map<string, SellerInfo>> {
   const map = new Map<string, SellerInfo>();
-  if (accessContext.scope !== "all") {
-    return map;
-  }
   try {
     const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
     for (const member of members) {
@@ -1161,7 +1159,8 @@ const PAYABLES_SELECT = `
   purchase:purchase_orders(
     purchase_number,
     purchase_date,
-    total_amount
+    total_amount,
+    payable_origin
   )
 `;
 

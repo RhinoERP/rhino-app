@@ -56,6 +56,8 @@ type LoadedDebitNote = {
   amount: number;
   invoiceType: InvoiceType;
   issueDate: string;
+  currency?: string;
+  exchangeRate?: number | null;
   status: "draft" | "pending" | "verifying" | "authorized" | "error";
   arcaCae: string | null;
   arcaCaeExpiresAt: string | null;
@@ -203,7 +205,7 @@ async function loadContext(orgSlug: string, debitNoteId: string) {
   const { data: rawSale, error: saleError } = await client
     .from("sales_orders")
     .select(`
-    id, status, sale_date, invoice_type, total_amount, arca_status, arca_cae, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_request_json,
+    id, status, sale_date, invoice_type, total_amount, currency, exchange_rate, arca_status, arca_cae, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_request_json,
     customer:customers(cuit, tax_condition), taxes:sales_order_taxes(id, tax_id, name, rate, base_amount, tax_amount, tax_code_snapshot, tax:taxes(code))
   `)
     .eq("organization_id", organization.id)
@@ -245,6 +247,8 @@ async function loadContext(orgSlug: string, debitNoteId: string) {
     },
     taxes: ((rawSale.taxes ?? []) as Record<string, unknown>[]).map(mapTax),
   };
+  note.currency = rawSale.currency ?? "ARS";
+  note.exchangeRate = rawSale.exchange_rate ?? null;
   return { organization, client, note, sale };
 }
 
@@ -279,16 +283,26 @@ async function persistDebitNoteAccounting(params: {
       return null;
     }
 
-    const event = buildNdVenta({
-      id: params.note.id,
-      organizationId: params.note.organizationId,
-      customerId: params.note.customerId,
-      salesOrderId: params.note.salesOrderId,
-      debitNoteNumber: params.note.debitNoteNumber,
-      issueDate: params.note.issueDate,
-      amount: params.note.amount,
-      items: params.note.items,
-    });
+    const event = buildNdVenta(
+      {
+        id: params.note.id,
+        organizationId: params.note.organizationId,
+        customerId: params.note.customerId,
+        salesOrderId: params.note.salesOrderId,
+        debitNoteNumber: params.note.debitNoteNumber,
+        issueDate: params.note.issueDate,
+        amount: params.note.amount,
+        items: params.note.items,
+      },
+      {
+        moneda: (params.note.currency ?? "ARS") === "USD" ? "USD" : "ARS",
+        tipoCambio: params.note.exchangeRate,
+        montoUSD:
+          (params.note.currency ?? "ARS") === "USD"
+            ? params.note.amount
+            : undefined,
+      }
+    );
     const settings = await getOrgSettings(params.orgSlug);
 
     if (settings.automatic_accounting_enabled) {

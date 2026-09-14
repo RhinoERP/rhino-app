@@ -35,6 +35,8 @@ const FIXED_KEYS = [
   "paymentDate",
   "invoiceNumber",
   "amount",
+  "currency",
+  "amountArs",
   "sellerName",
   "supplierName",
 ] as const;
@@ -45,11 +47,14 @@ const FIXED_HEADERS = [
   "Fecha",
   "N° Comprobante",
   "Importe",
+  "Moneda",
+  "Equivalente ARS",
   "Vendedor",
   "Proveedor",
 ];
 
 const MONTO_IDX = 4;
+const EQUIVALENTE_IDX = 6;
 
 function formatComprobante(entry: PaymentReportEntry): string {
   if (entry.invoiceNumber) {
@@ -67,6 +72,10 @@ function getCellValue(entry: PaymentReportEntry, key: string): string | number {
       return formatDateOnly(entry.paymentDate);
     case "amount":
       return entry.amount;
+    case "currency":
+      return entry.currency;
+    case "amountArs":
+      return entry.amountArs;
     case "sellerName":
       return entry.sellerName ?? "—";
     case "customerName":
@@ -117,10 +126,12 @@ async function downloadFile(
   ws["!cols"] = wscols;
 
   for (let r = 1; r <= rows.length; r++) {
-    const addr = String.fromCharCode(65 + MONTO_IDX) + (r + 1);
-    const cell = ws[addr];
-    if (cell && typeof (cell as Record<string, unknown>).v === "number") {
-      (cell as Record<string, unknown>).z = "#,##0.00";
+    for (const colIdx of [MONTO_IDX, EQUIVALENTE_IDX]) {
+      const addr = String.fromCharCode(65 + colIdx) + (r + 1);
+      const cell = ws[addr];
+      if (cell && typeof (cell as Record<string, unknown>).v === "number") {
+        (cell as Record<string, unknown>).z = "#,##0.00";
+      }
     }
   }
 

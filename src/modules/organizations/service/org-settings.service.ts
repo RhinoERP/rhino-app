@@ -23,6 +23,7 @@ export const OrgSettingsSchema = z.object({
   due_days_default: z.number().int().min(1).default(30),
   configurable_price_lists_enabled: z.boolean().default(false),
   initial_balances_enabled: z.boolean().default(false),
+  allow_preventa_arca_invoicing: z.boolean().default(false),
   sales_default_tax_ids: z.array(z.string().uuid()).default([]),
   sales_enabled_payment_methods: z
     .array(
@@ -58,6 +59,7 @@ export const OrgSettingsSchema = z.object({
       "FACTURA_E",
     ])
     .default("NOTA_DE_VENTA"),
+  distributor_catalog_margin: z.number().min(0).max(100).default(30),
 });
 
 export type OrgSettings = z.infer<typeof OrgSettingsSchema>;

@@ -10,6 +10,7 @@ import {
   CaretRightIcon,
   PackageIcon,
   ShoppingCartIcon,
+  TrendUpIcon,
   UsersThreeIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
@@ -68,6 +69,45 @@ export function ControlTowerTab({
 
   return (
     <div className="space-y-6">
+      {/* Ventas del período — separado por moneda (ARS + USD) */}
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+            <TrendUpIcon
+              className="h-4 w-4 text-muted-foreground"
+              weight="duotone"
+            />
+          </div>
+          <CardTitle className="font-medium text-sm">
+            Ventas del Período
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="mt-6 flex flex-wrap items-end gap-x-8 gap-y-2">
+            <div>
+              <div className="font-bold text-2xl tabular-nums">
+                {formatCurrency(data.kpis.sales.totalAmount)}
+              </div>
+              <p className="text-muted-foreground text-xs">en pesos (ARS)</p>
+            </div>
+            <div>
+              <div className="font-bold text-2xl tabular-nums">
+                {formatCurrency(data.kpis.sales.totalAmountUSD, "USD")}
+              </div>
+              <p className="text-muted-foreground text-xs">en dólares (USD)</p>
+            </div>
+            <div>
+              <div className="font-bold text-2xl tabular-nums">
+                {data.kpis.sales.totalOrders}
+              </div>
+              <p className="text-muted-foreground text-xs">
+                pedidos en el período
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* KPI Cards Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {/* Orders Delivered */}
@@ -157,6 +197,12 @@ export function ControlTowerTab({
               {data.kpis.purchases.pending}
             </div>
             <p className="text-muted-foreground text-xs">órdenes abiertas</p>
+            {data.kpis.purchases.pendingUSD_AMOUNT > 0 && (
+              <p className="text-muted-foreground text-xs">
+                {formatCurrency(data.kpis.purchases.pendingUSD_AMOUNT, "USD")}{" "}
+                en USD
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

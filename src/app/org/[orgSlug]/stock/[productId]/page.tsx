@@ -18,6 +18,7 @@ import {
   getProductDetail,
   getProductLots,
   getProductTaxIds,
+  getProductVariantsByProductId,
   getStockMovementsForProduct,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
@@ -101,6 +102,9 @@ export default async function ProductDetailsPage({
     salePrice,
   } = productDetail;
   const resolvedSalePrice = salePrice ?? product.sale_price ?? null;
+  const variants = product.has_variants
+    ? await getProductVariantsByProductId(orgSlug, productId)
+    : [];
   const { tracksUnits, stockLabel, associatedUnits } = getStockDisplayInfo(
     product.unit_of_measure,
     product.tracks_stock_units,
@@ -191,6 +195,7 @@ export default async function ProductDetailsPage({
               orgSlug={orgSlug}
               product={product}
               productId={productId}
+              variants={variants}
             />
           </div>
 

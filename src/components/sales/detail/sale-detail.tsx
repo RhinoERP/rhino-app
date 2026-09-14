@@ -104,6 +104,7 @@ import {
   INVOICE_TYPE_OPTIONS,
   isArcaSupportedInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
+import { canIssueArcaInvoiceForPreventa } from "@/modules/sales/preventa-invoicing";
 import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type {
@@ -235,6 +236,7 @@ type SaleDetailProps = {
   salesAdvancesEnabled: boolean;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
+  isProductionEnabled: boolean;
 };
 
 type SellerOption = Pick<OrganizationMember, "user_id" | "user">;
@@ -842,6 +844,7 @@ export function SaleDetail({
   salesAdvancesEnabled,
   saleReturns,
   creditNotes,
+  isProductionEnabled,
 }: SaleDetailProps) {
   const router = useRouter();
   const [accountingPayload, setAccountingPayload] =
@@ -881,6 +884,7 @@ export function SaleDetail({
   );
   const hasOrderLevelRemitos = (dispatchProgress?.events.length ?? 0) > 0;
   const isOrderFlowWithRemitos = Boolean(relatedOrder) && hasOrderLevelRemitos;
+  const isProductionLocked = isProductionEnabled;
   const canEditSale =
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale);
@@ -972,6 +976,8 @@ export function SaleDetail({
   const automaticAccountingEnabled =
     orgSettings?.automatic_accounting_enabled ?? false;
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
+  const allowPreventaArcaInvoicing =
+    orgSettings?.allow_preventa_arca_invoicing ?? false;
   const invoiceEmailDraft = useMemo(() => {
     const invoiceReference = getSaleInvoiceReference(sale);
     const templateValues = {
@@ -1304,7 +1310,11 @@ export function SaleDetail({
     ? buildSellerLabel(selectedSeller)
     : sale.seller?.name || sale.seller?.email || "Selecciona un vendedor";
   const canShowArcaCard =
-    isConfirmedSale || isDispatchedSale || isDeliveredSale || isArcaAuthorized;
+    isConfirmedSale ||
+    isDispatchedSale ||
+    isDeliveredSale ||
+    isArcaAuthorized ||
+    canIssueArcaInvoiceForPreventa(sale.status, allowPreventaArcaInvoicing);
   const hasCustomerCuit = Boolean(sale.customer.cuit?.trim());
   const hasCustomerTaxCondition = Boolean(sale.customer.tax_condition?.trim());
   const hasManualInvoiceNumber =
@@ -1781,6 +1791,9 @@ export function SaleDetail({
   }, [isSavingDraft]);
 
   const confirmButtonTitle = useMemo(() => {
+    if (isProductionLocked) {
+      return "El estado de la venta se actualiza automáticamente según el pedido.";
+    }
     if (relatedOrder) {
       return "Esta venta pertenece a un pedido. Continúa desde el flujo de pedidos.";
     }
@@ -1789,7 +1802,7 @@ export function SaleDetail({
     }
     // biome-ignore lint/nursery/noUselessUndefined: undefined omits the title attribute intentionally
     return undefined;
-  }, [relatedOrder, isDraftSale]);
+  }, [isProductionLocked, relatedOrder, isDraftSale]);
 
   const toggleEditingDetails = async () => {
     if (!canManageSale) {
@@ -1884,6 +1897,13 @@ export function SaleDetail({
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates permissions, accounting preview/auto-confirm, and sale confirmation in a single handler
   const handleConfirm = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -1923,7 +1943,12 @@ export function SaleDetail({
         invoice_number: invoiceNumber || null,
       },
       { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
-      { items: buildSaleAccountingItems(items, totals.taxPlan) }
+      {
+        items: buildSaleAccountingItems(items, totals.taxPlan),
+        moneda: sale.currency === "USD" ? "USD" : "ARS",
+        tipoCambio: sale.exchange_rate,
+        montoUSD: sale.currency === "USD" ? totals.total : undefined,
+      }
     );
 
     if (automaticAccountingEnabled) {
@@ -1981,6 +2006,13 @@ export function SaleDetail({
   };
 
   const handleDispatch = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -2019,6 +2051,13 @@ export function SaleDetail({
   };
 
   const handleDeliver = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -2299,9 +2338,14 @@ export function SaleDetail({
           ) : null}
           {canManageSale && isDispatchedSale && !relatedOrder ? (
             <Button
-              disabled={isDeliverMutationPending}
+              disabled={isDeliverMutationPending || isProductionLocked}
               onClick={handleDeliver}
               size="sm"
+              title={
+                isProductionLocked
+                  ? "El estado de la venta se actualiza automáticamente según el pedido."
+                  : undefined
+              }
               type="button"
               variant="outline"
             >
@@ -2312,9 +2356,14 @@ export function SaleDetail({
           ) : null}
           {canManageSale && isConfirmedSale && !relatedOrder ? (
             <Button
-              disabled={isDispatching}
+              disabled={isDispatching || isProductionLocked}
               onClick={() => setIsDispatchDialogOpen(true)}
               size="sm"
+              title={
+                isProductionLocked
+                  ? "El estado de la venta se actualiza automáticamente según el pedido."
+                  : undefined
+              }
               type="button"
             >
               <Truck className="mr-2 h-4 w-4" />
@@ -3953,7 +4002,7 @@ export function SaleDetail({
                 {canManageSale ? (
                   <Button
                     className="w-full justify-between"
-                    disabled={!canConfirm || isSaving}
+                    disabled={!canConfirm || isSaving || isProductionLocked}
                     onClick={handleConfirm}
                     title={confirmButtonTitle}
                     type="button"

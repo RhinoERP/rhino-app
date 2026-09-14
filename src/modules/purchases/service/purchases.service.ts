@@ -3,12 +3,14 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
+import { resolvePaymentCurrencyFields } from "@/modules/collections/utils/payment-currency";
 import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   buildItemizedTaxPlan,
   type TaxableItemLine,
+  toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
@@ -53,8 +55,13 @@ async function resolveAccessContext(
   };
 }
 
+export type PurchasePayableOrigin = "PURCHASE_NOTE" | "SUPPLIER_INVOICE";
+
 export type PurchaseOrder =
-  Database["public"]["Tables"]["purchase_orders"]["Row"];
+  Database["public"]["Tables"]["purchase_orders"]["Row"] & {
+    /** Added by the purchase-payable-origin migration. */
+    payable_origin?: PurchasePayableOrigin | null;
+  };
 export type PurchaseOrderItem =
   Database["public"]["Tables"]["purchase_order_items"]["Row"];
 export type ProductWithPrice =
@@ -116,6 +123,16 @@ function calculateGlobalDiscount(subtotalAmount: number, discountPercent = 0) {
   };
 }
 
+type PurchaseTaxInput = Array<{
+  taxId: string;
+  name: string;
+  rate: number;
+}>;
+
+function resolvePurchaseFallbackTaxes(taxes?: PurchaseTaxInput) {
+  return taxes && taxes.length > 0 ? toFallbackItemTaxes(taxes) : undefined;
+}
+
 async function syncAccountsPayable(params: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgId: string;
@@ -128,11 +145,22 @@ async function syncAccountsPayable(params: {
     params;
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
-  const { data: purchaseOrderRow } = await supabase
+  const { data: purchaseOrderData } = await supabase
     .from("purchase_orders")
-    .select("currency")
+    .select("currency, payable_origin")
     .eq("id", purchaseOrderId)
     .maybeSingle();
+  const purchaseOrderRow = purchaseOrderData as {
+    currency?: string | null;
+    payable_origin?: PurchasePayableOrigin | null;
+  } | null;
+
+  // Once a supplier invoice exists, it is the sole authority for the debt.
+  // OC edits must keep affecting stock and pricing, never its payable balance.
+  if (purchaseOrderRow?.payable_origin === "SUPPLIER_INVOICE") {
+    return;
+  }
+
   const currency = purchaseOrderRow?.currency ?? "ARS";
 
   const { data: existingData, error: fetchError } = await supabase
@@ -296,6 +324,7 @@ export type CreatePurchaseOrderInput = {
   expiration_date?: string;
   remittance_number?: string;
   currency?: string;
+  payable_origin?: PurchasePayableOrigin;
   items: {
     product_id: string;
     quantity: number;
@@ -305,6 +334,7 @@ export type CreatePurchaseOrderInput = {
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>>;
   }[];
+  taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
 };
 
@@ -542,9 +572,12 @@ export async function createPurchaseOrder(
     };
   });
 
+  const fallbackTaxes = resolvePurchaseFallbackTaxes(input.taxes);
+
   const taxPlan = buildItemizedTaxPlan({
     lines: taxLines,
     globalDiscountAmount: global_discount_amount,
+    fallbackTaxes,
   });
 
   const total_tax_amount = taxPlan.totalTaxAmount;
@@ -582,7 +615,8 @@ export async function createPurchaseOrder(
       global_discount_amount,
       total_amount,
       status: "ORDERED",
-    })
+      payable_origin: input.payable_origin ?? "PURCHASE_NOTE",
+    } as never)
     .select("*")
     .single();
 
@@ -901,14 +935,14 @@ export async function confirmDraftPurchaseOrder(params: {
 
   await updateDraftItemPrices(supabase, updatedItems, org.id);
 
-  if (params.expirationDate) {
+  if ((purchaseOrder as PurchaseOrder).payable_origin !== "SUPPLIER_INVOICE") {
     await syncAccountsPayable({
       supabase,
       orgId: org.id,
       supplierId: params.supplierId,
       purchaseOrderId: params.purchaseOrderId,
       totalAmount,
-      dueDate: params.expirationDate,
+      dueDate: params.expirationDate ?? purchaseOrder.purchase_date,
     });
   }
 
@@ -2054,6 +2088,7 @@ export type UpdatePurchaseOrderInput = {
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
   }[];
+  taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
 };
 
@@ -2274,9 +2309,12 @@ export async function updatePurchaseOrder(
       input.global_discount_percentage ?? 0
     );
 
+    const updateFallbackTaxes = resolvePurchaseFallbackTaxes(input.taxes);
+
     const taxPlan = buildItemizedTaxPlan({
       lines: taxLines,
       globalDiscountAmount: global_discount_amount,
+      fallbackTaxes: updateFallbackTaxes,
     });
 
     calculateAndAddTotals(
@@ -2571,6 +2609,8 @@ function insertBulkSupplierPayments(
     paymentDateValue: string;
     sanitizedReference: string | null;
     sanitizedNotes: string | null;
+    currency: string;
+    exchangeRate?: number | null;
   }
 ) {
   const {
@@ -2580,21 +2620,30 @@ function insertBulkSupplierPayments(
     paymentDateValue,
     sanitizedReference,
     sanitizedNotes,
+    currency,
+    exchangeRate,
   } = params;
 
   return supabase.from("payable_payments").insert(
-    paymentsToInsert.map((p) => ({
-      organization_id: orgId,
-      account_payable_id: p.account_payable_id,
-      amount: truncateMoney(p.amount),
-      currency: "ARS",
-      exchange_rate: null,
-      amount_ars: truncateMoney(p.amount),
-      payment_method: paymentMethodValue,
-      payment_date: paymentDateValue,
-      reference_number: sanitizedReference,
-      notes: sanitizedNotes,
-    }))
+    paymentsToInsert.map((p) => {
+      const currencyFields = resolvePaymentCurrencyFields(
+        currency,
+        p.amount,
+        exchangeRate
+      );
+      return {
+        organization_id: orgId,
+        account_payable_id: p.account_payable_id,
+        amount: truncateMoney(p.amount),
+        currency: currencyFields.currency,
+        exchange_rate: currencyFields.exchangeRate,
+        amount_ars: currencyFields.amountArs,
+        payment_method: paymentMethodValue,
+        payment_date: paymentDateValue,
+        reference_number: sanitizedReference,
+        notes: sanitizedNotes,
+      };
+    })
   );
 }
 
@@ -2670,6 +2719,8 @@ export async function processBulkSupplierPayment(input: {
   paymentDate?: string;
   referenceNumber?: string;
   notes?: string;
+  currency?: string;
+  exchangeRate?: number | null;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -2677,7 +2728,7 @@ export async function processBulkSupplierPayment(input: {
   appliedAmount?: number;
   creditBalance?: number;
   affectedAccounts?: number;
-  excludedUsdCount?: number;
+  excludedCount?: number;
   distributions?: Array<{
     accountId: string;
     purchaseNumber: number | null;
@@ -2697,7 +2748,25 @@ export async function processBulkSupplierPayment(input: {
     paymentDate,
     referenceNumber,
     notes,
+    currency,
+    exchangeRate,
   } = input;
+
+  const batchCurrency = (currency ?? "ARS").toUpperCase();
+  if (batchCurrency !== "ARS" && batchCurrency !== "USD") {
+    return {
+      success: false,
+      error: "Moneda no soportada",
+      code: "invalid_currency",
+    };
+  }
+  if (batchCurrency === "USD" && !(exchangeRate && Number(exchangeRate) > 0)) {
+    return {
+      success: false,
+      error: "Debe ingresar el tipo de cambio para pagos en dólares.",
+      code: "exchange_rate_required",
+    };
+  }
 
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
@@ -2753,28 +2822,33 @@ export async function processBulkSupplierPayment(input: {
     };
   }
 
-  const arsAccounts = pendingAccounts.filter(
-    (account) => (account.currency ?? "ARS") === "ARS"
+  const batchAccounts = pendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === batchCurrency
   );
-  const excludedUsdCount = pendingAccounts.length - arsAccounts.length;
+  const excludedCount = pendingAccounts.length - batchAccounts.length;
 
-  if (arsAccounts.length === 0) {
+  if (batchAccounts.length === 0) {
     return {
       success: false,
       error:
-        "Este proveedor tiene deudas solo en USD. Usá el pago individual para esas órdenes de compra.",
-      code: "usd_only",
+        batchCurrency === "USD"
+          ? "Este proveedor no tiene deudas en dólares pendientes para este lote."
+          : "Este proveedor tiene deudas solo en USD. Elegí la moneda USD para ese lote.",
+      code: "no_accounts_in_currency",
     };
   }
 
-  // Calculate distribution (FIFO) solo sobre cuentas ARS
+  // Calculate distribution (FIFO) solo sobre cuentas de la moneda del lote
   const {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateSupplierPaymentDistributions(arsAccounts, normalizedTotalAmount);
+  } = calculateSupplierPaymentDistributions(
+    batchAccounts,
+    normalizedTotalAmount
+  );
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -2802,6 +2876,8 @@ export async function processBulkSupplierPayment(input: {
     paymentDateValue,
     sanitizedReference,
     sanitizedNotes,
+    currency: batchCurrency,
+    exchangeRate,
   });
 
   if (paymentsError) {
@@ -2840,6 +2916,7 @@ export async function processBulkSupplierPayment(input: {
       supplierId,
       creditBalance,
       notes: sanitizedNotes,
+      currency: batchCurrency,
     });
   }
 
@@ -2849,7 +2926,7 @@ export async function processBulkSupplierPayment(input: {
     creditBalance,
     affectedAccounts: distributions.length,
     distributions,
-    excludedUsdCount: excludedUsdCount > 0 ? excludedUsdCount : undefined,
+    excludedCount: excludedCount > 0 ? excludedCount : undefined,
   };
 }
 
@@ -2859,8 +2936,10 @@ async function saveSupplierCredit(options: {
   supplierId: string;
   creditBalance: number;
   notes: string | null;
+  currency?: string;
 }) {
-  const { supabase, orgId, supplierId, creditBalance, notes } = options;
+  const { supabase, orgId, supplierId, creditBalance, notes, currency } =
+    options;
 
   const creditNotes = notes
     ? `Crédito generado por pago masivo. ${notes}`
@@ -2871,7 +2950,7 @@ async function saveSupplierCredit(options: {
     supplier_id: supplierId,
     amount: truncateMoney(creditBalance),
     remaining_amount: truncateMoney(creditBalance),
-    currency: "ARS",
+    currency: (currency ?? "ARS").toUpperCase(),
     source_payment_id: null,
     notes: creditNotes,
   } as never);
@@ -2887,7 +2966,8 @@ async function saveSupplierCredit(options: {
 export async function calculateBulkSupplierPaymentDistribution(
   orgSlug: string,
   supplierId: string,
-  totalAmount: number
+  totalAmount: number,
+  currency?: string
 ): Promise<
   Array<{
     accountId: string;
@@ -2938,11 +3018,12 @@ export async function calculateBulkSupplierPaymentDistribution(
     return [];
   }
 
-  const arsAccounts = pendingAccounts.filter(
-    (account) => (account.currency ?? "ARS") === "ARS"
+  const batchCurrency = (currency ?? "ARS").toUpperCase();
+  const batchAccounts = pendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === batchCurrency
   );
 
-  if (arsAccounts.length === 0) {
+  if (batchAccounts.length === 0) {
     return [];
   }
 
@@ -2958,7 +3039,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     newStatus: CollectionAccountStatus;
   }> = [];
 
-  for (const account of arsAccounts) {
+  for (const account of batchAccounts) {
     if (remainingAmount <= 0) {
       break;
     }

@@ -1171,11 +1171,10 @@ export function PreSaleForm({
       : null;
   const expirationDateString = useMemo(() => {
     if (normalizedExpirationDays !== null) {
-      const today = toDateOnlyString(new Date());
-      return addDays(today, normalizedExpirationDays);
+      return addDays(saleDateString, normalizedExpirationDays);
     }
     return null;
-  }, [normalizedExpirationDays]);
+  }, [saleDateString, normalizedExpirationDays]);
 
   const dueDate = useMemo(
     () =>
@@ -2015,7 +2014,7 @@ export function PreSaleForm({
                   </Popover>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
+                  <Label htmlFor="expirationDays">Días de vencimiento</Label>
                   <Input
                     id="expirationDays"
                     inputMode="numeric"
@@ -2036,7 +2035,7 @@ export function PreSaleForm({
                       <>
                         Vence el {formatDateOnly(expirationDateString)}
                         {normalizedExpirationDays !== null
-                          ? ` (hoy + ${normalizedExpirationDays} días)`
+                          ? ` (fecha de venta + ${normalizedExpirationDays} días)`
                           : ""}
                         .
                       </>

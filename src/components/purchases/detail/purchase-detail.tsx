@@ -13,6 +13,7 @@ import type {
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import type { Tax } from "@/modules/taxes/types";
 import { PurchaseDetailForm } from "./purchase-detail-form";
 import {
   PurchaseDetailHeader,
@@ -44,6 +45,7 @@ type PurchaseDetailProps = {
   suppliers: Supplier[];
   products: ProductWithPrice[];
   categories?: Category[];
+  taxes: Tax[];
 };
 
 function toDateOnlyString(date: Date): string {
@@ -100,6 +102,7 @@ export function PurchaseDetail({
   suppliers,
   products,
   categories = [],
+  taxes,
 }: PurchaseDetailProps) {
   const router = useRouter();
   const updatePurchase = useUpdatePurchaseOrder(orgSlug);
@@ -145,6 +148,14 @@ export function PurchaseDetail({
   const [isConfirmingDraft, setIsConfirmingDraft] = useState(false);
   const isDraftSale = purchaseOrder.status === "DRAFT";
   const [error, setError] = useState<string | null>(null);
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>(() =>
+    (purchaseOrder.taxes ?? []).map((tax) => tax.tax_id).filter(Boolean)
+  );
+
+  const selectedTaxes = useMemo(
+    () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
+    [taxes, selectedTaxIds]
+  );
 
   const purchaseDateString = useMemo(
     () => toDateOnlyString(purchaseDate),
@@ -184,6 +195,14 @@ export function PurchaseDetail({
     })),
     global_discount_percentage:
       globalDiscountPercentage > 0 ? globalDiscountPercentage : undefined,
+    taxes:
+      selectedTaxes.length > 0
+        ? selectedTaxes.map((tax) => ({
+            taxId: tax.id,
+            name: tax.name,
+            rate: tax.rate,
+          }))
+        : undefined,
   });
 
   const handleSave = async () => {
@@ -356,10 +375,13 @@ export function PurchaseDetail({
             onRemittanceNumberChange={setRemittanceNumber}
             onSupplierChange={setSupplierId}
             onSupplierPickerOpenChange={setIsSupplierPickerOpen}
+            onTaxesChange={setSelectedTaxIds}
             purchaseDate={purchaseDate}
             remittanceNumber={remittanceNumber}
+            selectedTaxIds={selectedTaxIds}
             supplierId={supplierId}
             suppliers={suppliers}
+            taxes={taxes}
           />
 
           <PurchaseDetailItems

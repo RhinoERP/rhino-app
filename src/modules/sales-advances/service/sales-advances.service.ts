@@ -1286,7 +1286,15 @@ async function registerAdvanceInvoiceAccounting(params: {
       total: money(params.sale.total_amount),
       totalTaxAmount: money(params.sale.total_tax_amount),
     },
-    { tipoFactura: "ANTICIPO" }
+    {
+      tipoFactura: "ANTICIPO",
+      moneda: params.sale.currency === "USD" ? "USD" : "ARS",
+      tipoCambio: params.sale.exchange_rate,
+      montoUSD:
+        params.sale.currency === "USD"
+          ? money(params.sale.total_amount)
+          : undefined,
+    }
   );
   const preview = await previewAccountingEvent(event);
   if (preview.estadoImputacion !== "COMPLETO") {
@@ -1317,7 +1325,15 @@ async function assertAdvanceInvoiceAccountingReady(params: {
       total: money(params.sale.total_amount),
       totalTaxAmount: money(params.sale.total_tax_amount),
     },
-    { tipoFactura: "ANTICIPO" }
+    {
+      tipoFactura: "ANTICIPO",
+      moneda: params.sale.currency === "USD" ? "USD" : "ARS",
+      tipoCambio: params.sale.exchange_rate,
+      montoUSD:
+        params.sale.currency === "USD"
+          ? money(params.sale.total_amount)
+          : undefined,
+    }
   );
   const preview = await previewAccountingEvent(event);
   if (preview.estadoImputacion !== "COMPLETO") {
@@ -1344,7 +1360,7 @@ export async function issueSalesAdvance(
   const { data: advanceSaleForAccess } = await supabase
     .from("sales_orders")
     .select(
-      "id, organization_id, customer_id, user_id, invoice_type, arca_status, sale_date, expiration_date, invoice_number, total_amount, total_tax_amount"
+      "id, organization_id, customer_id, user_id, invoice_type, arca_status, sale_date, expiration_date, invoice_number, total_amount, total_tax_amount, currency, exchange_rate"
     )
     .eq("id", advance.advance_sales_order_id)
     .maybeSingle();
@@ -1388,7 +1404,7 @@ export async function issueSalesAdvance(
     const { data: sale } = await supabase
       .from("sales_orders")
       .select(
-        "id, organization_id, customer_id, sale_date, expiration_date, invoice_number, total_amount, total_tax_amount, currency"
+        "id, organization_id, customer_id, sale_date, expiration_date, invoice_number, total_amount, total_tax_amount, currency, exchange_rate"
       )
       .eq("id", advance.advance_sales_order_id)
       .single();

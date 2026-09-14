@@ -1,5 +1,6 @@
 "use server";
 
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
@@ -67,7 +68,7 @@ export async function getFinancialResultsAction(
     // Cuentas por cobrar pendientes
     supabase
       .from("accounts_receivable")
-      .select("pending_balance")
+      .select("pending_balance, currency, sales_orders(exchange_rate)")
       .eq("organization_id", orgId)
       .eq("is_collection_deferred" as never, false)
       .in("status", ["PENDING", "PARTIALLY_PAID"]),
@@ -75,17 +76,16 @@ export async function getFinancialResultsAction(
     // Cuentas por pagar pendientes
     supabase
       .from("accounts_payable")
-      .select("pending_balance")
+      .select("pending_balance, currency, total_amount, amount_ars")
       .eq("organization_id", orgId)
       .in("status", ["PENDING", "PARTIALLY_PAID"]),
 
     // This is intentionally informational: a sale with an active advance is
     // not collectible yet, but its future net balance must remain visible.
-    // sales_advances is newer than the generated Supabase types.
-    // biome-ignore lint/suspicious/noExplicitAny: remove when types are regenerated.
-    (supabase.from("sales_advances" as never) as any)
+    supabase
+      .from("sales_advances")
       .select(
-        "amount, status, final_sale:sales_orders!sales_advances_final_sales_order_id_fkey(total_amount)"
+        "amount, status, final_sale:sales_orders!sales_advances_final_sales_order_id_fkey(total_amount, currency, exchange_rate)"
       )
       .eq("organization_id", orgId),
   ]);
@@ -115,14 +115,37 @@ export async function getFinancialResultsAction(
   const cashInflows = cashCollections;
   const netCashFlow = cashInflows - totalExpenses;
 
-  const pendingReceivables = (arResult.data ?? []).reduce(
-    (sum, r) => sum + (r.pending_balance ?? 0),
-    0
-  );
-  const pendingPayables = (apResult.data ?? []).reduce(
-    (sum, r) => sum + (r.pending_balance ?? 0),
-    0
-  );
+  const pendingReceivables = (arResult.data ?? []).reduce((sum, r) => {
+    const row = r as {
+      pending_balance: number;
+      currency?: string | null;
+      sales_orders?:
+        | { exchange_rate: number | null }
+        | Array<{ exchange_rate: number | null }>
+        | null;
+    };
+    const balance = Number(row.pending_balance ?? 0);
+    if ((row.currency ?? "ARS").toUpperCase() !== "USD") {
+      return sum + balance;
+    }
+    const rate = Array.isArray(row.sales_orders)
+      ? row.sales_orders[0]?.exchange_rate
+      : row.sales_orders?.exchange_rate;
+    return rate && Number(rate) > 0
+      ? sum + truncateMoney(balance * Number(rate))
+      : sum + balance;
+  }, 0);
+  const pendingPayables = (apResult.data ?? []).reduce((sum, r) => {
+    const balance = Number(r.pending_balance ?? 0);
+    if ((r.currency ?? "ARS").toUpperCase() !== "USD") {
+      return sum + balance;
+    }
+    const total = Number(r.total_amount ?? 0);
+    const amountArs = Number(r.amount_ars ?? 0);
+    return total > 0 && amountArs > 0
+      ? sum + truncateMoney(balance * (amountArs / total))
+      : sum + balance;
+  }, 0);
   const activeAdvances = (
     (advancesResult.data ?? []) as ActiveAdvanceRow[]
   ).filter(
@@ -135,13 +158,15 @@ export async function getFinancialResultsAction(
     const finalSale = Array.isArray(advance.final_sale)
       ? advance.final_sale[0]
       : advance.final_sale;
-    return (
-      sum +
-      Math.max(
-        0,
-        Number(finalSale?.total_amount ?? 0) - Number(advance.amount ?? 0)
-      )
+    const net = Math.max(
+      0,
+      Number(finalSale?.total_amount ?? 0) - Number(advance.amount ?? 0)
     );
+    if ((finalSale?.currency ?? "ARS").toUpperCase() !== "USD") {
+      return sum + net;
+    }
+    const rate = Number(finalSale?.exchange_rate ?? 0);
+    return rate > 0 ? sum + truncateMoney(net * rate) : sum + net;
   }, 0);
 
   return {
@@ -166,8 +191,16 @@ type ActiveAdvanceRow = {
   amount: number | null;
   status: string;
   final_sale:
-    | { total_amount: number | null }
-    | Array<{ total_amount: number | null }>
+    | {
+        total_amount: number | null;
+        currency?: string | null;
+        exchange_rate?: number | null;
+      }
+    | Array<{
+        total_amount: number | null;
+        currency?: string | null;
+        exchange_rate?: number | null;
+      }>
     | null;
 };
 

@@ -24,6 +24,7 @@ const INVOICE: SupplierInvoice = {
   tax_amount: 2100,
   total_amount: 12_100,
   currency: "ARS",
+  exchange_rate: null,
   status: "REGISTERED",
   invoice_pdf_url: null,
   invoice_filename: null,

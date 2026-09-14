@@ -158,6 +158,20 @@ export function createReceivableColumns(
       },
     },
     {
+      id: "empresa",
+      accessorFn: (row) => row.customer.business_name || null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Empresa" />
+      ),
+      cell: ({ row }) => (
+        <div className="text-sm">
+          {row.original.customer.business_name || "—"}
+        </div>
+      ),
+      enableSorting: true,
+      enableColumnFilter: false,
+    },
+    {
       id: "seller",
       accessorFn: (row) =>
         row.seller?.name || row.seller?.email || row.seller?.id || null,
@@ -470,6 +484,38 @@ export function createPayableColumns(
       },
       enableSorting: false,
       enableColumnFilter: false,
+    },
+    {
+      id: "payable_origin",
+      accessorFn: (row) => row.payableOrigin ?? "PURCHASE_NOTE",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Origen" />
+      ),
+      cell: ({ row }) => {
+        const invoiceBacked = row.original.payableOrigin === "SUPPLIER_INVOICE";
+        return (
+          <Badge
+            className="rounded-full"
+            variant={invoiceBacked ? "secondary" : "outline"}
+          >
+            {invoiceBacked ? "Factura" : "Nota de compra"}
+          </Badge>
+        );
+      },
+      meta: {
+        label: "Origen",
+        variant: "multiSelect",
+        options: [
+          { label: "Nota de compra", value: "PURCHASE_NOTE" },
+          { label: "Factura", value: "SUPPLIER_INVOICE" },
+        ],
+      },
+      enableSorting: false,
+      enableColumnFilter: true,
+      filterFn: (row, id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.getValue(id));
+      },
     },
     {
       id: "created_at",

@@ -12,6 +12,7 @@ import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isAuthorizedPreventaInvoice } from "@/modules/sales/preventa-invoicing";
 import {
   deriveSaleCreditSupplier,
   deriveSupplierNameFromSale,
@@ -72,6 +73,8 @@ type LinkedSaleForAccounting = {
   total_amount: number;
   total_tax_amount: number | null;
   document_type?: string | null;
+  currency: string;
+  exchange_rate: number | null;
 };
 
 const CREDIT_NOTE_ITEM_SELECT = `
@@ -395,6 +398,12 @@ async function buildCreditNoteAccountingPayload(params: {
     {
       items: lineItems,
       totalTaxAmount: params.totalTaxAmount,
+      moneda: params.linkedSale.currency === "USD" ? "USD" : "ARS",
+      tipoCambio: params.linkedSale.exchange_rate,
+      montoUSD:
+        params.linkedSale.currency === "USD"
+          ? params.creditNote.amount
+          : undefined,
     }
   );
 }
@@ -565,7 +574,7 @@ export async function createCreditNote(
   // biome-ignore lint/suspicious/noExplicitAny: Supabase types are regenerated when the migration is applied.
   const { data: sale } = (await (supabase.from("sales_orders" as never) as any)
     .select(
-      "id, status, customer_id, total_amount, total_tax_amount, invoice_type, document_type"
+      "id, status, arca_status, customer_id, total_amount, total_tax_amount, invoice_type, document_type, currency, exchange_rate"
     )
     .eq("id", salesOrderId)
     .eq("organization_id", org.id)
@@ -576,9 +585,17 @@ export async function createCreditNote(
     throw new Error("Venta no encontrada");
   }
 
-  if (!["CONFIRMED", "DISPATCH", "DELIVERED"].includes(sale.status)) {
+  const isOperationalSale = ["CONFIRMED", "DISPATCH", "DELIVERED"].includes(
+    sale.status
+  );
+  const isAuthorizedPreventa = isAuthorizedPreventaInvoice(
+    sale.status,
+    sale.arca_status
+  );
+
+  if (!(isOperationalSale || isAuthorizedPreventa)) {
     throw new Error(
-      "Solo se pueden emitir notas de crédito para ventas confirmadas, despachadas o entregadas"
+      "Solo se pueden emitir notas de crédito para ventas confirmadas, despachadas, entregadas o preventas facturadas en ARCA"
     );
   }
 
@@ -728,6 +745,9 @@ export async function createCreditNote(
       total_amount: saleTotal,
       total_tax_amount: sale.total_tax_amount,
       document_type: (sale as { document_type?: string | null }).document_type,
+      currency: (sale as { currency?: string | null }).currency ?? "ARS",
+      exchange_rate:
+        (sale as { exchange_rate?: number | null }).exchange_rate ?? null,
     },
     items: input.items,
     totalTaxAmount,

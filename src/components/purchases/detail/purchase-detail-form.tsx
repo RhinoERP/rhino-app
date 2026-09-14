@@ -25,6 +25,8 @@ import {
 import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseTaxSelector } from "../forms/purchase-tax-selector";
 
 type PurchaseDetailFormProps = {
   supplierId: string;
@@ -35,12 +37,15 @@ type PurchaseDetailFormProps = {
   globalDiscountPercentage: number;
   isEditingDetails: boolean;
   isSupplierPickerOpen: boolean;
+  selectedTaxIds: string[];
+  taxes: Tax[];
   onSupplierChange: (supplierId: string) => void;
   onSupplierPickerOpenChange: (open: boolean) => void;
   onPurchaseDateChange: (date: Date) => void;
   onExpirationDaysChange: (days: number | null) => void;
   onRemittanceNumberChange: (value: string) => void;
   onGlobalDiscountPercentageChange: (value: number) => void;
+  onTaxesChange: (taxIds: string[]) => void;
 };
 
 export function PurchaseDetailForm({
@@ -52,12 +57,15 @@ export function PurchaseDetailForm({
   globalDiscountPercentage,
   isEditingDetails,
   isSupplierPickerOpen,
+  selectedTaxIds,
+  taxes,
   onSupplierChange,
   onSupplierPickerOpenChange,
   onPurchaseDateChange,
   onExpirationDaysChange,
   onRemittanceNumberChange,
   onGlobalDiscountPercentageChange,
+  onTaxesChange,
 }: PurchaseDetailFormProps) {
   const selectedSupplier = suppliers.find((s) => s.id === supplierId);
 
@@ -251,6 +259,21 @@ export function PurchaseDetailForm({
                 globalDiscountPercentage === 0 ? "" : globalDiscountPercentage
               }
             />
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="purchaseTaxes">Impuestos</Label>
+            <PurchaseTaxSelector
+              disabled={!isEditingDetails}
+              onTaxesChange={onTaxesChange}
+              selectedTaxIds={selectedTaxIds}
+              taxes={taxes}
+            />
+            <p className="text-muted-foreground text-xs">
+              Impuestos generales aplicados a la compra.
+            </p>
           </div>
         </div>
       </CardContent>

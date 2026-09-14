@@ -37,6 +37,11 @@ export function FinancialBreakdownCards({
             <div className="font-bold text-2xl">
               {formatCurrency(invoicing.total)}
             </div>
+            {invoicing.totalUSD > 0 && (
+              <div className="text-muted-foreground text-xs">
+                {formatCurrency(invoicing.totalUSD, "USD")}
+              </div>
+            )}
             <p className="text-muted-foreground text-xs">
               Total facturado en el periodo
             </p>

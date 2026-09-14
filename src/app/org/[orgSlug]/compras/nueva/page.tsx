@@ -17,9 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCategories } from "@/modules/categories/hooks/use-categories";
+import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
 import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
+import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
+import { toFallbackItemTaxes } from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
 
 function NewPurchaseContent() {
   const params = useParams();
@@ -32,16 +36,48 @@ function NewPurchaseContent() {
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
   const [formValues, setFormValues] = useState<Partial<PurchaseFormValues>>({
     purchase_date: new Date(),
+    payable_origin: "PURCHASE_NOTE",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } =
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
   const { data: categories = [] } = useCategories(orgSlug);
+  const { data: taxes = [] } = useTaxes(orgSlug);
+
+  const productIds = useMemo(
+    () => Array.from(new Set(purchaseItems.map((item) => item.product_id))),
+    [purchaseItems]
+  );
+
+  const { data: productTaxes = new Map() } = useProductTaxes(
+    orgSlug,
+    productIds
+  );
+
+  const selectedTaxes = useMemo(
+    () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
+    [taxes, selectedTaxIds]
+  );
+
+  const fallbackTaxes = useMemo(
+    () =>
+      selectedTaxes.length > 0
+        ? toFallbackItemTaxes(
+            selectedTaxes.map((tax: Tax) => ({
+              taxId: tax.id,
+              name: tax.name,
+              rate: tax.rate,
+            }))
+          )
+        : [],
+    [selectedTaxes]
+  );
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
 
@@ -96,7 +132,9 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
-    let expirationDateStr: string | undefined;
+    // A note of purchase always creates a payable. With no explicit term its
+    // due date is the purchase date, matching the form's displayed fallback.
+    let expirationDateStr: string | undefined = purchaseDateStr;
     if (
       formValues.expiration_days &&
       formValues.expiration_days > 0 &&
@@ -115,6 +153,7 @@ function NewPurchaseContent() {
       purchase_date: purchaseDateStr,
       expiration_date: expirationDateStr,
       currency: purchaseCurrency,
+      payable_origin: formValues.payable_origin ?? "PURCHASE_NOTE",
       items: purchaseItems.map((item) => {
         const isWeightOrVolume =
           item.unit_of_measure === "KG" ||
@@ -142,6 +181,7 @@ function NewPurchaseContent() {
           variant_stocks: item.has_variants ? item.variant_stocks : undefined,
         };
       }),
+      taxes: selectedTaxIds.length > 0 ? fallbackTaxes : undefined,
       global_discount_percentage:
         globalDiscountPercent > 0 ? globalDiscountPercent : undefined,
     };
@@ -152,6 +192,8 @@ function NewPurchaseContent() {
     purchaseItems,
     globalDiscountPercent,
     purchaseCurrency,
+    selectedTaxIds,
+    fallbackTaxes,
   ]);
 
   const handleSubmit = useCallback(async () => {
@@ -248,8 +290,11 @@ function NewPurchaseContent() {
               <PurchaseForm
                 onFormChange={handleFormChange}
                 onSupplierChange={setSelectedSupplierId}
+                onTaxesChange={setSelectedTaxIds}
                 selectedSupplierId={selectedSupplierId}
+                selectedTaxIds={selectedTaxIds}
                 suppliers={suppliers}
+                taxes={taxes}
               />
             </CardContent>
           </Card>
@@ -257,6 +302,7 @@ function NewPurchaseContent() {
           {/* Purchase Items */}
           <PurchaseItemsList
             categories={categories}
+            fallbackTaxes={fallbackTaxes}
             isLoadingProducts={isLoadingProducts}
             items={purchaseItems}
             onAddItem={handleAddItem}
@@ -264,6 +310,7 @@ function NewPurchaseContent() {
             onUpdateItem={handleUpdateItem}
             orgSlug={orgSlug}
             products={products}
+            productTaxes={productTaxes}
           />
         </div>
 
@@ -274,12 +321,13 @@ function NewPurchaseContent() {
             disabled={
               isSubmitting || !selectedSupplierId || purchaseItems.length === 0
             }
+            fallbackTaxes={fallbackTaxes}
             globalDiscountPercent={globalDiscountPercent}
             isSubmitting={isSubmitting}
             items={purchaseItems}
             onGlobalDiscountChange={setGlobalDiscountPercent}
             onSubmit={handleSubmit}
-            orgSlug={orgSlug}
+            productTaxes={productTaxes}
           />
         </div>
       </div>

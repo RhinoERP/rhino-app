@@ -2,7 +2,13 @@
 
 import { ClockClockwise } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +51,8 @@ import {
   createProductLotAction,
   createStockMovementAction,
 } from "@/modules/inventory/actions/stock.actions";
+import { useStockMovementsByVariant } from "@/modules/inventory/hooks/use-stock-movements-by-variant";
+import type { ProductVariantRow } from "@/modules/inventory/service/inventory.service";
 import type {
   Product,
   ProductLotWithStatus,
@@ -61,6 +69,7 @@ type StockMovementsCardProps = {
   orgSlug: string;
   productId: string;
   product: Product;
+  variants: ProductVariantRow[];
 };
 
 const movementLabels: Record<
@@ -113,6 +122,7 @@ export function StockMovementsCard({
   orgSlug,
   productId,
   product,
+  variants,
 }: StockMovementsCardProps) {
   const router = useRouter();
   const { can } = usePermissions();
@@ -132,6 +142,8 @@ export function StockMovementsCard({
   const [selectedMovement, setSelectedMovement] =
     useState<StockMovementWithLot | null>(null);
   const [viewAllOpen, setViewAllOpen] = useState(false);
+  const [selectedVariantFilter, setSelectedVariantFilter] =
+    useState<string>("all");
   const isWeightBased =
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
@@ -332,42 +344,112 @@ export function StockMovementsCard({
     [lots]
   );
 
-  const enrichedMovements = useMemo(() => {
-    if (!tracksUnits) {
-      return movements;
-    }
-
-    const lotUnits = new Map<string, number>();
-    for (const lot of lots) {
-      lotUnits.set(lot.id, lot.unit_quantity_available ?? 0);
-    }
-
-    return movements.map((movement) => {
-      const currentUnits = lotUnits.get(movement.lot_id);
-      if (currentUnits == null || movement.unit_quantity == null) {
-        return {
-          ...movement,
-          unit_new_stock: null,
-          unit_previous_stock: null,
-        };
+  const enrichMovementsWithUnits = useCallback(
+    (movementsToEnrich: StockMovementWithLot[]): StockMovementWithLot[] => {
+      if (!tracksUnits) {
+        return movementsToEnrich;
       }
 
-      const unitNewStock = currentUnits;
-      const unitPreviousStock = unitNewStock - movement.unit_quantity;
-      lotUnits.set(movement.lot_id, unitPreviousStock);
+      const lotUnits = new Map<string, number>();
+      for (const lot of lots) {
+        lotUnits.set(lot.id, lot.unit_quantity_available ?? 0);
+      }
 
-      return {
-        ...movement,
-        unit_new_stock: unitNewStock,
-        unit_previous_stock: unitPreviousStock,
-      };
-    });
-  }, [lots, movements, tracksUnits]);
+      return movementsToEnrich.map((movement) => {
+        const currentUnits = lotUnits.get(movement.lot_id);
+        if (currentUnits == null || movement.unit_quantity == null) {
+          return {
+            ...movement,
+            unit_new_stock: null,
+            unit_previous_stock: null,
+          };
+        }
+
+        const unitNewStock = currentUnits;
+        const unitPreviousStock = unitNewStock - movement.unit_quantity;
+        lotUnits.set(movement.lot_id, unitPreviousStock);
+
+        return {
+          ...movement,
+          unit_new_stock: unitNewStock,
+          unit_previous_stock: unitPreviousStock,
+        };
+      });
+    },
+    [lots, tracksUnits]
+  );
+
+  const enrichedMovements = useMemo(
+    () => enrichMovementsWithUnits(movements),
+    [enrichMovementsWithUnits, movements]
+  );
+
+  const variantOptions = useMemo(
+    () =>
+      variants
+        .map((variant) => ({
+          key: `${variant.talle}__${variant.color}`,
+          label: `${variant.color} · ${variant.talle}`,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [variants]
+  );
+
+  const getLotDisplay = useCallback(
+    (movement: StockMovementWithLot): string => {
+      if (movement.talle && movement.color) {
+        return `${movement.color} · ${movement.talle}`;
+      }
+      return getLotLabel[movement.lot_id] || movement.lot_number;
+    },
+    [getLotLabel]
+  );
+
+  const selectedVariant = useMemo(() => {
+    if (selectedVariantFilter === "all") {
+      return null;
+    }
+    return (
+      variants.find(
+        (variant) =>
+          `${variant.talle}__${variant.color}` === selectedVariantFilter
+      ) ?? null
+    );
+  }, [selectedVariantFilter, variants]);
+
+  const hasVariantFilter =
+    product.has_variants && selectedVariantFilter !== "all";
+
+  const { data: variantMovements, isPending: variantMovementsPending } =
+    useStockMovementsByVariant(
+      orgSlug,
+      productId,
+      selectedVariant?.lotId ?? null,
+      hasVariantFilter
+    );
+
+  const movementsLoading = hasVariantFilter && variantMovementsPending;
+
+  const filteredMovements = useMemo(() => {
+    if (!hasVariantFilter) {
+      return enrichedMovements;
+    }
+    return enrichMovementsWithUnits(variantMovements ?? []);
+  }, [
+    enrichMovementsWithUnits,
+    enrichedMovements,
+    hasVariantFilter,
+    variantMovements,
+  ]);
 
   const visibleMovements =
-    enrichedMovements && enrichedMovements.length > 10
-      ? enrichedMovements.slice(0, 10)
-      : enrichedMovements;
+    filteredMovements && filteredMovements.length > 10
+      ? filteredMovements.slice(0, 10)
+      : filteredMovements;
+
+  if (!canManageInventory) {
+    return null;
+  }
 
   return (
     <>
@@ -380,6 +462,26 @@ export function StockMovementsCard({
                 ? "Historial de stock. Ajustá el stock desde la grilla de variantes."
                 : "Historial y ajustes de stock"}
             </CardDescription>
+            {product.has_variants && variantOptions.length > 1 && (
+              <div className="pt-1">
+                <Select
+                  onValueChange={(value) => setSelectedVariantFilter(value)}
+                  value={selectedVariantFilter}
+                >
+                  <SelectTrigger className="h-7 w-auto min-w-[180px] text-xs">
+                    <SelectValue placeholder="Todas las variantes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las variantes</SelectItem>
+                    {variantOptions.map((opt) => (
+                      <SelectItem key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -640,7 +742,17 @@ export function StockMovementsCard({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visibleMovements.length === 0 ? (
+              {movementsLoading && (
+                <TableRow>
+                  <TableCell
+                    className="py-10 text-center text-muted-foreground"
+                    colSpan={tracksUnits ? 6 : 5}
+                  >
+                    Cargando movimientos…
+                  </TableCell>
+                </TableRow>
+              )}
+              {!movementsLoading && visibleMovements.length === 0 && (
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
@@ -649,7 +761,9 @@ export function StockMovementsCard({
                     Aún no hay movimientos registrados para este producto.
                   </TableCell>
                 </TableRow>
-              ) : (
+              )}
+              {!movementsLoading &&
+                visibleMovements.length > 0 &&
                 visibleMovements.map((movement) => {
                   const meta = movementLabels[movement.type];
                   const baseChange = formatChange(
@@ -674,7 +788,7 @@ export function StockMovementsCard({
                         {formatDateTime(movement.created_at)}
                       </TableCell>
                       <TableCell className="font-medium">
-                        {getLotLabel[movement.lot_id] || movement.lot_number}
+                        {getLotDisplay(movement)}
                       </TableCell>
                       <TableCell>
                         <Badge className={meta.className} variant="secondary">
@@ -694,8 +808,7 @@ export function StockMovementsCard({
                       </TableCell>
                     </TableRow>
                   );
-                })
-              )}
+                })}
             </TableBody>
           </Table>
         </CardContent>
@@ -726,7 +839,17 @@ export function StockMovementsCard({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {movements.length === 0 ? (
+                {movementsLoading && (
+                  <TableRow>
+                    <TableCell
+                      className="py-10 text-center text-muted-foreground"
+                      colSpan={tracksUnits ? 6 : 5}
+                    >
+                      Cargando movimientos…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!movementsLoading && filteredMovements.length === 0 && (
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
@@ -735,8 +858,10 @@ export function StockMovementsCard({
                       Aún no hay movimientos registrados para este producto.
                     </TableCell>
                   </TableRow>
-                ) : (
-                  movements.map((movement) => {
+                )}
+                {!movementsLoading &&
+                  filteredMovements.length > 0 &&
+                  filteredMovements.map((movement) => {
                     const meta = movementLabels[movement.type];
                     const baseChange = formatChange(
                       movement.previous_stock,
@@ -752,7 +877,7 @@ export function StockMovementsCard({
                           {formatDateTime(movement.created_at)}
                         </TableCell>
                         <TableCell className="font-medium">
-                          {getLotLabel[movement.lot_id] || movement.lot_number}
+                          {getLotDisplay(movement)}
                         </TableCell>
                         <TableCell>
                           <Badge className={meta.className} variant="secondary">
@@ -772,8 +897,7 @@ export function StockMovementsCard({
                         </TableCell>
                       </TableRow>
                     );
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
           </div>
@@ -809,7 +933,9 @@ export function StockMovementsCard({
                 </div>
                 <div className="space-y-1">
                   <p className="text-muted-foreground">Lote</p>
-                  <p className="font-medium">{selectedMovement.lot_number}</p>
+                  <p className="font-medium">
+                    {getLotDisplay(selectedMovement)}
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-muted-foreground">{stockDetailLabel}</p>

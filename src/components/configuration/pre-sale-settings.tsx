@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { updateOrganizationSettings } from "@/modules/organizations/actions/update-organization-settings.action";
@@ -47,6 +48,7 @@ const invoiceTypes: { value: InvoiceType; label: string }[] =
   INVOICE_TYPE_OPTIONS;
 
 const formSchema = z.object({
+  allow_preventa_arca_invoicing: z.boolean(),
   sales_default_tax_ids: z.array(z.string().uuid()),
   sales_enabled_payment_methods: z.array(
     z.enum([
@@ -95,6 +97,7 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      allow_preventa_arca_invoicing: false,
       sales_default_tax_ids: [],
       sales_enabled_payment_methods: [],
       sales_default_payment_method: "efectivo",
@@ -109,6 +112,8 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
     getOrganizationSettings(orgSlug).then((result) => {
       if (result.success && result.data) {
         form.reset({
+          allow_preventa_arca_invoicing:
+            result.data.allow_preventa_arca_invoicing ?? false,
           sales_default_tax_ids: result.data.sales_default_tax_ids ?? [],
           sales_enabled_payment_methods:
             result.data.sales_enabled_payment_methods ?? [],
@@ -169,6 +174,31 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
       <CardContent>
         <Form {...form}>
           <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
+            <FormField
+              control={form.control}
+              name="allow_preventa_arca_invoicing"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5">
+                    <FormLabel>
+                      Facturar preventas antes de confirmarlas
+                    </FormLabel>
+                    <FormDescription>
+                      Permite emitir una factura fiscal ARCA normal desde el
+                      detalle de una preventa. No descuenta stock y genera la
+                      cuenta por cobrar al autorizarse.
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name="sales_default_tax_ids"

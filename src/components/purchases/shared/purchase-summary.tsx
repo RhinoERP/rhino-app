@@ -15,32 +15,72 @@ import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
-import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
 import { getModifierKey } from "@/modules/purchases/utils/purchase-calculations";
-import { calculatePurchaseTaxPreview } from "@/modules/purchases/utils/purchase-tax-preview";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+  type ItemTaxSnapshot,
+} from "@/modules/taxes/item-tax-calculations";
 import type { PurchaseItem } from "../forms/purchase-items-list";
+
+type TaxSummaryLine = {
+  key: string;
+  name: string;
+  rate: number;
+  baseAmount: number;
+  taxAmount: number;
+};
+
+function summarizeTaxes(itemTaxes: ItemTaxSnapshot[]): TaxSummaryLine[] {
+  const byKey = new Map<string, TaxSummaryLine>();
+  for (const tax of itemTaxes) {
+    const key = [
+      tax.taxId ?? "no-tax-id",
+      tax.name.trim().toLowerCase(),
+      String(tax.rate),
+      tax.taxCodeSnapshot ?? "",
+    ].join(":");
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.baseAmount = truncateMoney(existing.baseAmount + tax.baseAmount);
+      existing.taxAmount = truncateMoney(existing.taxAmount + tax.taxAmount);
+      continue;
+    }
+    byKey.set(key, {
+      key,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: truncateMoney(tax.baseAmount),
+      taxAmount: truncateMoney(tax.taxAmount),
+    });
+  }
+  return Array.from(byKey.values());
+}
 
 type PurchaseSummaryProps = {
   items: PurchaseItem[];
   currency?: string;
-  orgSlug: string;
   onSubmit?: () => void;
   isSubmitting?: boolean;
   disabled?: boolean;
   globalDiscountPercent?: number;
   onGlobalDiscountChange?: (percent: number) => void;
+  fallbackTaxes?: ItemTaxInput[];
+  productTaxes: Map<string, ItemTaxInput[]>;
 };
 
 export function PurchaseSummary({
   items,
   currency = "ARS",
-  orgSlug,
   onSubmit,
   isSubmitting = false,
   disabled = false,
   globalDiscountPercent: globalDiscountPercentProp = 0,
   onGlobalDiscountChange,
+  fallbackTaxes = [],
+  productTaxes,
 }: PurchaseSummaryProps) {
   const [localGlobalDiscount, setLocalGlobalDiscount] = useState<number>(
     globalDiscountPercentProp
@@ -61,28 +101,27 @@ export function PurchaseSummary({
     Math.max(0, subtotal)
   );
 
-  const productIds = useMemo(
-    () => Array.from(new Set(items.map((item) => item.product_id))),
-    [items]
-  );
-
-  const { data: productTaxes = new Map() } = useProductTaxes(
-    orgSlug,
-    productIds
-  );
-
-  const { taxes, totalTaxAmount } = useMemo(
-    () =>
-      calculatePurchaseTaxPreview({
-        items: items.map((item) => ({
-          product_id: item.product_id,
-          subtotal: item.subtotal,
-        })),
-        productTaxes,
-        globalDiscountPercent,
-      }),
-    [items, productTaxes, globalDiscountPercent]
-  );
+  const { totalTaxAmount, generalTaxes, productSummaryTaxes } = useMemo(() => {
+    const taxPlan = buildItemizedTaxPlan({
+      lines: items.map((item, index) => ({
+        lineId: `item-${index}`,
+        productId: item.product_id,
+        netAmount: item.subtotal,
+        taxes: productTaxes.get(item.product_id),
+      })),
+      globalDiscountAmount: discountAmount,
+      fallbackTaxes,
+    });
+    return {
+      totalTaxAmount: taxPlan.totalTaxAmount,
+      generalTaxes: summarizeTaxes(
+        taxPlan.itemTaxes.filter((tax) => tax.source === "fallback")
+      ),
+      productSummaryTaxes: summarizeTaxes(
+        taxPlan.itemTaxes.filter((tax) => tax.source === "product")
+      ),
+    };
+  }, [items, productTaxes, discountAmount, fallbackTaxes]);
 
   const total = Math.max(0, subtotal - discountAmount + totalTaxAmount);
 
@@ -146,22 +185,55 @@ export function PurchaseSummary({
             </div>
           )}
 
-          {taxes.map((tax) => (
-            <div className="flex items-center justify-between" key={tax.taxId}>
-              <span className="text-muted-foreground text-sm">
-                {tax.name} ({tax.rate}%)
-              </span>
-              <span className="font-medium text-sm">
-                {formatCurrency(tax.taxAmount, currency)}
-              </span>
+          {generalTaxes.length > 0 && (
+            <div className="space-y-2">
+              <p className="font-semibold text-muted-foreground text-xs uppercase">
+                Impuestos generales de la compra
+              </p>
+              {generalTaxes.map((tax) => (
+                <div
+                  className="flex items-center justify-between"
+                  key={tax.key}
+                >
+                  <span className="text-muted-foreground text-xs">
+                    {tax.name} ({tax.rate}%)
+                  </span>
+                  <span className="font-medium text-xs">
+                    {formatCurrency(tax.taxAmount, currency)}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-
-          {items.length > 0 && taxes.length === 0 && (
-            <p className="text-muted-foreground text-xs italic">
-              Ninguno de los productos tiene impuestos asignados.
-            </p>
           )}
+
+          {productSummaryTaxes.length > 0 && (
+            <div className="space-y-2">
+              <p className="font-semibold text-muted-foreground text-xs uppercase">
+                Impuestos aplicados a productos específicos
+              </p>
+              {productSummaryTaxes.map((tax) => (
+                <div
+                  className="flex items-center justify-between"
+                  key={tax.key}
+                >
+                  <span className="text-muted-foreground text-xs">
+                    {tax.name} ({tax.rate}%)
+                  </span>
+                  <span className="font-medium text-xs">
+                    {formatCurrency(tax.taxAmount, currency)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {items.length > 0 &&
+            generalTaxes.length === 0 &&
+            productSummaryTaxes.length === 0 && (
+              <p className="text-muted-foreground text-xs italic">
+                Ninguno de los productos tiene impuestos asignados.
+              </p>
+            )}
         </div>
 
         <Separator />
