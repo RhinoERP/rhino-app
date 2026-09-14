@@ -26,6 +26,9 @@ export type QuoteDetails = QuoteRow & {
     email: string | null;
   } | null;
   quote_items: (QuoteItemRow & {
+    products: {
+      brand: string | null;
+    } | null;
     quote_item_extras: QuoteItemExtraRow[];
     quote_item_taxes: QuoteItemTaxRow[];
   })[];
@@ -52,6 +55,7 @@ export async function getQuoteById(
       ),
       quote_items (
         *,
+        products (brand),
         quote_item_extras (*),
         quote_item_taxes (*)
       ),

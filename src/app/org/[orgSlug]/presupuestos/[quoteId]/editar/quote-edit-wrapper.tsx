@@ -450,6 +450,12 @@ function QuoteDetailCard({
                 >
                   <div className="min-w-0">
                     <span>{item.description || "Producto"}</span>
+                    {item.products?.brand && (
+                      <span className="text-muted-foreground text-xs">
+                        {" "}
+                        · {item.products.brand}
+                      </span>
+                    )}
                     <ItemExtrasList
                       currency={quote.currency}
                       extras={item.quote_item_extras}
