@@ -4,40 +4,40 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import {
+  calculateSalePrice,
+  type SalePriceAdjustment,
+} from "@/modules/price-levels/service/price-calculator";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
 type ProductSearchProps = {
   products: SaleProduct[];
   onSelectProduct: (product: SaleProduct, quantity?: number) => void;
-  priceList?: SalesPriceList | null;
+  level?: PriceLevel | null;
+  adjustment?: SalesPriceList | null;
   currency?: string;
 };
 
 function getSearchPrice(
   product: SaleProduct,
-  priceList: SalesPriceList | null | undefined
+  level: PriceLevel | null | undefined,
+  adjustment: SalesPriceList | null | undefined
 ): number {
-  if (!priceList?.is_active) {
-    return product.price || 0;
-  }
+  const adjustments: SalePriceAdjustment[] = adjustment
+    ? [{ type: adjustment.type, value: adjustment.value }]
+    : [];
 
-  const today = new Date().toISOString().split("T")[0];
-  if (priceList.valid_from > today) {
-    return product.price || 0;
-  }
+  const { price } = calculateSalePrice({
+    basePrice: product.price || 0,
+    costPrice: product.costPrice,
+    level,
+    adjustments,
+  });
 
-  if (priceList.is_target_margin && product.costPrice != null) {
-    return truncateMoney(product.costPrice * (1 + priceList.value / 100));
-  }
-
-  if (priceList.type === "PRICE") {
-    return truncateMoney(Math.max(0, (product.price || 0) + priceList.value));
-  }
-
-  return truncateMoney((product.price || 0) * (1 + priceList.value / 100));
+  return price;
 }
 
 const normalizeSearchValue = (value: string) =>
@@ -50,10 +50,12 @@ const normalizeSearchValue = (value: string) =>
 
 function ProductMetaLine({
   product,
-  priceList,
+  level,
+  adjustment,
 }: {
   product: SaleProduct;
-  priceList?: SalesPriceList | null;
+  level?: PriceLevel | null;
+  adjustment?: SalesPriceList | null;
 }) {
   const metaParts = [
     product.sku ? `SKU: ${product.sku}` : null,
@@ -64,7 +66,7 @@ function ProductMetaLine({
     <span className="text-muted-foreground text-xs">
       {metaParts.join(" · ")}
       {metaParts.length > 0 ? " • " : ""}
-      {formatCurrency(getSearchPrice(product, priceList))}
+      {formatCurrency(getSearchPrice(product, level, adjustment))}
     </span>
   );
 }
@@ -83,7 +85,8 @@ function CurrencyBadge({ currency }: { currency?: string }) {
 export function ProductSearch({
   products,
   onSelectProduct,
-  priceList,
+  level,
+  adjustment,
   currency,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -171,7 +174,11 @@ export function ProductSearch({
                       {product.name}
                       <CurrencyBadge currency={product.currency} />
                     </span>
-                    <ProductMetaLine priceList={priceList} product={product} />
+                    <ProductMetaLine
+                      adjustment={adjustment}
+                      level={level}
+                      product={product}
+                    />
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">

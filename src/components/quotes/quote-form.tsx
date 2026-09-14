@@ -81,6 +81,11 @@ import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import {
+  calculateSalePrice,
+  type SalePriceAdjustment,
+} from "@/modules/price-levels/service/price-calculator";
+import type { PriceLevel } from "@/modules/price-levels/types";
+import {
   type QuoteFormValues,
   type QuoteItemFormValues,
   type QuoteItemVariantFormValues,
@@ -121,29 +126,37 @@ function getDisplayName(
 
 function getEffectivePriceList(
   form: { getValues: (name: string) => string },
-  salesPriceLists: SalesPriceList[]
-): SalesPriceList | undefined {
-  const targetMarginListId = form.getValues("targetMarginListId");
-  if (targetMarginListId && targetMarginListId !== "none") {
-    const targetList = salesPriceLists.find(
-      (pl) => pl.id === targetMarginListId
-    );
-    if (targetList) {
-      return targetList;
-    }
-  }
+  salesPriceLists: SalesPriceList[],
+  priceLevels: PriceLevel[]
+): { level: PriceLevel | null; adjustment: SalesPriceList | null } {
+  const priceLevelId = form.getValues("priceLevelId");
+  const level =
+    priceLevelId && priceLevelId !== "none"
+      ? (priceLevels.find((pl) => pl.id === priceLevelId) ?? null)
+      : null;
+
   const salesPriceListId = form.getValues("salesPriceListId");
-  return salesPriceLists.find((pl) => pl.id === salesPriceListId);
+  const adjustment =
+    salesPriceListId && salesPriceListId !== "none"
+      ? (salesPriceLists.find((pl) => pl.id === salesPriceListId) ?? null)
+      : null;
+
+  return { level, adjustment };
 }
+
+type EffectivePricing = {
+  level: PriceLevel | null;
+  adjustment: SalesPriceList | null;
+};
 
 function recalcItemPrices(
   items: QuoteFormValues["items"],
   products: SaleProduct[],
-  priceList: SalesPriceList | undefined,
+  pricing: EffectivePricing,
   adjustFn: (
     basePrice: number,
     costPrice: number | null | undefined,
-    pl: SalesPriceList | null | undefined
+    effectivePricing: EffectivePricing
   ) => number
 ): QuoteFormValues["items"] {
   return items.map((item) => {
@@ -151,7 +164,7 @@ function recalcItemPrices(
     const newUnitPrice = adjustFn(
       product?.price ?? 0,
       product?.costPrice,
-      priceList
+      pricing
     );
     const extrasTotal = (item.extras || []).reduce(
       (acc, e) => acc + e.price,
@@ -296,7 +309,7 @@ function UnitPriceInput({
 type TargetMarginListSelectProps = {
   // biome-ignore lint/suspicious/noExplicitAny: react-hook-form control type is opaque
   control: any;
-  targetMarginLists: SalesPriceList[];
+  targetMarginLists: PriceLevel[];
   NO_PRICE_LIST: string;
 };
 
@@ -312,11 +325,11 @@ function TargetMarginListSelect({
   return (
     <FormField
       control={control}
-      name="targetMarginListId"
+      name="priceLevelId"
       render={({ field }) => (
         <FormItem>
           <div className="flex items-center gap-1.5">
-            <FormLabel>Margen objetivo (opcional)</FormLabel>
+            <FormLabel>Nivel de lista (opcional)</FormLabel>
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="cursor-help text-muted-foreground">
@@ -324,8 +337,8 @@ function TargetMarginListSelect({
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top">
-                Solo listas de margen sobre costo. Reemplaza la lista del
-                cliente para este presupuesto.
+                Niveles de margen sobre costo. Reemplaza la lista del cliente
+                para este presupuesto.
               </TooltipContent>
             </Tooltip>
           </div>
@@ -339,7 +352,7 @@ function TargetMarginListSelect({
               <SelectItem value={noneValue}>Ninguna</SelectItem>
               {targetMarginLists.map((pl) => (
                 <SelectItem key={pl.id} value={pl.id}>
-                  {pl.name}
+                  {pl.name} ({pl.margin}%)
                 </SelectItem>
               ))}
             </SelectContent>
@@ -356,6 +369,7 @@ type QuoteFormProps = {
   customers: Customer[];
   products: SaleProduct[];
   salesPriceLists: SalesPriceList[];
+  priceLevels: PriceLevel[];
   onSubmit: (values: QuoteFormValues) => void;
   isSubmitting?: boolean;
   defaultValues?: Partial<QuoteFormValues>;
@@ -371,6 +385,7 @@ type QuoteFormProps = {
 export function QuoteForm({
   orgSlug,
   salesPriceLists,
+  priceLevels,
   customers,
   products,
   onSubmit,
@@ -411,7 +426,7 @@ export function QuoteForm({
     defaultValues: {
       customerId: "",
       salesPriceListId: NO_PRICE_LIST,
-      targetMarginListId: NO_PRICE_LIST,
+      priceLevelId: NO_PRICE_LIST,
       currency: "ARS",
       invoiceType: "NOTA_DE_VENTA",
       items: [],
@@ -620,38 +635,29 @@ export function QuoteForm({
     (
       basePrice: number,
       costPrice: number | null | undefined,
-      priceList: SalesPriceList | null | undefined
+      pricing: EffectivePricing
     ): number => {
-      if (!priceList?.is_active) {
-        return basePrice;
-      }
+      const { level, adjustment } = pricing;
 
-      const today = new Date().toISOString().split("T")[0];
-      if (priceList.valid_from > today) {
-        return basePrice;
-      }
+      const adjustments: SalePriceAdjustment[] = adjustment
+        ? [{ type: adjustment.type, value: adjustment.value }]
+        : [];
 
-      if (priceList.is_target_margin && costPrice != null) {
-        return truncateMoney(costPrice * (1 + priceList.value / 100));
-      }
+      const { price } = calculateSalePrice({
+        basePrice,
+        costPrice,
+        level,
+        adjustments,
+      });
 
-      if (priceList.type === "PRICE") {
-        return truncateMoney(Math.max(0, basePrice + priceList.value));
-      }
-
-      return truncateMoney(basePrice * (1 + priceList.value / 100));
+      return price;
     },
     []
   );
 
-  const targetMarginLists = useMemo(
-    () => salesPriceLists.filter((pl) => pl.is_target_margin),
-    [salesPriceLists]
-  );
-
   const getUnitPrice = (product: SaleProduct) => {
-    const priceList = getEffectivePriceList(form, salesPriceLists);
-    return getAdjustedPrice(product.price || 0, product.costPrice, priceList);
+    const pricing = getEffectivePriceList(form, salesPriceLists, priceLevels);
+    return getAdjustedPrice(product.price || 0, product.costPrice, pricing);
   };
 
   const applyEditVariants = (variants: QuoteItemVariantFormValues[]) => {
@@ -923,10 +929,15 @@ export function QuoteForm({
     name: "salesPriceListId",
   });
 
-  const selectedTargetMarginListId = useWatch({
+  const selectedPriceLevelId = useWatch({
     control: form.control,
-    name: "targetMarginListId",
+    name: "priceLevelId",
   });
+
+  const targetMarginLists = useMemo(
+    () => priceLevels.filter((pl) => pl.is_active),
+    [priceLevels]
+  );
 
   const selectedCustomerId = useWatch({
     control: form.control,
@@ -945,6 +956,7 @@ export function QuoteForm({
     const customer = customers.find((c) => c.id === selectedCustomerId);
     const priceListId = customer?.sales_price_list_id ?? NO_PRICE_LIST;
     form.setValue("salesPriceListId", priceListId);
+    form.setValue("priceLevelId", customer?.price_level_id ?? NO_PRICE_LIST);
   }, [selectedCustomerId, customers, form]);
 
   useEffect(() => {
@@ -956,24 +968,32 @@ export function QuoteForm({
       return;
     }
 
-    const priceList =
-      selectedTargetMarginListId && selectedTargetMarginListId !== NO_PRICE_LIST
-        ? salesPriceLists.find((pl) => pl.id === selectedTargetMarginListId)
-        : salesPriceLists.find((pl) => pl.id === selectedPriceListId);
+    const pricing: EffectivePricing = {
+      level:
+        selectedPriceLevelId && selectedPriceLevelId !== NO_PRICE_LIST
+          ? (priceLevels.find((pl) => pl.id === selectedPriceLevelId) ?? null)
+          : null,
+      adjustment:
+        selectedPriceListId && selectedPriceListId !== NO_PRICE_LIST
+          ? (salesPriceLists.find((pl) => pl.id === selectedPriceListId) ??
+            null)
+          : null,
+    };
 
     const currentItems = form.getValues("items");
     const updatedItems = recalcItemPrices(
       currentItems,
       products,
-      priceList,
+      pricing,
       getAdjustedPrice
     );
 
     form.setValue("items", updatedItems, { shouldDirty: true });
   }, [
     selectedPriceListId,
-    selectedTargetMarginListId,
+    selectedPriceLevelId,
     salesPriceLists,
+    priceLevels,
     form,
     products,
     currency,
@@ -1359,13 +1379,18 @@ export function QuoteForm({
                 <div className="grid gap-6">
                   {/* Buscador */}
                   <ProductSearch
-                    currency={currency}
-                    onSelectProduct={handleProductSelect}
-                    priceList={
+                    adjustment={
                       salesPriceLists.find(
                         (pl) => pl.id === selectedPriceListId
                       ) ?? null
                     }
+                    currency={currency}
+                    level={
+                      priceLevels.find(
+                        (pl) => pl.id === selectedPriceLevelId
+                      ) ?? null
+                    }
+                    onSelectProduct={handleProductSelect}
                     products={products}
                   />
 

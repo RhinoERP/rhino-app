@@ -34,136 +34,92 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { createSalesPriceListAction } from "@/modules/sales-price-lists/actions/create-sales-price-list.action";
-import { updateSalesPriceListAction } from "@/modules/sales-price-lists/actions/update-sales-price-list.action";
-import { salesPriceListsQueryKey } from "@/modules/sales-price-lists/queries/query-keys";
+import { createPriceLevelAction } from "@/modules/price-levels/actions/create-price-level.action";
+import { updatePriceLevelAction } from "@/modules/price-levels/actions/update-price-level.action";
+import { priceLevelsQueryKey } from "@/modules/price-levels/queries/query-keys";
 import type {
-  CreateSalesPriceListInput,
-  SalesPriceList,
-  SalesPriceListType,
-} from "@/modules/sales-price-lists/types";
+  CreatePriceLevelInput,
+  PriceLevel,
+} from "@/modules/price-levels/types";
 
-const salesPriceListSchema = z
+const priceLevelSchema = z
   .object({
-    name: z.string().min(1, "El nombre de la lista es obligatorio"),
-    type: z.enum(["PERCENTAGE", "PRICE"]),
-    value: z.number(),
+    name: z.string().min(1, "El nombre del nivel es obligatorio"),
+    margin: z.number(),
+    extraCommissionRate: z.number().min(0).max(100).optional(),
     valid_from: z.date({
       message: "La fecha de vigencia es obligatoria",
     }),
     is_active: z.boolean(),
-    notes: z.string().optional(),
   })
   .superRefine((values, context) => {
-    if (values.type === "PERCENTAGE") {
-      if (values.value < -100) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "El porcentaje no puede ser menor a -100%",
-          path: ["value"],
-        });
-      }
-
-      if (values.value > 1000) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "El porcentaje no puede ser mayor a 1000%",
-          path: ["value"],
-        });
-      }
+    if (values.margin < 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El margen no puede ser negativo",
+        path: ["margin"],
+      });
     }
   });
 
-type SalesPriceListFormValues = z.infer<typeof salesPriceListSchema>;
+type PriceLevelFormValues = z.infer<typeof priceLevelSchema>;
 
-type SalesPriceListDialogProps = {
+type PriceLevelDialogProps = {
   orgSlug: string;
-  priceList?: SalesPriceList | null;
+  priceLevel?: PriceLevel | null;
+  commissionsEnabled?: boolean;
   onSuccess?: () => void;
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
 
-export function CreateSalesPriceListDialog({
+export function PriceLevelDialog({
   orgSlug,
-  priceList,
+  priceLevel,
+  commissionsEnabled = false,
   onSuccess,
   trigger,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
-}: SalesPriceListDialogProps) {
+}: PriceLevelDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const queryClient = useQueryClient();
 
-  const isEditing = Boolean(priceList);
+  const isEditing = Boolean(priceLevel);
   const open = externalOpen !== undefined ? externalOpen : internalOpen;
   const setOpen = externalOnOpenChange || setInternalOpen;
 
-  const form = useForm<SalesPriceListFormValues>({
-    resolver: zodResolver(salesPriceListSchema),
+  const form = useForm<PriceLevelFormValues>({
+    resolver: zodResolver(priceLevelSchema),
     defaultValues: {
       name: "",
-      type: "PERCENTAGE",
-      value: 0,
+      margin: 0,
       valid_from: new Date(),
       is_active: true,
-      notes: "",
     },
   });
 
-  const selectedType = form.watch("type") as SalesPriceListType;
-
-  const getValueLabel = () => {
-    if (selectedType === "PRICE") {
-      return "Ajuste fijo ($)";
-    }
-    return "Porcentaje (%)";
-  };
-
-  const getValuePlaceholder = () => {
-    if (selectedType === "PRICE") {
-      return "1500";
-    }
-    return "10";
-  };
-
-  const getValueHint = () => {
-    if (selectedType === "PRICE") {
-      return "Puede ser positivo (+) o negativo (-). Se suma/resta sobre el precio base.";
-    }
-    return "Puede ser positivo (ej: 10) o negativo (ej: -5).";
-  };
-
   const resetForm = useCallback(
-    (editing: boolean, data: SalesPriceList | null | undefined) => {
+    (editing: boolean, data: PriceLevel | null | undefined) => {
       if (editing && data) {
         form.reset({
           name: data.name ?? "",
-          type: data.type ?? "PERCENTAGE",
-          value: data.value ?? data.percentage ?? 0,
+          margin: data.margin ?? 0,
+          extraCommissionRate: data.extra_commission_rate ?? 0,
           valid_from: data.valid_from ? new Date(data.valid_from) : new Date(),
           is_active: data.is_active ?? true,
-          notes: data.notes ?? "",
         });
       } else {
         form.reset({
           name: "",
-          type: "PERCENTAGE",
-          value: 0,
+          margin: 0,
           valid_from: new Date(),
           is_active: true,
-          notes: "",
         });
       }
     },
@@ -172,52 +128,48 @@ export function CreateSalesPriceListDialog({
 
   useEffect(() => {
     if (open) {
-      resetForm(isEditing, priceList);
+      resetForm(isEditing, priceLevel);
     }
-  }, [open, isEditing, priceList, resetForm]);
+  }, [open, isEditing, priceLevel, resetForm]);
 
-  const handleUpdate = async (values: SalesPriceListFormValues) => {
-    if (!priceList) {
-      throw new Error("Lista de precios no encontrada");
+  const handleUpdate = async (values: PriceLevelFormValues) => {
+    if (!priceLevel) {
+      throw new Error("Nivel de precio no encontrado");
     }
 
-    const result = await updateSalesPriceListAction(orgSlug, priceList.id, {
+    const result = await updatePriceLevelAction(orgSlug, priceLevel.id, {
       name: values.name,
-      type: values.type,
-      value: values.value,
-      valid_from: format(values.valid_from, "yyyy-MM-dd"),
-      is_active: values.is_active,
-      notes: values.notes || null,
+      margin: values.margin,
+      validFrom: format(values.valid_from, "yyyy-MM-dd"),
+      isActive: values.is_active,
+      extraCommissionRate: values.extraCommissionRate,
     });
 
     if (!result.success) {
-      throw new Error(
-        result.error || "Error al actualizar la lista de precios"
-      );
+      throw new Error(result.error || "Error al actualizar el nivel");
     }
   };
 
-  const handleCreate = async (values: SalesPriceListFormValues) => {
-    const input: CreateSalesPriceListInput = {
+  const handleCreate = async (values: PriceLevelFormValues) => {
+    const input: CreatePriceLevelInput = {
       orgSlug,
       name: values.name,
-      type: values.type,
-      value: values.value,
-      valid_from: format(values.valid_from, "yyyy-MM-dd"),
-      is_active: values.is_active,
-      notes: values.notes || null,
+      margin: values.margin,
+      validFrom: format(values.valid_from, "yyyy-MM-dd"),
+      isActive: values.is_active,
+      extraCommissionRate: values.extraCommissionRate,
     };
 
-    const result = await createSalesPriceListAction(input);
+    const result = await createPriceLevelAction(input);
 
     if (!result.success) {
-      throw new Error(result.error || "Error al crear la lista de precios");
+      throw new Error(result.error || "Error al crear el nivel");
     }
   };
 
   const handleSuccess = async () => {
     await queryClient.invalidateQueries({
-      queryKey: salesPriceListsQueryKey(orgSlug),
+      queryKey: priceLevelsQueryKey(orgSlug),
     });
 
     setOpen(false);
@@ -230,16 +182,16 @@ export function CreateSalesPriceListDialog({
       return error.message;
     }
     return isEditing
-      ? "Error al actualizar la lista de precios"
-      : "Error al crear la lista de precios";
+      ? "Error al actualizar el nivel de precio"
+      : "Error al crear el nivel de precio";
   };
 
-  const onSubmit = async (values: SalesPriceListFormValues) => {
+  const onSubmit = async (values: PriceLevelFormValues) => {
     setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
-      if (isEditing && priceList) {
+      if (isEditing && priceLevel) {
         await handleUpdate(values);
       } else {
         await handleCreate(values);
@@ -268,7 +220,7 @@ export function CreateSalesPriceListDialog({
         <DialogTrigger asChild>
           <Button>
             <Plus className="mr-2 h-4 w-4" />
-            Nueva lista de precios
+            Nuevo nivel
           </Button>
         </DialogTrigger>
       )}
@@ -276,14 +228,12 @@ export function CreateSalesPriceListDialog({
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>
-            {isEditing
-              ? "Editar lista de precios de venta"
-              : "Crear lista de precios de venta"}
+            {isEditing ? "Editar nivel de margen" : "Crear nivel de margen"}
           </DialogTitle>
           <DialogDescription>
             {isEditing
-              ? "Actualiza los datos de la lista de precios."
-              : "Crea una nueva lista de precios con ajuste por porcentaje o precio fijo."}
+              ? "Actualiza el nivel de margen de lista."
+              : "Crea un nivel de margen de lista (ej. Lista 35, Lista 45, Lista 55)."}
           </DialogDescription>
         </DialogHeader>
 
@@ -299,7 +249,7 @@ export function CreateSalesPriceListDialog({
                     <FormControl>
                       <Input
                         disabled={isSubmitting}
-                        placeholder="Lista Mayorista 10%"
+                        placeholder="Lista 45"
                         {...field}
                       />
                     </FormControl>
@@ -310,56 +260,58 @@ export function CreateSalesPriceListDialog({
 
               <FormField
                 control={form.control}
-                name="type"
+                name="margin"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Tipo de ajuste</FormLabel>
-                    <FormControl>
-                      <Select
-                        disabled={isSubmitting}
-                        onValueChange={(value) =>
-                          field.onChange(value as SalesPriceListType)
-                        }
-                        value={field.value}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Selecciona un tipo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="PERCENTAGE">Porcentaje</SelectItem>
-                          <SelectItem value="PRICE">Ajuste fijo</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="value"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{getValueLabel()}</FormLabel>
+                    <FormLabel>Margen (%)</FormLabel>
                     <FormControl>
                       <Input
                         disabled={isSubmitting}
                         onChange={(e) =>
                           field.onChange(Number.parseFloat(e.target.value) || 0)
                         }
-                        placeholder={getValuePlaceholder()}
+                        placeholder="45"
                         type="number"
                         value={field.value === 0 ? "" : field.value}
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">
-                      {getValueHint()}
+                      Precio = costo × (1 + margen/100).
                     </p>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+
+              {commissionsEnabled && (
+                <FormField
+                  control={form.control}
+                  name="extraCommissionRate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Comisión extra (%)</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          onChange={(e) =>
+                            field.onChange(
+                              Number.parseFloat(e.target.value) || 0
+                            )
+                          }
+                          placeholder="0"
+                          type="number"
+                          value={field.value === 0 ? "" : field.value}
+                        />
+                      </FormControl>
+                      <p className="text-muted-foreground text-xs">
+                        Se suma a la comisión base del vendedor al usar este
+                        nivel.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}
@@ -403,18 +355,22 @@ export function CreateSalesPriceListDialog({
 
               <FormField
                 control={form.control}
-                name="notes"
+                name="is_active"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notas (Opcional)</FormLabel>
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
+                    <div className="space-y-0.5">
+                      <FormLabel>Activo</FormLabel>
+                      <p className="text-muted-foreground text-xs">
+                        Si está inactivo, no se ofrece en el selector de nivel.
+                      </p>
+                    </div>
                     <FormControl>
-                      <Input
+                      <Switch
+                        checked={field.value}
                         disabled={isSubmitting}
-                        placeholder="Notas adicionales..."
-                        {...field}
+                        onCheckedChange={field.onChange}
                       />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -440,7 +396,7 @@ export function CreateSalesPriceListDialog({
                   if (isSubmitting) {
                     return isEditing ? "Actualizando..." : "Creando...";
                   }
-                  return isEditing ? "Actualizar lista" : "Crear lista";
+                  return isEditing ? "Actualizar nivel" : "Crear nivel";
                 })()}
               </Button>
             </DialogFooter>

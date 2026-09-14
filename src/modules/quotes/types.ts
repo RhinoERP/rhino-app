@@ -60,7 +60,7 @@ export type CreateQuoteInput = {
   observations?: string | null;
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
-  targetMarginListId?: string | null;
+  priceLevelId?: string | null;
   globalDiscountPercentage?: number | null;
   /** Tipo de comprobante de la venta que se generará al convertir. */
   invoiceType?: InvoiceType | null;
@@ -177,7 +177,7 @@ export const quoteFormSchema = z
 
     salesPriceListId: z.string(),
 
-    targetMarginListId: z.string().optional().default("none"),
+    priceLevelId: z.string().optional().default("none"),
 
     currency: z.enum(["ARS", "USD"]),
 

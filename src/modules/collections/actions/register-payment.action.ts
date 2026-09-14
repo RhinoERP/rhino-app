@@ -13,15 +13,13 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
-import {
-  deriveReceivableCreditSupplier,
-  generateCommissions,
-} from "@/modules/collections/service/collections.service";
+import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import {
   assertPaymentExchangeRate,
   type PaymentCurrencyFields,
   resolvePaymentCurrencyFields,
 } from "@/modules/collections/utils/payment-currency";
+import { generateCommissions } from "@/modules/commissions/service/commissions-generation.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";

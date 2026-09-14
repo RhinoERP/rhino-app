@@ -9,6 +9,7 @@ import {
 } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
+import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { NewQuoteFormWrapper } from "./quote-form-wrapper";
@@ -33,12 +34,14 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
   // - Clientes
   // - Productos (con precios de la vista DB)
   // - Listas de precios de venta
-  const [organization, customers, products, salesPriceLists] =
+  // - Niveles de lista
+  const [organization, customers, products, salesPriceLists, priceLevels] =
     await Promise.all([
       getOrganizationBySlug(orgSlug),
       getQuoteCustomersByOrgSlug(orgSlug),
       getSaleProducts(orgSlug),
       getSalesPriceListsByOrgSlug(orgSlug),
+      getPriceLevelsByOrgSlug(orgSlug),
     ]);
 
   if (!organization) {
@@ -61,6 +64,7 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
       <NewQuoteFormWrapper
         customers={customers}
         orgSlug={orgSlug}
+        priceLevels={priceLevels}
         products={products}
         salesPriceLists={salesPriceLists}
       />
