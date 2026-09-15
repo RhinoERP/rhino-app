@@ -33,7 +33,9 @@ export type CreateInformalEntryInput = CreateJournalEntryInput & {
     | "COBRO"
     | "ORDEN_PAGO"
     | "COMPRA"
-    | "NOTA_DE_CREDITO";
+    | "NOTA_DE_CREDITO"
+    | "VENTA_POS"
+    | "COBRO_POS";
 };
 
 export type InformalEntryFilters = {
@@ -45,7 +47,9 @@ export type InformalEntryFilters = {
     | "COBRO"
     | "ORDEN_PAGO"
     | "COMPRA"
-    | "NOTA_DE_CREDITO";
+    | "NOTA_DE_CREDITO"
+    | "VENTA_POS"
+    | "COBRO_POS";
   desde?: string;
   hasta?: string;
 };

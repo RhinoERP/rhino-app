@@ -40,3 +40,32 @@ describe("organization preventa ARCA setting", () => {
     ).toBe(true);
   });
 });
+
+describe("organization POS accounting defaults", () => {
+  it("keeps default POS customer and account codes nullable", () => {
+    const parsed = organizationSettingsSchema.parse({});
+
+    expect(parsed.pos_default_customer_id).toBeNull();
+    expect(parsed.pos_cash_account_code).toBeNull();
+    expect(parsed.pos_electronic_account_code).toBeNull();
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.pos_default_customer_id).toBeNull();
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.pos_cash_account_code).toBeNull();
+    expect(
+      ORGANIZATION_SETTINGS_DEFAULTS.pos_electronic_account_code
+    ).toBeNull();
+  });
+
+  it("accepts explicitly configured POS defaults", () => {
+    const parsed = organizationSettingsSchema.parse({
+      pos_default_customer_id: "00000000-0000-4000-8000-000000000123",
+      pos_cash_account_code: "CAJA_PESOS",
+      pos_electronic_account_code: "BANCO_PESOS",
+    });
+
+    expect(parsed.pos_default_customer_id).toBe(
+      "00000000-0000-4000-8000-000000000123"
+    );
+    expect(parsed.pos_cash_account_code).toBe("CAJA_PESOS");
+    expect(parsed.pos_electronic_account_code).toBe("BANCO_PESOS");
+  });
+});

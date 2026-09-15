@@ -13,6 +13,7 @@ import {
   fetchLibroMayor,
   fetchReglas,
 } from "@/lib/accounting-client";
+import type { InformalEntrySourceType } from "@/modules/accounting/types";
 
 // ------------------------------------------------------------
 // Query Keys
@@ -162,13 +163,7 @@ export function useReglas(orgId: string) {
 export function useInformalEntries(params: {
   orgId: string;
   estadoFormalizacion?: "PENDIENTE" | "CANCELADO" | "ASENTADO";
-  sourceType?:
-    | "NOTA_DE_VENTA"
-    | "FACTURA_PENDIENTE"
-    | "COBRO"
-    | "ORDEN_PAGO"
-    | "COMPRA"
-    | "NOTA_DE_CREDITO";
+  sourceType?: InformalEntrySourceType;
   desde?: string;
   hasta?: string;
 }) {

@@ -36,6 +36,8 @@ const VALID_SOURCE_TYPES = [
   "ORDEN_PAGO",
   "COMPRA",
   "NOTA_DE_CREDITO",
+  "VENTA_POS",
+  "COBRO_POS",
 ] as const;
 type ValidSourceType = (typeof VALID_SOURCE_TYPES)[number];
 function isValidSourceType(v: string): v is ValidSourceType {
@@ -352,7 +354,9 @@ router.get(
           source_type === "COBRO" ||
           source_type === "ORDEN_PAGO" ||
           source_type === "COMPRA" ||
-          source_type === "NOTA_DE_CREDITO"
+          source_type === "NOTA_DE_CREDITO" ||
+          source_type === "VENTA_POS" ||
+          source_type === "COBRO_POS"
             ? source_type
             : undefined,
         desde: typeof desde === "string" ? desde : undefined,

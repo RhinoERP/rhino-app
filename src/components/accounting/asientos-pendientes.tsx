@@ -34,6 +34,8 @@ type FilterSourceType =
   | "NOTA_DE_CREDITO"
   | "COBRO"
   | "ORDEN_PAGO"
+  | "VENTA_POS"
+  | "COBRO_POS"
   | "all";
 
 const ESTADO_BADGE: Record<
@@ -54,7 +56,9 @@ const SOURCE_LABEL: Record<
   | "COMPRA"
   | "NOTA_DE_CREDITO"
   | "COBRO"
-  | "ORDEN_PAGO",
+  | "ORDEN_PAGO"
+  | "VENTA_POS"
+  | "COBRO_POS",
   string
 > = {
   NOTA_DE_VENTA: "Nota de Venta",
@@ -63,6 +67,8 @@ const SOURCE_LABEL: Record<
   NOTA_DE_CREDITO: "Nota de Crédito",
   COBRO: "Cobro",
   ORDEN_PAGO: "Orden de Pago",
+  VENTA_POS: "Venta POS",
+  COBRO_POS: "Cobro POS",
 };
 
 export function AsientosPendientes({ orgId, orgSlug }: Props) {
@@ -119,6 +125,8 @@ export function AsientosPendientes({ orgId, orgSlug }: Props) {
               <SelectItem value="NOTA_DE_CREDITO">Nota de Crédito</SelectItem>
               <SelectItem value="COBRO">Cobro</SelectItem>
               <SelectItem value="ORDEN_PAGO">Orden de Pago</SelectItem>
+              <SelectItem value="VENTA_POS">Venta POS</SelectItem>
+              <SelectItem value="COBRO_POS">Cobro POS</SelectItem>
             </SelectContent>
           </Select>
         </div>

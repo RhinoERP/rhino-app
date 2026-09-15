@@ -239,9 +239,14 @@ function getLineAccountOptions(
     return cuentas;
   }
 
-  const configuredOptions = line.opcionesCuenta ?? [];
+  // opcionesCuenta null = sin restricción (mismo criterio que el motor de
+  // reglas server-side): cualquier cuenta del plan es válida.
+  if (!line.opcionesCuenta) {
+    return cuentas;
+  }
+
   const allowedAccountCodes = new Set(
-    configuredOptions.map((option) => option.accountCode)
+    line.opcionesCuenta.map((option) => option.accountCode)
   );
 
   return cuentas.filter(

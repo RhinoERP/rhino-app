@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,13 @@ import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import type { DirectSaleConfig } from "@/modules/organizations/types";
 import { useBarcodeScannerInput } from "@/modules/pos/hooks/use-barcode-scanner-input";
+import {
+  clearPosAccountingReviewFlow,
+  type PosAccountingReviewFlow,
+  resolvePosAccountingReviewSequence,
+  restorePosAccountingReviewFlow,
+  savePosAccountingReviewFlow,
+} from "@/modules/pos/utils/accounting-review";
 import type { CreateDirectSaleActionResult } from "@/modules/sales/actions/create-direct-sale.action";
 import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-customers";
 import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
@@ -400,6 +408,184 @@ async function printDirectSaleTicketAfterSuccess({
   }
 }
 
+function buildAccountingReviewFlow(
+  result: CreateDirectSaleActionResult
+): PosAccountingReviewFlow | null {
+  const reviewSteps = resolvePosAccountingReviewSequence({
+    accountingStatus: result.accountingStatus,
+    accountingSalePayload: result.accountingSalePayload ?? null,
+    accountingPaymentPayload: result.accountingPaymentPayload ?? null,
+  });
+
+  if (reviewSteps.length === 0) {
+    return null;
+  }
+
+  return {
+    salePayload: result.accountingSalePayload ?? null,
+    paymentPayload: result.accountingPaymentPayload ?? null,
+    steps: reviewSteps,
+    currentStepIndex: 0,
+  };
+}
+
+function advanceAccountingReviewFlow(
+  flow: PosAccountingReviewFlow
+): PosAccountingReviewFlow | null {
+  const nextIndex = flow.currentStepIndex + 1;
+
+  if (nextIndex >= flow.steps.length) {
+    return null;
+  }
+
+  return {
+    ...flow,
+    currentStepIndex: nextIndex,
+  };
+}
+
+function resetAccountingReviewFlow(
+  setAccountingReviewFlow: (value: PosAccountingReviewFlow | null) => void
+) {
+  setAccountingReviewFlow(null);
+  clearPosAccountingReviewFlow();
+}
+
+function useDefaultTerminalSelection(params: {
+  didFetchTerminals: boolean;
+  didFetchDefaultOpenTerminal: boolean;
+  isFetchingTerminals: boolean;
+  isFetchingDefaultOpenTerminal: boolean;
+  terminals: DirectSaleTerminal[];
+  defaultOpenTerminal: { terminalId: string } | null | undefined;
+  selectedTerminalId: string;
+  activeTerminals: DirectSaleTerminal[];
+  form: ReturnType<typeof useForm<DirectSaleFormValues>>;
+}) {
+  const {
+    didFetchTerminals,
+    didFetchDefaultOpenTerminal,
+    isFetchingTerminals,
+    isFetchingDefaultOpenTerminal,
+    terminals,
+    defaultOpenTerminal,
+    selectedTerminalId,
+    activeTerminals,
+    form,
+  } = params;
+
+  useEffect(() => {
+    if (
+      !(didFetchTerminals && didFetchDefaultOpenTerminal) ||
+      (isFetchingTerminals && terminals.length === 0) ||
+      (isFetchingDefaultOpenTerminal && !defaultOpenTerminal)
+    ) {
+      return;
+    }
+
+    if (!defaultOpenTerminal?.terminalId || selectedTerminalId) {
+      return;
+    }
+
+    const isCurrentTerminalActive = activeTerminals.some(
+      (terminal) => terminal.id === defaultOpenTerminal.terminalId
+    );
+
+    if (isCurrentTerminalActive) {
+      form.setValue("terminalId", defaultOpenTerminal.terminalId, {
+        shouldValidate: true,
+      });
+    }
+  }, [
+    activeTerminals,
+    defaultOpenTerminal,
+    didFetchDefaultOpenTerminal,
+    didFetchTerminals,
+    form,
+    isFetchingDefaultOpenTerminal,
+    isFetchingTerminals,
+    selectedTerminalId,
+    terminals.length,
+  ]);
+}
+
+function useDefaultTaxInitialization(params: {
+  didInitializeDefaultTax: boolean;
+  defaultDirectSalesTaxIds: string[];
+  form: ReturnType<typeof useForm<DirectSaleFormValues>>;
+  setDidInitializeDefaultTax: (value: boolean) => void;
+}) {
+  const {
+    didInitializeDefaultTax,
+    defaultDirectSalesTaxIds,
+    form,
+    setDidInitializeDefaultTax,
+  } = params;
+
+  useEffect(() => {
+    if (didInitializeDefaultTax) {
+      return;
+    }
+
+    const currentSelectedTaxIds = form.getValues("selectedTaxIds");
+    if (currentSelectedTaxIds.length > 0) {
+      setDidInitializeDefaultTax(true);
+      return;
+    }
+
+    form.setValue("selectedTaxIds", defaultDirectSalesTaxIds, {
+      shouldValidate: true,
+    });
+    setDidInitializeDefaultTax(true);
+  }, [
+    defaultDirectSalesTaxIds,
+    didInitializeDefaultTax,
+    form,
+    setDidInitializeDefaultTax,
+  ]);
+}
+
+function useDefaultPaymentMethod(params: {
+  directSaleConfig: DirectSaleConfig | undefined;
+  enabledPaymentMethodOptions: {
+    value: DirectSalePaymentMethod;
+    label: string;
+  }[];
+  form: ReturnType<typeof useForm<DirectSaleFormValues>>;
+}) {
+  const { directSaleConfig, enabledPaymentMethodOptions, form } = params;
+
+  useEffect(() => {
+    if (!directSaleConfig?.sales_default_payment_method) {
+      return;
+    }
+
+    form.setValue(
+      "paymentMethod",
+      directSaleConfig.sales_default_payment_method,
+      {
+        shouldValidate: true,
+      }
+    );
+  }, [directSaleConfig?.sales_default_payment_method, form]);
+
+  useEffect(() => {
+    const current = form.getValues("paymentMethod");
+    if (
+      enabledPaymentMethodOptions.some((option) => option.value === current)
+    ) {
+      return;
+    }
+
+    form.setValue(
+      "paymentMethod",
+      enabledPaymentMethodOptions[0]?.value ?? "efectivo",
+      { shouldValidate: true }
+    );
+  }, [enabledPaymentMethodOptions, form]);
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This component orchestrates multiple POS lifecycle concerns, but logic is intentionally delegated to small helper hooks and actions.
 export function PosTerminal({
   orgSlug,
   taxes,
@@ -412,8 +598,20 @@ export function PosTerminal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [didInitializeDefaultTax, setDidInitializeDefaultTax] = useState(false);
+  const [accountingReviewFlow, setAccountingReviewFlow] =
+    useState<PosAccountingReviewFlow | null>(null);
+
+  useEffect(() => {
+    const restored = restorePosAccountingReviewFlow();
+    if (!restored) {
+      return;
+    }
+
+    setAccountingReviewFlow(restored);
+  }, []);
   const scanFeedbackTimerRef = useRef<number | null>(null);
   const saleConfirmedAtRef = useRef<string | null>(null);
+  const currentPosSaleIdRef = useRef<string | null>(null);
 
   const deferredSearch = useDeferredValue(searchTerm);
 
@@ -441,6 +639,15 @@ export function PosTerminal({
       const confirmedAt =
         saleConfirmedAtRef.current ?? new Date().toISOString();
       saleConfirmedAtRef.current = null;
+      currentPosSaleIdRef.current = result.posSaleId ?? null;
+
+      const nextFlow = buildAccountingReviewFlow(result);
+
+      if (nextFlow) {
+        setAccountingReviewFlow(nextFlow);
+        savePosAccountingReviewFlow(nextFlow);
+        return;
+      }
 
       await printDirectSaleTicketAfterSuccess({
         result,
@@ -508,75 +715,24 @@ export function PosTerminal({
     taxes,
   ]);
 
-  useEffect(() => {
-    if (
-      !(didFetchTerminals && didFetchDefaultOpenTerminal) ||
-      (isFetchingTerminals && terminals.length === 0) ||
-      (isFetchingDefaultOpenTerminal && !defaultOpenTerminal)
-    ) {
-      return;
-    }
-
-    if (!defaultOpenTerminal?.terminalId) {
-      return;
-    }
-
-    if (selectedTerminalId) {
-      return;
-    }
-
-    const isCurrentTerminalActive = activeTerminals.some(
-      (terminal) => terminal.id === defaultOpenTerminal.terminalId
-    );
-
-    if (isCurrentTerminalActive) {
-      form.setValue("terminalId", defaultOpenTerminal.terminalId, {
-        shouldValidate: true,
-      });
-    }
-  }, [
-    activeTerminals,
-    defaultOpenTerminal,
-    defaultOpenTerminal?.terminalId,
-    didFetchDefaultOpenTerminal,
+  useDefaultTerminalSelection({
     didFetchTerminals,
-    form,
-    isFetchingDefaultOpenTerminal,
+    didFetchDefaultOpenTerminal,
     isFetchingTerminals,
+    isFetchingDefaultOpenTerminal,
+    terminals,
+    defaultOpenTerminal,
     selectedTerminalId,
-    terminals.length,
-  ]);
+    activeTerminals,
+    form,
+  });
 
-  useEffect(() => {
-    if (didInitializeDefaultTax) {
-      return;
-    }
-
-    const currentSelectedTaxIds = form.getValues("selectedTaxIds");
-    if (currentSelectedTaxIds.length > 0) {
-      setDidInitializeDefaultTax(true);
-      return;
-    }
-
-    form.setValue("selectedTaxIds", defaultDirectSalesTaxIds, {
-      shouldValidate: true,
-    });
-    setDidInitializeDefaultTax(true);
-  }, [defaultDirectSalesTaxIds, didInitializeDefaultTax, form]);
-
-  useEffect(() => {
-    if (!directSaleConfig?.sales_default_payment_method) {
-      return;
-    }
-
-    form.setValue(
-      "paymentMethod",
-      directSaleConfig.sales_default_payment_method,
-      {
-        shouldValidate: true,
-      }
-    );
-  }, [directSaleConfig?.sales_default_payment_method, form]);
+  useDefaultTaxInitialization({
+    didInitializeDefaultTax,
+    defaultDirectSalesTaxIds,
+    form,
+    setDidInitializeDefaultTax,
+  });
 
   const selectedTaxIds = form.watch("selectedTaxIds");
   const globalDiscountPercentage = Number(
@@ -598,19 +754,11 @@ export function PosTerminal({
     );
   }, [directSaleConfig?.sales_enabled_payment_methods]);
 
-  useEffect(() => {
-    const current = form.getValues("paymentMethod");
-    if (
-      enabledPaymentMethodOptions.some((option) => option.value === current)
-    ) {
-      return;
-    }
-    form.setValue(
-      "paymentMethod",
-      enabledPaymentMethodOptions[0]?.value ?? "efectivo",
-      { shouldValidate: true }
-    );
-  }, [enabledPaymentMethodOptions, form]);
+  useDefaultPaymentMethod({
+    directSaleConfig,
+    enabledPaymentMethodOptions,
+    form,
+  });
 
   const cartSummary = useMemo(() => {
     const subtotal = cartItems.reduce((sum, item) => {
@@ -956,6 +1104,69 @@ export function PosTerminal({
     );
   };
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The confirmation flow needs to validate, confirm, and advance state in one place.
+  const handleAccountingReviewConfirm = async (informalEntryId: string) => {
+    if (!accountingReviewFlow) {
+      return;
+    }
+
+    const currentStep =
+      accountingReviewFlow.steps[accountingReviewFlow.currentStepIndex];
+    if (!currentStep) {
+      resetAccountingReviewFlow(setAccountingReviewFlow);
+      return;
+    }
+
+    try {
+      const { confirmPosSaleAccountingStepAction } = await import(
+        "@/modules/pos/actions/confirm-pos-sale-accounting.action"
+      );
+
+      const posSaleId = currentPosSaleIdRef.current;
+      if (!posSaleId) {
+        throw new Error(
+          "No se pudo identificar la venta POS para confirmar el asiento."
+        );
+      }
+
+      const result = await confirmPosSaleAccountingStepAction({
+        orgSlug,
+        posSaleId,
+        step: currentStep,
+        informalEntryId,
+      });
+
+      if (!result.success) {
+        throw new Error(
+          result.error ?? "No se pudo confirmar el asiento contable."
+        );
+      }
+
+      const nextFlow = advanceAccountingReviewFlow(accountingReviewFlow);
+
+      if (!nextFlow) {
+        resetAccountingReviewFlow(setAccountingReviewFlow);
+        toast.success("Asientos contables del POS confirmados.");
+        return;
+      }
+
+      setAccountingReviewFlow(nextFlow);
+      savePosAccountingReviewFlow(nextFlow);
+    } catch (error) {
+      resetAccountingReviewFlow(setAccountingReviewFlow);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No se pudo confirmar el asiento contable."
+      );
+    }
+  };
+
+  const handleAccountingReviewCancel = () => {
+    setAccountingReviewFlow(null);
+    clearPosAccountingReviewFlow();
+  };
+
   const onSubmit = form.handleSubmit(async (values) => {
     if (activeTerminals.length === 0) {
       setErrorMessage(
@@ -1016,8 +1227,32 @@ export function PosTerminal({
 
   const isSubmitting = createDirectSale.isPending;
 
+  const currentAccountingEvent =
+    accountingReviewFlow &&
+    accountingReviewFlow.steps[accountingReviewFlow.currentStepIndex] ===
+      "venta"
+      ? accountingReviewFlow.salePayload
+      : accountingReviewFlow?.paymentPayload;
+
   return (
     <div className="space-y-6">
+      {accountingReviewFlow && currentAccountingEvent ? (
+        <AsientoModal
+          eventoPayload={currentAccountingEvent}
+          mode="gate"
+          onCancel={handleAccountingReviewCancel}
+          onConfirm={handleAccountingReviewConfirm}
+          open={Boolean(accountingReviewFlow && currentAccountingEvent)}
+          persistAs="informal"
+          sourceType={
+            accountingReviewFlow.steps[
+              accountingReviewFlow.currentStepIndex
+            ] === "venta"
+              ? "VENTA_POS"
+              : "COBRO_POS"
+          }
+        />
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link href={`/org/${orgSlug}/venta-directa`}>
           <Button size="sm" variant="ghost">
