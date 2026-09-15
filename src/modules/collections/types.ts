@@ -19,6 +19,7 @@ export type ReceivableAccount = {
   organization_id: string;
   customer_id: string;
   sales_order_id: string;
+  manual_fiscal_invoice_id?: string | null;
   total_amount: number;
   pending_balance: number;
   currency?: string;
