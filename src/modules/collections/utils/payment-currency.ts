@@ -43,9 +43,9 @@ export function assertPaymentExchangeRate(
 /**
  * Resuelve la moneda y el equivalente en ARS de un pago según la moneda de la
  * deuda. Para deudas USD el operador ingresa el monto en USD y se convierte a
- * ARS con la cotización del momento; el `amount` guardado queda en la moneda de
- * la deuda (descuenta el saldo tal cual) y `amount_ars` es su valuación
- * contable al tipo de cambio informado.
+ * ARS con la cotización del día previo (precargada en el diálogo y editable);
+ * el `amount` guardado queda en la moneda de la deuda (descuenta el saldo tal
+ * cual) y `amount_ars` es su valuación contable al tipo de cambio informado.
  */
 export function resolvePaymentCurrencyFields(
   debtCurrency: string | null | undefined,
