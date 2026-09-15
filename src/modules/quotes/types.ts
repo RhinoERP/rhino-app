@@ -147,6 +147,8 @@ export const quoteItemSchema = z.object({
   productName: z.string(),
   sku: z.string().optional(),
   brand: z.string().optional(),
+  /** Moneda original del producto (para detectar conversión necesaria). */
+  productCurrency: z.string().optional().default("ARS"),
   unitPrice: z.number().min(0),
   // Variants (Talles) with their respective quantities
   variants: z
@@ -223,6 +225,18 @@ export const quoteFormSchema = z
         path: ["invoiceType"],
         message:
           "Con pago anticipado, el comprobante debe ser Factura A, B o C",
+      });
+    }
+
+    const needsExchangeRate = val.items.some(
+      (item) => item.productCurrency && item.productCurrency !== val.currency
+    );
+    if (needsExchangeRate && (!val.exchangeRate || val.exchangeRate <= 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["exchangeRate"],
+        message:
+          "Debe ingresar el tipo de cambio para presupuestos con productos de otra moneda",
       });
     }
   });
