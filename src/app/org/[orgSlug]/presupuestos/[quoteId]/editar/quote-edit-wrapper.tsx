@@ -67,6 +67,7 @@ type ProductEntry = {
   productName: string;
   sku?: string;
   brand?: string;
+  productCurrency: string;
   unitPrice: number;
   variants: Array<{
     talle: string;
@@ -88,6 +89,7 @@ function getOrCreateEntry(
     productName: string;
     sku: string | undefined;
     brand: string | undefined;
+    productCurrency: string;
     unitPrice: number;
   }
 ): ProductEntry {
@@ -175,6 +177,7 @@ function processQuoteItem(
     productName,
     sku: product?.sku,
     brand: product?.brand ?? undefined,
+    productCurrency: product?.currency ?? "ARS",
     unitPrice: item.unit_price,
   });
 

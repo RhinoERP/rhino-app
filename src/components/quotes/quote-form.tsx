@@ -1,7 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { FileImage, FilePdf, Info, PencilSimple } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  FileImage,
+  FilePdf,
+  Info,
+  PencilSimple,
+} from "@phosphor-icons/react";
 import {
   Check,
   ChevronsUpDown,
@@ -20,6 +26,7 @@ import {
   useState,
 } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
+import { toast } from "sonner";
 import { usePermissions } from "@/components/auth/permissions-provider";
 
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +99,10 @@ import {
   quoteFormSchema,
 } from "@/modules/quotes/types";
 import {
+  convertPriceToQuoteCurrency,
+  needsExchangeRate,
+} from "@/modules/quotes/utils/currency-conversion";
+import {
   buildQuoteTaxLines,
   computeQuoteTotals,
 } from "@/modules/quotes/utils/quote-line-calcs";
@@ -149,23 +160,35 @@ type EffectivePricing = {
   adjustment: SalesPriceList | null;
 };
 
-function recalcItemPrices(
-  items: QuoteFormValues["items"],
-  products: SaleProduct[],
-  pricing: EffectivePricing,
-  adjustFn: (
-    basePrice: number,
-    costPrice: number | null | undefined,
-    effectivePricing: EffectivePricing
-  ) => number
-): QuoteFormValues["items"] {
+type PriceAdjustArgs = {
+  basePrice: number;
+  costPrice: number | null | undefined;
+  productCurrency: string;
+  pricing: EffectivePricing;
+  rate: number | null | undefined;
+  targetCurrency: string;
+};
+
+function recalcItemPrices(params: {
+  items: QuoteFormValues["items"];
+  products: SaleProduct[];
+  pricing: EffectivePricing;
+  exchangeRate: number | null | undefined;
+  quoteCurrency: string;
+  adjustFn: (args: PriceAdjustArgs) => number;
+}): QuoteFormValues["items"] {
+  const { items, products, pricing, exchangeRate, quoteCurrency, adjustFn } =
+    params;
   return items.map((item) => {
     const product = products.find((p) => p.id === item.productId);
-    const newUnitPrice = adjustFn(
-      product?.price ?? 0,
-      product?.costPrice,
-      pricing
-    );
+    const newUnitPrice = adjustFn({
+      basePrice: product?.price ?? 0,
+      costPrice: product?.costPrice,
+      productCurrency: product?.currency ?? "ARS",
+      pricing,
+      rate: exchangeRate,
+      targetCurrency: quoteCurrency,
+    });
     const extrasTotal = (item.extras || []).reduce(
       (acc, e) => acc + e.price,
       0
@@ -242,10 +265,27 @@ const getItemTaxIndicator = (
 const clampPercentage = (value: number): number =>
   Math.min(Math.max(0, value), 100);
 
-function ProductInfoCell({ item }: { item: QuoteFormValues["items"][number] }) {
+function ProductInfoCell({
+  item,
+  quoteCurrency,
+}: {
+  item: QuoteFormValues["items"][number];
+  quoteCurrency: string;
+}) {
+  const converted =
+    item.productCurrency &&
+    quoteCurrency &&
+    item.productCurrency !== quoteCurrency;
   return (
     <TableCell>
-      <div className="font-medium">{item.productName}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{item.productName}</span>
+        {converted && (
+          <Badge className="text-[10px]" variant="outline">
+            Convertido de {item.productCurrency}
+          </Badge>
+        )}
+      </div>
       {item.sku && (
         <div className="text-muted-foreground text-xs">
           {item.sku}
@@ -414,6 +454,7 @@ export function QuoteForm({
   );
   const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
     useState(false);
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
 
   const { can } = usePermissions();
   const canEditPrices = can("organization.admin");
@@ -448,6 +489,56 @@ export function QuoteForm({
     defaultValues?.invoiceType,
     form,
   ]);
+
+  const loadExchangeRate = useCallback(async (): Promise<boolean> => {
+    setIsFetchingRate(true);
+    try {
+      const res = await fetch("/api/exchange-rate/usd");
+      if (!res.ok) {
+        return false;
+      }
+      const data = (await res.json()) as { venta?: number };
+      if (typeof data?.venta === "number" && data.venta > 0) {
+        form.setValue("exchangeRate", data.venta, { shouldDirty: true });
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setIsFetchingRate(false);
+    }
+  }, [form]);
+
+  useEffect(() => {
+    // Pre-cargar la cotización BNA solo al crear un presupuesto nuevo.
+    if (defaultValues?.exchangeRate != null) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/usd")
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        const venta = (data as { venta?: number }).venta;
+        if (typeof venta === "number" && venta > 0) {
+          form.setValue("exchangeRate", venta, { shouldDirty: false });
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsFetchingRate(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultValues?.exchangeRate, form]);
 
   const { fields, append, remove, update } = useFieldArray({
     control: form.control,
@@ -578,6 +669,13 @@ export function QuoteForm({
   };
 
   const handleProductSelect = (product: SaleProduct, quantity = 1) => {
+    const productCurrency = product.currency ?? "ARS";
+    if (needsExchangeRate(productCurrency, currency, exchangeRate)) {
+      toast.error(
+        "Ingresá el tipo de cambio para agregar productos de otra moneda"
+      );
+      return;
+    }
     setSelectedProduct(product);
     if (product.hasVariants) {
       setIsGridOpen(true);
@@ -613,6 +711,7 @@ export function QuoteForm({
         productName: product.name,
         sku: product.sku,
         brand: product.brand ?? undefined,
+        productCurrency: product.currency ?? "ARS",
         unitPrice,
         variants: [
           {
@@ -632,11 +731,14 @@ export function QuoteForm({
   };
 
   const getAdjustedPrice = useCallback(
-    (
-      basePrice: number,
-      costPrice: number | null | undefined,
-      pricing: EffectivePricing
-    ): number => {
+    ({
+      basePrice,
+      costPrice,
+      productCurrency,
+      pricing,
+      rate,
+      targetCurrency,
+    }: PriceAdjustArgs): number => {
       const { level, adjustment } = pricing;
 
       const adjustments: SalePriceAdjustment[] = adjustment
@@ -650,14 +752,26 @@ export function QuoteForm({
         adjustments,
       });
 
-      return price;
+      return convertPriceToQuoteCurrency(
+        price,
+        productCurrency,
+        targetCurrency,
+        rate
+      );
     },
     []
   );
 
   const getUnitPrice = (product: SaleProduct) => {
     const pricing = getEffectivePriceList(form, salesPriceLists, priceLevels);
-    return getAdjustedPrice(product.price || 0, product.costPrice, pricing);
+    return getAdjustedPrice({
+      basePrice: product.price || 0,
+      costPrice: product.costPrice,
+      productCurrency: product.currency ?? "ARS",
+      pricing,
+      rate: exchangeRate,
+      targetCurrency: currency,
+    });
   };
 
   const applyEditVariants = (variants: QuoteItemVariantFormValues[]) => {
@@ -731,6 +845,7 @@ export function QuoteForm({
         productName: product.name,
         sku: product.sku,
         brand: product.brand ?? undefined,
+        productCurrency: product.currency ?? "ARS",
         unitPrice,
         variants,
         totalQuantity,
@@ -949,6 +1064,11 @@ export function QuoteForm({
     name: "currency",
   });
 
+  const exchangeRate = useWatch({
+    control: form.control,
+    name: "exchangeRate",
+  });
+
   useEffect(() => {
     if (!selectedCustomerId) {
       return;
@@ -961,10 +1081,6 @@ export function QuoteForm({
 
   useEffect(() => {
     if (fields.length === 0) {
-      return;
-    }
-
-    if (currency === "USD") {
       return;
     }
 
@@ -981,12 +1097,14 @@ export function QuoteForm({
     };
 
     const currentItems = form.getValues("items");
-    const updatedItems = recalcItemPrices(
-      currentItems,
+    const updatedItems = recalcItemPrices({
+      items: currentItems,
       products,
       pricing,
-      getAdjustedPrice
-    );
+      exchangeRate,
+      quoteCurrency: currency,
+      adjustFn: getAdjustedPrice,
+    });
 
     form.setValue("items", updatedItems, { shouldDirty: true });
   }, [
@@ -997,6 +1115,7 @@ export function QuoteForm({
     form,
     products,
     currency,
+    exchangeRate,
     fields.length,
     getAdjustedPrice,
   ]);
@@ -1086,7 +1205,6 @@ export function QuoteForm({
                       <FormItem>
                         <FormLabel>Moneda</FormLabel>
                         <Select
-                          disabled={fields.length > 0}
                           onValueChange={field.onChange}
                           value={field.value}
                         >
@@ -1102,11 +1220,52 @@ export function QuoteForm({
                             <SelectItem value="USD">USD - Dólares</SelectItem>
                           </SelectContent>
                         </Select>
-                        {fields.length > 0 && (
-                          <p className="text-muted-foreground text-xs">
-                            Vacía el presupuesto para cambiar la moneda.
-                          </p>
-                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="exchangeRate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tipo de cambio (USD → ARS)</FormLabel>
+                        <div className="flex items-center gap-2">
+                          <FormControl>
+                            <Input
+                              inputMode="decimal"
+                              min="0"
+                              placeholder="Cotización"
+                              step="any"
+                              type="number"
+                              {...field}
+                              onChange={(e) => {
+                                const parsed = Number.parseFloat(
+                                  e.target.value
+                                );
+                                field.onChange(
+                                  Number.isFinite(parsed) ? parsed : null
+                                );
+                              }}
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <Button
+                            aria-label="Actualizar cotización"
+                            disabled={isFetchingRate}
+                            onClick={() => {
+                              loadExchangeRate();
+                            }}
+                            size="icon"
+                            type="button"
+                            variant="outline"
+                          >
+                            <ArrowClockwise
+                              className={isFetchingRate ? "animate-spin" : ""}
+                              size={16}
+                            />
+                          </Button>
+                        </div>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1385,6 +1544,7 @@ export function QuoteForm({
                       ) ?? null
                     }
                     currency={currency}
+                    exchangeRate={exchangeRate}
                     level={
                       priceLevels.find(
                         (pl) => pl.id === selectedPriceLevelId
@@ -1429,7 +1589,10 @@ export function QuoteForm({
                             return (
                               <Fragment key={field.id}>
                                 <TableRow>
-                                  <ProductInfoCell item={item} />
+                                  <ProductInfoCell
+                                    item={item}
+                                    quoteCurrency={currency}
+                                  />
                                   <TableCell>
                                     <div className="flex flex-wrap gap-1">
                                       {item.variants.map((v) => (
