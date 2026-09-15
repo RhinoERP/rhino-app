@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import {
   createManualFiscalInvoiceAction,
+  downloadManualFiscalInvoicePdfAction,
   emitManualFiscalInvoiceAction,
 } from "@/modules/arca/actions/manual-fiscal-invoices.action";
 import type { ManualFiscalInvoice } from "@/modules/arca/server/manual-fiscal-invoices.service";
@@ -133,6 +134,33 @@ export function ManualFiscalInvoicesPanel({
         return;
       }
       toast.success("Factura autorizada por ARCA");
+      if (result.emailWarning) {
+        toast.warning(result.emailWarning);
+      }
+    });
+  const downloadPdf = (id: string) =>
+    startTransition(async () => {
+      const result = await downloadManualFiscalInvoicePdfAction({
+        orgSlug,
+        invoiceId: id,
+      });
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      const binary = window.atob(result.pdfBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      const url = URL.createObjectURL(
+        new Blob([bytes], { type: "application/pdf" })
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      link.click();
+      URL.revokeObjectURL(url);
     });
   return (
     <div className="space-y-4">
@@ -189,6 +217,16 @@ export function ManualFiscalInvoicesPanel({
                           Emitir ARCA
                         </Button>
                       )}
+                    {invoice.status === "authorized" && (
+                      <Button
+                        disabled={pending}
+                        onClick={() => downloadPdf(invoice.id)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        PDF
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

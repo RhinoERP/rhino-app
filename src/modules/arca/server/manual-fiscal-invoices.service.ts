@@ -100,6 +100,7 @@ export type ManualFiscalInvoice = {
   arca_voucher_number: number | null;
   arca_voucher_type_code: number | null;
   arca_last_error: string | null;
+  arca_request_json?: unknown;
   customer?: {
     id: string;
     business_name: string;
@@ -165,6 +166,101 @@ function calculate(
       total_amount: truncateMoney(net + tax),
     };
   });
+}
+
+async function completeAuthorizedInvoiceSideEffects(params: {
+  invoice: ManualFiscalInvoice;
+  organizationId: string;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+}): Promise<void> {
+  const { invoice, organizationId, supabase } = params;
+
+  try {
+    const { data: existingReceivable, error: existingReceivableError } =
+      await supabase
+        .from("accounts_receivable")
+        .select("id")
+        .eq("manual_fiscal_invoice_id" as never, invoice.id)
+        .maybeSingle();
+
+    if (existingReceivableError) {
+      throw existingReceivableError;
+    }
+
+    if (!existingReceivable) {
+      const dueDate = invoice.due_date ?? invoice.issue_date;
+      await supabase
+        .from("accounts_receivable")
+        .insert({
+          organization_id: organizationId,
+          customer_id: invoice.customer_id,
+          sales_order_id: null,
+          manual_fiscal_invoice_id: invoice.id,
+          total_amount: invoice.total_amount,
+          pending_balance: invoice.total_amount,
+          currency: invoice.currency,
+          due_date: dueDate,
+          status: "PENDING",
+        } as never)
+        .throwOnError();
+    }
+  } catch (cause) {
+    console.error("Factura manual autorizada sin cuenta por cobrar", cause);
+    await table(supabase)
+      .update({
+        arca_last_error:
+          "Factura autorizada. La cuenta por cobrar quedó pendiente de revisión.",
+      } as never)
+      .eq("id", invoice.id);
+    return;
+  }
+
+  try {
+    const accountingEvent = {
+      tipoEvento: "FACTURA_VENTA",
+      orgId: organizationId,
+      referenciaId: invoice.id,
+      referenciaTabla: "manual_fiscal_invoices",
+      fecha: invoice.issue_date,
+      descripcion: `Factura manual ${invoice.invoice_number ?? invoice.id}`,
+      idempotencyKey: `FACTURA_VENTA_MANUAL_${invoice.id}`,
+      datos: {
+        tipoFactura: "MANUAL",
+        totalFactura: invoice.total_amount.toFixed(2),
+        montoNeto: invoice.sub_total.toFixed(2),
+        montoImpuestos: invoice.total_tax_amount.toFixed(2),
+        condicionVenta: invoice.due_date ? "CREDITO" : "CONTADO",
+        clienteId: invoice.customer_id,
+        facturaNumero: invoice.invoice_number ?? invoice.id,
+        moneda: invoice.currency,
+        ...(invoice.currency === "USD"
+          ? {
+              tipoCambio: String(invoice.exchange_rate),
+              montoUSD: invoice.total_amount.toFixed(2),
+            }
+          : {}),
+        lineasDesglosadas: [
+          {
+            accountCode: null,
+            montoNeto: invoice.sub_total.toFixed(2),
+            montoImpuestos: invoice.total_tax_amount.toFixed(2),
+          },
+        ],
+      },
+    } as unknown as AnyEvento;
+    await confirmAccountingEvent(accountingEvent);
+  } catch (cause) {
+    console.error(
+      "Factura manual autorizada con contabilidad pendiente",
+      cause
+    );
+    await table(supabase)
+      .update({
+        arca_last_error:
+          "Factura autorizada. El asiento contable quedó pendiente de revisión.",
+      } as never)
+      .eq("id", invoice.id);
+  }
 }
 
 export async function createManualFiscalInvoice(
@@ -261,6 +357,32 @@ export async function getManualFiscalInvoices(
   return (data ?? []) as unknown as ManualFiscalInvoice[];
 }
 
+export async function getManualFiscalInvoiceById(params: {
+  orgSlug: string;
+  invoiceId: string;
+}): Promise<ManualFiscalInvoice> {
+  const [supabase, org] = await Promise.all([
+    createClient(),
+    getOrganizationBySlug(params.orgSlug),
+  ]);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const { data, error } = await table(supabase)
+    .select(
+      "*, customer:customers(id, business_name, fantasy_name, email, cuit, tax_condition), items:manual_fiscal_invoice_items(*)"
+    )
+    .eq("organization_id", org.id)
+    .eq("id", params.invoiceId)
+    .maybeSingle();
+  if (error || !data) {
+    throw new ArcaValidationError("Factura manual no encontrada.");
+  }
+
+  return data as unknown as ManualFiscalInvoice;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: fiscal issuance needs a single durable ARCA flow.
 export async function emitManualFiscalInvoice(params: {
   orgSlug: string;
@@ -280,6 +402,11 @@ export async function emitManualFiscalInvoice(params: {
   }
   const invoice = data as unknown as ManualFiscalInvoice;
   if (invoice.status === "authorized") {
+    await completeAuthorizedInvoiceSideEffects({
+      invoice,
+      organizationId: organization.id,
+      supabase,
+    });
     return invoice;
   }
   if (invoice.status === "pending") {
@@ -388,9 +515,29 @@ export async function emitManualFiscalInvoice(params: {
       "La factura cambió de estado. Actualizá la pantalla."
     );
   }
+  let authorization: Awaited<
+    ReturnType<typeof client.ElectronicBilling.createNextVoucher>
+  >;
   try {
-    const authorization =
-      await client.ElectronicBilling.createNextVoucher(request);
+    authorization = await client.ElectronicBilling.createNextVoucher(request);
+  } catch (cause) {
+    const message = sanitizeArcaErrorMessage(cause);
+    const wasRejectedByArca = cause instanceof ArcaValidationError;
+    await table(supabase)
+      .update({
+        status: wasRejectedByArca ? "error" : "pending",
+        arca_last_error: wasRejectedByArca
+          ? message
+          : "Resultado ARCA indeterminado. Requiere conciliación antes de reintentar para evitar un comprobante duplicado.",
+      } as never)
+      .eq("id", invoice.id);
+    throw new ArcaConnectionError(
+      message || "No se pudo emitir la factura manual en ARCA."
+    );
+  }
+
+  let authorized: unknown;
+  try {
     const voucherNumber = Number(authorization.voucherNumber);
     const now = new Date().toISOString();
     const patch = {
@@ -405,87 +552,40 @@ export async function emitManualFiscalInvoice(params: {
       arca_last_error: null,
       arca_response_json: { authorization },
     };
-    const { data: authorized, error: persistError } = await table(supabase)
+    const { data: persistedInvoice, error: persistError } = await table(
+      supabase
+    )
       .update(patch as never)
       .eq("id", invoice.id)
       .select(
         "*, customer:customers(id, business_name, fantasy_name, email, cuit, tax_condition), items:manual_fiscal_invoice_items(*)"
       )
       .single();
-    if (persistError || !authorized) {
+    if (persistError || !persistedInvoice) {
       throw new ArcaConnectionError(
         "ARCA autorizó el comprobante pero Rhino no pudo guardarlo."
       );
     }
-    const dueDate = invoice.due_date ?? invoice.issue_date;
-    await supabase
-      .from("accounts_receivable")
-      .insert({
-        organization_id: organization.id,
-        customer_id: invoice.customer_id,
-        sales_order_id: null,
-        manual_fiscal_invoice_id: invoice.id,
-        total_amount: invoice.total_amount,
-        pending_balance: invoice.total_amount,
-        currency: invoice.currency,
-        due_date: dueDate,
-        status: "PENDING",
-      } as never)
-      .throwOnError();
-    try {
-      const accountingEvent = {
-        tipoEvento: "FACTURA_VENTA",
-        orgId: organization.id,
-        referenciaId: invoice.id,
-        referenciaTabla: "manual_fiscal_invoices",
-        fecha: invoice.issue_date,
-        descripcion: `Factura manual ${formatNumber(credentials.pointOfSale, voucherNumber)}`,
-        idempotencyKey: `FACTURA_VENTA_MANUAL_${invoice.id}`,
-        datos: {
-          tipoFactura: "MANUAL",
-          totalFactura: invoice.total_amount.toFixed(2),
-          montoNeto: invoice.sub_total.toFixed(2),
-          montoImpuestos: invoice.total_tax_amount.toFixed(2),
-          condicionVenta: invoice.due_date ? "CREDITO" : "CONTADO",
-          clienteId: invoice.customer_id,
-          facturaNumero: formatNumber(credentials.pointOfSale, voucherNumber),
-          moneda: invoice.currency,
-          ...(invoice.currency === "USD"
-            ? {
-                tipoCambio: String(invoice.exchange_rate),
-                montoUSD: invoice.total_amount.toFixed(2),
-              }
-            : {}),
-          lineasDesglosadas: [
-            {
-              accountCode: null,
-              montoNeto: invoice.sub_total.toFixed(2),
-              montoImpuestos: invoice.total_tax_amount.toFixed(2),
-            },
-          ],
-        },
-      } as unknown as AnyEvento;
-      await confirmAccountingEvent(accountingEvent);
-    } catch (accountingError) {
-      console.error(
-        "Factura manual autorizada con contabilidad pendiente",
-        accountingError
-      );
-      await table(supabase)
-        .update({
-          arca_last_error:
-            "Factura autorizada. El asiento contable quedó pendiente de revisión.",
-        } as never)
-        .eq("id", invoice.id);
-    }
-    return authorized as unknown as ManualFiscalInvoice;
+    authorized = persistedInvoice;
   } catch (cause) {
     const message = sanitizeArcaErrorMessage(cause);
     await table(supabase)
-      .update({ status: "error", arca_last_error: message } as never)
+      .update({
+        status: "pending",
+        arca_last_error:
+          "ARCA autorizó el comprobante, pero Rhino no pudo terminar de guardarlo. Requiere conciliación antes de reintentar.",
+      } as never)
       .eq("id", invoice.id);
     throw new ArcaConnectionError(
       message || "No se pudo emitir la factura manual en ARCA."
     );
   }
+
+  const authorizedInvoice = authorized as ManualFiscalInvoice;
+  await completeAuthorizedInvoiceSideEffects({
+    invoice: authorizedInvoice,
+    organizationId: organization.id,
+    supabase,
+  });
+  return authorizedInvoice;
 }

@@ -2033,6 +2033,7 @@ type LightReceivableRow = {
   id: string;
   pending_balance: number;
   total_amount: number;
+  currency?: string | null;
   due_date: string;
   created_at: string | null;
   customer: {
@@ -2047,6 +2048,9 @@ type LightReceivableRow = {
     invoice_number: string | null;
     remittance_number: string | null;
     dispatched_at: string | null;
+  } | null;
+  manual_invoice: {
+    created_by: string | null;
   } | null;
 };
 
@@ -2547,7 +2551,8 @@ export async function getReceivablesPaginated(
       due_date,
       created_at,
       customer:customers(id, business_name, fantasy_name, city),
-      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at)
+      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at),
+      manual_invoice:manual_fiscal_invoices(created_by)
     `
   );
 
@@ -2638,7 +2643,7 @@ export async function getReceivablesPaginated(
     : undefined;
 
   const visible = filterAndSortLightRows(
-    lightRows ?? [],
+    (lightRows ?? []) as unknown as LightReceivableRow[],
     accessContext,
     params,
     sellersByUserId,
@@ -2813,7 +2818,8 @@ export async function getReceivablesMetrics(
       total_amount,
       currency,
       due_date,
-      sale:sales_orders(status, user_id)
+      sale:sales_orders(status, user_id),
+      manual_invoice:manual_fiscal_invoices(created_by)
     `
     )
     .eq("organization_id", org.id)
@@ -2824,7 +2830,7 @@ export async function getReceivablesMetrics(
     return { byCurrency: [] };
   }
 
-  const visible = (lightRows ?? []).filter(
+  const visible = ((lightRows ?? []) as unknown as LightReceivableRow[]).filter(
     (r) =>
       !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
       canAccessReceivable(
