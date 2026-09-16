@@ -35,7 +35,7 @@ export async function getStockForOrderAction(
 
   const { data: stockData, error } = await supabase
     .from("view_stock_detail")
-    .select("product_id, product_name, total_stock")
+    .select("product_id, product_name, brand, total_stock")
     .eq("organization_id", org.id)
     .in("product_id", productIds);
 
@@ -85,6 +85,7 @@ export async function getStockForOrderAction(
       return {
         product_id: item.productId,
         product_name: stock?.product_name ?? "Desconocido",
+        brand: stock?.brand ?? null,
         quantity_needed: item.quantityNeeded,
         stock_available: variantStock,
         has_stock: variantStock >= item.quantityNeeded,
@@ -98,6 +99,7 @@ export async function getStockForOrderAction(
     return {
       product_id: item.productId,
       product_name: stock?.product_name ?? "Desconocido",
+      brand: stock?.brand ?? null,
       quantity_needed: item.quantityNeeded,
       stock_available: stockAvailable,
       has_stock: stockAvailable >= item.quantityNeeded,
