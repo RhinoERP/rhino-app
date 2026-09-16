@@ -14,6 +14,7 @@ import {
 import {
   canIssueArcaInvoiceForPreventa,
   isArcaInvoiceEligibleSaleStatus,
+  isEarlyBillablePreventaStatus,
 } from "@/modules/sales/preventa-invoicing";
 import { regenerateAuthorizedSaleRemittances } from "@/modules/sales/remittance-regeneration";
 import {
@@ -971,7 +972,7 @@ export async function validateSaleForArcaInvoicing(params: {
     await loadSaleForArcaInvoicing(params);
 
   if (sale.arcaStatus === "authorized") {
-    if (sale.status === "DRAFT") {
+    if (isEarlyBillablePreventaStatus(sale.status)) {
       await ensureReceivableForAuthorizedPreventaInvoice({
         supabase: await createClient(),
         orgId: organizationId,
@@ -1000,12 +1001,12 @@ export async function validateSaleForArcaInvoicing(params: {
   }
 
   let allowPreventaInvoicing = false;
-  if (sale.status === "DRAFT") {
+  if (isEarlyBillablePreventaStatus(sale.status)) {
     const orgSettings = await getOrgSettings(params.orgSlug);
     allowPreventaInvoicing = orgSettings.allow_preventa_arca_invoicing;
     if (!canIssueArcaInvoiceForPreventa(sale.status, allowPreventaInvoicing)) {
       throw new ArcaValidationError(
-        "No se puede emitir ARCA para una preventa en borrador porque esta organización no habilitó la facturación previa a la confirmación."
+        "No se puede emitir ARCA para una preventa no confirmada porque esta organización no habilitó la facturación previa a la confirmación."
       );
     }
   }
@@ -1590,7 +1591,9 @@ export async function emitSaleInvoice(params: {
     authorization,
     requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
-    preventaSale: context.sale.status === "DRAFT" ? context.sale : undefined,
+    preventaSale: isEarlyBillablePreventaStatus(context.sale.status)
+      ? context.sale
+      : undefined,
   });
 
   const supabase = await createClient();

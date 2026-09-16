@@ -118,6 +118,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
+import { canCreatePreventaAdvance } from "@/modules/sales-advances/preventa-advance";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
@@ -234,6 +235,7 @@ type SaleDetailProps = {
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   salesAdvancesEnabled: boolean;
+  isFullAdvanceQuote?: boolean;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
   isProductionEnabled: boolean;
@@ -842,6 +844,7 @@ export function SaleDetail({
   relatedOrder,
   remittanceSettings,
   salesAdvancesEnabled,
+  isFullAdvanceQuote = false,
   saleReturns,
   creditNotes,
   isProductionEnabled,
@@ -877,6 +880,16 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const isIncompleteSale = sale.status === "INCOMPLETE";
+  const canShowAdvanceCard =
+    salesAdvancesEnabled &&
+    !isFullAdvanceQuote &&
+    (isDraftSale ||
+      isConfirmedSale ||
+      isDispatchedSale ||
+      isDeliveredSale ||
+      (isIncompleteSale &&
+        sale.preventa_status &&
+        canCreatePreventaAdvance(sale.preventa_status)));
   const { data: dispatchProgress } = useSaleDispatchProgress(
     orgSlug,
     sale.id,
@@ -2655,11 +2668,7 @@ export function SaleDetail({
         </Card>
       ) : null}
 
-      {salesAdvancesEnabled &&
-      (sale.status === "DRAFT" ||
-        isConfirmedSale ||
-        isDispatchedSale ||
-        isDeliveredSale) ? (
+      {canShowAdvanceCard ? (
         <SalesAdvanceCard
           canIssueBalance={isConfirmedSale}
           canManage={canManageSale}

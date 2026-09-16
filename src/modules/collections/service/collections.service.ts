@@ -27,6 +27,7 @@ import type {
 type ReceivableRow = Database["public"]["Tables"]["accounts_receivable"]["Row"];
 
 type ReceivableWithRelations = ReceivableRow & {
+  manual_fiscal_invoice_id?: string | null;
   is_collection_deferred?: boolean | null;
   customer:
     | {
@@ -68,6 +69,20 @@ type ReceivableWithRelations = ReceivableRow & {
         global_discount_amount?: number | null;
         remittance_number?: string | null;
         items?: SaleItemRaw[] | null;
+      }>
+    | null;
+  manual_invoice:
+    | {
+        invoice_number?: string | null;
+        issue_date?: string | null;
+        sub_total?: number | null;
+        created_by?: string | null;
+      }
+    | Array<{
+        invoice_number?: string | null;
+        issue_date?: string | null;
+        sub_total?: number | null;
+        created_by?: string | null;
       }>
     | null;
 };
@@ -263,6 +278,13 @@ function getSaleUserId(sale: ReceivableWithRelations["sale"]): string | null {
   return typeof rawSale.user_id === "string" ? rawSale.user_id : null;
 }
 
+function getManualInvoiceUserId(
+  invoice: ReceivableWithRelations["manual_invoice"]
+): string | null {
+  const raw = Array.isArray(invoice) ? invoice[0] : invoice;
+  return typeof raw?.created_by === "string" ? raw.created_by : null;
+}
+
 function canAccessReceivable(
   receivable: ReceivableWithRelations,
   accessContext: CollectionsAccessContext
@@ -275,7 +297,10 @@ function canAccessReceivable(
     return false;
   }
 
-  return getSaleUserId(receivable.sale) === accessContext.userId;
+  return (
+    getSaleUserId(receivable.sale) === accessContext.userId ||
+    getManualInvoiceUserId(receivable.manual_invoice) === accessContext.userId
+  );
 }
 
 async function fetchLastPayablePaymentDates(
@@ -415,7 +440,21 @@ function normalizeSaleInfo(
     : receivable.sale;
 
   if (!hasSaleData(rawSale)) {
-    return null;
+    const rawManual = Array.isArray(receivable.manual_invoice)
+      ? receivable.manual_invoice[0]
+      : receivable.manual_invoice;
+    if (!rawManual) {
+      return null;
+    }
+    return {
+      invoice_number: rawManual.invoice_number ?? null,
+      sale_date: rawManual.issue_date ?? null,
+      dispatched_at: null,
+      sale_number: null,
+      sub_total: normalizeOptionalMoney(rawManual.sub_total),
+      global_discount_amount: null,
+      remittance_number: "Factura manual",
+    };
   }
 
   return {
@@ -1000,7 +1039,11 @@ function mapReceivableAccount(
     id: row.id,
     organization_id: row.organization_id,
     customer_id: row.customer_id,
-    sales_order_id: row.sales_order_id,
+    // Consumers still use this legacy display identifier. Manual documents use
+    // their own id here and expose their invoice metadata through `sale`.
+    sales_order_id:
+      row.sales_order_id ?? row.manual_fiscal_invoice_id ?? row.id,
+    manual_fiscal_invoice_id: row.manual_fiscal_invoice_id ?? null,
     total_amount: total,
     pending_balance: pending,
     currency: row.currency ?? "ARS",
@@ -1032,7 +1075,8 @@ const RECEIVABLES_SELECT = `
     sub_total,
     global_discount_amount,
     remittance_number
-  )
+  ),
+  manual_invoice:manual_fiscal_invoices(invoice_number, issue_date, sub_total, created_by)
 `;
 
 export async function getReceivablesByOrgSlug(
@@ -1989,6 +2033,7 @@ type LightReceivableRow = {
   id: string;
   pending_balance: number;
   total_amount: number;
+  currency?: string | null;
   due_date: string;
   created_at: string | null;
   customer: {
@@ -2003,6 +2048,9 @@ type LightReceivableRow = {
     invoice_number: string | null;
     remittance_number: string | null;
     dispatched_at: string | null;
+  } | null;
+  manual_invoice: {
+    created_by: string | null;
   } | null;
 };
 
@@ -2503,7 +2551,8 @@ export async function getReceivablesPaginated(
       due_date,
       created_at,
       customer:customers(id, business_name, fantasy_name, city),
-      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at)
+      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at),
+      manual_invoice:manual_fiscal_invoices(created_by)
     `
   );
 
@@ -2594,7 +2643,7 @@ export async function getReceivablesPaginated(
     : undefined;
 
   const visible = filterAndSortLightRows(
-    lightRows ?? [],
+    (lightRows ?? []) as unknown as LightReceivableRow[],
     accessContext,
     params,
     sellersByUserId,
@@ -2769,7 +2818,8 @@ export async function getReceivablesMetrics(
       total_amount,
       currency,
       due_date,
-      sale:sales_orders(status, user_id)
+      sale:sales_orders(status, user_id),
+      manual_invoice:manual_fiscal_invoices(created_by)
     `
     )
     .eq("organization_id", org.id)
@@ -2780,7 +2830,7 @@ export async function getReceivablesMetrics(
     return { byCurrency: [] };
   }
 
-  const visible = (lightRows ?? []).filter(
+  const visible = ((lightRows ?? []) as unknown as LightReceivableRow[]).filter(
     (r) =>
       !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
       canAccessReceivable(
