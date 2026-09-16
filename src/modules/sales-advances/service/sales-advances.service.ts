@@ -1211,6 +1211,35 @@ export async function getSalesAdvancesPaginated(
   };
 }
 
+export async function isFullAdvanceQuoteForSale(params: {
+  orgSlug: string;
+  finalSalesOrderId: string;
+}): Promise<boolean> {
+  try {
+    const org = await getOrganizationBySlug(params.orgSlug);
+    if (!org?.id) {
+      return false;
+    }
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("sales_order_items")
+      .select(
+        "quote_items(id, quote_id, quotes(advance_payment, advance_payment_percentage))"
+      )
+      .eq("sales_order_id", params.finalSalesOrderId)
+      .eq("organization_id", org.id)
+      .limit(1)
+      .maybeSingle();
+    const quote = (data as Raw | null)?.quote_items?.quotes;
+    return Boolean(
+      quote?.advance_payment &&
+        Number(quote?.advance_payment_percentage) === 100
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function getSalesAdvanceSuggestion(params: {
   orgSlug: string;
   finalSalesOrderId: string;
