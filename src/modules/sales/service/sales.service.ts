@@ -4489,7 +4489,8 @@ export async function cancelSaleOrder(
   }
 
   const isAuthorizedPreventa =
-    sale.status === "DRAFT" && sale.arca_status === "authorized";
+    (sale.status === "DRAFT" || sale.status === "INCOMPLETE") &&
+    sale.arca_status === "authorized";
 
   if (isAuthorizedPreventa) {
     await assertAuthorizedPreventaCanBeCancelled({
