@@ -45,6 +45,7 @@ import type { AnyEvento } from "@/modules/accounting/types";
 import { downloadPaymentInvoiceAction } from "@/modules/collections/actions/download-payment-invoice.action";
 import { downloadReceiptAction } from "@/modules/collections/actions/download-receipt.action";
 import { generateReceiptAction } from "@/modules/collections/actions/generate-receipt.action";
+import { getPaymentRateAction } from "@/modules/collections/actions/get-payment-rate.action";
 import {
   markPaymentAccountingJournalAction,
   registerPaymentAction,
@@ -586,25 +587,29 @@ export function RegisterPaymentDialog({
 
   const isUsdDebt = currency === "USD";
 
+  const rateQuery = useQuery({
+    queryKey: ["payment-rate", type, accountId],
+    queryFn: () =>
+      getPaymentRateAction({
+        orgSlug,
+        type,
+        accountId,
+      }),
+    enabled: Boolean(open && !isEditMode && isUsdDebt && accountId),
+  });
+
+  const missingInvoice = rateQuery.data?.missingInvoice ?? false;
+  const invoiceRate = rateQuery.data?.rate ?? null;
+
   useEffect(() => {
-    if (isEditMode || !isUsdDebt || !open) {
-      return;
+    if (
+      rateQuery.data?.success &&
+      typeof rateQuery.data.rate === "number" &&
+      rateQuery.data.rate > 0
+    ) {
+      setExchangeRate(String(rateQuery.data.rate));
     }
-    let cancelled = false;
-    fetch("/api/exchange-rate/usd?previous=1")
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled && data?.venta) {
-          setExchangeRate(String(data.venta));
-        }
-      })
-      .catch(() => {
-        // si no se puede obtener la cotización, el usuario la escribe
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isEditMode, isUsdDebt, open]);
+  }, [rateQuery.data]);
 
   const equivalenteARS = useMemo(() => {
     const parsedAmount = truncateMoney(Number(amount));
@@ -619,6 +624,44 @@ export function RegisterPaymentDialog({
     }
     return truncateMoney(parsedAmount * parsedRate);
   }, [amount, exchangeRate]);
+
+  const renderRateStatus = () => {
+    if (rateQuery.isLoading) {
+      return (
+        <p className="text-muted-foreground text-xs">
+          Cargando cotización de la factura...
+        </p>
+      );
+    }
+    if (missingInvoice) {
+      return (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-800 text-xs dark:bg-amber-900/20 dark:text-amber-400">
+          {type === "receivable"
+            ? "La venta no tiene una factura emitida con cotización. Facturá la venta antes de cobrar."
+            : "El pago no tiene una factura de compra registrada con cotización. Registrá la factura antes de pagar."}
+        </p>
+      );
+    }
+    if (invoiceRate != null) {
+      return (
+        <>
+          <p className="font-medium text-sm">{String(invoiceRate)} ARS/USD</p>
+          <p className="text-muted-foreground text-xs">
+            Cotización fijada por la factura.
+          </p>
+          {equivalenteARS !== null ? (
+            <p className="text-muted-foreground text-xs">
+              Recibís:{" "}
+              <span className="font-medium text-foreground">
+                {formatCurrency(equivalenteARS, "ARS")}
+              </span>
+            </p>
+          ) : null}
+        </>
+      );
+    }
+    return null;
+  };
 
   const selectedReceivedChecks = useMemo(
     () =>
@@ -914,9 +957,19 @@ export function RegisterPaymentDialog({
       return null;
     }
 
+    if (rateQuery.isLoading) {
+      return null;
+    }
+
+    if (missingInvoice) {
+      return type === "receivable"
+        ? "La venta no tiene una factura emitida con cotización. Facturá la venta antes de cobrar."
+        : "El pago no tiene una factura de compra registrada con cotización. Registrá la factura antes de pagar.";
+    }
+
     const parsedExchangeRate = Number(exchangeRate);
     if (!Number.isFinite(parsedExchangeRate) || parsedExchangeRate <= 0) {
-      return "Debe ingresar el tipo de cambio para deudas en USD.";
+      return "No se pudo obtener la cotización de la factura para esta deuda.";
     }
 
     return null;
@@ -1552,31 +1605,8 @@ export function RegisterPaymentDialog({
 
                 {!isEditMode && isUsdDebt ? (
                   <div className="grid gap-2">
-                    <Label htmlFor="exchangeRate">
-                      Tipo de cambio (USD → ARS)
-                    </Label>
-                    <Input
-                      id="exchangeRate"
-                      inputMode="decimal"
-                      min={0}
-                      onChange={(event) => setExchangeRate(event.target.value)}
-                      placeholder="Ej: 1200"
-                      step="0.01"
-                      type="number"
-                      value={exchangeRate}
-                    />
-                    {equivalenteARS !== null ? (
-                      <p className="text-muted-foreground text-xs">
-                        Recibís:{" "}
-                        <span className="font-medium text-foreground">
-                          {formatCurrency(equivalenteARS, "ARS")}
-                        </span>
-                      </p>
-                    ) : (
-                      <p className="text-muted-foreground text-xs">
-                        Ingresá la cotización para ver el equivalente en ARS.
-                      </p>
-                    )}
+                    <Label>Tipo de cambio (USD → ARS)</Label>
+                    {renderRateStatus()}
                   </div>
                 ) : null}
 
@@ -1812,7 +1842,7 @@ export function RegisterPaymentDialog({
                     Cancelar
                   </Button>
                   <Button
-                    disabled={isPending}
+                    disabled={isPending || missingInvoice}
                     onClick={handleSubmit}
                     type="button"
                   >
