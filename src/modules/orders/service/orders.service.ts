@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
+import { hasFullFiscalReversal } from "@/modules/sales/preventa-invoicing";
 import {
   confirmIncompleteSaleWithStockDeduction,
   dispatchSaleFromOrders,
@@ -4621,6 +4622,56 @@ async function cancelParentWithChildren(
   return { success: true };
 }
 
+// A linked sale that was already invoiced in ARCA (without an advance record)
+// must be fully reversed with an authorized credit note before the order can
+// be cancelled, otherwise its fiscal record would be left dangling.
+async function getAuthorizedSaleCancelError(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  salesOrderId: string | null
+): Promise<string | null> {
+  if (!salesOrderId) {
+    return null;
+  }
+
+  const { data: saleForCancel } = await supabase
+    .from("sales_orders")
+    .select("id, arca_status, total_amount")
+    .eq("id", salesOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleForCancel?.arca_status !== "authorized") {
+    return null;
+  }
+
+  const { data: creditNotes } = await supabase
+    .from("credit_notes")
+    .select("amount")
+    .eq("organization_id", orgId)
+    .eq("sales_order_id", salesOrderId)
+    .eq("arca_status", "authorized")
+    .neq("status", "CANCELLED");
+
+  const authorizedCreditAmount = truncateMoney(
+    (creditNotes ?? []).reduce(
+      (total, creditNote) => total + Number(creditNote.amount ?? 0),
+      0
+    )
+  );
+
+  if (
+    !hasFullFiscalReversal({
+      saleTotal: truncateMoney(Number(saleForCancel.total_amount ?? 0)),
+      authorizedCreditAmount,
+    })
+  ) {
+    return "El pedido tiene una factura ARCA emitida. Emití y autorizá una Nota de Crédito por el total facturado antes de cancelarlo.";
+  }
+
+  return null;
+}
+
 export async function cancelOrder(
   supabase: SupabaseClient<Database>,
   params: {
@@ -4672,6 +4723,15 @@ export async function cancelOrder(
           "El pedido tiene un anticipo facturado. Resolvé su nota de crédito, reintegro o traslado a una revisión antes de cancelarlo.",
       };
     }
+  }
+
+  const authorizedSaleError = await getAuthorizedSaleCancelError(
+    supabase,
+    params.orgId,
+    params.salesOrderId
+  );
+  if (authorizedSaleError) {
+    return { success: false, error: authorizedSaleError };
   }
 
   // Child order — cancel just this child

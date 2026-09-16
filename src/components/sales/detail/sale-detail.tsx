@@ -235,6 +235,7 @@ type SaleDetailProps = {
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   salesAdvancesEnabled: boolean;
+  isFullAdvanceQuote?: boolean;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
   isProductionEnabled: boolean;
@@ -843,6 +844,7 @@ export function SaleDetail({
   relatedOrder,
   remittanceSettings,
   salesAdvancesEnabled,
+  isFullAdvanceQuote = false,
   saleReturns,
   creditNotes,
   isProductionEnabled,
@@ -880,6 +882,7 @@ export function SaleDetail({
   const isIncompleteSale = sale.status === "INCOMPLETE";
   const canShowAdvanceCard =
     salesAdvancesEnabled &&
+    !isFullAdvanceQuote &&
     (isDraftSale ||
       isConfirmedSale ||
       isDispatchedSale ||

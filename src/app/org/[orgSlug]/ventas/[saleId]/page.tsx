@@ -16,6 +16,7 @@ import {
   getSalesAccessContext,
   getSalesOrderById,
 } from "@/modules/sales/service/sales.service";
+import { isFullAdvanceQuoteForSale } from "@/modules/sales-advances/service/sales-advances.service";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type SaleDetailPageProps = {
@@ -63,6 +64,7 @@ export default async function SaleDetailPage({
     arcaReadiness,
     organization,
     relatedOrder,
+    isFullAdvanceQuote,
   ] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
@@ -76,6 +78,7 @@ export default async function SaleDetailPage({
     getArcaSaleInvoiceReadiness(orgSlug),
     getOrganizationBySlug(orgSlug),
     getOrderIdBySaleId(orgSlug, saleId),
+    isFullAdvanceQuoteForSale({ orgSlug, finalSalesOrderId: saleId }),
   ]);
 
   if (!(sale && organization)) {
@@ -89,6 +92,7 @@ export default async function SaleDetailPage({
         creditNotes={creditNotes}
         customers={customers}
         initialMode={initialMode}
+        isFullAdvanceQuote={isFullAdvanceQuote}
         isProductionEnabled={organization.production_enabled === true}
         organizationName={organization.name}
         orgSlug={orgSlug}
