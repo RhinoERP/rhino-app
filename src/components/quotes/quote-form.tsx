@@ -357,21 +357,25 @@ function UnitPriceInput({
   value: number;
   onChange: (raw: string) => void;
 }) {
-  const [draft, setDraft] = useState(value.toString());
+  const displayValue = value.toFixed(2);
+  const [draft, setDraft] = useState(displayValue);
   const isFocusedRef = useRef(false);
 
   useEffect(() => {
     if (!isFocusedRef.current) {
-      setDraft(value.toString());
+      setDraft(value.toFixed(2));
     }
   }, [value]);
 
   const commit = () => {
+    if (draft === displayValue) {
+      return;
+    }
     const parsed = Number.parseFloat(draft);
     if (Number.isFinite(parsed) && parsed >= 0) {
       onChange(draft);
     } else {
-      setDraft(value.toString());
+      setDraft(displayValue);
     }
   };
 

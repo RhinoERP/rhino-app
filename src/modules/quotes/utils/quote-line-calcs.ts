@@ -1,4 +1,4 @@
-import { truncateMoney } from "@/lib/decimal";
+import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { computeLineGross, type LineExtrasInput } from "@/lib/line-values";
 import {
   buildItemizedTaxPlan,
@@ -7,6 +7,11 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 
 export type QuoteExtrasInput = LineExtrasInput;
+
+// Precisión interna de los cálculos de presupuesto. La conversión de moneda
+// introduce decimales no centésimos; truncar a 2 antes de tiempo acumula
+// errores en cantidades grandes. Solo el total final se trunca a 2 decimales.
+const CALC_PRECISION = 6;
 
 // Shared, client-safe quote money calculation.
 // Used both by the form (preview) and the server (persistence) so the
@@ -56,14 +61,17 @@ export function buildQuoteTaxLines(items: QuoteCalcItem[]): QuoteTaxLine[] {
         variant.quantity,
         variant.extras
       );
-      const discount = truncateMoney((gross * discountPercentage) / 100);
+      const discount = truncateToDecimals(
+        (gross * discountPercentage) / 100,
+        CALC_PRECISION
+      );
 
       lines.push({
         lineId: `item-${itemIndex}-variant-${variantIndex}`,
         productId: item.productId ?? null,
         gross,
         discount,
-        net: truncateMoney(Math.max(0, gross - discount)),
+        net: truncateToDecimals(Math.max(0, gross - discount), CALC_PRECISION),
         taxes: item.taxes && item.taxes.length > 0 ? item.taxes : undefined,
       });
     });
@@ -80,20 +88,25 @@ export function computeQuoteTotals(params: {
 }): QuoteTotals {
   const lines = params.lines ?? buildQuoteTaxLines(params.items);
 
-  const grossTotal = truncateMoney(
-    lines.reduce((sum, line) => sum + line.gross, 0)
+  const grossTotal = truncateToDecimals(
+    lines.reduce((sum, line) => sum + line.gross, 0),
+    CALC_PRECISION
   );
-  const lineDiscountTotal = truncateMoney(
-    lines.reduce((sum, line) => sum + line.discount, 0)
+  const lineDiscountTotal = truncateToDecimals(
+    lines.reduce((sum, line) => sum + line.discount, 0),
+    CALC_PRECISION
   );
-  const subTotal = truncateMoney(
-    lines.reduce((sum, line) => sum + line.net, 0)
+  const subTotal = truncateToDecimals(
+    lines.reduce((sum, line) => sum + line.net, 0),
+    CALC_PRECISION
   );
-  const globalDiscountAmount = truncateMoney(
-    (subTotal * clampPercentage(params.globalDiscountPercentage)) / 100
+  const globalDiscountAmount = truncateToDecimals(
+    (subTotal * clampPercentage(params.globalDiscountPercentage)) / 100,
+    CALC_PRECISION
   );
-  const netAfterDiscount = truncateMoney(
-    Math.max(0, subTotal - globalDiscountAmount)
+  const netAfterDiscount = truncateToDecimals(
+    Math.max(0, subTotal - globalDiscountAmount),
+    CALC_PRECISION
   );
 
   const taxPlan = buildItemizedTaxPlan({
@@ -105,6 +118,7 @@ export function computeQuoteTotals(params: {
     })),
     globalDiscountAmount,
     fallbackTaxes: params.fallbackTaxes,
+    precision: CALC_PRECISION,
   });
 
   const totalTaxAmount = taxPlan.totalTaxAmount;

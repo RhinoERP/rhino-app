@@ -1,13 +1,11 @@
-import { truncateMoney } from "@/lib/decimal";
+import { truncateToDecimals } from "@/lib/decimal";
 
 export type LineExtrasInput = Array<{ price: number }>;
 
 export function computeLineExtrasTotal(
   extras: LineExtrasInput | undefined
 ): number {
-  return truncateMoney(
-    (extras ?? []).reduce((sum, extra) => sum + extra.price, 0)
-  );
+  return (extras ?? []).reduce((sum, extra) => sum + extra.price, 0);
 }
 
 export function computeLineGross(
@@ -16,5 +14,5 @@ export function computeLineGross(
   extras: LineExtrasInput | undefined
 ): number {
   const extrasTotal = computeLineExtrasTotal(extras);
-  return truncateMoney(quantity * unitPrice + extrasTotal * quantity);
+  return truncateToDecimals(quantity * unitPrice + extrasTotal * quantity, 6);
 }
