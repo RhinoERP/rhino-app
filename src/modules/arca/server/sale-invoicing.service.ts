@@ -1309,6 +1309,7 @@ async function persistAuthorizedInvoice(params: {
   pointOfSale: number;
   voucherTypeCode: number;
   voucherNumber: number;
+  exchangeRate: number | null;
   authorization: {
     CAE: string;
     CAEFchVto: string;
@@ -1339,6 +1340,7 @@ async function persistAuthorizedInvoice(params: {
       arca_request_json: params.requestJson,
       arca_response_json: params.responseJson,
       invoice_number: invoiceNumber,
+      exchange_rate: params.exchangeRate,
       updated_at: now,
     })
     .eq("organization_id", params.orgId)
@@ -1588,12 +1590,11 @@ export async function emitSaleInvoice(params: {
     pointOfSale: request.PtoVta,
     voucherTypeCode: request.CbteTipo,
     voucherNumber: authorization.voucherNumber,
+    exchangeRate: context.sale.currency === "USD" ? fiscalCurrency.rate : null,
     authorization,
     requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
-    preventaSale: isEarlyBillablePreventaStatus(context.sale.status)
-      ? context.sale
-      : undefined,
+    preventaSale: context.sale.status === "DRAFT" ? context.sale : undefined,
   });
 
   const supabase = await createClient();
