@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-conversion";
 import { updateQuote } from "../service/quotes.service";
 import type { QuoteFormValues } from "../types";
 
@@ -43,7 +44,15 @@ export async function updateQuoteAction(
           color: v.color,
           quantity: v.quantity,
           productVariantId: v.productVariantId,
-          extras: v.extras,
+          extras: (v.extras ?? []).map((extra) => ({
+            ...extra,
+            price: convertPriceToQuoteCurrency(
+              extra.price,
+              item.productCurrency ?? "ARS",
+              values.currency,
+              values.exchangeRate
+            ),
+          })),
         })),
         discountPercentage: item.discountPercentage ?? null,
         taxes: item.taxes,

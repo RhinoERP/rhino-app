@@ -31,6 +31,7 @@ import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-fil
 import { useEditQuote } from "@/modules/quotes/hooks/use-quote-edit";
 import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteFormValues } from "@/modules/quotes/types";
+import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-conversion";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import type {
@@ -163,10 +164,13 @@ const taxesEqual = (a: ItemTaxInput[], b: ItemTaxInput[]): boolean => {
 function processQuoteItem(
   itemsByProduct: Map<string, ProductEntry>,
   item: QuoteDetails["quote_items"][number],
-  productMap: Map<string, SaleProduct>
+  productMap: Map<string, SaleProduct>,
+  quoteContext: { quoteCurrency: string; exchangeRate: number | null }
 ): void {
+  const { quoteCurrency, exchangeRate } = quoteContext;
   const productId = item.product_id ?? "";
   const product = productMap.get(productId);
+  const productCurrency = product?.currency ?? "ARS";
   const parsed = parseDescription(item.description);
   const productName =
     parsed?.productName ?? product?.name ?? item.description ?? "Producto";
@@ -177,7 +181,7 @@ function processQuoteItem(
     productName,
     sku: product?.sku,
     brand: product?.brand ?? undefined,
-    productCurrency: product?.currency ?? "ARS",
+    productCurrency,
     unitPrice: item.unit_price,
   });
 
@@ -188,7 +192,12 @@ function processQuoteItem(
     productVariantId: item.product_variant_id ?? undefined,
     extras: (item.quote_item_extras ?? []).map((e) => ({
       description: e.description,
-      price: e.price,
+      price: convertPriceToQuoteCurrency(
+        e.price,
+        quoteCurrency,
+        productCurrency,
+        exchangeRate
+      ),
     })),
   });
   entry.totalQuantity += item.quantity;
@@ -222,7 +231,10 @@ function buildDefaultValues(
   const itemsByProduct = new Map<string, ProductEntry>();
 
   for (const item of quote.quote_items) {
-    processQuoteItem(itemsByProduct, item, productMap);
+    processQuoteItem(itemsByProduct, item, productMap, {
+      quoteCurrency: quote.currency ?? "ARS",
+      exchangeRate: quote.exchange_rate,
+    });
   }
 
   return {

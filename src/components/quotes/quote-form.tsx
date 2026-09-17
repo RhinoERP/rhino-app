@@ -196,6 +196,9 @@ function recalcItemPrices(params: {
       subtotal: computeSubtotalForItem({
         unitPrice: newUnitPrice,
         variants: item.variants,
+        productCurrency: item.productCurrency ?? "ARS",
+        quoteCurrency,
+        exchangeRate,
       }),
     };
   });
@@ -212,6 +215,9 @@ function hasItemVariants(item: QuoteFormValues["items"][number]): boolean {
 type SubtotalItem = {
   unitPrice: number;
   variants: Array<{ quantity: number; extras?: Array<{ price: number }> }>;
+  productCurrency: string;
+  quoteCurrency: string;
+  exchangeRate: number | null | undefined;
 };
 
 function computeSubtotalForItem(item: SubtotalItem): number {
@@ -219,10 +225,44 @@ function computeSubtotalForItem(item: SubtotalItem): number {
     item.variants.reduce(
       (acc, variant) =>
         acc +
-        computeLineGross(item.unitPrice, variant.quantity, variant.extras),
+        computeLineGross(
+          item.unitPrice,
+          variant.quantity,
+          (variant.extras ?? []).map((extra) => ({
+            ...extra,
+            price: convertPriceToQuoteCurrency(
+              extra.price,
+              item.productCurrency,
+              item.quoteCurrency,
+              item.exchangeRate
+            ),
+          }))
+        ),
       0
     )
   );
+}
+
+function buildCalcItemsForQuote(
+  items: QuoteFormValues["items"],
+  quoteCurrency: string,
+  exchangeRate: number | null | undefined
+): QuoteFormValues["items"] {
+  return items.map((item) => ({
+    ...item,
+    variants: item.variants.map((variant) => ({
+      ...variant,
+      extras: (variant.extras ?? []).map((extra) => ({
+        ...extra,
+        price: convertPriceToQuoteCurrency(
+          extra.price,
+          item.productCurrency ?? "ARS",
+          quoteCurrency,
+          exchangeRate
+        ),
+      })),
+    })),
+  }));
 }
 
 const formatTaxSummary = (
@@ -715,6 +755,9 @@ export function QuoteForm({
         subtotal: computeSubtotalForItem({
           unitPrice: existingItem.unitPrice,
           variants: updatedVariants,
+          productCurrency: existingItem.productCurrency ?? "ARS",
+          quoteCurrency: currency,
+          exchangeRate,
         }),
       });
     } else {
@@ -815,6 +858,9 @@ export function QuoteForm({
       subtotal: computeSubtotalForItem({
         unitPrice,
         variants: mergedVariants,
+        productCurrency: existingItem.productCurrency ?? "ARS",
+        quoteCurrency: currency,
+        exchangeRate,
       }),
     });
     setEditingItemIndex(null);
@@ -861,6 +907,9 @@ export function QuoteForm({
         subtotal: computeSubtotalForItem({
           unitPrice: existingItem.unitPrice,
           variants: mergedVariants,
+          productCurrency: existingItem.productCurrency ?? "ARS",
+          quoteCurrency: currency,
+          exchangeRate,
         }),
       });
     } else {
@@ -932,6 +981,9 @@ export function QuoteForm({
       subtotal: computeSubtotalForItem({
         unitPrice: item.unitPrice,
         variants: updatedVariants,
+        productCurrency: item.productCurrency ?? "ARS",
+        quoteCurrency: currency,
+        exchangeRate,
       }),
     });
   };
@@ -949,6 +1001,9 @@ export function QuoteForm({
       subtotal: computeSubtotalForItem({
         unitPrice: parsed,
         variants: item.variants,
+        productCurrency: item.productCurrency ?? "ARS",
+        quoteCurrency: currency,
+        exchangeRate,
       }),
     });
   };
@@ -1040,15 +1095,37 @@ export function QuoteForm({
     name: "globalDiscountPercentage",
   });
 
+  const selectedCustomerId = useWatch({
+    control: form.control,
+    name: "customerId",
+  });
+
+  const currency = useWatch({
+    control: form.control,
+    name: "currency",
+  });
+
+  const exchangeRate = useWatch({
+    control: form.control,
+    name: "exchangeRate",
+  });
+
   const totals = useMemo(() => {
-    const lines = buildQuoteTaxLines(formItems);
+    const calcItems = buildCalcItemsForQuote(formItems, currency, exchangeRate);
+    const lines = buildQuoteTaxLines(calcItems);
     return computeQuoteTotals({
-      items: formItems,
+      items: calcItems,
       globalDiscountPercentage: globalDiscountPercentage ?? 0,
       fallbackTaxes: formFallbackTaxes,
       lines,
     });
-  }, [formItems, formFallbackTaxes, globalDiscountPercentage]);
+  }, [
+    formItems,
+    formFallbackTaxes,
+    globalDiscountPercentage,
+    currency,
+    exchangeRate,
+  ]);
 
   const quoteTotal = totals.totalAmount;
   const advancePaymentPercentage = useWatch({
@@ -1075,21 +1152,6 @@ export function QuoteForm({
     () => priceLevels.filter((pl) => pl.is_active),
     [priceLevels]
   );
-
-  const selectedCustomerId = useWatch({
-    control: form.control,
-    name: "customerId",
-  });
-
-  const currency = useWatch({
-    control: form.control,
-    name: "currency",
-  });
-
-  const exchangeRate = useWatch({
-    control: form.control,
-    name: "exchangeRate",
-  });
 
   useEffect(() => {
     if (!selectedCustomerId) {
@@ -1655,6 +1717,9 @@ export function QuoteForm({
                                             {v.talle} / {v.color}: {v.quantity}
                                           </span>
                                           <QuoteItemExtrasPopover
+                                            currency={
+                                              item.productCurrency ?? "ARS"
+                                            }
                                             extras={v.extras ?? []}
                                             onChange={(newExtras) => {
                                               const updatedVariants =
@@ -1674,6 +1739,11 @@ export function QuoteForm({
                                                   computeSubtotalForItem({
                                                     unitPrice: item.unitPrice,
                                                     variants: updatedVariants,
+                                                    productCurrency:
+                                                      item.productCurrency ??
+                                                      "ARS",
+                                                    quoteCurrency: currency,
+                                                    exchangeRate,
                                                   }),
                                               });
                                             }}

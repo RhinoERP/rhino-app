@@ -19,11 +19,13 @@ export type QuoteItemExtra = {
 type QuoteItemExtrasPopoverProps = {
   extras: QuoteItemExtra[];
   onChange: (extras: QuoteItemExtra[]) => void;
+  currency?: string;
 };
 
 export function QuoteItemExtrasPopover({
   extras,
   onChange,
+  currency = "ARS",
 }: QuoteItemExtrasPopoverProps) {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
@@ -80,7 +82,7 @@ export function QuoteItemExtrasPopover({
                 id="price"
                 min="0"
                 onChange={(e) => setPrice(e.target.value)}
-                placeholder="0.00"
+                placeholder={`En ${currency}`}
                 step="0.01"
                 type="number"
                 value={price}
@@ -102,7 +104,7 @@ export function QuoteItemExtrasPopover({
                     <span>{extra.description}</span>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">
-                        {formatCurrency(extra.price)}
+                        {formatCurrency(extra.price, currency)}
                       </span>
                       <Button
                         className="h-6 w-6 text-destructive"
