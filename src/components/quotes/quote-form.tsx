@@ -455,6 +455,7 @@ export function QuoteForm({
   const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
     useState(false);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [editingRate, setEditingRate] = useState(false);
 
   const { can } = usePermissions();
   const canEditPrices = can("organization.admin");
@@ -1231,40 +1232,70 @@ export function QuoteForm({
                       <FormItem>
                         <FormLabel>Tipo de cambio (USD → ARS)</FormLabel>
                         <div className="flex items-center gap-2">
-                          <FormControl>
-                            <Input
-                              inputMode="decimal"
-                              min="0"
-                              placeholder="Cotización"
-                              step="any"
-                              type="number"
-                              {...field}
-                              onChange={(e) => {
-                                const parsed = Number.parseFloat(
-                                  e.target.value
-                                );
-                                field.onChange(
-                                  Number.isFinite(parsed) ? parsed : null
-                                );
-                              }}
-                              value={field.value ?? ""}
-                            />
-                          </FormControl>
-                          <Button
-                            aria-label="Actualizar cotización"
-                            disabled={isFetchingRate}
-                            onClick={() => {
-                              loadExchangeRate();
-                            }}
-                            size="icon"
-                            type="button"
-                            variant="outline"
-                          >
-                            <ArrowClockwise
-                              className={isFetchingRate ? "animate-spin" : ""}
-                              size={16}
-                            />
-                          </Button>
+                          {editingRate || field.value == null ? (
+                            <>
+                              <FormControl>
+                                <Input
+                                  inputMode="decimal"
+                                  min="0"
+                                  placeholder="Cotización"
+                                  step="any"
+                                  type="number"
+                                  {...field}
+                                  onBlur={(event) => {
+                                    if (
+                                      !event.currentTarget.parentElement?.contains(
+                                        event.relatedTarget as Node | null
+                                      )
+                                    ) {
+                                      setEditingRate(false);
+                                    }
+                                  }}
+                                  onChange={(e) => {
+                                    const parsed = Number.parseFloat(
+                                      e.target.value
+                                    );
+                                    field.onChange(
+                                      Number.isFinite(parsed) ? parsed : null
+                                    );
+                                  }}
+                                  value={field.value ?? ""}
+                                />
+                              </FormControl>
+                              <Button
+                                aria-label="Actualizar cotización"
+                                disabled={isFetchingRate}
+                                onClick={() => {
+                                  loadExchangeRate();
+                                }}
+                                onMouseDown={(event) => event.preventDefault()}
+                                size="icon"
+                                type="button"
+                                variant="outline"
+                              >
+                                <ArrowClockwise
+                                  className={
+                                    isFetchingRate ? "animate-spin" : ""
+                                  }
+                                  size={16}
+                                />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              aria-label="Editar cotización"
+                              className="h-9 justify-start border-transparent bg-transparent px-0 font-medium text-foreground text-sm hover:bg-transparent"
+                              onClick={() => setEditingRate(true)}
+                              type="button"
+                              variant="ghost"
+                            >
+                              {field.value}
+                              <PencilSimple
+                                className="text-muted-foreground"
+                                size={14}
+                              />
+                            </Button>
+                          )}
                         </div>
                         <FormMessage />
                       </FormItem>
