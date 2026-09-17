@@ -1,9 +1,12 @@
 import { truncateMoney } from "@/lib/decimal";
+import { computeLineGross, type LineExtrasInput } from "@/lib/line-values";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
   type ItemTaxInput,
 } from "@/modules/taxes/item-tax-calculations";
+
+export type QuoteExtrasInput = LineExtrasInput;
 
 // Shared, client-safe quote money calculation.
 // Used both by the form (preview) and the server (persistence) so the
@@ -13,8 +16,7 @@ import {
 export type QuoteCalcItem = {
   productId?: string | null;
   unitPrice: number;
-  variants: Array<{ quantity: number }>;
-  extras?: Array<{ price: number }>;
+  variants: Array<{ quantity: number; extras?: QuoteExtrasInput }>;
   discountPercentage?: number | null;
   taxes?: ItemTaxInput[];
 };
@@ -46,14 +48,13 @@ export function buildQuoteTaxLines(items: QuoteCalcItem[]): QuoteTaxLine[] {
   const lines: QuoteTaxLine[] = [];
 
   items.forEach((item, itemIndex) => {
-    const extrasTotal = truncateMoney(
-      (item.extras ?? []).reduce((sum, extra) => sum + extra.price, 0)
-    );
     const discountPercentage = clampPercentage(item.discountPercentage);
 
     (item.variants ?? []).forEach((variant, variantIndex) => {
-      const gross = truncateMoney(
-        variant.quantity * item.unitPrice + extrasTotal * variant.quantity
+      const gross = computeLineGross(
+        item.unitPrice,
+        variant.quantity,
+        variant.extras
       );
       const discount = truncateMoney((gross * discountPercentage) / 100);
 

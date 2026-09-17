@@ -43,10 +43,10 @@ export async function updateQuoteAction(
           color: v.color,
           quantity: v.quantity,
           productVariantId: v.productVariantId,
+          extras: v.extras,
         })),
         discountPercentage: item.discountPercentage ?? null,
         taxes: item.taxes,
-        extras: item.extras,
       })),
     };
 

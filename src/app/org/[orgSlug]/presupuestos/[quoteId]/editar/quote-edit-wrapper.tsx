@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import type { Customer } from "@/modules/customers/types";
 import type { PriceLevel } from "@/modules/price-levels/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
@@ -74,8 +75,8 @@ type ProductEntry = {
     color: string;
     quantity: number;
     productVariantId?: string;
+    extras: Array<{ description: string; price: number }>;
   }>;
-  extras: Array<{ description: string; price: number }>;
   totalQuantity: number;
   subtotal: number;
   discountPercentage: number;
@@ -99,7 +100,6 @@ function getOrCreateEntry(
       productId,
       ...data,
       variants: [],
-      extras: [],
       totalQuantity: 0,
       subtotal: 0,
       discountPercentage: 0,
@@ -186,6 +186,10 @@ function processQuoteItem(
     color,
     quantity: item.quantity,
     productVariantId: item.product_variant_id ?? undefined,
+    extras: (item.quote_item_extras ?? []).map((e) => ({
+      description: e.description,
+      price: e.price,
+    })),
   });
   entry.totalQuantity += item.quantity;
   entry.subtotal += item.subtotal;
@@ -204,13 +208,6 @@ function processQuoteItem(
     // representar a nivel de ítem; se resetean para no persistir nada.
     entry.discountPercentage = 0;
     entry.taxes = [];
-  }
-
-  if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
-    entry.extras = item.quote_item_extras.map((e) => ({
-      description: e.description,
-      price: e.price,
-    }));
   }
 }
 
@@ -316,14 +313,10 @@ function QuoteDetailCard({
   totalItems: number;
 }) {
   const itemsWithExtras = quote.quote_items.map((item) => {
-    const extrasTotal = truncateMoney(
-      (item.quote_item_extras ?? []).reduce(
-        (sum, extra) => sum + extra.price,
-        0
-      )
-    );
-    const gross = truncateMoney(
-      (item.subtotal ?? 0) + extrasTotal * item.quantity
+    const gross = computeLineGross(
+      item.unit_price,
+      item.quantity,
+      item.quote_item_extras ?? undefined
     );
     const discount = truncateMoney(item.discount_amount ?? 0);
     return {
@@ -437,14 +430,10 @@ function QuoteDetailCard({
           </p>
           <div className="space-y-2">
             {quote.quote_items.map((item) => {
-              const extrasTotal = truncateMoney(
-                (item.quote_item_extras ?? []).reduce(
-                  (sum, extra) => sum + extra.price,
-                  0
-                )
-              );
-              const displaySubtotal = truncateMoney(
-                (item.subtotal ?? 0) + extrasTotal * item.quantity
+              const displaySubtotal = computeLineGross(
+                item.unit_price,
+                item.quantity,
+                item.quote_item_extras ?? undefined
               );
               return (
                 <div

@@ -73,13 +73,13 @@ function clampPercentage(value: number | null | undefined): number {
 
 function computeVariantDiscount(
   item: CreateQuoteInput["items"][number],
-  quantity: number
+  variant: CreateQuoteInput["items"][number]["variants"][number]
 ): number {
   const extrasTotal = truncateMoney(
-    (item.extras ?? []).reduce((acc, extra) => acc + extra.price, 0)
+    (variant.extras ?? []).reduce((acc, extra) => acc + extra.price, 0)
   );
   const gross = truncateMoney(
-    quantity * item.unitPrice + extrasTotal * quantity
+    variant.quantity * item.unitPrice + extrasTotal * variant.quantity
   );
   return truncateMoney(
     (gross * clampPercentage(item.discountPercentage)) / 100
@@ -89,7 +89,7 @@ function computeVariantDiscount(
 async function insertQuoteItemExtras(
   supabase: SupabaseClient,
   itemId: string,
-  extras: CreateQuoteInput["items"][number]["extras"]
+  extras: CreateQuoteInput["items"][number]["variants"][number]["extras"]
 ): Promise<void> {
   if (!extras || extras.length === 0) {
     return;
@@ -177,7 +177,7 @@ async function insertQuoteItemVariant(
       ? clampPercentage(item.discountPercentage)
       : null;
   const discountAmount = discountPercentage
-    ? computeVariantDiscount(item, variant.quantity)
+    ? computeVariantDiscount(item, variant)
     : null;
   const description =
     item.productName && variant.talle
@@ -255,7 +255,7 @@ async function insertQuoteItemsAndExtras(
         variant,
         taxesByLine.get(lineId)
       );
-      await insertQuoteItemExtras(supabase, itemId, item.extras);
+      await insertQuoteItemExtras(supabase, itemId, variant.extras);
     }
   }
 }
