@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineExtrasTotal, computeLineGross } from "@/lib/line-values";
 import type {
   QuoteItemExtraRow,
   QuoteItemRow,
@@ -108,14 +109,13 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
     data.customer.fantasy_name || data.customer.business_name || "Cliente";
 
   const itemsWithExtras = data.items.map((item) => {
-    const extrasTotal = truncateMoney(
-      (item.quote_item_extras ?? []).reduce(
-        (sum, extra) => sum + extra.price,
-        0
-      )
+    const extrasTotal = computeLineExtrasTotal(
+      item.quote_item_extras ?? undefined
     );
-    const gross = truncateMoney(
-      (item.subtotal ?? 0) + extrasTotal * item.quantity
+    const gross = computeLineGross(
+      item.unit_price,
+      item.quantity,
+      item.quote_item_extras ?? undefined
     );
     const discount = truncateMoney(item.discount_amount ?? 0);
     return {

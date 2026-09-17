@@ -84,6 +84,7 @@ import {
 } from "@/components/ui/tooltip";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
@@ -189,16 +190,16 @@ function recalcItemPrices(params: {
       rate: exchangeRate,
       targetCurrency: quoteCurrency,
     });
-    const extrasTotal = (item.extras || []).reduce(
-      (acc, e) => acc + e.price,
-      0
-    );
     return {
       ...item,
       unitPrice: newUnitPrice,
-      subtotal: truncateMoney(
-        (newUnitPrice + extrasTotal) * item.totalQuantity
-      ),
+      subtotal: computeSubtotalForItem({
+        unitPrice: newUnitPrice,
+        variants: item.variants,
+        productCurrency: item.productCurrency ?? "ARS",
+        quoteCurrency,
+        exchangeRate,
+      }),
     };
   });
 }
@@ -209,6 +210,59 @@ function hasItemVariants(item: QuoteFormValues["items"][number]): boolean {
     (item.variants.length === 1 &&
       (item.variants[0].talle !== "Único" || item.variants[0].color !== "—"))
   );
+}
+
+type SubtotalItem = {
+  unitPrice: number;
+  variants: Array<{ quantity: number; extras?: Array<{ price: number }> }>;
+  productCurrency: string;
+  quoteCurrency: string;
+  exchangeRate: number | null | undefined;
+};
+
+function computeSubtotalForItem(item: SubtotalItem): number {
+  return truncateMoney(
+    item.variants.reduce(
+      (acc, variant) =>
+        acc +
+        computeLineGross(
+          item.unitPrice,
+          variant.quantity,
+          (variant.extras ?? []).map((extra) => ({
+            ...extra,
+            price: convertPriceToQuoteCurrency(
+              extra.price,
+              item.productCurrency,
+              item.quoteCurrency,
+              item.exchangeRate
+            ),
+          }))
+        ),
+      0
+    )
+  );
+}
+
+function buildCalcItemsForQuote(
+  items: QuoteFormValues["items"],
+  quoteCurrency: string,
+  exchangeRate: number | null | undefined
+): QuoteFormValues["items"] {
+  return items.map((item) => ({
+    ...item,
+    variants: item.variants.map((variant) => ({
+      ...variant,
+      extras: (variant.extras ?? []).map((extra) => ({
+        ...extra,
+        price: convertPriceToQuoteCurrency(
+          extra.price,
+          item.productCurrency ?? "ARS",
+          quoteCurrency,
+          exchangeRate
+        ),
+      })),
+    })),
+  }));
 }
 
 const formatTaxSummary = (
@@ -303,21 +357,25 @@ function UnitPriceInput({
   value: number;
   onChange: (raw: string) => void;
 }) {
-  const [draft, setDraft] = useState(value.toString());
+  const displayValue = value.toFixed(2);
+  const [draft, setDraft] = useState(displayValue);
   const isFocusedRef = useRef(false);
 
   useEffect(() => {
     if (!isFocusedRef.current) {
-      setDraft(value.toString());
+      setDraft(value.toFixed(2));
     }
   }, [value]);
 
   const commit = () => {
+    if (draft === displayValue) {
+      return;
+    }
     const parsed = Number.parseFloat(draft);
     if (Number.isFinite(parsed) && parsed >= 0) {
       onChange(draft);
     } else {
-      setDraft(value.toString());
+      setDraft(displayValue);
     }
   };
 
@@ -694,17 +752,17 @@ export function QuoteForm({
         ...v,
         quantity: v.quantity + quantity,
       }));
-      const extrasTotal = (existingItem.extras || []).reduce(
-        (acc, e) => acc + e.price,
-        0
-      );
       update(existingIndex, {
         ...existingItem,
         variants: updatedVariants,
         totalQuantity: existingItem.totalQuantity + quantity,
-        subtotal: truncateMoney(
-          (unitPrice + extrasTotal) * (existingItem.totalQuantity + quantity)
-        ),
+        subtotal: computeSubtotalForItem({
+          unitPrice: existingItem.unitPrice,
+          variants: updatedVariants,
+          productCurrency: existingItem.productCurrency ?? "ARS",
+          quoteCurrency: currency,
+          exchangeRate,
+        }),
       });
     } else {
       append({
@@ -719,10 +777,10 @@ export function QuoteForm({
             talle: "\u00danico",
             color: "\u2014",
             quantity,
+            extras: [],
           },
         ],
         totalQuantity: quantity,
-        extras: [],
         subtotal: truncateMoney(unitPrice * quantity),
         discountPercentage: 0,
         taxes: product.taxes ?? [],
@@ -781,17 +839,33 @@ export function QuoteForm({
     }
     const currentItems = form.getValues("items");
     const existingItem = currentItems[editingItemIndex];
-    const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
-    const extrasTotal = (existingItem.extras || []).reduce(
-      (acc, e) => acc + e.price,
+    const unitPrice = existingItem.unitPrice;
+    const mergedVariants = variants.map((newVar) => {
+      const existingVar = existingItem.variants.find(
+        (v) => v.talle === newVar.talle && v.color === newVar.color
+      );
+      return {
+        ...newVar,
+        extras: newVar.extras?.length
+          ? newVar.extras
+          : (existingVar?.extras ?? []),
+      };
+    });
+    const totalQuantity = mergedVariants.reduce(
+      (acc, v) => acc + v.quantity,
       0
     );
-    const unitPrice = getUnitPrice(selectedProduct);
     update(editingItemIndex, {
       ...existingItem,
-      variants,
+      variants: mergedVariants,
       totalQuantity,
-      subtotal: truncateMoney((unitPrice + extrasTotal) * totalQuantity),
+      subtotal: computeSubtotalForItem({
+        unitPrice,
+        variants: mergedVariants,
+        productCurrency: existingItem.productCurrency ?? "ARS",
+        quoteCurrency: currency,
+        exchangeRate,
+      }),
     });
     setEditingItemIndex(null);
     setEditingInitialQuantities({});
@@ -830,15 +904,17 @@ export function QuoteForm({
         (acc, v) => acc + v.quantity,
         0
       );
-      const extrasTotal = (existingItem.extras || []).reduce(
-        (acc, e) => acc + e.price,
-        0
-      );
       update(existingIndex, {
         ...existingItem,
         variants: mergedVariants,
         totalQuantity: newTotalQuantity,
-        subtotal: truncateMoney((unitPrice + extrasTotal) * newTotalQuantity),
+        subtotal: computeSubtotalForItem({
+          unitPrice: existingItem.unitPrice,
+          variants: mergedVariants,
+          productCurrency: existingItem.productCurrency ?? "ARS",
+          quoteCurrency: currency,
+          exchangeRate,
+        }),
       });
     } else {
       append({
@@ -850,7 +926,6 @@ export function QuoteForm({
         unitPrice,
         variants,
         totalQuantity,
-        extras: [],
         subtotal: truncateMoney(totalQuantity * unitPrice),
         discountPercentage: 0,
         taxes: product.taxes ?? [],
@@ -899,18 +974,21 @@ export function QuoteForm({
     }
     const currentItems = form.getValues("items");
     const item = currentItems[index];
-    const extrasTotal = (item.extras || []).reduce(
-      (acc, e) => acc + e.price,
-      0
-    );
+    const updatedVariants = item.variants.map((v) => ({
+      ...v,
+      quantity: newQuantity,
+    }));
     update(index, {
       ...item,
       totalQuantity: newQuantity,
-      variants: item.variants.map((v) => ({
-        ...v,
-        quantity: newQuantity,
-      })),
-      subtotal: truncateMoney((item.unitPrice + extrasTotal) * newQuantity),
+      variants: updatedVariants,
+      subtotal: computeSubtotalForItem({
+        unitPrice: item.unitPrice,
+        variants: updatedVariants,
+        productCurrency: item.productCurrency ?? "ARS",
+        quoteCurrency: currency,
+        exchangeRate,
+      }),
     });
   };
 
@@ -921,14 +999,16 @@ export function QuoteForm({
     }
     const currentItems = form.getValues("items");
     const item = currentItems[index];
-    const extrasTotal = (item.extras || []).reduce(
-      (acc, e) => acc + e.price,
-      0
-    );
     update(index, {
       ...item,
       unitPrice: parsed,
-      subtotal: truncateMoney((parsed + extrasTotal) * item.totalQuantity),
+      subtotal: computeSubtotalForItem({
+        unitPrice: parsed,
+        variants: item.variants,
+        productCurrency: item.productCurrency ?? "ARS",
+        quoteCurrency: currency,
+        exchangeRate,
+      }),
     });
   };
 
@@ -1019,15 +1099,37 @@ export function QuoteForm({
     name: "globalDiscountPercentage",
   });
 
+  const selectedCustomerId = useWatch({
+    control: form.control,
+    name: "customerId",
+  });
+
+  const currency = useWatch({
+    control: form.control,
+    name: "currency",
+  });
+
+  const exchangeRate = useWatch({
+    control: form.control,
+    name: "exchangeRate",
+  });
+
   const totals = useMemo(() => {
-    const lines = buildQuoteTaxLines(formItems);
+    const calcItems = buildCalcItemsForQuote(formItems, currency, exchangeRate);
+    const lines = buildQuoteTaxLines(calcItems);
     return computeQuoteTotals({
-      items: formItems,
+      items: calcItems,
       globalDiscountPercentage: globalDiscountPercentage ?? 0,
       fallbackTaxes: formFallbackTaxes,
       lines,
     });
-  }, [formItems, formFallbackTaxes, globalDiscountPercentage]);
+  }, [
+    formItems,
+    formFallbackTaxes,
+    globalDiscountPercentage,
+    currency,
+    exchangeRate,
+  ]);
 
   const quoteTotal = totals.totalAmount;
   const advancePaymentPercentage = useWatch({
@@ -1054,21 +1156,6 @@ export function QuoteForm({
     () => priceLevels.filter((pl) => pl.is_active),
     [priceLevels]
   );
-
-  const selectedCustomerId = useWatch({
-    control: form.control,
-    name: "customerId",
-  });
-
-  const currency = useWatch({
-    control: form.control,
-    name: "currency",
-  });
-
-  const exchangeRate = useWatch({
-    control: form.control,
-    name: "exchangeRate",
-  });
 
   useEffect(() => {
     if (!selectedCustomerId) {
@@ -1596,7 +1683,6 @@ export function QuoteForm({
                             <TableHead className="text-right">
                               Precio Un.
                             </TableHead>
-                            <TableHead className="text-right">Extras</TableHead>
                             <TableHead className="text-right">
                               Cantidad
                             </TableHead>
@@ -1625,14 +1711,48 @@ export function QuoteForm({
                                     quoteCurrency={currency}
                                   />
                                   <TableCell>
-                                    <div className="flex flex-wrap gap-1">
-                                      {item.variants.map((v) => (
-                                        <span
-                                          className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs"
+                                    <div className="flex flex-col gap-1">
+                                      {item.variants.map((v, variantIndex) => (
+                                        <div
+                                          className="flex items-center gap-1"
                                           key={`${v.talle}-${v.color}`}
                                         >
-                                          {v.talle} / {v.color}: {v.quantity}
-                                        </span>
+                                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs">
+                                            {v.talle} / {v.color}: {v.quantity}
+                                          </span>
+                                          <QuoteItemExtrasPopover
+                                            currency={
+                                              item.productCurrency ?? "ARS"
+                                            }
+                                            extras={v.extras ?? []}
+                                            onChange={(newExtras) => {
+                                              const updatedVariants =
+                                                item.variants.map(
+                                                  (existing, vi) =>
+                                                    vi === variantIndex
+                                                      ? {
+                                                          ...existing,
+                                                          extras: newExtras,
+                                                        }
+                                                      : existing
+                                                );
+                                              update(index, {
+                                                ...item,
+                                                variants: updatedVariants,
+                                                subtotal:
+                                                  computeSubtotalForItem({
+                                                    unitPrice: item.unitPrice,
+                                                    variants: updatedVariants,
+                                                    productCurrency:
+                                                      item.productCurrency ??
+                                                      "ARS",
+                                                    quoteCurrency: currency,
+                                                    exchangeRate,
+                                                  }),
+                                              });
+                                            }}
+                                          />
+                                        </div>
                                       ))}
                                     </div>
                                   </TableCell>
@@ -1652,26 +1772,6 @@ export function QuoteForm({
                                     ) : (
                                       formatCurrency(item.unitPrice, currency)
                                     )}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <QuoteItemExtrasPopover
-                                      extras={item.extras || []}
-                                      onChange={(newExtras) => {
-                                        const extrasTotal = newExtras.reduce(
-                                          (acc, e) => acc + e.price,
-                                          0
-                                        );
-                                        const newSubtotal = truncateMoney(
-                                          (item.unitPrice + extrasTotal) *
-                                            item.totalQuantity
-                                        );
-                                        update(index, {
-                                          ...item,
-                                          extras: newExtras,
-                                          subtotal: newSubtotal,
-                                        });
-                                      }}
-                                    />
                                   </TableCell>
                                   <TableCell className="text-right">
                                     {hasItemVariants(item) ? (
@@ -1764,7 +1864,7 @@ export function QuoteForm({
                                 <TableRow key={`${field.id}-tax`}>
                                   <TableCell
                                     className="border-t-0 py-1 pt-0"
-                                    colSpan={8}
+                                    colSpan={7}
                                   >
                                     <div className="flex w-full items-start justify-between gap-3">
                                       <p

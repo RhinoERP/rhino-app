@@ -1,10 +1,16 @@
-import { truncateMoney } from "@/lib/decimal";
+import { truncateToDecimals } from "@/lib/decimal";
 
 /**
  * Convierte un precio calculado en la moneda del producto a la moneda del
  * presupuesto. Si ambas monedas coinciden o no hay tipo de cambio válido,
  * devuelve el precio sin cambios.
+ *
+ * Usa precisión interna de 6 decimales para que la conversión de moneda no
+ * pierda centavos al multiplicar por la cantidad. El truncamiento a 2
+ * decimales ocurre solo sobre los totales finales.
  */
+const CONVERSION_PRECISION = 6;
+
 export function convertPriceToQuoteCurrency(
   price: number,
   productCurrency: string | null | undefined,
@@ -18,10 +24,10 @@ export function convertPriceToQuoteCurrency(
     return price;
   }
   if (productCurrency === "USD" && quoteCurrency === "ARS") {
-    return truncateMoney(price * exchangeRate);
+    return truncateToDecimals(price * exchangeRate, CONVERSION_PRECISION);
   }
   if (productCurrency === "ARS" && quoteCurrency === "USD") {
-    return truncateMoney(price / exchangeRate);
+    return truncateToDecimals(price / exchangeRate, CONVERSION_PRECISION);
   }
   return price;
 }

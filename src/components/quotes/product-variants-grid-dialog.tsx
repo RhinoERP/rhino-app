@@ -108,6 +108,7 @@ export function ProductVariantsGridDialog({
             color,
             quantity: qty,
             productVariantId: variant?.id,
+            extras: [],
           });
         }
       }
