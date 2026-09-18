@@ -2,8 +2,8 @@
 
 import { ChartLine, Package, SignOut, Users } from "@phosphor-icons/react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { usePathname } from "next/navigation";
+import { secureLogout } from "@/lib/auth/secure-logout";
 
 type BottomNavProps = {
   orgSlug: string;
@@ -12,14 +12,6 @@ type BottomNavProps = {
 
 export function BottomNav({ orgSlug, wholesaleEnabled }: BottomNavProps) {
   const pathname = usePathname();
-  const router = useRouter();
-
-  const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/auth/login");
-  };
-
   const navItems = [
     {
       icon: ChartLine,
@@ -69,7 +61,7 @@ export function BottomNav({ orgSlug, wholesaleEnabled }: BottomNavProps) {
         })}
         <button
           className="flex flex-1 flex-col items-center gap-1 py-3 text-muted-foreground transition-colors hover:text-foreground"
-          onClick={handleLogout}
+          onClick={secureLogout}
           type="button"
         >
           <SignOut className="size-6" weight="regular" />

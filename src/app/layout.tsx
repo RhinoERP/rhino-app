@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
+import { OfflineCommandSync } from "@/components/offline/offline-command-sync";
+import { PwaProvider } from "@/components/pwa/pwa-provider";
+import { SerwistProvider } from "@/components/serwist/serwist-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
@@ -15,8 +18,21 @@ export const metadata: Metadata = {
   description: "Tu plataforma de gestión de distribución",
   icons: {
     icon: "/images/logo_solo.svg",
+    apple: "/icons/pwa-192x192.png",
   },
+  manifest: "/manifest.webmanifest",
 };
+
+function isPwaEnabled() {
+  const configured = process.env.NEXT_PUBLIC_PWA_ENABLED;
+  if (configured) {
+    return configured === "true";
+  }
+
+  return process.env.VERCEL_ENV
+    ? process.env.VERCEL_ENV === "production"
+    : process.env.NODE_ENV === "production";
+}
 
 export default function RootLayout({
   children,
@@ -45,8 +61,13 @@ export default function RootLayout({
             disableTransitionOnChange
             enableSystem
           >
-            <Providers>{children}</Providers>
-            <Toaster />
+            <SerwistProvider enabled={isPwaEnabled()}>
+              <PwaProvider>
+                {isPwaEnabled() && <OfflineCommandSync />}
+                <Providers>{children}</Providers>
+                <Toaster />
+              </PwaProvider>
+            </SerwistProvider>
           </ThemeProvider>
         </NuqsAdapter>
       </body>

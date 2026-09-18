@@ -4,6 +4,10 @@ import { Suspense } from "react";
 import { PermissionsProvider } from "@/components/auth/permissions-provider";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { BottomNav } from "@/components/layout/bottom-nav";
+import { MobileOrganizationSwitcher } from "@/components/layout/mobile-organization-switcher";
+import { OfflineDataManager } from "@/components/offline/offline-data-manager";
+import { OfflineLifecycle } from "@/components/offline/offline-lifecycle";
+import { PwaInstallBanner } from "@/components/pwa/pwa-install-banner";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
@@ -35,9 +39,11 @@ async function OrganizationLayoutContent({
   }
 
   const { permissions, user, organizations, currentOrganization } = layoutData;
+  const ownerUserId = String(user?.sub ?? "");
 
   return (
     <PermissionsProvider initialPermissions={permissions} orgSlug={orgSlug}>
+      {ownerUserId && <OfflineLifecycle ownerUserId={ownerUserId} />}
       <SidebarProvider>
         <AppSidebar
           organizations={organizations}
@@ -49,11 +55,24 @@ async function OrganizationLayoutContent({
           }}
         />
         <SidebarInset>
+          <MobileOrganizationSwitcher
+            currentOrganization={currentOrganization}
+            organizations={organizations}
+          />
+          <OfflineDataManager
+            organizationId={currentOrganization.id}
+            orgSlug={orgSlug}
+            ownerUserId={ownerUserId}
+            wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
+          />
           <div className="flex flex-1 flex-col gap-4 p-2 pb-20 md:pb-4">
             {children}
           </div>
           <BottomNav
             orgSlug={orgSlug}
+            wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
+          />
+          <PwaInstallBanner
             wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
           />
         </SidebarInset>
