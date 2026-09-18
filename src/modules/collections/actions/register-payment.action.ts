@@ -19,6 +19,12 @@ import {
   type PaymentCurrencyFields,
   resolvePaymentCurrencyFields,
 } from "@/modules/collections/utils/payment-currency";
+import {
+  NO_PAYABLE_INVOICE_RATE_MESSAGE,
+  NO_RECEIVABLE_INVOICE_RATE_MESSAGE,
+  resolvePayableExchangeRate,
+  resolveReceivableExchangeRate,
+} from "@/modules/collections/utils/payment-rate";
 import { generateCommissions } from "@/modules/commissions/service/commissions-generation.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
@@ -38,7 +44,9 @@ type PayableAccountRow = {
   pending_balance: number;
   status?: string | null;
   supplier_id: string;
+  purchase_order_id: string | null;
   currency?: string | null;
+  exchange_rate?: number | null;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -946,15 +954,23 @@ async function applyReceivablePayment({
   }
 
   if (amount > 0) {
+    const effectiveExchangeRate = await resolveReceivableExchangeRate({
+      supabase,
+      orgId,
+      receivable,
+    });
     const exchangeRateError = assertPaymentExchangeRate(
       receivable.currency,
       amount,
-      input.exchangeRate
+      effectiveExchangeRate
     );
     if (exchangeRateError) {
       return {
         success: false,
-        error: exchangeRateError,
+        error:
+          (receivable.currency ?? "ARS") === "USD"
+            ? NO_RECEIVABLE_INVOICE_RATE_MESSAGE
+            : exchangeRateError,
         code: "exchange_rate_required",
       };
     }
@@ -962,7 +978,7 @@ async function applyReceivablePayment({
     const currencyFields = resolvePaymentCurrencyFields(
       receivable.currency,
       amount,
-      input.exchangeRate
+      effectiveExchangeRate
     );
     const paymentPersistence = await createReceivablePaymentWithAccounting({
       supabase,
@@ -1132,15 +1148,23 @@ async function applyStandardPayablePayment(params: {
   let paymentId: string | undefined;
 
   if (params.amount > 0) {
+    const effectiveExchangeRate = await resolvePayableExchangeRate({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      payable: params.payableAccount,
+    });
     const exchangeRateError = assertPaymentExchangeRate(
       params.payableAccount.currency,
       params.amount,
-      params.input.exchangeRate
+      effectiveExchangeRate
     );
     if (exchangeRateError) {
       return {
         success: false,
-        error: exchangeRateError,
+        error:
+          (params.payableAccount.currency ?? "ARS") === "USD"
+            ? NO_PAYABLE_INVOICE_RATE_MESSAGE
+            : exchangeRateError,
         code: "exchange_rate_required",
       };
     }
@@ -1148,7 +1172,7 @@ async function applyStandardPayablePayment(params: {
     const currencyFields = resolvePaymentCurrencyFields(
       params.payableAccount.currency,
       params.amount,
-      params.input.exchangeRate
+      effectiveExchangeRate
     );
     const paymentPersistence = await createPayablePaymentWithAccounting({
       supabase: params.supabase,
@@ -1248,7 +1272,7 @@ async function applyPayablePayment({
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
     .select(
-      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id, currency"
+      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id, currency, exchange_rate"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)

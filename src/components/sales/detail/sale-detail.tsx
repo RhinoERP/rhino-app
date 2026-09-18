@@ -80,6 +80,7 @@ import {
 } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineExtrasTotal } from "@/lib/line-values";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaVenta } from "@/modules/accounting/types";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
@@ -1512,10 +1513,7 @@ export function SaleDetail({
     if (!item.extras || item.extras.length === 0) {
       return 0;
     }
-    const extrasTotal = truncateMoney(
-      item.extras.reduce((sum, extra) => sum + extra.price, 0)
-    );
-    return extrasTotal * item.quantity;
+    return computeLineExtrasTotal(item.extras) * item.quantity;
   };
 
   const itemsExtrasTotal = truncateMoney(
