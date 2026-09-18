@@ -98,6 +98,16 @@ function remittanceWithItems(type: RemittanceData["type"]): RemittanceData {
 }
 
 describe("remittance commercial information", () => {
+  it("shows product brands only when enabled", () => {
+    const data = remittanceWithItems("REMITO_FINAL");
+    data.items[0].brand = "Marca de prueba";
+
+    expect(generateRemittanceHTML(data)).not.toContain("Marca de prueba");
+
+    data.showProductBrand = true;
+    expect(generateRemittanceHTML(data)).toContain("Marca de prueba");
+  });
+
   it("hides product prices, discounts, and totals on final remittances", () => {
     const html = generateRemittanceHTML(remittanceWithItems("REMITO_FINAL"));
     const documentContent = html.slice(html.indexOf("</style>"));
