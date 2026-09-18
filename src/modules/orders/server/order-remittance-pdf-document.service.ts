@@ -6,6 +6,7 @@ import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
   generateRemittanceHTML,
   type RemittanceData,
@@ -299,6 +300,9 @@ export async function getOrderRemittanceData(params: {
     total,
     observations: orderData.observations ?? null,
     singlePageDuplicate,
+    showProductBrand:
+      organization != null &&
+      isOrganizationModuleEnabled(organization, "production"),
     finalRemittanceVisibility,
   };
 

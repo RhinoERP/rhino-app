@@ -15,6 +15,7 @@ import { getOrganizationSettings } from "@/modules/organizations/actions/get-org
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
@@ -5965,6 +5966,9 @@ export async function regenerateSaleLevelRemito(params: {
         orgSettingsResult.success && orgSettingsResult.data
           ? orgSettingsResult.data.remittance_single_page_duplicate
           : false,
+      showProductBrand:
+        organization != null &&
+        isOrganizationModuleEnabled(organization, "production"),
       finalRemittanceVisibility:
         orgSettingsResult.success && orgSettingsResult.data
           ? getRemittanceFinalVisibility(orgSettingsResult.data)

@@ -70,6 +70,7 @@ export type RemittanceData = {
   total: number;
   observations?: string | null;
   singlePageDuplicate?: boolean;
+  showProductBrand?: boolean;
   finalRemittanceVisibility?: RemittanceFinalVisibility;
 };
 
@@ -151,7 +152,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       ${isFinalRemittance ? "" : `<td class="c-center">${displayValue(item.unitOfMeasure)}</td>`}
       ${showWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       ${showSku ? `<td class="c-sku">${displayValue(item.sku)}</td>` : ""}
-      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice, displayCurrency)}/u</div>`).join("") : ""}</td>
+      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${data.showProductBrand && item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice, displayCurrency)}/u</div>`).join("") : ""}</td>
       ${showUnitPrice ? `<td class="c-right">${formatCurrency(item.unitPrice, displayCurrency)}</td>` : ""}
       ${showDiscount ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
       ${showLineTotal ? `<td class="c-right c-bold">${formatCurrency(item.subtotal, displayCurrency)}</td>` : ""}
@@ -493,6 +494,7 @@ export function buildRemittanceFromSale(
     cuit?: string | null;
     logoUrl?: string | null;
     singlePageDuplicate?: boolean;
+    showProductBrand?: boolean;
     finalRemittanceVisibility?: RemittanceFinalVisibility;
   }
 ): RemittanceData {
@@ -590,6 +592,7 @@ export function buildRemittanceFromSale(
     total,
     observations: sale.observations ?? undefined,
     singlePageDuplicate: issuer?.singlePageDuplicate ?? false,
+    showProductBrand: issuer?.showProductBrand ?? false,
     finalRemittanceVisibility: issuer?.finalRemittanceVisibility,
   };
 }
