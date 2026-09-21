@@ -186,6 +186,7 @@ export async function getOrdersByOrg(
           product_id,
           product_variant_id,
           assigned_order_id,
+          product:products(name, sku),
           quote_item_extras(*)
         )
       ),
@@ -956,6 +957,7 @@ export async function getOrderById(
           product_id,
           product_variant_id,
           assigned_order_id,
+          product:products(name, sku),
           quote_item_extras(*)
         )
       ),
