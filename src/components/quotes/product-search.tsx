@@ -10,6 +10,10 @@ import {
   type SalePriceAdjustment,
 } from "@/modules/price-levels/service/price-calculator";
 import type { PriceLevel } from "@/modules/price-levels/types";
+import {
+  convertPriceToQuoteCurrency,
+  needsExchangeRate,
+} from "@/modules/quotes/utils/currency-conversion";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
@@ -19,13 +23,17 @@ type ProductSearchProps = {
   level?: PriceLevel | null;
   adjustment?: SalesPriceList | null;
   currency?: string;
+  exchangeRate?: number | null;
 };
 
-function getSearchPrice(
-  product: SaleProduct,
-  level: PriceLevel | null | undefined,
-  adjustment: SalesPriceList | null | undefined
-): number {
+function getSearchPrice(params: {
+  product: SaleProduct;
+  level: PriceLevel | null | undefined;
+  adjustment: SalesPriceList | null | undefined;
+  quoteCurrency: string;
+  exchangeRate: number | null | undefined;
+}): number {
+  const { product, level, adjustment, quoteCurrency, exchangeRate } = params;
   const adjustments: SalePriceAdjustment[] = adjustment
     ? [{ type: adjustment.type, value: adjustment.value }]
     : [];
@@ -37,7 +45,12 @@ function getSearchPrice(
     adjustments,
   });
 
-  return price;
+  return convertPriceToQuoteCurrency(
+    price,
+    product.currency ?? "ARS",
+    quoteCurrency,
+    exchangeRate
+  );
 }
 
 const normalizeSearchValue = (value: string) =>
@@ -52,10 +65,14 @@ function ProductMetaLine({
   product,
   level,
   adjustment,
+  quoteCurrency,
+  exchangeRate,
 }: {
   product: SaleProduct;
   level?: PriceLevel | null;
   adjustment?: SalesPriceList | null;
+  quoteCurrency: string;
+  exchangeRate?: number | null;
 }) {
   const metaParts = [
     product.sku ? `SKU: ${product.sku}` : null,
@@ -66,7 +83,18 @@ function ProductMetaLine({
     <span className="text-muted-foreground text-xs">
       {metaParts.join(" · ")}
       {metaParts.length > 0 ? " • " : ""}
-      {formatCurrency(getSearchPrice(product, level, adjustment))}
+      {needsExchangeRate(product.currency, quoteCurrency, exchangeRate)
+        ? "—"
+        : formatCurrency(
+            getSearchPrice({
+              product,
+              level,
+              adjustment,
+              quoteCurrency,
+              exchangeRate,
+            }),
+            quoteCurrency
+          )}
     </span>
   );
 }
@@ -87,7 +115,8 @@ export function ProductSearch({
   onSelectProduct,
   level,
   adjustment,
-  currency,
+  currency = "ARS",
+  exchangeRate,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [activatingId, setActivatingId] = useState<string | null>(null);
@@ -99,15 +128,11 @@ export function ProductSearch({
   }, [searchTerm]);
 
   const filteredProducts = useMemo(() => {
-    const byCurrency = currency
-      ? products.filter((product) => (product.currency ?? "ARS") === currency)
-      : products;
-
     if (searchTokens.length === 0) {
-      return byCurrency.slice(0, 10);
+      return products.slice(0, 10);
     }
 
-    return byCurrency
+    return products
       .filter((product) => {
         const nameTokens = normalizeSearchValue(product.name || "")
           .split(" ")
@@ -122,7 +147,7 @@ export function ProductSearch({
         });
       })
       .slice(0, 20);
-  }, [products, searchTokens, currency]);
+  }, [products, searchTokens]);
 
   const handleStartAdd = (product: SaleProduct) => {
     setActivatingId(product.id);
@@ -156,9 +181,7 @@ export function ProductSearch({
         <div className="flex flex-col divide-y">
           {filteredProducts.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground text-sm">
-              {currency
-                ? `No hay productos en ${currency} para esta búsqueda.`
-                : "No se encontraron productos."}
+              No se encontraron productos.
             </div>
           ) : (
             filteredProducts.map((product) => {
@@ -176,8 +199,10 @@ export function ProductSearch({
                     </span>
                     <ProductMetaLine
                       adjustment={adjustment}
+                      exchangeRate={exchangeRate}
                       level={level}
                       product={product}
+                      quoteCurrency={currency}
                     />
                   </div>
 

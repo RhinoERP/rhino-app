@@ -32,21 +32,23 @@ export type CreateQuoteItemExtraInput = {
   price: number;
 };
 
+export type CreateQuoteItemVariantInput = {
+  talle: string;
+  color: string;
+  quantity: number;
+  productVariantId?: string;
+  extras?: CreateQuoteItemExtraInput[];
+};
+
 export type CreateQuoteItemInput = {
   productId?: string | null;
   productName?: string;
   description?: string | null;
   currency?: string;
   unitPrice: number;
-  variants: Array<{
-    talle: string;
-    color: string;
-    quantity: number;
-    productVariantId?: string;
-  }>;
+  variants: CreateQuoteItemVariantInput[];
   discountPercentage?: number | null;
   discountAmount?: number | null;
-  extras?: CreateQuoteItemExtraInput[];
   /** Impuestos de la línea (producto o override manual). Vacío = fallback global. */
   taxes?: ItemTaxInput[];
 };
@@ -140,6 +142,7 @@ export const quoteItemVariantSchema = z.object({
   color: z.string().min(1, "El color es requerido"),
   quantity: z.number().min(1, "La cantidad debe ser mayor a 0"),
   productVariantId: z.string().optional(),
+  extras: z.array(quoteItemsExtrasSchema).default([]),
 });
 
 export const quoteItemSchema = z.object({
@@ -147,6 +150,8 @@ export const quoteItemSchema = z.object({
   productName: z.string(),
   sku: z.string().optional(),
   brand: z.string().optional(),
+  /** Moneda original del producto (para detectar conversión necesaria). */
+  productCurrency: z.string().optional().default("ARS"),
   unitPrice: z.number().min(0),
   // Variants (Talles) with their respective quantities
   variants: z
@@ -154,7 +159,6 @@ export const quoteItemSchema = z.object({
     .min(1, "Debe agregar al menos una cantidad/talle"),
   // Total quantity across all variants for this item
   totalQuantity: z.number().min(1),
-  extras: z.array(quoteItemsExtrasSchema),
   // Subtotal (totalQuantity * unitPrice)
   subtotal: z.number().min(0),
   discountPercentage: z.number().min(0).max(100).default(0),
@@ -223,6 +227,18 @@ export const quoteFormSchema = z
         path: ["invoiceType"],
         message:
           "Con pago anticipado, el comprobante debe ser Factura A, B o C",
+      });
+    }
+
+    const needsExchangeRate = val.items.some(
+      (item) => item.productCurrency && item.productCurrency !== val.currency
+    );
+    if (needsExchangeRate && (!val.exchangeRate || val.exchangeRate <= 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["exchangeRate"],
+        message:
+          "Debe ingresar el tipo de cambio para presupuestos con productos de otra moneda",
       });
     }
   });

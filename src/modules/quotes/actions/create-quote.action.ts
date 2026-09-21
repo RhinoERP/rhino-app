@@ -2,6 +2,7 @@
 
 import { requireAuth } from "@/lib/supabase/auth";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-conversion";
 import { createQuote } from "../service/quotes.service";
 import type { CreateQuoteInput, QuoteFormValues } from "../types";
 
@@ -47,10 +48,18 @@ export async function createQuoteAction(
           color: v.color,
           quantity: v.quantity,
           productVariantId: v.productVariantId,
+          extras: (v.extras ?? []).map((extra) => ({
+            ...extra,
+            price: convertPriceToQuoteCurrency(
+              extra.price,
+              item.productCurrency ?? "ARS",
+              values.currency,
+              values.exchangeRate
+            ),
+          })),
         })),
         discountPercentage: item.discountPercentage ?? null,
         taxes: item.taxes,
-        extras: item.extras,
       })),
     };
 

@@ -1,6 +1,7 @@
 import { remittanceIssuerConfig } from "@/config/remittance";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import { formatAmountInWords } from "@/lib/number-to-words";
 import type { SalesOrderDetail } from "./sales.service";
 
@@ -510,9 +511,6 @@ export function buildRemittanceFromSale(
       description: extra.description,
       unitPrice: truncateMoney(extra.price),
     }));
-    const extrasTotal = truncateMoney(
-      extras.reduce((sum, extra) => sum + extra.unitPrice, 0)
-    );
 
     return {
       sku: item.sku,
@@ -527,8 +525,10 @@ export function buildRemittanceFromSale(
           ? undefined
           : (item.weightQuantity ?? undefined),
       unitPrice: item.unitPrice,
-      subtotal: truncateMoney(
-        (item.subtotal ?? 0) + extrasTotal * item.quantity
+      subtotal: computeLineGross(
+        item.unitPrice,
+        item.quantity,
+        item.extras ?? undefined
       ),
       discountPercentage:
         item.type === "adjustment"

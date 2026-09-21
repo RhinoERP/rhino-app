@@ -1,4 +1,4 @@
-import { truncateMoney } from "@/lib/decimal";
+import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { requireAuth } from "@/lib/supabase/auth";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -26,6 +26,8 @@ import {
   type QuoteTaxLine,
 } from "../utils/quote-line-calcs";
 import { buildQuoteTotals } from "./quote-tax.service";
+
+const QUOTE_CALC_PRECISION = 6;
 
 type QuotesScope = "all" | "own";
 
@@ -73,13 +75,13 @@ function clampPercentage(value: number | null | undefined): number {
 
 function computeVariantDiscount(
   item: CreateQuoteInput["items"][number],
-  quantity: number
+  variant: CreateQuoteInput["items"][number]["variants"][number]
 ): number {
   const extrasTotal = truncateMoney(
-    (item.extras ?? []).reduce((acc, extra) => acc + extra.price, 0)
+    (variant.extras ?? []).reduce((acc, extra) => acc + extra.price, 0)
   );
   const gross = truncateMoney(
-    quantity * item.unitPrice + extrasTotal * quantity
+    variant.quantity * item.unitPrice + extrasTotal * variant.quantity
   );
   return truncateMoney(
     (gross * clampPercentage(item.discountPercentage)) / 100
@@ -89,7 +91,7 @@ function computeVariantDiscount(
 async function insertQuoteItemExtras(
   supabase: SupabaseClient,
   itemId: string,
-  extras: CreateQuoteInput["items"][number]["extras"]
+  extras: CreateQuoteInput["items"][number]["variants"][number]["extras"]
 ): Promise<void> {
   if (!extras || extras.length === 0) {
     return;
@@ -177,7 +179,7 @@ async function insertQuoteItemVariant(
       ? clampPercentage(item.discountPercentage)
       : null;
   const discountAmount = discountPercentage
-    ? computeVariantDiscount(item, variant.quantity)
+    ? computeVariantDiscount(item, variant)
     : null;
   const description =
     item.productName && variant.talle
@@ -255,7 +257,7 @@ async function insertQuoteItemsAndExtras(
         variant,
         taxesByLine.get(lineId)
       );
-      await insertQuoteItemExtras(supabase, itemId, item.extras);
+      await insertQuoteItemExtras(supabase, itemId, variant.extras);
     }
   }
 }
@@ -865,17 +867,17 @@ async function buildQuoteTaxLinesFromRows(
   );
 
   return items.map((row) => {
-    const extrasTotal = truncateMoney(
-      (extrasByItemId[row.id] ?? []).reduce(
-        (sum, extra) => sum + extra.price,
-        0
-      )
+    const extrasTotal = (extrasByItemId[row.id] ?? []).reduce(
+      (sum, extra) => sum + extra.price,
+      0
     );
-    const gross = truncateMoney(
-      row.quantity * row.unit_price + extrasTotal * row.quantity
+    const gross = truncateToDecimals(
+      row.quantity * row.unit_price + extrasTotal * row.quantity,
+      QUOTE_CALC_PRECISION
     );
-    const discount = truncateMoney(
-      (gross * clampPercentage(row.discount_percentage)) / 100
+    const discount = truncateToDecimals(
+      (gross * clampPercentage(row.discount_percentage)) / 100,
+      QUOTE_CALC_PRECISION
     );
 
     const itemTaxes = (itemTaxesByItemId.get(row.id) ?? [])
@@ -895,7 +897,10 @@ async function buildQuoteTaxLinesFromRows(
       productId: row.product_id,
       gross,
       discount,
-      net: truncateMoney(Math.max(0, gross - discount)),
+      net: truncateToDecimals(
+        Math.max(0, gross - discount),
+        QUOTE_CALC_PRECISION
+      ),
       taxes: itemTaxes.length > 0 ? itemTaxes : undefined,
     };
   });
