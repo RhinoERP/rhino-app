@@ -3,6 +3,7 @@ import "server-only";
 import QRCode from "qrcode";
 import { remittanceIssuerConfig } from "@/config/remittance";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -339,7 +340,14 @@ function generateInvoiceItemsRows(
           <td class="cell-right">${weightLabel ?? "—"}</td>
           <td class="cell-right">${formatCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatDiscountPercent(item.discountPercent)}</td>
-          <td class="cell-right cell-amount">${formatCurrency(item.subtotal, currency)}</td>
+          <td class="cell-right cell-amount">${formatCurrency(
+            computeLineGross(
+              item.unitPrice,
+              item.quantity,
+              item.extras ?? undefined
+            ),
+            currency
+          )}</td>
         </tr>
       `;
     })

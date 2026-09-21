@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import type { Customer } from "@/modules/customers/types";
 import type { PriceLevel } from "@/modules/price-levels/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
@@ -30,6 +31,7 @@ import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-fil
 import { useEditQuote } from "@/modules/quotes/hooks/use-quote-edit";
 import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteFormValues } from "@/modules/quotes/types";
+import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-conversion";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import type {
@@ -74,8 +76,8 @@ type ProductEntry = {
     color: string;
     quantity: number;
     productVariantId?: string;
+    extras: Array<{ description: string; price: number }>;
   }>;
-  extras: Array<{ description: string; price: number }>;
   totalQuantity: number;
   subtotal: number;
   discountPercentage: number;
@@ -99,7 +101,6 @@ function getOrCreateEntry(
       productId,
       ...data,
       variants: [],
-      extras: [],
       totalQuantity: 0,
       subtotal: 0,
       discountPercentage: 0,
@@ -163,10 +164,13 @@ const taxesEqual = (a: ItemTaxInput[], b: ItemTaxInput[]): boolean => {
 function processQuoteItem(
   itemsByProduct: Map<string, ProductEntry>,
   item: QuoteDetails["quote_items"][number],
-  productMap: Map<string, SaleProduct>
+  productMap: Map<string, SaleProduct>,
+  quoteContext: { quoteCurrency: string; exchangeRate: number | null }
 ): void {
+  const { quoteCurrency, exchangeRate } = quoteContext;
   const productId = item.product_id ?? "";
   const product = productMap.get(productId);
+  const productCurrency = product?.currency ?? "ARS";
   const parsed = parseDescription(item.description);
   const productName =
     parsed?.productName ?? product?.name ?? item.description ?? "Producto";
@@ -177,7 +181,7 @@ function processQuoteItem(
     productName,
     sku: product?.sku,
     brand: product?.brand ?? undefined,
-    productCurrency: product?.currency ?? "ARS",
+    productCurrency,
     unitPrice: item.unit_price,
   });
 
@@ -186,6 +190,15 @@ function processQuoteItem(
     color,
     quantity: item.quantity,
     productVariantId: item.product_variant_id ?? undefined,
+    extras: (item.quote_item_extras ?? []).map((e) => ({
+      description: e.description,
+      price: convertPriceToQuoteCurrency(
+        e.price,
+        quoteCurrency,
+        productCurrency,
+        exchangeRate
+      ),
+    })),
   });
   entry.totalQuantity += item.quantity;
   entry.subtotal += item.subtotal;
@@ -205,13 +218,6 @@ function processQuoteItem(
     entry.discountPercentage = 0;
     entry.taxes = [];
   }
-
-  if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
-    entry.extras = item.quote_item_extras.map((e) => ({
-      description: e.description,
-      price: e.price,
-    }));
-  }
 }
 
 function buildDefaultValues(
@@ -225,7 +231,10 @@ function buildDefaultValues(
   const itemsByProduct = new Map<string, ProductEntry>();
 
   for (const item of quote.quote_items) {
-    processQuoteItem(itemsByProduct, item, productMap);
+    processQuoteItem(itemsByProduct, item, productMap, {
+      quoteCurrency: quote.currency ?? "ARS",
+      exchangeRate: quote.exchange_rate,
+    });
   }
 
   return {
@@ -316,14 +325,10 @@ function QuoteDetailCard({
   totalItems: number;
 }) {
   const itemsWithExtras = quote.quote_items.map((item) => {
-    const extrasTotal = truncateMoney(
-      (item.quote_item_extras ?? []).reduce(
-        (sum, extra) => sum + extra.price,
-        0
-      )
-    );
-    const gross = truncateMoney(
-      (item.subtotal ?? 0) + extrasTotal * item.quantity
+    const gross = computeLineGross(
+      item.unit_price,
+      item.quantity,
+      item.quote_item_extras ?? undefined
     );
     const discount = truncateMoney(item.discount_amount ?? 0);
     return {
@@ -437,14 +442,10 @@ function QuoteDetailCard({
           </p>
           <div className="space-y-2">
             {quote.quote_items.map((item) => {
-              const extrasTotal = truncateMoney(
-                (item.quote_item_extras ?? []).reduce(
-                  (sum, extra) => sum + extra.price,
-                  0
-                )
-              );
-              const displaySubtotal = truncateMoney(
-                (item.subtotal ?? 0) + extrasTotal * item.quantity
+              const displaySubtotal = computeLineGross(
+                item.unit_price,
+                item.quantity,
+                item.quote_item_extras ?? undefined
               );
               return (
                 <div
