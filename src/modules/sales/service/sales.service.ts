@@ -305,6 +305,7 @@ export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
   items: SalesOrderItemDetail[];
   taxes: SalesOrderTaxDetail[];
   supplier?: { id: string; name: string } | null;
+  advance_pending: boolean;
 };
 
 export type ConfirmSaleResult = {
@@ -2682,6 +2683,16 @@ export async function getSalesOrderById(
     access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
   };
 
+  const advancePending =
+    typeof sale.advance_payment_percentage === "number" &&
+    sale.advance_payment_percentage > 0
+      ? await isInformalAdvancePending({
+          supabase,
+          orgId: org.id,
+          saleId,
+        })
+      : false;
+
   return {
     ...saleBase,
     supplier: normalizeSupplierFromSale(sale),
@@ -2693,6 +2704,7 @@ export async function getSalesOrderById(
     remittance_number: sale.remittance_number ?? null,
     items,
     taxes,
+    advance_pending: advancePending,
   };
 }
 
@@ -3995,7 +4007,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4026,6 +4038,20 @@ export async function confirmSaleOrder(
   if (currentStatus !== "DRAFT" && currentStatus !== "INCOMPLETE") {
     throw new Error(
       "Solo las preventas en borrador o incompletas pueden confirmarse"
+    );
+  }
+
+  if (
+    existingSale.advance_payment_percentage &&
+    existingSale.advance_payment_percentage > 0 &&
+    (await isInformalAdvancePending({
+      supabase,
+      orgId: org.id,
+      saleId,
+    }))
+  ) {
+    throw new Error(
+      "La preventa tiene un anticipo pendiente de cobro. Registrá el pago del anticipo antes de confirmarla."
     );
   }
 
@@ -6190,6 +6216,38 @@ async function removeInformalAdvanceDocument(params: {
     .delete()
     .eq("id", params.advanceDocId)
     .eq("organization_id", params.orgId);
+}
+
+async function isInformalAdvancePending(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<boolean> {
+  const { data: advanceDoc } = await params.supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("parent_sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .eq("document_type", "ADVANCE")
+    .maybeSingle();
+
+  if (!advanceDoc?.id) {
+    return false;
+  }
+
+  const { data: receivable } = await params.supabase
+    .from("accounts_receivable")
+    .select("status, pending_balance")
+    .eq("sales_order_id", advanceDoc.id)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (!receivable) {
+    return false;
+  }
+
+  const pendingBalance = Number(receivable.pending_balance ?? 0);
+  return receivable.status !== "PAID" || pendingBalance > 0;
 }
 
 export async function ensureReceivableForAuthorizedPreventaInvoice(params: {

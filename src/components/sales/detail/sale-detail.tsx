@@ -884,6 +884,7 @@ export function SaleDetail({
   const canShowAdvanceCard =
     salesAdvancesEnabled &&
     !isFullAdvanceQuote &&
+    sale.invoice_type !== "NOTA_DE_VENTA" &&
     (isDraftSale ||
       isConfirmedSale ||
       isDispatchedSale ||
@@ -1787,6 +1788,7 @@ export function SaleDetail({
     canManageSale &&
     isDraftSale &&
     !relatedOrder &&
+    !sale.advance_pending &&
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
@@ -4077,6 +4079,12 @@ export function SaleDetail({
                       </div>
                     )}
                   </Button>
+                ) : null}
+                {sale.advance_pending ? (
+                  <p className="text-muted-foreground text-xs">
+                    No se puede confirmar la venta: hay un anticipo pendiente de
+                    cobro.
+                  </p>
                 ) : null}
                 <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
                   <span>Descuento %</span>
