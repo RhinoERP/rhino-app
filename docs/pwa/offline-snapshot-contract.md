@@ -1,6 +1,6 @@
 # Snapshot offline del vendedor
 
-> **Estado:** contrato inicial para discovery e implementacion de Fase 1.
+> **Estado:** Fase 1 implementada e integrada con borradores y sincronizacion; validaciones manuales indicadas al final siguen pendientes.
 >
 > **Fecha:** 2026-09-14.
 
@@ -15,7 +15,7 @@
 - Pantalla `/~offline/datos` implementada y precacheada para buscar clientes y productos sin red.
 - Logout centralizado con purga previa de IndexedDB y React Query.
 - Mantenimiento implementado para cambio de cuenta, `SIGNED_OUT`, reanudacion y 72 horas de inactividad.
-- El modelo final de precios queda abierto hasta medir listas y asignaciones reales.
+- La formula de precios se comparte con el flujo de borradores; las diferencias se vuelven a validar en servidor al sincronizar.
 
 ## Alcance
 
@@ -140,13 +140,16 @@ El volumen confirma que un snapshot completo es viable para esta organizacion pi
 - El snapshot no descarga costos generales. Solo incluye items de listas de compra cuando una asignacion de un cliente visible referencia explicitamente esa lista.
 - La formula de precio fue extraida de `PreSaleForm` a `src/modules/sales/utils/pre-sale-pricing.ts` para compartirla y probar paridad entre online y offline.
 
+## Reemplazo y borradores
+
+Guardar un snapshot nuevo reemplaza el registro de la particion. Al abrir un borrador creado con otro `snapshotId`, la aplicacion revalida sus referencias y propone migrarlo al snapshot actual, actualizando precio e impuestos y mostrando cambios comerciales o referencias faltantes antes de permitir el envio.
+
 ## Pendientes actuales
 
 - Validar manualmente descarga, cierre y reapertura en Safari iOS.
 - Confirmar purga al cerrar sesion y al ingresar con otra cuenta.
 - Probar vencimiento e inactividad con plazos reducidos en un entorno controlado.
-- Agregar coordinacion explicita cross-tab antes de introducir drafts y comandos.
-- Crear la matriz de pruebas de aislamiento entre usuario y organizacion.
+- Completar la matriz manual de aislamiento entre usuario y organizacion en dispositivos reales.
 
 ## Repositorio local
 
@@ -176,7 +179,7 @@ La aplicacion solicita almacenamiento persistente mediante `navigator.storage.pe
 - Consultar precio, impuestos incluidos en el contrato y stock de referencia.
 - Identificar datos vencidos y su antiguedad.
 
-El snapshot vencido puede consultarse como referencia, pero no habilitara nuevas operaciones. La creacion de borradores se implementara en la siguiente fase.
+El snapshot vencido puede consultarse como referencia, pero no habilita nuevas operaciones. Los borradores existentes permanecen disponibles y deben migrarse a un snapshot vigente antes de encolar.
 
 ### Prueba en dispositivo
 

@@ -12,6 +12,17 @@ import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { OfflineCommandSync } from "@/components/offline/offline-command-sync";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,6 +68,11 @@ export default function OfflineDraftsPage() {
   const [retryingCommandId, setRetryingCommandId] = useState<string | null>(
     null
   );
+  const [pendingAction, setPendingAction] = useState<{
+    kind: "edit" | "delete";
+    draftId: string;
+    description: string;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -131,7 +147,10 @@ export default function OfflineDraftsPage() {
   const expired = isSellerSnapshotExpired(state.snapshot);
 
   const createDraft = async () => {
-    await clearActiveOfflinePreSaleDraft();
+    await clearActiveOfflinePreSaleDraft(
+      state.snapshot.ownerUserId,
+      state.snapshot.organizationId
+    );
     window.location.assign("/~offline/preventa");
   };
 
@@ -141,18 +160,86 @@ export default function OfflineDraftsPage() {
       if (command.status === "queued" || command.status === "syncing") {
         return;
       }
-      await deleteOfflineCommand(command.commandId);
+      setPendingAction({
+        kind: "edit",
+        draftId,
+        description:
+          command.status === "synced"
+            ? "Esta operación ya fue aceptada por el servidor. Editar el borrador no modifica ni cancela esa venta. Se creará una nueva versión editable."
+            : "Se quitará esta operación de la cola local y se conservará el borrador para editarlo. Esto no puede cancelar trabajo que el servidor ya haya aceptado.",
+      });
+      return;
     }
-    await selectOfflinePreSaleDraft(draftId);
+    await selectOfflinePreSaleDraft(
+      draftId,
+      state.snapshot.ownerUserId,
+      state.snapshot.organizationId
+    );
+    window.location.assign("/~offline/preventa");
+  };
+
+  const editDraftWithCommand = async (draftId: string) => {
+    const command = state.commands.find((entry) => entry.draftId === draftId);
+    if (command) {
+      const deleted = await deleteOfflineCommand(
+        command.commandId,
+        state.snapshot.ownerUserId,
+        state.snapshot.organizationId
+      );
+      if (!deleted) {
+        toast.error(
+          "La preventa comenzó a sincronizarse y ya no puede editarse"
+        );
+        window.location.assign("/~offline/borradores");
+        return;
+      }
+    }
+    await selectOfflinePreSaleDraft(
+      draftId,
+      state.snapshot.ownerUserId,
+      state.snapshot.organizationId
+    );
     window.location.assign("/~offline/preventa");
   };
 
   const removeDraft = async (draftId: string) => {
     const command = state.commands.find((entry) => entry.draftId === draftId);
-    if (command) {
-      await deleteOfflineCommand(command.commandId);
+    if (command?.status === "syncing") {
+      return;
     }
-    await deleteOfflinePreSaleDraft(draftId);
+    if (command) {
+      setPendingAction({
+        kind: "delete",
+        draftId,
+        description:
+          "Se eliminarán el borrador y su operación local. La eliminación local no puede cancelar trabajo que el servidor ya haya aceptado.",
+      });
+      return;
+    }
+    await removeDraftWithCommand(draftId);
+  };
+
+  const removeDraftWithCommand = async (draftId: string) => {
+    const command = state.commands.find((entry) => entry.draftId === draftId);
+    if (command) {
+      const deleted = await deleteOfflineCommand(
+        command.commandId,
+        state.snapshot.ownerUserId,
+        state.snapshot.organizationId
+      );
+      if (!deleted) {
+        toast.error(
+          "La preventa comenzó a sincronizarse y ya no puede eliminarse"
+        );
+        window.location.assign("/~offline/borradores");
+        return;
+      }
+    }
+    await deleteOfflinePreSaleDraft(
+      draftId,
+      state.snapshot.ownerUserId,
+      state.snapshot.organizationId
+    );
     setState((current) =>
       current
         ? {
@@ -169,7 +256,13 @@ export default function OfflineDraftsPage() {
   const retryCommand = async (commandId: string) => {
     setRetryingCommandId(commandId);
     try {
-      const [result] = await replayOfflineCommands(commandId, true);
+      const command = state.commands.find(
+        (entry) => entry.commandId === commandId
+      );
+      const results = command
+        ? await replayOfflineCommands(command.ownerUserId, commandId, true)
+        : [];
+      const result = results.find((entry) => entry.commandId === commandId);
       if (result?.status === "synced") {
         toast.success("Preventa sincronizada correctamente");
       } else {
@@ -184,8 +277,22 @@ export default function OfflineDraftsPage() {
     }
   };
 
+  const confirmPendingAction = async () => {
+    const action = pendingAction;
+    setPendingAction(null);
+    if (!action) {
+      return;
+    }
+    if (action.kind === "edit") {
+      await editDraftWithCommand(action.draftId);
+    } else {
+      await removeDraftWithCommand(action.draftId);
+    }
+  };
+
   return (
     <main className="min-h-dvh bg-muted/30 pb-8">
+      <OfflineCommandSync ownerUserId={state.snapshot.ownerUserId} />
       <header className="sticky top-0 z-20 border-b bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <Button asChild size="icon-sm" variant="ghost">
@@ -281,10 +388,22 @@ export default function OfflineDraftsPage() {
                           {statusLabels[command.status]}
                         </Badge>
                         {command.lastError && (
-                          <p className="text-muted-foreground text-xs">
-                            {command.lastError.message}
-                          </p>
+                          <div className="text-muted-foreground text-xs">
+                            <p>{command.lastError.message}</p>
+                            {command.lastError.changes?.map((change) => (
+                              <p key={`${change.path}:${change.message}`}>
+                                {change.message}: {String(change.capturedValue)}{" "}
+                                → {String(change.currentValue)}
+                              </p>
+                            ))}
+                          </div>
                         )}
+                        <p className="text-muted-foreground text-xs">
+                          Intentos: {command.attemptCount}
+                          {command.nextAttemptAt
+                            ? ` · Próximo reintento ${formatDistanceToNow(new Date(command.nextAttemptAt), { addSuffix: true, locale: es })}`
+                            : ""}
+                        </p>
                       </div>
                     )}
                   </button>
@@ -307,6 +426,7 @@ export default function OfflineDraftsPage() {
                   )}
                   <Button
                     aria-label="Eliminar borrador"
+                    disabled={command?.status === "syncing"}
                     onClick={() => removeDraft(draft.draftId)}
                     size="icon-sm"
                     variant="ghost"
@@ -319,6 +439,29 @@ export default function OfflineDraftsPage() {
           );
         })}
       </div>
+      <AlertDialog
+        onOpenChange={(open) => !open && setPendingAction(null)}
+        open={pendingAction !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingAction?.kind === "edit"
+                ? "Editar operación local"
+                : "Eliminar operación local"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPendingAction}>
+              Continuar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

@@ -1,6 +1,6 @@
 # Fase 2 - Borradores locales de preventa
 
-> **Estado:** implementacion tecnica completa; pendiente validacion manual en Safari iOS.
+> **Estado:** implementacion tecnica completa e integrada con la cola de Fase 3; validacion manual mobile del flujo completo pendiente.
 >
 > **Fecha:** 2026-09-17.
 
@@ -42,17 +42,16 @@ Los drafts:
 - Se purgan ante cambio de cuenta.
 - Se purgan luego del plazo de inactividad configurado.
 - Se validan con Zod antes de guardar y al recuperar.
-- No se eliminan automaticamente por vencimiento del snapshot; antes de una futura sincronizacion deberan actualizar referencias y precios.
+- Al reemplazar el snapshot, el editor detecta el cambio de `snapshotId`, revalida cliente, vendedor, medio de pago y productos, y propone migrar precios, impuestos y referencias al snapshot nuevo antes de encolar.
 
 ## Limites actuales
 
-- El borrador no se envia al servidor.
-- No existe Command API ni cola de sincronizacion.
 - No crea clientes offline.
 - No admite productos con variantes.
 - No admite mezclar monedas.
 - No confirma ventas, mueve stock, factura ni registra pagos.
 - No incluye aun descuentos globales o por linea.
+- La sincronizacion es foreground; no depende de Background Sync.
 
 ## Checklist manual
 
@@ -69,6 +68,6 @@ Los drafts:
 11. Eliminar uno y confirmar que el otro permanece disponible.
 12. Cerrar sesion con conexion y confirmar que datos y borradores fueron purgados.
 
-## Siguiente fase
+## Integracion con Fase 3
 
-Implementar una Command API estable e idempotente para encolar `preSale.create`, revalidar referencias y precios en servidor, crear la preventa en una transaccion y mostrar estados `queued`, `syncing`, `requires-review`, `failed` y `synced`.
+El borrador genera un unico comando `preSale.create`. Se conserva mientras este pendiente, fallido o requiera revision y se elimina solo despues de un resultado exitoso. La bandeja permite revisar/editar y eliminar con confirmaciones que aclaran que una accion local no cancela trabajo ya aceptado por el servidor.

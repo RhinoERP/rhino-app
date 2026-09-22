@@ -1,14 +1,32 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OfflineCommandV1 } from "@/modules/offline/contracts/offline-command";
 import type { SellerOfflineSnapshotV1 } from "@/modules/offline/contracts/seller-offline-snapshot";
 
-vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+const {
+  adminRpcMock,
+  createAdminClientMock,
+  createClientMock,
+  createSnapshotMock,
+  rpcMock,
+} = vi.hoisted(() => ({
+  adminRpcMock: vi.fn(),
+  createAdminClientMock: vi.fn(),
+  createClientMock: vi.fn(),
+  createSnapshotMock: vi.fn(),
+  rpcMock: vi.fn(),
+}));
+
+vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+vi.mock("@/lib/supabase/admin-client", () => ({
+  createAdminClient: createAdminClientMock,
+}));
 vi.mock("@/modules/offline/service/seller-offline-snapshot.service", () => ({
-  createSellerOfflineSnapshot: vi.fn(),
+  createSellerOfflineSnapshot: createSnapshotMock,
   SellerOfflineSnapshotError: class extends Error {},
 }));
 
 import {
+  executeOfflineCommand,
   findOfflinePreSaleCommercialChanges,
   OfflineCommandError,
 } from "./offline-command.service";
@@ -114,6 +132,87 @@ const snapshot = {
     defaultInvoiceType: "NOTA_DE_VENTA",
   },
 } satisfies SellerOfflineSnapshotV1;
+
+describe("executeOfflineCommand", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createClientMock.mockResolvedValue({ rpc: rpcMock });
+    createAdminClientMock.mockReturnValue({ rpc: adminRpcMock });
+    createSnapshotMock.mockResolvedValue(snapshot);
+  });
+
+  it("returns a duplicate before creating a fresh snapshot", async () => {
+    rpcMock.mockResolvedValueOnce({
+      data: [{ sales_order_id: "00000000-0000-4000-8000-000000000010" }],
+      error: null,
+    });
+
+    await expect(executeOfflineCommand(command)).resolves.toMatchObject({
+      duplicate: true,
+      resourceId: "00000000-0000-4000-8000-000000000010",
+    });
+    expect(rpcMock).toHaveBeenCalledWith("get_offline_pre_sale_replay_result", {
+      p_command: command,
+    });
+    expect(createSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it("continues with snapshot validation when no replay exists", async () => {
+    rpcMock.mockResolvedValueOnce({ data: [], error: null });
+    adminRpcMock.mockResolvedValueOnce({
+      data: [
+        {
+          sales_order_id: "00000000-0000-4000-8000-000000000010",
+          duplicate: false,
+        },
+      ],
+      error: null,
+    });
+
+    await expect(executeOfflineCommand(command)).resolves.toMatchObject({
+      duplicate: false,
+    });
+    expect(createSnapshotMock).toHaveBeenCalledWith(command.orgSlugAtCreation);
+    expect(adminRpcMock).toHaveBeenCalledWith(
+      "create_offline_pre_sale_atomic",
+      {
+        p_actor_user_id: command.ownerUserId,
+        p_command: command,
+      }
+    );
+  });
+
+  it("blocks a new command when current commercial data changed", async () => {
+    const changedSnapshot = structuredClone(snapshot);
+    changedSnapshot.products[0].price = 120;
+    rpcMock.mockResolvedValueOnce({ data: [], error: null });
+    createSnapshotMock.mockResolvedValue(changedSnapshot);
+
+    await expect(executeOfflineCommand(command)).rejects.toMatchObject({
+      code: "REVIEW_REQUIRED",
+      retryable: false,
+    });
+    expect(rpcMock).toHaveBeenCalledOnce();
+    expect(adminRpcMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["OFFLINE_AUTH_REQUIRED", "AUTH_REQUIRED", true, 401],
+    ["OFFLINE_FORBIDDEN", "FORBIDDEN", false, 403],
+    ["OFFLINE_IDEMPOTENCY_CONFLICT", "VALIDATION_ERROR", false, 400],
+    ["OFFLINE_RETRYABLE", "RETRYABLE", true, 503],
+    ["connection lost", "RETRYABLE", true, 503],
+  ])("maps replay RPC error %s", async (message, code, retryable, status) => {
+    rpcMock.mockResolvedValueOnce({ data: null, error: { message } });
+
+    await expect(executeOfflineCommand(command)).rejects.toMatchObject({
+      code,
+      retryable,
+      status,
+    });
+    expect(createSnapshotMock).not.toHaveBeenCalled();
+  });
+});
 
 describe("findOfflinePreSaleCommercialChanges", () => {
   it("acepta precios e impuestos vigentes", () => {

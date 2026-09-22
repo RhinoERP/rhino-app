@@ -23,6 +23,7 @@ const DATABASE_NAME = "rhinos-offline";
 const DATABASE_VERSION = 3;
 const ACTIVE_SNAPSHOT_KEY = "active-seller-snapshot";
 const ACTIVE_DRAFT_KEY = "active-pre-sale-draft";
+const SYNCED_COMMAND_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type StoredSellerSnapshot = {
   key: string;
@@ -243,6 +244,12 @@ export async function purgeOfflineDataForOwner(ownerUserId: string) {
   if (active?.ownerUserId === ownerUserId) {
     await transaction.objectStore("state").delete(ACTIVE_SNAPSHOT_KEY);
   }
+  const activeDraft = await transaction
+    .objectStore("state")
+    .get(ACTIVE_DRAFT_KEY);
+  if (activeDraft?.ownerUserId === ownerUserId) {
+    await transaction.objectStore("state").delete(ACTIVE_DRAFT_KEY);
+  }
   const draftKeys = await transaction
     .objectStore("drafts")
     .index("byOwner")
@@ -311,6 +318,11 @@ export async function maintainOfflineDataForOwner(
   for (const command of commands) {
     if (command.ownerUserId !== ownerUserId) {
       await transaction.objectStore("commands").delete(command.commandId);
+    } else if (
+      command.status === "synced" &&
+      now - Date.parse(command.updatedAt) >= SYNCED_COMMAND_RETENTION_MS
+    ) {
+      await transaction.objectStore("commands").delete(command.commandId);
     } else if (command.status !== "synced") {
       retainedDraftIds.add(command.draftId);
     }
@@ -327,6 +339,23 @@ export async function maintainOfflineDataForOwner(
       (inactiveTooLong && !retainedDraftIds.has(draft.draftId))
     ) {
       await transaction.objectStore("drafts").delete(draft.draftId);
+    }
+  }
+
+  const activeDraft = await transaction
+    .objectStore("state")
+    .get(ACTIVE_DRAFT_KEY);
+  if (activeDraft && "draftId" in activeDraft) {
+    const selectedDraft = await transaction
+      .objectStore("drafts")
+      .get(activeDraft.draftId);
+    if (
+      activeDraft.ownerUserId !== ownerUserId ||
+      !selectedDraft ||
+      selectedDraft.ownerUserId !== activeDraft.ownerUserId ||
+      selectedDraft.organizationId !== activeDraft.organizationId
+    ) {
+      await transaction.objectStore("state").delete(ACTIVE_DRAFT_KEY);
     }
   }
 
@@ -413,10 +442,20 @@ export async function getActiveOfflinePreSaleDraft(
   return null;
 }
 
-export async function selectOfflinePreSaleDraft(draftId: string) {
+export async function selectOfflinePreSaleDraft(
+  draftId: string,
+  ownerUserId: string,
+  organizationId: string
+) {
   const database = await getDatabase();
   const draft = await database.get("drafts", draftId);
   const parsed = offlinePreSaleDraftSchema.parse(draft);
+  if (
+    parsed.ownerUserId !== ownerUserId ||
+    parsed.organizationId !== organizationId
+  ) {
+    throw new Error("El borrador no pertenece a la particion activa");
+  }
   await database.put("state", {
     key: ACTIVE_DRAFT_KEY,
     draftId: parsed.draftId,
@@ -426,14 +465,37 @@ export async function selectOfflinePreSaleDraft(draftId: string) {
   });
 }
 
-export async function clearActiveOfflinePreSaleDraft() {
+export async function clearActiveOfflinePreSaleDraft(
+  ownerUserId: string,
+  organizationId: string
+) {
   const database = await getDatabase();
-  await database.delete("state", ACTIVE_DRAFT_KEY);
+  const active = await database.get("state", ACTIVE_DRAFT_KEY);
+  if (
+    active &&
+    "draftId" in active &&
+    active.ownerUserId === ownerUserId &&
+    active.organizationId === organizationId
+  ) {
+    await database.delete("state", ACTIVE_DRAFT_KEY);
+  }
 }
 
-export async function deleteOfflinePreSaleDraft(draftId: string) {
+export async function deleteOfflinePreSaleDraft(
+  draftId: string,
+  ownerUserId?: string,
+  organizationId?: string
+) {
   const database = await getDatabase();
   const transaction = database.transaction(["drafts", "state"], "readwrite");
+  const draft = await transaction.objectStore("drafts").get(draftId);
+  if (
+    (ownerUserId && draft?.ownerUserId !== ownerUserId) ||
+    (organizationId && draft?.organizationId !== organizationId)
+  ) {
+    await transaction.done;
+    return;
+  }
   await transaction.objectStore("drafts").delete(draftId);
   const active = await transaction.objectStore("state").get(ACTIVE_DRAFT_KEY);
   if (active && "draftId" in active && active.draftId === draftId) {
@@ -467,6 +529,8 @@ export async function enqueueOfflineCommand(
     updatedAt: command.createdAt,
     lastAttemptAt: null,
     nextAttemptAt: null,
+    leaseOwnerId: null,
+    leaseExpiresAt: null,
     resourceId: null,
     lastError: null,
     command,
@@ -478,13 +542,13 @@ export async function enqueueOfflineCommand(
 
 export async function listOfflineCommands(
   ownerUserId: string,
-  organizationId: string
+  organizationId?: string
 ): Promise<StoredOfflineCommand[]> {
   const database = await getDatabase();
   const records = await database.getAllFromIndex(
     "commands",
-    "byOrganization",
-    organizationId
+    organizationId ? "byOrganization" : "byOwner",
+    organizationId ?? ownerUserId
   );
   const valid: StoredOfflineCommand[] = [];
   for (const record of records) {
@@ -494,13 +558,98 @@ export async function listOfflineCommands(
     const parsed = storedOfflineCommandSchema.safeParse(record);
     if (parsed.success) {
       valid.push(parsed.data);
-    } else {
-      await database.delete("commands", record.commandId);
     }
   }
   return valid.sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt)
   );
+}
+
+export async function claimOfflineCommand(options: {
+  commandId: string;
+  ownerUserId: string;
+  leaseOwnerId: string;
+  now: number;
+  leaseDurationMs: number;
+  force?: boolean;
+}): Promise<StoredOfflineCommand | null> {
+  const {
+    commandId,
+    ownerUserId,
+    leaseOwnerId,
+    now,
+    leaseDurationMs,
+    force = false,
+  } = options;
+  const nowIso = new Date(now).toISOString();
+  const database = await getDatabase();
+  const transaction = database.transaction("commands", "readwrite");
+  const store = transaction.objectStore("commands");
+  const parsed = storedOfflineCommandSchema.safeParse(
+    await store.get(commandId)
+  );
+  if (!parsed.success) {
+    await transaction.done;
+    return null;
+  }
+
+  const current = parsed.data;
+  const leaseActive =
+    current.leaseExpiresAt && Date.parse(current.leaseExpiresAt) > now;
+  const retryDue =
+    force || !current.nextAttemptAt || Date.parse(current.nextAttemptAt) <= now;
+  if (
+    current.ownerUserId !== ownerUserId ||
+    (current.status !== "queued" && current.status !== "syncing") ||
+    leaseActive ||
+    !retryDue
+  ) {
+    await transaction.done;
+    return null;
+  }
+
+  const claimed = storedOfflineCommandSchema.parse({
+    ...current,
+    status: "syncing",
+    attemptCount: current.attemptCount + 1,
+    lastAttemptAt: nowIso,
+    updatedAt: nowIso,
+    leaseOwnerId,
+    leaseExpiresAt: new Date(now + leaseDurationMs).toISOString(),
+    lastError: null,
+  });
+  await store.put(claimed);
+  await transaction.done;
+  return claimed;
+}
+
+export async function finalizeOfflineCommandClaim(
+  commandId: string,
+  leaseOwnerId: string,
+  update: (current: StoredOfflineCommand) => StoredOfflineCommand
+): Promise<StoredOfflineCommand | null> {
+  const database = await getDatabase();
+  const transaction = database.transaction("commands", "readwrite");
+  const store = transaction.objectStore("commands");
+  const parsed = storedOfflineCommandSchema.safeParse(
+    await store.get(commandId)
+  );
+  if (
+    !parsed.success ||
+    parsed.data.status === "synced" ||
+    parsed.data.leaseOwnerId !== leaseOwnerId
+  ) {
+    await transaction.done;
+    return null;
+  }
+  const next = storedOfflineCommandSchema.parse({
+    ...update(parsed.data),
+    leaseOwnerId: null,
+    leaseExpiresAt: null,
+  });
+  await store.put(next);
+  await transaction.done;
+  return next;
 }
 
 export async function updateOfflineCommand(
@@ -513,9 +662,6 @@ export async function updateOfflineCommand(
   const current = await store.get(commandId);
   const parsed = storedOfflineCommandSchema.safeParse(current);
   if (!parsed.success) {
-    if (current) {
-      await store.delete(commandId);
-    }
     await transaction.done;
     return null;
   }
@@ -525,15 +671,56 @@ export async function updateOfflineCommand(
   return next;
 }
 
-export async function deleteOfflineCommand(commandId: string) {
+export async function deleteOfflineCommand(
+  commandId: string,
+  ownerUserId: string,
+  organizationId: string
+) {
   const database = await getDatabase();
-  await database.delete("commands", commandId);
+  const transaction = database.transaction("commands", "readwrite");
+  const store = transaction.objectStore("commands");
+  const command = await store.get(commandId);
+  if (!command) {
+    await transaction.done;
+    return true;
+  }
+  if (
+    command.ownerUserId !== ownerUserId ||
+    command.organizationId !== organizationId ||
+    command.status === "syncing" ||
+    (command.leaseExpiresAt && Date.parse(command.leaseExpiresAt) > Date.now())
+  ) {
+    await transaction.done;
+    return false;
+  }
+  await store.delete(commandId);
+  await transaction.done;
+  return true;
 }
 
-export async function deleteOfflineCommandForDraft(draftId: string) {
+export async function deleteOfflineCommandForDraft(
+  draftId: string,
+  ownerUserId: string,
+  organizationId: string
+) {
   const database = await getDatabase();
-  const command = await database.getFromIndex("commands", "byDraft", draftId);
-  if (command) {
-    await database.delete("commands", command.commandId);
+  const transaction = database.transaction("commands", "readwrite");
+  const store = transaction.objectStore("commands");
+  const command = await store.index("byDraft").get(draftId);
+  if (!command) {
+    await transaction.done;
+    return true;
   }
+  if (
+    command.ownerUserId !== ownerUserId ||
+    command.organizationId !== organizationId ||
+    command.status === "syncing" ||
+    (command.leaseExpiresAt && Date.parse(command.leaseExpiresAt) > Date.now())
+  ) {
+    await transaction.done;
+    return false;
+  }
+  await store.delete(command.commandId);
+  await transaction.done;
+  return true;
 }

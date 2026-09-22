@@ -2,7 +2,7 @@
 
 > **Proposito:** ofrecer una experiencia movil instalable y resistente a conectividad intermitente para vendedores en campo, sin comprometer aislamiento de datos, consistencia comercial ni seguridad.
 >
-> **Estado:** propuesta revisada contra el repositorio actual. Este documento reemplaza la arquitectura de caching de APIs/HTML y replay de Server Actions del plan anterior.
+> **Estado:** plan canonico actualizado contra la implementacion. Fases 0 a 3 implementadas tecnicamente; quedan integracion con base real, aceptacion Android y validacion mobile del flujo completo.
 >
 > **Decision arquitectonica:** comenzar con una PWA enfocada en vendedores. Expo/React Native queda como alternativa futura si el piloto demuestra limitaciones operativas concretas. El snapshot, los contratos y la API de comandos se disenaran independientes del cliente para que puedan reutilizarse en una app nativa.
 
@@ -289,6 +289,8 @@ Mitigaciones:
 
 ## 6. Fase 0 - Shell PWA seguro
 
+**Estado:** implementada; validada manualmente en Safari iOS para shell e instalacion. Android y Sentry operativo pendientes.
+
 ### Objetivo
 
 Hacer la aplicacion instalable, servir un fallback offline seguro y controlar actualizaciones. Esta fase no promete consulta de datos comerciales offline.
@@ -491,6 +493,8 @@ pnpm start
 
 ## 7. Fase 1 - Snapshot offline del vendedor
 
+**Estado:** implementada e integrada con IndexedDB, borradores y revalidacion de comandos.
+
 ### Objetivo
 
 Descargar de forma explicita el conjunto minimo de datos necesario para trabajar. No depende de haber visitado previamente cada pantalla.
@@ -611,6 +615,8 @@ Primero se debe medir el volumen por vendedor y organizacion.
 
 ## 8. Fase 2 - Borradores locales
 
+**Estado:** implementada, incluida migracion/revision al reemplazar el snapshot.
+
 ### Objetivo
 
 Evitar perdida de trabajo antes de implementar envio automatico.
@@ -650,6 +656,8 @@ type OfflineDraft<T> = {
 ---
 
 ## 9. Fase 3 - Comandos offline y sincronizacion
+
+**Estado:** implementada tecnicamente. No se han ejecutado integraciones contra una base Supabase real ni la aceptacion mobile completa.
 
 ### Objetivo
 
@@ -732,6 +740,8 @@ La creacion de preventa debe ejecutarse en una sola transaccion/RPC que incluya:
 
 Cualquier error revierte toda la operacion.
 
+La implementacion endurecida vive en la migracion aditiva `20260921120000_harden_offline_pre_sale_replay.sql`. La consulta de replay completado se ejecuta como usuario autenticado y valida `auth.uid()`, propietario y hash. La escritura atomica `create_offline_pre_sale_atomic(uuid,jsonb)` esta concedida solo a `service_role`: el servidor autentica con sesion, genera un snapshot fresco, verifica que usuario y organizacion coincidan y recien entonces suministra el actor verificado a la RPC.
+
 ### Validacion
 
 Definir schemas Zod compartidos y versionados. Validar:
@@ -772,6 +782,8 @@ No se elimina una operacion hasta recibir `ok: true`.
 
 No se usa Background Sync como dependencia porque no es interoperable: no esta disponible en Safari/iOS ni Firefox.
 
+La implementacion lista todos los comandos del propietario, sin depender de la organizacion o snapshot activos. Usa timeout de 15 segundos, leases de 60 segundos, Web Lock particionado por propietario, single-flight, backoff exponencial con jitter y finalizacion monotona que no degrada `synced`. Los exitos se conservan siete dias; el trabajo no resuelto no se purga por esa retencion.
+
 ### UI de sincronizacion
 
 Mostrar en sidebar y `BottomNav`:
@@ -790,6 +802,12 @@ Drawer o pantalla de detalle:
 - Fallidas, con codigo y mensaje sanitizado.
 - Sincronizadas recientemente.
 - Reintentar, editar o eliminar segun estado.
+
+La bandeja implementada confirma revision/edicion y eliminacion, explica que borrar localmente no cancela trabajo aceptado por servidor y evita eliminar mientras el comando esta `syncing`. Al reemplazar el snapshot, los borradores se revalidan y migran de forma explicita antes de generar un comando nuevo.
+
+### Refresh de Ventas
+
+Al sincronizar, el cliente publica un evento particionado por usuario y organizacion mediante `BroadcastChannel` y `localStorage`. `OfflineSalesRefresh` invalida queries y refresca la ruta de Ventas al montar, navegar, volver a visibilidad, restaurar BFCache o recibir eventos de canal/storage. Solo acepta eventos de la misma cuenta, organizacion y slug con antiguedad maxima de 24 horas.
 
 ### Verificacion
 

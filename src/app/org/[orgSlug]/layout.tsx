@@ -5,8 +5,10 @@ import { PermissionsProvider } from "@/components/auth/permissions-provider";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { MobileOrganizationSwitcher } from "@/components/layout/mobile-organization-switcher";
+import { OfflineCommandSync } from "@/components/offline/offline-command-sync";
 import { OfflineDataManager } from "@/components/offline/offline-data-manager";
 import { OfflineLifecycle } from "@/components/offline/offline-lifecycle";
+import { OfflineSalesRefresh } from "@/components/offline/offline-sales-refresh";
 import { PwaInstallBanner } from "@/components/pwa/pwa-install-banner";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
@@ -44,6 +46,14 @@ async function OrganizationLayoutContent({
   return (
     <PermissionsProvider initialPermissions={permissions} orgSlug={orgSlug}>
       {ownerUserId && <OfflineLifecycle ownerUserId={ownerUserId} />}
+      {ownerUserId && (
+        <OfflineSalesRefresh
+          organizationId={currentOrganization.id}
+          orgSlug={orgSlug}
+          ownerUserId={ownerUserId}
+        />
+      )}
+      {ownerUserId && <OfflineCommandSync ownerUserId={ownerUserId} />}
       <SidebarProvider>
         <AppSidebar
           organizations={organizations}

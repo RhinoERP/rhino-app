@@ -7368,9 +7368,15 @@ export type Database = {
         Returns: boolean
       }
       create_offline_pre_sale_atomic: {
-        Args: { p_command: Json }
+        Args: { p_actor_user_id: string; p_command: Json }
         Returns: {
           duplicate: boolean
+          sales_order_id: string
+        }[]
+      }
+      get_offline_pre_sale_replay_result: {
+        Args: { p_command: Json }
+        Returns: {
           sales_order_id: string
         }[]
       }

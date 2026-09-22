@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
-import { OfflineCommandSync } from "@/components/offline/offline-command-sync";
 import { PwaProvider } from "@/components/pwa/pwa-provider";
 import { SerwistProvider } from "@/components/serwist/serwist-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
@@ -63,7 +62,6 @@ export default function RootLayout({
           >
             <SerwistProvider enabled={isPwaEnabled()}>
               <PwaProvider>
-                {isPwaEnabled() && <OfflineCommandSync />}
                 <Providers>{children}</Providers>
                 <Toaster />
               </PwaProvider>

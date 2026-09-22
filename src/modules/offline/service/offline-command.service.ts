@@ -1,3 +1,4 @@
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import type {
   CommercialChange,
@@ -217,6 +218,24 @@ const mapRpcError = (error: {
 export async function executeOfflineCommand(
   command: OfflineCommandV1
 ): Promise<OfflineCommandResult> {
+  const supabase = await createClient();
+  const { data: replayData, error: replayError } = await supabase.rpc(
+    "get_offline_pre_sale_replay_result",
+    { p_command: command }
+  );
+  if (replayError) {
+    throw mapRpcError(replayError);
+  }
+  const replayResult = replayData?.[0];
+  if (replayResult?.sales_order_id) {
+    return {
+      ok: true,
+      commandId: command.commandId,
+      resourceId: replayResult.sales_order_id,
+      duplicate: true,
+    };
+  }
+
   let snapshot: SellerOfflineSnapshotV1;
   try {
     snapshot = await createSellerOfflineSnapshot(command.orgSlugAtCreation);
@@ -250,10 +269,11 @@ export async function executeOfflineCommand(
     });
   }
 
-  const supabase = await createClient();
-  const { data, error: rpcError } = await supabase.rpc(
+  const adminSupabase = createAdminClient();
+  const { data, error: rpcError } = await adminSupabase.rpc(
     "create_offline_pre_sale_atomic",
     {
+      p_actor_user_id: command.ownerUserId,
       p_command: command,
     }
   );

@@ -1,5 +1,7 @@
 # Plan PWA — Rhinos App
 
+> **OBSOLETO / HISTORICO:** este fue el plan original y no describe la arquitectura implementada. No usarlo como guia. La fuente canonica vigente es [`plan-pwa-v2.md`](./plan-pwa-v2.md) y los documentos enlazados desde [`README.md`](./README.md).
+
 > **Propósito:** Convertir Rhinos en una Progressive Web App instalable, con capacidades offline y notificaciones push nativas, orientada al vendedor en campo.
 
 ---
