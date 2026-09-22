@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   AnyEventoSchema,
   EventoAsientoManualSchema,
-  EventoCobroPosSchema,
   EventoCobroSchema,
   EventoFacturaCompraSchema,
   EventoFacturaVentaSchema,
@@ -187,8 +186,8 @@ describe("EventoCobroSchema", () => {
   });
 });
 
-describe("EventoVentaPosSchema y EventoCobroPosSchema", () => {
-  it("acepta ventas y cobros POS con la estructura del flujo de revisión manual", () => {
+describe("EventoVentaPosSchema", () => {
+  it("acepta una venta POS con cuenta de cobro y líneas desglosadas", () => {
     const ventaPos = {
       tipoEvento: "VENTA_POS" as const,
       orgId: "00000000-0000-0000-0000-000000000001",
@@ -199,47 +198,21 @@ describe("EventoVentaPosSchema y EventoCobroPosSchema", () => {
       idempotencyKey: "VENTA_POS_00000000-0000-0000-0000-000000000500",
       datos: {
         totalVenta: "1250.0000",
+        metodoPago: "EFECTIVO" as const,
+        bancoAccountCode: "CAJA_PESOS",
         clienteId: "00000000-0000-0000-0000-000000000003",
         comprobanteNumero: "0001",
-      },
-    };
-
-    const cobroPos = {
-      tipoEvento: "COBRO_POS" as const,
-      orgId: "00000000-0000-0000-0000-000000000001",
-      referenciaId: "00000000-0000-0000-0000-000000000600",
-      referenciaTabla: "pos_payments" as const,
-      fecha: "2026-09-15",
-      descripcion: "Cobro POS final",
-      idempotencyKey: "COBRO_POS_00000000-0000-0000-0000-000000000600",
-      datos: {
-        montoCobrado: "1250.0000",
-        metodoPago: "EFECTIVO" as const,
-        clienteId: "00000000-0000-0000-0000-000000000003",
+        lineasDesglosadas: [
+          {
+            accountCode: "VENTAS_MERCADERIAS",
+            montoNeto: "1250.0000",
+            montoImpuestos: "0.0000",
+          },
+        ],
       },
     };
 
     expect(() => EventoVentaPosSchema.parse(ventaPos)).not.toThrow();
-    expect(() => EventoCobroPosSchema.parse(cobroPos)).not.toThrow();
-  });
-
-  it("rechaza un COBRO_POS con método inválido", () => {
-    const invalid = {
-      tipoEvento: "COBRO_POS" as const,
-      orgId: "00000000-0000-0000-0000-000000000001",
-      referenciaId: "00000000-0000-0000-0000-000000000600",
-      referenciaTabla: "pos_payments" as const,
-      fecha: "2026-09-15",
-      descripcion: "Cobro POS inválido",
-      idempotencyKey: "COBRO_POS_00000000-0000-0000-0000-000000000600",
-      datos: {
-        montoCobrado: "1250.0000",
-        metodoPago: "TARJETA",
-        clienteId: "00000000-0000-0000-0000-000000000003",
-      },
-    };
-
-    expect(() => EventoCobroPosSchema.parse(invalid)).toThrow();
   });
 });
 
@@ -275,9 +248,7 @@ describe("EventoAsientoManualSchema", () => {
     fecha: "2026-06-09",
     descripcion: "Asiento manual - Ajuste de caja",
     idempotencyKey: "MANUAL_00000000-0000-0000-0000-000000000099",
-    datos: {
-      referenciaLibre: "Ajuste cierre Z",
-    },
+    datos: { referenciaLibre: "Ajuste cierre Z" },
   };
 
   it("valida un asiento manual con referencia libre opcional", () => {

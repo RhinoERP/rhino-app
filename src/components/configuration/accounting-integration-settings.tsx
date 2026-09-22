@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useCuentas } from "@/modules/accounting/queries/queries.client";
-import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { updateOrganizationSettings } from "@/modules/organizations/actions/update-organization-settings.action";
 
@@ -33,9 +32,9 @@ const EMPTY_OPTION = "__none__";
 
 type FormValues = {
   automatic_accounting_enabled: boolean;
-  pos_default_customer_id: string | null;
   pos_cash_account_code: string | null;
-  pos_electronic_account_code: string | null;
+  pos_card_account_code: string | null;
+  pos_transfer_account_code: string | null;
 };
 
 type AccountingIntegrationSettingsProps = {
@@ -48,7 +47,6 @@ export function AccountingIntegrationSettings({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const queryClient = useQueryClient();
-  const { data: customers = [] } = useCustomers(orgSlug, "all");
   const { data: cuentas = [] } = useCuentas(orgSlug);
 
   const accountOptions = useMemo(
@@ -66,9 +64,9 @@ export function AccountingIntegrationSettings({
   const form = useForm<FormValues>({
     defaultValues: {
       automatic_accounting_enabled: false,
-      pos_default_customer_id: null,
       pos_cash_account_code: null,
-      pos_electronic_account_code: null,
+      pos_card_account_code: null,
+      pos_transfer_account_code: null,
     },
   });
 
@@ -78,10 +76,12 @@ export function AccountingIntegrationSettings({
         form.reset({
           automatic_accounting_enabled:
             result.data.automatic_accounting_enabled,
-          pos_default_customer_id: result.data.pos_default_customer_id ?? null,
           pos_cash_account_code: result.data.pos_cash_account_code ?? null,
-          pos_electronic_account_code:
-            result.data.pos_electronic_account_code ?? null,
+          pos_card_account_code: result.data.pos_card_account_code ?? null,
+          pos_transfer_account_code:
+            result.data.pos_transfer_account_code ??
+            result.data.pos_electronic_account_code ??
+            null,
         });
       }
       setIsLoading(false);
@@ -92,9 +92,9 @@ export function AccountingIntegrationSettings({
     setIsSaving(true);
     const result = await updateOrganizationSettings(orgSlug, {
       automatic_accounting_enabled: values.automatic_accounting_enabled,
-      pos_default_customer_id: values.pos_default_customer_id ?? null,
       pos_cash_account_code: values.pos_cash_account_code ?? null,
-      pos_electronic_account_code: values.pos_electronic_account_code ?? null,
+      pos_card_account_code: values.pos_card_account_code ?? null,
+      pos_transfer_account_code: values.pos_transfer_account_code ?? null,
     });
     setIsSaving(false);
 
@@ -149,50 +149,12 @@ export function AccountingIntegrationSettings({
                 )}
               />
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="pos_default_customer_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Cliente POS por defecto</FormLabel>
-                      <Select
-                        onValueChange={(value) =>
-                          field.onChange(value === EMPTY_OPTION ? null : value)
-                        }
-                        value={field.value ?? EMPTY_OPTION}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Seleccioná cliente" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value={EMPTY_OPTION}>
-                            Sin cliente por defecto
-                          </SelectItem>
-                          {customers.map((customer) => (
-                            <SelectItem key={customer.id} value={customer.id}>
-                              {customer.fantasy_name ||
-                                customer.business_name ||
-                                "Cliente sin nombre"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        Se usa cuando una venta POS no informa explícitamente un
-                        cliente.
-                      </FormDescription>
-                    </FormItem>
-                  )}
-                />
-
+              <div className="grid gap-4 md:grid-cols-[repeat(3,minmax(0,1fr))]">
                 <FormField
                   control={form.control}
                   name="pos_cash_account_code"
                   render={({ field }) => (
-                    <FormItem>
+                    <FormItem className="min-w-0">
                       <FormLabel>Cuenta de efectivo POS</FormLabel>
                       <Select
                         onValueChange={(value) =>
@@ -201,8 +163,11 @@ export function AccountingIntegrationSettings({
                         value={field.value ?? EMPTY_OPTION}
                       >
                         <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Seleccioná cuenta" />
+                          <SelectTrigger className="w-full min-w-0 overflow-hidden">
+                            <SelectValue
+                              className="min-w-0 truncate"
+                              placeholder="Seleccioná cuenta"
+                            />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -228,10 +193,10 @@ export function AccountingIntegrationSettings({
 
                 <FormField
                   control={form.control}
-                  name="pos_electronic_account_code"
+                  name="pos_card_account_code"
                   render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Cuenta de pagos electrónicos POS</FormLabel>
+                    <FormItem className="min-w-0">
+                      <FormLabel>Cuenta de tarjetas POS</FormLabel>
                       <Select
                         onValueChange={(value) =>
                           field.onChange(value === EMPTY_OPTION ? null : value)
@@ -239,8 +204,11 @@ export function AccountingIntegrationSettings({
                         value={field.value ?? EMPTY_OPTION}
                       >
                         <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Seleccioná cuenta" />
+                          <SelectTrigger className="w-full min-w-0 overflow-hidden">
+                            <SelectValue
+                              className="min-w-0 truncate"
+                              placeholder="Seleccioná cuenta"
+                            />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -258,8 +226,48 @@ export function AccountingIntegrationSettings({
                         </SelectContent>
                       </Select>
                       <FormDescription>
-                        Se usa para tarjetas, transferencias y otros medios no
-                        efectivos.
+                        Se usa para tarjetas de crédito y débito.
+                      </FormDescription>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="pos_transfer_account_code"
+                  render={({ field }) => (
+                    <FormItem className="min-w-0">
+                      <FormLabel>Cuenta de transferencias POS</FormLabel>
+                      <Select
+                        onValueChange={(value) =>
+                          field.onChange(value === EMPTY_OPTION ? null : value)
+                        }
+                        value={field.value ?? EMPTY_OPTION}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full min-w-0 overflow-hidden">
+                            <SelectValue
+                              className="min-w-0 truncate"
+                              placeholder="Seleccioná cuenta"
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={EMPTY_OPTION}>
+                            Sin configurar
+                          </SelectItem>
+                          {accountOptions.map((cuenta) => (
+                            <SelectItem
+                              key={cuenta.account_code ?? cuenta.id}
+                              value={cuenta.account_code ?? ""}
+                            >
+                              {cuenta.account_code} · {cuenta.nombre}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Se usa para transferencias y depósitos.
                       </FormDescription>
                     </FormItem>
                   )}

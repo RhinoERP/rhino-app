@@ -1,5 +1,4 @@
-import type { AccountingPaymentMethodInput } from "@/lib/accounting-client";
-import { buildCobroPos, buildVentaPos } from "@/lib/accounting-client";
+import { buildVentaPos } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
@@ -2287,7 +2286,7 @@ async function buildPosSaleAccountingLineas(params: {
 
   const { data: productRows, error } = await supabase
     .from("products")
-    .select("id, accounting_account_code")
+    .select("id, category_id, accounting_account_code")
     .eq("organization_id", orgId)
     .in("id", productIds);
 
@@ -2297,11 +2296,47 @@ async function buildPosSaleAccountingLineas(params: {
     );
   }
 
+  const typedProductRows = (productRows ?? []) as Array<{
+    id: string;
+    category_id: string | null;
+    accounting_account_code: string | null;
+  }>;
+  const categoryIds = [
+    ...new Set(
+      typedProductRows
+        .map((row) => row.category_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const { data: categoryRules, error: categoryRulesError } = categoryIds.length
+    ? await supabase
+        .from("category_accounting_rules" as never)
+        .select("category_id, account_code")
+        .eq("organization_id", orgId)
+        .in("category_id", categoryIds)
+    : { data: [], error: null };
+
+  if (categoryRulesError) {
+    throw new Error(
+      `No se pudieron obtener las cuentas contables de categorías: ${categoryRulesError.message}`
+    );
+  }
+
+  const accountCodeByCategoryId = new Map(
+    (
+      (categoryRules ?? []) as Array<{
+        category_id: string;
+        account_code: string;
+      }>
+    ).map((row) => [row.category_id, row.account_code])
+  );
   const accountCodeByProductId = new Map(
-    (productRows ?? []).map((row) => [
+    typedProductRows.map((row) => [
       row.id,
-      (row as { accounting_account_code?: string | null })
-        .accounting_account_code ?? null,
+      row.accounting_account_code ??
+        (row.category_id
+          ? (accountCodeByCategoryId.get(row.category_id) ?? null)
+          : null),
     ])
   );
 
@@ -2328,6 +2363,37 @@ async function buildPosSaleAccountingLineas(params: {
       };
     })
     .filter((line) => line.montoNeto > 0 || line.montoImpuestos > 0);
+}
+
+function normalizePosAccountingPaymentMethod(
+  paymentMethod: string
+): "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ" {
+  if (paymentMethod === "efectivo") {
+    return "EFECTIVO";
+  }
+  if (paymentMethod === "cheque") {
+    return "CHEQUE";
+  }
+  if (paymentMethod === "e-cheq") {
+    return "E-CHEQ";
+  }
+  return "TRANSFERENCIA";
+}
+
+// Fallback por si pos_default_customer_id no está seteado (orgs previas al seed automático).
+async function resolveConsumidorFinalCustomerId(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+}): Promise<string | null> {
+  const { data } = await params.supabase
+    .from("customers")
+    .select("id")
+    .eq("organization_id", params.orgId)
+    .ilike("business_name", "consumidor final")
+    .limit(1)
+    .maybeSingle();
+
+  return data?.id ?? null;
 }
 
 // Nunca debe lanzar: un fallo contable no puede revertir venta/pago/stock ya persistidos.
@@ -2382,7 +2448,10 @@ async function finalizePosSaleAccounting(params: {
       return patch;
     }
 
-    const clienteId = customerId ?? orgSettings.pos_default_customer_id ?? null;
+    const clienteId =
+      customerId ??
+      orgSettings.pos_default_customer_id ??
+      (await resolveConsumidorFinalCustomerId({ supabase, orgId }));
 
     if (clienteId) {
       if (!posPaymentId) {
@@ -2398,42 +2467,38 @@ async function finalizePosSaleAccounting(params: {
         splitTaxPlan,
       });
 
-      const eventoVenta = buildVentaPos(
-        {
-          id: posSaleId,
-          organization_id: orgId,
-          sale_date: saleDate,
-          receipt_number: receiptNumber,
-        },
-        { total: totalAmount, totalTaxAmount },
-        clienteId,
-        { items: accountingLineas }
-      );
+      // El servicio contable exige fecha YYYY-MM-DD; saleDate trae hora incluida.
+      const accountingDate = saleDate.slice(0, 10);
 
       const bancoAccountCode = resolvePosCobroDefaultAccountCode({
         paymentMethod,
         cashAccountCode: orgSettings.pos_cash_account_code,
+        cardAccountCode: orgSettings.pos_card_account_code,
+        transferAccountCode: orgSettings.pos_transfer_account_code,
         electronicAccountCode: orgSettings.pos_electronic_account_code,
       });
 
-      const eventoCobro = buildCobroPos(
+      const eventoVenta = buildVentaPos(
         {
-          id: posPaymentId,
+          id: posSaleId,
           organization_id: orgId,
-          pos_sale_id: posSaleId,
-          amount: totalAmount,
-          payment_method: paymentMethod as AccountingPaymentMethodInput,
-          payment_date: saleDate,
+          sale_date: accountingDate,
+          receipt_number: receiptNumber,
         },
+        { total: totalAmount, totalTaxAmount },
         clienteId,
-        { bancoAccountCode }
+        {
+          items: accountingLineas,
+          metodoPago: normalizePosAccountingPaymentMethod(paymentMethod),
+          bancoAccountCode,
+        }
       );
 
       patch = await runPosSaleAccountingFlow({
         eventoVenta,
-        eventoCobro,
         isTicketX,
-        automaticAccountingEnabled: orgSettings.automatic_accounting_enabled,
+        automaticAccountingEnabled:
+          orgSettings.automatic_accounting_enabled || Boolean(bancoAccountCode),
         orgId,
       });
     } else {
@@ -2707,18 +2772,19 @@ export async function createPosSale(
       });
     }
 
-    const arcaInvoice = isNonInvoicedPaymentMethod
-      ? ({
-          status: "not_requested",
-          error: null,
-        } satisfies CreatePosSaleResult["arcaInvoice"])
-      : await tryAutoEmitPosSaleInvoice({
-          supabase,
-          orgSlug: payload.orgSlug,
-          orgId: org.id,
-          posSaleId,
-          invoiceType: autoInvoiceType,
-        });
+    const arcaInvoice =
+      isNonInvoicedPaymentMethod || !autoInvoiceType
+        ? ({
+            status: "not_requested",
+            error: null,
+          } satisfies CreatePosSaleResult["arcaInvoice"])
+        : await tryAutoEmitPosSaleInvoice({
+            supabase,
+            orgSlug: payload.orgSlug,
+            orgId: org.id,
+            posSaleId,
+            invoiceType: autoInvoiceType,
+          });
 
     const accountingPatch = await finalizePosSaleAccounting({
       supabase,
@@ -2745,11 +2811,6 @@ export async function createPosSale(
       accountingSalePayload: accountingPatch.accounting_sale_entry_id
         ? null
         : accountingPatch.accounting_sale_event_snapshot,
-      accountingPaymentPayload:
-        accountingPatch.accounting_sale_entry_id &&
-        !accountingPatch.accounting_payment_entry_id
-          ? accountingPatch.accounting_payment_event_snapshot
-          : null,
     };
   } catch (error) {
     if (stockContext) {

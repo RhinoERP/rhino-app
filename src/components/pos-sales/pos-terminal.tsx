@@ -207,6 +207,21 @@ function resolveDirectSaleUnitPrice(
   );
 }
 
+function getSaleSubmissionError(
+  activeTerminalCount: number,
+  itemCount: number
+): string | null {
+  if (activeTerminalCount === 0) {
+    return "No hay terminales POS activas. Activa una terminal desde Configuración.";
+  }
+
+  if (itemCount === 0) {
+    return "Agrega al menos un producto para registrar la venta directa.";
+  }
+
+  return null;
+}
+
 function buildTicketTaxesFromPayload(params: {
   payload: Omit<CreateDirectSaleInput, "orgSlug">;
   discountedSubtotal: number;
@@ -414,7 +429,6 @@ function buildAccountingReviewFlow(
   const reviewSteps = resolvePosAccountingReviewSequence({
     accountingStatus: result.accountingStatus,
     accountingSalePayload: result.accountingSalePayload ?? null,
-    accountingPaymentPayload: result.accountingPaymentPayload ?? null,
   });
 
   if (reviewSteps.length === 0) {
@@ -423,24 +437,6 @@ function buildAccountingReviewFlow(
 
   return {
     salePayload: result.accountingSalePayload ?? null,
-    paymentPayload: result.accountingPaymentPayload ?? null,
-    steps: reviewSteps,
-    currentStepIndex: 0,
-  };
-}
-
-function advanceAccountingReviewFlow(
-  flow: PosAccountingReviewFlow
-): PosAccountingReviewFlow | null {
-  const nextIndex = flow.currentStepIndex + 1;
-
-  if (nextIndex >= flow.steps.length) {
-    return null;
-  }
-
-  return {
-    ...flow,
-    currentStepIndex: nextIndex,
   };
 }
 
@@ -1104,16 +1100,8 @@ export function PosTerminal({
     );
   };
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The confirmation flow needs to validate, confirm, and advance state in one place.
   const handleAccountingReviewConfirm = async (informalEntryId: string) => {
     if (!accountingReviewFlow) {
-      return;
-    }
-
-    const currentStep =
-      accountingReviewFlow.steps[accountingReviewFlow.currentStepIndex];
-    if (!currentStep) {
-      resetAccountingReviewFlow(setAccountingReviewFlow);
       return;
     }
 
@@ -1132,7 +1120,7 @@ export function PosTerminal({
       const result = await confirmPosSaleAccountingStepAction({
         orgSlug,
         posSaleId,
-        step: currentStep,
+        step: "venta",
         informalEntryId,
       });
 
@@ -1142,16 +1130,8 @@ export function PosTerminal({
         );
       }
 
-      const nextFlow = advanceAccountingReviewFlow(accountingReviewFlow);
-
-      if (!nextFlow) {
-        resetAccountingReviewFlow(setAccountingReviewFlow);
-        toast.success("Asientos contables del POS confirmados.");
-        return;
-      }
-
-      setAccountingReviewFlow(nextFlow);
-      savePosAccountingReviewFlow(nextFlow);
+      resetAccountingReviewFlow(setAccountingReviewFlow);
+      toast.success("Asiento contable del POS confirmado.");
     } catch (error) {
       resetAccountingReviewFlow(setAccountingReviewFlow);
       toast.error(
@@ -1168,17 +1148,12 @@ export function PosTerminal({
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
-    if (activeTerminals.length === 0) {
-      setErrorMessage(
-        "No hay terminales POS activas. Activa una terminal desde Configuración."
-      );
-      return;
-    }
-
-    if (!cartItems.length) {
-      setErrorMessage(
-        "Agrega al menos un producto para registrar la venta directa."
-      );
+    const validationError = getSaleSubmissionError(
+      activeTerminals.length,
+      cartItems.length
+    );
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 
@@ -1193,7 +1168,7 @@ export function PosTerminal({
         rate: tax.rate,
       }));
 
-      await createDirectSale.mutateAsync({
+      const result = await createDirectSale.mutateAsync({
         terminalId: values.terminalId,
         customerId: values.customerId ?? null,
         saleDate:
@@ -1215,7 +1190,10 @@ export function PosTerminal({
         taxes: taxesPayload.length ? taxesPayload : undefined,
       });
 
-      router.push(`/org/${orgSlug}/venta-directa`);
+      // No navegar si quedó pendiente la revisión contable: navegar desmontaría el modal recién abierto.
+      if (!buildAccountingReviewFlow(result)) {
+        router.push(`/org/${orgSlug}/venta-directa`);
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -1227,12 +1205,7 @@ export function PosTerminal({
 
   const isSubmitting = createDirectSale.isPending;
 
-  const currentAccountingEvent =
-    accountingReviewFlow &&
-    accountingReviewFlow.steps[accountingReviewFlow.currentStepIndex] ===
-      "venta"
-      ? accountingReviewFlow.salePayload
-      : accountingReviewFlow?.paymentPayload;
+  const currentAccountingEvent = accountingReviewFlow?.salePayload;
 
   return (
     <div className="space-y-6">
@@ -1244,13 +1217,7 @@ export function PosTerminal({
           onConfirm={handleAccountingReviewConfirm}
           open={Boolean(accountingReviewFlow && currentAccountingEvent)}
           persistAs="informal"
-          sourceType={
-            accountingReviewFlow.steps[
-              accountingReviewFlow.currentStepIndex
-            ] === "venta"
-              ? "VENTA_POS"
-              : "COBRO_POS"
-          }
+          sourceType="VENTA_POS"
         />
       ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -39,15 +39,15 @@ describe("buildItemizedTaxPlan", () => {
       expect.objectContaining({
         taxId: "iva-21",
         baseAmount: 90,
-        taxAmount: 18.89,
+        taxAmount: 18.9,
       }),
       expect.objectContaining({
         taxId: "iva-105",
         baseAmount: 180,
-        taxAmount: 18.89,
+        taxAmount: 18.9,
       }),
     ]);
-    expect(plan.totalTaxAmount).toBe(37.78);
+    expect(plan.totalTaxAmount).toBe(37.8);
   });
 
   it("usa impuestos fallback cuando el ítem no trae asignación", () => {

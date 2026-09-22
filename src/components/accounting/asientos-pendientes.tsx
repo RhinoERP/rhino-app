@@ -35,7 +35,6 @@ type FilterSourceType =
   | "COBRO"
   | "ORDEN_PAGO"
   | "VENTA_POS"
-  | "COBRO_POS"
   | "all";
 
 const ESTADO_BADGE: Record<
@@ -57,8 +56,7 @@ const SOURCE_LABEL: Record<
   | "NOTA_DE_CREDITO"
   | "COBRO"
   | "ORDEN_PAGO"
-  | "VENTA_POS"
-  | "COBRO_POS",
+  | "VENTA_POS",
   string
 > = {
   NOTA_DE_VENTA: "Nota de Venta",
@@ -68,7 +66,6 @@ const SOURCE_LABEL: Record<
   COBRO: "Cobro",
   ORDEN_PAGO: "Orden de Pago",
   VENTA_POS: "Venta POS",
-  COBRO_POS: "Cobro POS",
 };
 
 export function AsientosPendientes({ orgId, orgSlug }: Props) {

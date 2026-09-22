@@ -8,7 +8,6 @@ export type CreateDirectSaleActionResult = {
   posSaleId?: string;
   accountingStatus?: string;
   accountingSalePayload?: unknown;
-  accountingPaymentPayload?: unknown;
   error?: string;
 };
 
@@ -23,7 +22,6 @@ export async function createDirectSaleAction(
       posSaleId: result.posSaleId,
       accountingStatus: result.accountingStatus,
       accountingSalePayload: result.accountingSalePayload ?? null,
-      accountingPaymentPayload: result.accountingPaymentPayload ?? null,
     };
   } catch (error) {
     console.error("Error creating direct sale:", error);

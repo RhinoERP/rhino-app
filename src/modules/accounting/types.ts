@@ -67,8 +67,7 @@ export type InformalEntry = {
     | "ORDEN_PAGO"
     | "COMPRA"
     | "NOTA_DE_CREDITO"
-    | "VENTA_POS"
-    | "COBRO_POS";
+    | "VENTA_POS";
   estado_formalizacion: "PENDIENTE" | "CANCELADO" | "ASENTADO";
   formalized_journal_entry_id: string | null;
 };
@@ -247,6 +246,8 @@ export interface EventoVentaPos extends EventoBase {
     totalVenta: string;
     montoNeto?: string;
     montoImpuestos?: string;
+    metodoPago?: "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ";
+    bancoAccountCode?: string;
     clienteId: string;
     comprobanteNumero: string;
     lineasDesglosadas?: Array<{
@@ -260,21 +261,6 @@ export interface EventoVentaPos extends EventoBase {
         nombre?: string | null;
       }>;
     }>;
-    moneda?: "ARS" | "USD";
-    tipoCambio?: string;
-    montoUSD?: string;
-  };
-}
-
-export interface EventoCobroPos extends EventoBase {
-  tipoEvento: "COBRO_POS";
-  referenciaTabla: "pos_payments";
-  datos: {
-    montoCobrado: string;
-    metodoPago: "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ";
-    clienteId: string;
-    ventaId?: string;
-    bancoAccountCode?: string;
     moneda?: "ARS" | "USD";
     tipoCambio?: string;
     montoUSD?: string;
@@ -316,6 +302,5 @@ export type AnyEvento =
   | EventoNcCompra
   | EventoVentaPos
   | EventoCobro
-  | EventoCobroPos
   | EventoOrdenPago
   | EventoAsientoManual;

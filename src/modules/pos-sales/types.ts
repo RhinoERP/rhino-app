@@ -64,5 +64,4 @@ export type CreateDirectSaleResult = {
   posSaleId: string;
   accountingStatus?: string;
   accountingSalePayload?: unknown;
-  accountingPaymentPayload?: unknown;
 };

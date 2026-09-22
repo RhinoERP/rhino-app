@@ -1,15 +1,12 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type {
-  EventoCobroPos,
-  EventoVentaPos,
-} from "@/modules/accounting/types";
+import type { EventoVentaPos } from "@/modules/accounting/types";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
-  formalizePosSaleAccountingEntries,
+  formalizeSinglePosSaleAccountingEntry,
   runPosSaleAccountingFlow,
 } from "../service/pos-sale-accounting.service";
 
@@ -29,7 +26,6 @@ type PosSaleAccountingRow = {
   accounting_sale_entry_id: string | null;
   accounting_payment_entry_id: string | null;
   accounting_sale_event_snapshot: EventoVentaPos | null;
-  accounting_payment_event_snapshot: EventoCobroPos | null;
 };
 
 // Reintenta con el mismo snapshot ya construido (sin recalcular impuestos ni
@@ -50,7 +46,7 @@ export async function retryPosSaleAccountingAction(
   const { data: row, error } = await supabase
     .from("pos_sales")
     .select(
-      "invoice_type, arca_status, accounting_status, accounting_sale_entry_id, accounting_payment_entry_id, accounting_sale_event_snapshot, accounting_payment_event_snapshot" as never
+      "invoice_type, arca_status, accounting_status, accounting_sale_entry_id, accounting_sale_event_snapshot" as never
     )
     .eq("organization_id", org.id)
     .eq("id", input.posSaleId)
@@ -67,13 +63,11 @@ export async function retryPosSaleAccountingAction(
     typedRow.arca_status === "authorized" &&
     (typedRow.accounting_status === "PENDING" ||
       typedRow.accounting_status === "PARTIALLY_POSTED") &&
-    typedRow.accounting_sale_entry_id &&
-    typedRow.accounting_payment_entry_id
+    typedRow.accounting_sale_entry_id
   ) {
-    const formalizationPatch = await formalizePosSaleAccountingEntries({
+    const formalizationPatch = await formalizeSinglePosSaleAccountingEntry({
       orgId: org.id,
       saleEntryId: typedRow.accounting_sale_entry_id,
-      paymentEntryId: typedRow.accounting_payment_entry_id,
     });
 
     const { error: formalizeUpdateError } = await supabase
@@ -95,12 +89,7 @@ export async function retryPosSaleAccountingAction(
     };
   }
 
-  if (
-    !(
-      typedRow.accounting_sale_event_snapshot &&
-      typedRow.accounting_payment_event_snapshot
-    )
-  ) {
+  if (!typedRow.accounting_sale_event_snapshot) {
     return {
       success: false,
       error:
@@ -112,12 +101,10 @@ export async function retryPosSaleAccountingAction(
 
   const patch = await runPosSaleAccountingFlow({
     eventoVenta: typedRow.accounting_sale_event_snapshot,
-    eventoCobro: typedRow.accounting_payment_event_snapshot,
     isTicketX: typedRow.invoice_type === "TICKET_X",
     automaticAccountingEnabled: orgSettings.automatic_accounting_enabled,
     orgId: org.id,
     existingSaleEntryId: typedRow.accounting_sale_entry_id,
-    existingPaymentEntryId: typedRow.accounting_payment_entry_id,
   });
 
   const { error: updateError } = await supabase

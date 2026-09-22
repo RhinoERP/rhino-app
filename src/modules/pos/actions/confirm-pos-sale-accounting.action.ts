@@ -1,10 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type {
-  EventoCobroPos,
-  EventoVentaPos,
-} from "@/modules/accounting/types";
+import type { EventoVentaPos } from "@/modules/accounting/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { runPosSaleAccountingFlow } from "../service/pos-sale-accounting.service";
@@ -25,7 +22,6 @@ type PosSaleAccountingRow = {
   accounting_sale_entry_id: string | null;
   accounting_payment_entry_id: string | null;
   accounting_sale_event_snapshot: EventoVentaPos | null;
-  accounting_payment_event_snapshot: EventoCobroPos | null;
 };
 
 // Persistido junto con create-pos-sale para el paso pendiente que el
@@ -47,7 +43,7 @@ export async function confirmPosSaleAccountingStepAction(
   const { data: row, error } = await supabase
     .from("pos_sales")
     .select(
-      "invoice_type, accounting_sale_entry_id, accounting_payment_entry_id, accounting_sale_event_snapshot, accounting_payment_event_snapshot"
+      "invoice_type, accounting_sale_entry_id, accounting_sale_event_snapshot"
     )
     .eq("organization_id", org.id)
     .eq("id", input.posSaleId)
@@ -59,35 +55,27 @@ export async function confirmPosSaleAccountingStepAction(
 
   const typedRow = row as unknown as PosSaleAccountingRow;
 
-  if (
-    !(
-      typedRow.accounting_sale_event_snapshot &&
-      typedRow.accounting_payment_event_snapshot
-    )
-  ) {
+  if (!typedRow.accounting_sale_event_snapshot) {
     return {
       success: false,
       error: "Esta venta no tiene un asiento contable pendiente de revisión.",
     };
   }
 
-  const saleEntryId =
-    input.step === "venta"
-      ? input.informalEntryId
-      : typedRow.accounting_sale_entry_id;
-  const paymentEntryId =
-    input.step === "cobro"
-      ? input.informalEntryId
-      : typedRow.accounting_payment_entry_id;
+  if (input.step !== "venta") {
+    return {
+      success: false,
+      error:
+        "El flujo POS de asiento único no tiene un paso de cobro separado.",
+    };
+  }
 
   const patch = await runPosSaleAccountingFlow({
     eventoVenta: typedRow.accounting_sale_event_snapshot,
-    eventoCobro: typedRow.accounting_payment_event_snapshot,
     isTicketX: typedRow.invoice_type === "TICKET_X",
     automaticAccountingEnabled: false,
     orgId: org.id,
-    existingSaleEntryId: saleEntryId,
-    existingPaymentEntryId: paymentEntryId,
+    existingSaleEntryId: input.informalEntryId,
   });
 
   const { error: updateError } = await supabase

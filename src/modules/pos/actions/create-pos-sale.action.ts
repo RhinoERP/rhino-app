@@ -13,7 +13,6 @@ export type CreatePosSaleActionResult = {
   posSaleId?: string;
   accountingStatus?: CreatePosSaleResult["accountingStatus"];
   accountingSalePayload?: CreatePosSaleResult["accountingSalePayload"];
-  accountingPaymentPayload?: CreatePosSaleResult["accountingPaymentPayload"];
   error?: string;
 };
 
@@ -40,7 +39,6 @@ export async function createPosSaleAction(
       posSaleId: result.posSaleId,
       accountingStatus: result.accountingStatus,
       accountingSalePayload: result.accountingSalePayload ?? null,
-      accountingPaymentPayload: result.accountingPaymentPayload ?? null,
     };
   } catch (error) {
     console.error("Error creating POS sale:", error);

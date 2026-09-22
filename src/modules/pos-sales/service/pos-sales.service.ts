@@ -802,6 +802,5 @@ export async function createDirectSale(
     posSaleId,
     accountingStatus: undefined,
     accountingSalePayload: null,
-    accountingPaymentPayload: null,
   } satisfies CreateDirectSaleResult;
 }

@@ -6,10 +6,7 @@ import {
   formalizarEntry,
   previewAccountingEvent,
 } from "@/lib/accounting-server";
-import type {
-  EventoCobroPos,
-  EventoVentaPos,
-} from "@/modules/accounting/types";
+import type { EventoVentaPos } from "@/modules/accounting/types";
 
 export type PosSaleAccountingStatus =
   | "NOT_REQUIRED"
@@ -26,7 +23,7 @@ export type PosSaleAccountingPatch = {
   accounting_payment_entry_id: string | null;
   accounting_last_error: string | null;
   accounting_sale_event_snapshot: EventoVentaPos | null;
-  accounting_payment_event_snapshot: EventoCobroPos | null;
+  accounting_payment_event_snapshot: null;
   accounting_updated_at: string;
 };
 
@@ -37,6 +34,8 @@ export type PosSaleAccountingPatch = {
 export function resolvePosCobroDefaultAccountCode(params: {
   paymentMethod: string;
   cashAccountCode: string | null;
+  cardAccountCode: string | null;
+  transferAccountCode: string | null;
   electronicAccountCode: string | null;
 }): string | undefined {
   if (params.paymentMethod === "efectivo") {
@@ -47,6 +46,22 @@ export function resolvePosCobroDefaultAccountCode(params: {
     return "VALORES_A_DEPOSITAR";
   }
 
+  if (
+    params.paymentMethod === "tarjeta_de_credito" ||
+    params.paymentMethod === "tarjeta_de_debito"
+  ) {
+    return params.cardAccountCode ?? params.electronicAccountCode ?? undefined;
+  }
+
+  if (
+    params.paymentMethod === "transferencia" ||
+    params.paymentMethod === "deposito"
+  ) {
+    return (
+      params.transferAccountCode ?? params.electronicAccountCode ?? undefined
+    );
+  }
+
   return params.electronicAccountCode ?? undefined;
 }
 
@@ -55,8 +70,8 @@ export function resolvePosCobroDefaultAccountCode(params: {
 async function resolvePosAccountingEntryId(params: {
   existingEntryId: string | null;
   automaticAccountingEnabled: boolean;
-  evento: EventoVentaPos | EventoCobroPos;
-  sourceType: "VENTA_POS" | "COBRO_POS";
+  evento: EventoVentaPos;
+  sourceType: "VENTA_POS";
 }): Promise<string | null> {
   if (params.existingEntryId) {
     return params.existingEntryId;
@@ -75,26 +90,22 @@ async function resolvePosAccountingEntryId(params: {
 }
 
 /**
- * Orquesta venta+cobro POS: nunca crea el cobro sin que la venta ya exista
- * (informal o formal). Los IDs ya existentes se reciben para soportar
- * reintentos idempotentes sin recrear lo que ya se creó.
+ * Orquesta el único asiento contable de una venta POS.
  */
 export async function runPosSaleAccountingFlow(params: {
   eventoVenta: EventoVentaPos;
-  eventoCobro: EventoCobroPos;
   isTicketX: boolean;
   automaticAccountingEnabled: boolean;
   orgId: string;
   existingSaleEntryId?: string | null;
-  existingPaymentEntryId?: string | null;
 }): Promise<PosSaleAccountingPatch> {
   const base: PosSaleAccountingPatch = {
     accounting_status: "REVIEW_REQUIRED",
     accounting_sale_entry_id: params.existingSaleEntryId ?? null,
-    accounting_payment_entry_id: params.existingPaymentEntryId ?? null,
+    accounting_payment_entry_id: null,
     accounting_last_error: null,
     accounting_sale_event_snapshot: params.eventoVenta,
-    accounting_payment_event_snapshot: params.eventoCobro,
+    accounting_payment_event_snapshot: null,
     accounting_updated_at: new Date().toISOString(),
   };
 
@@ -110,26 +121,13 @@ export async function runPosSaleAccountingFlow(params: {
       return base;
     }
 
-    const paymentEntryId = await resolvePosAccountingEntryId({
-      existingEntryId: params.existingPaymentEntryId ?? null,
-      automaticAccountingEnabled: params.automaticAccountingEnabled,
-      evento: params.eventoCobro,
-      sourceType: "COBRO_POS",
-    });
-
-    if (!paymentEntryId) {
-      return { ...base, accounting_sale_entry_id: saleEntryId };
-    }
-
     if (params.isTicketX) {
       await asentarInformalEntry(saleEntryId, params.orgId);
-      await asentarInformalEntry(paymentEntryId, params.orgId);
 
       return {
         ...base,
         accounting_status: "SETTLED_INFORMAL",
         accounting_sale_entry_id: saleEntryId,
-        accounting_payment_entry_id: paymentEntryId,
       };
     }
 
@@ -137,7 +135,6 @@ export async function runPosSaleAccountingFlow(params: {
       ...base,
       accounting_status: "PENDING",
       accounting_sale_entry_id: saleEntryId,
-      accounting_payment_entry_id: paymentEntryId,
     };
   } catch (error) {
     return {
@@ -149,10 +146,10 @@ export async function runPosSaleAccountingFlow(params: {
   }
 }
 
-export type PosSaleFormalizationPatch = {
+export type PosSingleSaleFormalizationPatch = {
   accounting_status: "POSTED" | "PARTIALLY_POSTED";
   accounting_sale_entry_id: string;
-  accounting_payment_entry_id: string;
+  accounting_payment_entry_id: null;
   accounting_last_error: string | null;
   accounting_updated_at: string;
 };
@@ -173,61 +170,34 @@ async function formalizeIfInformal(params: {
   }
 }
 
-/**
- * Formaliza venta y cobro juntos cuando ARCA autoriza una Factura B/C.
- * Nunca lanza: un fallo acá no debe revertir la autorización ARCA ya
- * obtenida. Si sólo una mitad se formaliza, el resultado queda
- * PARTIALLY_POSTED para que un reintento posterior complete la otra sin
- * volver a tocar la que ya es un asiento formal.
- */
-export async function formalizePosSaleAccountingEntries(params: {
+export async function formalizeSinglePosSaleAccountingEntry(params: {
   orgId: string;
   saleEntryId: string;
-  paymentEntryId: string;
-}): Promise<PosSaleFormalizationPatch> {
+}): Promise<PosSingleSaleFormalizationPatch> {
   const nowIso = new Date().toISOString();
-  let saleJournalId = params.saleEntryId;
 
   try {
-    saleJournalId = await formalizeIfInformal({
+    const journalId = await formalizeIfInformal({
       entryId: params.saleEntryId,
-      orgId: params.orgId,
-    });
-  } catch (error) {
-    return {
-      accounting_status: "PARTIALLY_POSTED",
-      accounting_sale_entry_id: params.saleEntryId,
-      accounting_payment_entry_id: params.paymentEntryId,
-      accounting_last_error:
-        error instanceof Error
-          ? error.message
-          : "No se pudo formalizar el asiento de venta POS",
-      accounting_updated_at: nowIso,
-    };
-  }
-
-  try {
-    const paymentJournalId = await formalizeIfInformal({
-      entryId: params.paymentEntryId,
       orgId: params.orgId,
     });
 
     return {
       accounting_status: "POSTED",
-      accounting_sale_entry_id: saleJournalId,
-      accounting_payment_entry_id: paymentJournalId,
+      accounting_sale_entry_id: journalId,
+      accounting_payment_entry_id: null,
       accounting_last_error: null,
       accounting_updated_at: nowIso,
     };
   } catch (error) {
     return {
       accounting_status: "PARTIALLY_POSTED",
-      accounting_sale_entry_id: saleJournalId,
-      accounting_payment_entry_id: params.paymentEntryId,
+      accounting_sale_entry_id: params.saleEntryId,
+      accounting_payment_entry_id: null,
       accounting_last_error:
         error instanceof Error
           ? error.message
-          : "No se pudo formalizar el asiento de cobro POS",
+          : "No se pudo formalizar el asiento POS",
       accounting_updated_at: nowIso,
     };
   }

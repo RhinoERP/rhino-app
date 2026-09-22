@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import { formalizePosSaleAccountingEntries } from "@/modules/pos/service/pos-sale-accounting.service";
+import { formalizeSinglePosSaleAccountingEntry } from "@/modules/pos/service/pos-sale-accounting.service";
 import type { Database, Json } from "@/types/supabase";
 import {
   ArcaConnectionError,
@@ -896,23 +896,19 @@ async function formalizePosSaleAccountingIfPending(params: {
   posSaleId: string;
   accountingStatus?: string | null;
   saleEntryId?: string | null;
-  paymentEntryId?: string | null;
 }): Promise<void> {
   const isPendingFormalization =
     params.accountingStatus === "PENDING" ||
     params.accountingStatus === "PARTIALLY_POSTED";
 
-  if (
-    !(isPendingFormalization && params.saleEntryId && params.paymentEntryId)
-  ) {
+  if (!(isPendingFormalization && params.saleEntryId)) {
     return;
   }
 
   try {
-    const patch = await formalizePosSaleAccountingEntries({
+    const patch = await formalizeSinglePosSaleAccountingEntry({
       orgId: params.orgId,
       saleEntryId: params.saleEntryId,
-      paymentEntryId: params.paymentEntryId,
     });
 
     await params.supabase
@@ -984,9 +980,7 @@ async function persistAuthorizedPosInvoice(params: {
   // Select aparte: columnas todavía no reflejadas en los tipos generados de Supabase.
   const { data: accountingRow } = await supabase
     .from("pos_sales")
-    .select(
-      "accounting_status, accounting_sale_entry_id, accounting_payment_entry_id" as never
-    )
+    .select("accounting_status, accounting_sale_entry_id" as never)
     .eq("organization_id", params.orgId)
     .eq("id", params.posSaleId)
     .maybeSingle();
@@ -994,7 +988,6 @@ async function persistAuthorizedPosInvoice(params: {
   const typedAccountingRow = accountingRow as unknown as {
     accounting_status?: string | null;
     accounting_sale_entry_id?: string | null;
-    accounting_payment_entry_id?: string | null;
   } | null;
 
   await formalizePosSaleAccountingIfPending({
@@ -1003,7 +996,6 @@ async function persistAuthorizedPosInvoice(params: {
     posSaleId: params.posSaleId,
     accountingStatus: typedAccountingRow?.accounting_status,
     saleEntryId: typedAccountingRow?.accounting_sale_entry_id,
-    paymentEntryId: typedAccountingRow?.accounting_payment_entry_id,
   });
 
   return toArcaSaleInvoiceResult(

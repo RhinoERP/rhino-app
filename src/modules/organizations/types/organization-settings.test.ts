@@ -47,6 +47,8 @@ describe("organization POS accounting defaults", () => {
 
     expect(parsed.pos_default_customer_id).toBeNull();
     expect(parsed.pos_cash_account_code).toBeNull();
+    expect(parsed.pos_card_account_code).toBeNull();
+    expect(parsed.pos_transfer_account_code).toBeNull();
     expect(parsed.pos_electronic_account_code).toBeNull();
     expect(ORGANIZATION_SETTINGS_DEFAULTS.pos_default_customer_id).toBeNull();
     expect(ORGANIZATION_SETTINGS_DEFAULTS.pos_cash_account_code).toBeNull();
@@ -59,13 +61,15 @@ describe("organization POS accounting defaults", () => {
     const parsed = organizationSettingsSchema.parse({
       pos_default_customer_id: "00000000-0000-4000-8000-000000000123",
       pos_cash_account_code: "CAJA_PESOS",
-      pos_electronic_account_code: "BANCO_PESOS",
+      pos_card_account_code: "POS tarjetas",
+      pos_transfer_account_code: "BANCO_PESOS",
     });
 
     expect(parsed.pos_default_customer_id).toBe(
       "00000000-0000-4000-8000-000000000123"
     );
     expect(parsed.pos_cash_account_code).toBe("CAJA_PESOS");
-    expect(parsed.pos_electronic_account_code).toBe("BANCO_PESOS");
+    expect(parsed.pos_card_account_code).toBe("POS tarjetas");
+    expect(parsed.pos_transfer_account_code).toBe("BANCO_PESOS");
   });
 });

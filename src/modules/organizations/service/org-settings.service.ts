@@ -62,6 +62,8 @@ export const OrgSettingsSchema = z.object({
   distributor_catalog_margin: z.number().min(0).max(100).default(30),
   pos_default_customer_id: z.string().uuid().nullable().default(null),
   pos_cash_account_code: z.string().trim().nullable().default(null),
+  pos_card_account_code: z.string().trim().nullable().default(null),
+  pos_transfer_account_code: z.string().trim().nullable().default(null),
   pos_electronic_account_code: z.string().trim().nullable().default(null),
 });
 

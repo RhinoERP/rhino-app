@@ -2,7 +2,6 @@ import type {
   AnyEvento,
   EventoAsientoManual,
   EventoCobro,
-  EventoCobroPos,
   EventoFacturaCompra,
   EventoFacturaVenta,
   EventoNcCompra,
@@ -880,8 +879,8 @@ export function buildCobro(
 }
 
 // ------------------------------------------------------------
-// buildVentaPos / buildCobroPos
-// Par de eventos de una venta directa POS. clienteId siempre debe venir
+// buildVentaPos
+// Evento único de una venta directa POS. clienteId siempre debe venir
 // resuelto (cliente real o "consumidor final" configurado por org) antes
 // de llamar a estos builders — no se resuelve acá.
 // ------------------------------------------------------------
@@ -894,7 +893,11 @@ export function buildVentaPos(
   },
   totals: { total: number; totalTaxAmount: number },
   clienteId: string,
-  options: { items?: LineaDesglosadaInput[] } & CurrencyFields = {}
+  options: {
+    items?: LineaDesglosadaInput[];
+    metodoPago?: "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ";
+    bancoAccountCode?: string | null;
+  } & CurrencyFields = {}
 ): EventoVentaPos {
   const montoNeto = totals.total - totals.totalTaxAmount;
   const comprobanteNumero =
@@ -921,40 +924,11 @@ export function buildVentaPos(
       totalVenta: toAccountingStr(totals.total),
       montoNeto: toAccountingStr(montoNeto),
       montoImpuestos: toAccountingStr(totals.totalTaxAmount),
+      metodoPago: options.metodoPago,
+      bancoAccountCode: options.bancoAccountCode ?? undefined,
       clienteId,
       comprobanteNumero,
       lineasDesglosadas,
-      ...buildCurrencyDatos(options),
-    },
-  };
-}
-
-export function buildCobroPos(
-  payment: {
-    id: string;
-    organization_id: string;
-    pos_sale_id: string;
-    amount: number;
-    payment_method: AccountingPaymentMethodInput;
-    payment_date: string;
-  },
-  clienteId: string,
-  options: CurrencyFields & { bancoAccountCode?: string | null } = {}
-): EventoCobroPos {
-  return {
-    tipoEvento: "COBRO_POS",
-    orgId: payment.organization_id,
-    referenciaId: payment.id,
-    referenciaTabla: "pos_payments",
-    fecha: payment.payment_date,
-    descripcion: "Cobro de venta directa POS",
-    idempotencyKey: `COBRO_POS_${payment.id}`,
-    datos: {
-      montoCobrado: toAccountingStr(payment.amount),
-      metodoPago: normalizePaymentMethod(payment.payment_method),
-      clienteId,
-      ventaId: payment.pos_sale_id,
-      bancoAccountCode: options.bancoAccountCode ?? undefined,
       ...buildCurrencyDatos(options),
     },
   };
