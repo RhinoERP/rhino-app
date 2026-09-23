@@ -2915,6 +2915,7 @@ export async function createPreSaleOrder(
       parentSaleId: saleOrderId,
       customerId,
       userId: resolvedSellerId as string,
+      createdBy: userId,
       amount: advanceAmount,
       dueDate,
       currency: "ARS",
@@ -5879,6 +5880,7 @@ async function createInformalAdvanceDocument(params: {
   parentSaleId: string;
   customerId: string;
   userId: string;
+  createdBy: string | null;
   amount: number;
   dueDate: string;
   currency?: string;
@@ -5905,7 +5907,7 @@ async function createInformalAdvanceDocument(params: {
       status: "CONFIRMED",
       document_type: "ADVANCE",
       parent_sales_order_id: params.parentSaleId,
-      created_by: params.userId,
+      created_by: params.createdBy,
     } as never)
     .select("id")
     .single();
@@ -6041,6 +6043,7 @@ async function syncInformalAdvanceReceivable(params: {
   customerId: string;
   dueDate: string;
   currency: string;
+  createdBy: string | null;
 }): Promise<void> {
   const advanceAmount =
     params.advancePercentage && params.advancePercentage > 0
@@ -6097,6 +6100,7 @@ async function syncInformalAdvanceReceivable(params: {
     parentSaleId: params.saleId,
     customerId: params.customerId,
     userId: parentSale.user_id,
+    createdBy: params.createdBy,
     amount: advanceAmount,
     dueDate: params.dueDate,
     currency: params.currency,
@@ -6520,6 +6524,7 @@ export async function updateSaleOrder(
 
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  const actorUserId = await getCurrentUserId(supabase);
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
@@ -6585,6 +6590,7 @@ export async function updateSaleOrder(
           updatedSale.credit_days
         ),
         currency: updatedSale.currency ?? "ARS",
+        createdBy: actorUserId,
       });
     }
   } catch (error) {

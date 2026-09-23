@@ -1074,7 +1074,8 @@ const RECEIVABLES_SELECT = `
     sale_number,
     sub_total,
     global_discount_amount,
-    remittance_number
+    remittance_number,
+    document_type
   ),
   manual_invoice:manual_fiscal_invoices(invoice_number, issue_date, sub_total, created_by)
 `;
