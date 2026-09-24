@@ -1890,7 +1890,8 @@ export function SaleDetail({
     return {
       ...buildFiscalSaleMutationPayload(),
       remittanceNumber: remittanceNumber || null,
-      advancePaymentPercentage: saleAdvancePercentage,
+      advancePaymentPercentage:
+        invoiceType === "NOTA_DE_VENTA" ? saleAdvancePercentage : null,
     };
   };
 

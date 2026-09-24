@@ -1642,7 +1642,7 @@ export async function getSalesOrdersByOrgSlug(
 
   salesQuery = salesQuery
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE");
+    .in("document_type", ["STANDARD"]);
 
   const [{ data, error }, sellersByUserId] = await Promise.all([
     salesQuery.order("created_at", { ascending: false }),
@@ -1878,7 +1878,7 @@ function buildSalesQuery(
     )
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE");
+    .in("document_type", ["STANDARD"]);
 
   if (params.status) {
     query = query.eq("status", params.status);
@@ -2185,7 +2185,7 @@ async function fetchSalesMetrics(
     .select("*", { count: "exact", head: true })
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE");
+    .in("document_type", ["STANDARD"]);
 
   if (userId) {
     baseQuery = baseQuery.eq("user_id", userId);
@@ -2196,7 +2196,7 @@ async function fetchSalesMetrics(
     .select("*", { count: "exact", head: true })
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE")
+    .in("document_type", ["STANDARD"])
     .gte("sale_date", monthStart)
     .lte("sale_date", monthEnd);
 
@@ -2209,7 +2209,7 @@ async function fetchSalesMetrics(
     .select("total_amount, status")
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE")
+    .in("document_type", ["STANDARD"])
     .gte("sale_date", monthStart)
     .lte("sale_date", monthEnd)
     .in("status", countedStatuses);
@@ -2311,7 +2311,7 @@ export async function getAllSalesForExport(
     )
     .eq("organization_id", org.id)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE")
+    .in("document_type", ["STANDARD"])
     .limit(10_000);
 
   if (filters?.status) {
@@ -2484,11 +2484,6 @@ export async function getSalesOrderById(
   }
 
   if (!data) {
-    return null;
-  }
-
-  const rawSale = data as unknown as { document_type?: string | null };
-  if (rawSale.document_type === "ADVANCE") {
     return null;
   }
 
@@ -4769,11 +4764,12 @@ async function validateSaleForUpdate(
   invoiceType: Database["public"]["Enums"]["invoice_type"] | null;
   customerId: string | null;
   userId: string | null;
+  advancePaymentPercentage: number | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status"
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status, advance_payment_percentage"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -4830,6 +4826,10 @@ async function validateSaleForUpdate(
         : null,
     userId:
       typeof existingSale.user_id === "string" ? existingSale.user_id : null,
+    advancePaymentPercentage:
+      typeof existingSale.advance_payment_percentage === "number"
+        ? existingSale.advance_payment_percentage
+        : null,
   };
 }
 
@@ -4959,6 +4959,39 @@ function assertInformalAdvanceUpdateAllowed(
     (input.invoiceType ?? existingSale.invoiceType) !== "NOTA_DE_VENTA"
   ) {
     throw new Error(INFORMAL_ADVANCE_NOTA_DE_VENTA_ERROR);
+  }
+}
+
+async function assertInformalAdvanceUpdateRules(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>;
+  input: UpdateSaleOrderInput;
+}): Promise<void> {
+  const { supabase, orgId, saleId, existingSale, input } = params;
+
+  if (
+    input.advancePaymentPercentage !== undefined &&
+    (await informalAdvanceHasPayments({ supabase, orgId, saleId }))
+  ) {
+    throw new Error("El anticipo ya registró pagos y no puede modificarse");
+  }
+
+  const hasAdvancePercentage =
+    existingSale.advancePaymentPercentage !== null &&
+    existingSale.advancePaymentPercentage > 0;
+
+  if (
+    isStockedSaleStatus(existingSale.status) &&
+    hasAdvancePercentage &&
+    (input.items !== undefined ||
+      input.globalDiscountPercentage !== undefined ||
+      input.advancePaymentPercentage !== undefined)
+  ) {
+    throw new Error(
+      "Una venta confirmada con anticipo no puede modificar su monto ni el porcentaje de anticipo"
+    );
   }
 }
 
@@ -5908,7 +5941,7 @@ async function createInformalAdvanceDocument(params: {
       document_type: "ADVANCE",
       parent_sales_order_id: params.parentSaleId,
       created_by: params.createdBy,
-    } as never)
+    })
     .select("id")
     .single();
 
@@ -6254,6 +6287,44 @@ async function isInformalAdvancePending(params: {
   return receivable.status !== "PAID" || pendingBalance > 0;
 }
 
+async function informalAdvanceHasPayments(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<boolean> {
+  const { data: advanceDoc } = await params.supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("parent_sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .eq("document_type", "ADVANCE")
+    .maybeSingle();
+
+  if (!advanceDoc?.id) {
+    return false;
+  }
+
+  const { data: receivable } = await params.supabase
+    .from("accounts_receivable")
+    .select("id")
+    .eq("sales_order_id", advanceDoc.id)
+    .eq("organization_id", params.orgId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!receivable?.id) {
+    return false;
+  }
+
+  const { data: payments } = await params.supabase
+    .from("receivable_payments")
+    .select("id")
+    .eq("account_receivable_id", receivable.id)
+    .limit(1);
+
+  return (payments?.length ?? 0) > 0;
+}
+
 export async function ensureReceivableForAuthorizedPreventaInvoice(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -6535,6 +6606,14 @@ export async function updateSaleOrder(
   }
 
   assertInformalAdvanceUpdateAllowed(existingSale, input);
+
+  await assertInformalAdvanceUpdateRules({
+    supabase,
+    orgId: org.id,
+    saleId,
+    existingSale,
+    input,
+  });
 
   const isStockedSale = isStockedSaleStatus(existingSale.status);
 

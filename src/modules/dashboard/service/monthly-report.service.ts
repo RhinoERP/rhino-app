@@ -134,6 +134,7 @@ export async function generateMonthlyReportData(
     .gte("sale_date", startDate.toISOString())
     .lte("sale_date", endDate.toISOString())
     .neq("is_historical", true)
+    .eq("document_type", "STANDARD")
     .order("total_amount", { ascending: false })
     .limit(100);
 
@@ -281,6 +282,7 @@ export async function generateMonthlyReportData(
     .eq("organization_id", organizationId)
     .in("status", ["CONFIRMED", "DISPATCH"])
     .neq("is_historical", true)
+    .eq("document_type", "STANDARD")
     .lt(
       "sale_date",
       new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
