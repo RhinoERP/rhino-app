@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   adjustVariantStock,
@@ -88,6 +89,12 @@ export async function adjustMultipleVariantsStockAction(
 ): Promise<ProductActionResult> {
   await ensure("inventory.manage", orgSlug);
   try {
+    const supabase = await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      throw new Error("Usuario no autenticado");
+    }
+
     const productIds = new Set<string>();
 
     for (const adj of adjustments) {
@@ -106,6 +113,8 @@ export async function adjustMultipleVariantsStockAction(
           type: "ADJUSTMENT",
           quantity: delta,
           reason: "Ajuste manual de stock por variante",
+          createdBy: authData.user.id,
+          source: "MANUAL",
         });
       }
     }
