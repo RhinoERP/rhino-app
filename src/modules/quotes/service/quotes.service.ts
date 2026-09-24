@@ -1118,6 +1118,8 @@ export async function convertQuoteToSalesOrder(
       currency: quote.currency,
       exchange_rate:
         quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
+      commercial_exchange_rate:
+        quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
       sub_total: quote.sub_total,
       total_amount: totalAmount,
       total_tax_amount: quote.total_tax_amount,

@@ -911,12 +911,21 @@ export function SaleDetail({
       : persistedArcaStatus;
   const isArcaAuthorized = normalizedArcaStatus === "authorized";
   const isArcaPending = normalizedArcaStatus === "pending";
+  let commercialRateHint = "Requerido antes de emitir la factura ARCA.";
+  if (isArcaAuthorized) {
+    commercialRateHint =
+      "La cotización comercial queda fija tras la autorización ARCA.";
+  } else if (isArcaPending) {
+    commercialRateHint =
+      "Conciliá la emisión pendiente antes de cambiar la cotización.";
+  }
   const startsInReturnMode =
     canReturnProducts && initialMode === "return" && !isArcaAuthorized;
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
   const canEditInternalFields = isEditingDetails;
-  const canEditFiscalFields = isEditingDetails && !isArcaAuthorized;
+  const canEditFiscalFields =
+    isEditingDetails && !isArcaAuthorized && !isArcaPending;
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -955,6 +964,9 @@ export function SaleDetail({
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
+  const [commercialExchangeRate, setCommercialExchangeRate] = useState<
+    number | null
+  >(sale.commercial_exchange_rate ?? null);
   const [observations, setObservations] = useState<string>(
     sale.observations ?? ""
   );
@@ -1857,6 +1869,7 @@ export function SaleDetail({
       sale.credit_days ?? null
     ),
     invoiceType,
+    commercialExchangeRate,
     invoiceNumber: invoiceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
@@ -1873,7 +1886,7 @@ export function SaleDetail({
       observations: observations || null,
     };
 
-    if (isArcaAuthorized) {
+    if (isArcaAuthorized || isArcaPending) {
       return internalPayload;
     }
 
@@ -1957,7 +1970,7 @@ export function SaleDetail({
       {
         items: buildSaleAccountingItems(items, totals.taxPlan),
         moneda: sale.currency === "USD" ? "USD" : "ARS",
-        tipoCambio: sale.exchange_rate,
+        tipoCambio: commercialExchangeRate,
         montoUSD: sale.currency === "USD" ? totals.total : undefined,
       }
     );
@@ -2929,6 +2942,33 @@ export function SaleDetail({
                     </SelectContent>
                   </Select>
                 </div>
+
+                {sale.currency === "USD" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="commercialExchangeRate">
+                      Tipo de cambio comercial USD → ARS
+                    </Label>
+                    <Input
+                      disabled={!canEditFiscalFields}
+                      id="commercialExchangeRate"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setCommercialExchangeRate(
+                          value === "" ? null : Number(value)
+                        );
+                      }}
+                      placeholder="Cotización comercial"
+                      step="any"
+                      type="number"
+                      value={commercialExchangeRate ?? ""}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      {commercialRateHint}
+                    </p>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label htmlFor="taxes">Impuestos</Label>

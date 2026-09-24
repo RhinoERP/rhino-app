@@ -10,6 +10,7 @@ import {
 } from "@/modules/sales/invoice-type-utils";
 import type { Json } from "@/types/supabase";
 import { buildArcaQrPayload, buildArcaQrVerifierUrl } from "../arca-qr";
+import { formatCommercialExchangeRate } from "../commercial-exchange-rate";
 import { ArcaValidationError } from "../errors";
 import { readAuthorizedFiscalCurrency } from "../fiscal-currency";
 import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
@@ -149,6 +150,10 @@ async function generateManualFiscalInvoiceHtml(params: {
       invoice.arca_voucher_number
     ).padStart(8, "0")}`;
   const currency = invoice.currency;
+  const commercialRate = formatCommercialExchangeRate(
+    currency,
+    invoice.exchange_rate
+  );
   const items = invoice.items ?? [];
   const customerTaxCondition =
     getCustomerTaxConditionLabel(customer?.tax_condition) ??
@@ -195,6 +200,7 @@ async function generateManualFiscalInvoiceHtml(params: {
     <div class="box"><span class="label">CUIT / Documento</span>${displayValue(customer?.cuit)}</div>
     <div class="box"><span class="label">Condición frente al IVA</span>${displayValue(customerTaxCondition)}</div>
     <div class="box"><span class="label">Fecha de emisión</span>${formatDateOnly(invoice.issue_date)}</div>
+    ${commercialRate ? `<div class="box"><span class="label">Tipo de cambio comercial USD → ARS</span>${commercialRate}</div>` : ""}
   </section>
   <table>
     <thead><tr><th>Descripción</th><th class="number">Cant.</th><th class="number">Precio unit.</th><th class="number">IVA</th><th class="number">Importe</th></tr></thead>

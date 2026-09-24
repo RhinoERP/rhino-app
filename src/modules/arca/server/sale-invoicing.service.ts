@@ -23,6 +23,7 @@ import {
 } from "@/modules/sales/service/sales.service";
 import type { Database, Json } from "@/types/supabase";
 import { formatDateToArcaDateNumber } from "../arca-qr";
+import { requireCommercialExchangeRateForUsdInvoice } from "../commercial-exchange-rate";
 import {
   ArcaConnectionError,
   ArcaValidationError,
@@ -106,6 +107,7 @@ type LoadedSale = {
   subTotal: number | null;
   totalAmount: number;
   currency: string;
+  commercialExchangeRate: number | null;
   totalTaxAmount: number | null;
   globalDiscountAmount: number | null;
   arcaStatus: string;
@@ -141,6 +143,7 @@ type LoadedSaleQueryRecord = {
   sub_total: number | null;
   total_amount: number;
   currency: string | null;
+  commercial_exchange_rate: number | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
   arca_status: string;
@@ -693,6 +696,7 @@ function normalizeLoadedSale(data: {
   sub_total: number | null;
   total_amount: number;
   currency: string | null;
+  commercial_exchange_rate: number | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
   arca_status: string | null;
@@ -763,6 +767,7 @@ function normalizeLoadedSale(data: {
     subTotal: toNullableMoney(data.sub_total),
     totalAmount: truncateMoney(Number(data.total_amount ?? 0)),
     currency: data.currency ?? "ARS",
+    commercialExchangeRate: data.commercial_exchange_rate ?? null,
     totalTaxAmount: toNullableMoney(data.total_tax_amount),
     globalDiscountAmount: toNullableMoney(data.global_discount_amount),
     ...normalizeLoadedSaleArcaState(data),
@@ -798,6 +803,7 @@ async function loadSaleForArcaInvoicing(params: {
         sub_total,
         total_amount,
         currency,
+        commercial_exchange_rate,
         total_tax_amount,
         global_discount_amount,
         arca_status,
@@ -872,6 +878,7 @@ async function loadSaleForArcaInvoicing(params: {
       sub_total: saleData.sub_total,
       total_amount: saleData.total_amount,
       currency: saleData.currency,
+      commercial_exchange_rate: saleData.commercial_exchange_rate,
       total_tax_amount: saleData.total_tax_amount,
       global_discount_amount: saleData.global_discount_amount,
       arca_status: saleData.arca_status,
@@ -999,6 +1006,11 @@ export async function validateSaleForArcaInvoicing(params: {
       "Ya hay una emisión fiscal en curso para esta venta. Esperá unos segundos e intentá nuevamente."
     );
   }
+
+  requireCommercialExchangeRateForUsdInvoice(
+    sale.currency,
+    sale.commercialExchangeRate
+  );
 
   let allowPreventaInvoicing = false;
   if (isEarlyBillablePreventaStatus(sale.status)) {
