@@ -8,8 +8,10 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import {
+  getSaleStatusForOrderParent,
   recalcParentOrderStatus,
   restoreStockForOrderItems,
+  shouldRestoreStock,
 } from "../service/orders.service";
 import { ORDER_STATUS_CONFIG, type OrderFlowStatus } from "../types";
 
@@ -79,6 +81,21 @@ async function cancelLinkedPurchaseOrderIfExists(
       .update({ status: "CANCELLED" })
       .eq("id", order.purchase_order_id);
   }
+}
+
+async function getSaleStatusBySalesOrderId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  salesOrderId: string,
+  orgId: string
+): Promise<string | null> {
+  const { data: sale } = await supabase
+    .from("sales_orders")
+    .select("status")
+    .eq("id", salesOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  return sale?.status ?? null;
 }
 
 async function mergeSplitItemsBack(
@@ -201,7 +218,13 @@ async function undoCreatedChild(
 
   await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
 
-  if (allItemIds.length > 0) {
+  const saleStatus = parentOrderId
+    ? await getSaleStatusForOrderParent(supabase, parentOrderId, orgId)
+    : null;
+  const shouldRestore =
+    shouldRestoreStock(saleStatus) || currentStatus === "STOCK_RESERVED";
+
+  if (shouldRestore && allItemIds.length > 0) {
     const { data: childOrder } = await supabase
       .from("orders")
       .select("order_number")
@@ -302,13 +325,21 @@ async function undoChildCreation(
     childItems?.filter((i) => i.parent_quote_item_id == null) ?? [];
 
   if (splitItems.length > 0) {
-    const splitItemIds = splitItems.map((i) => i.id);
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      splitItemIds,
-      "Reversión de sub-pedido - stock restaurado"
-    );
+    const saleStatus = parentOrderId
+      ? await getSaleStatusForOrderParent(supabase, parentOrderId, orgId)
+      : null;
+    const shouldRestore =
+      shouldRestoreStock(saleStatus) || currentStatus === "STOCK_RESERVED";
+
+    if (shouldRestore) {
+      const splitItemIds = splitItems.map((i) => i.id);
+      await restoreStockForOrderItems(
+        supabase,
+        orgId,
+        splitItemIds,
+        "Reversión de sub-pedido - stock restaurado"
+      );
+    }
     await mergeSplitItemsBack(supabase, splitItems);
   }
 
@@ -370,16 +401,33 @@ async function cancelAllChildrenAndRestoreStock(
     orgId: string;
     userId: string;
     currentStatus: OrderFlowStatus;
+    salesOrderId: string | null;
   }
 ): Promise<{ error?: string }> {
-  const { children, orgId, userId, currentStatus } = params;
+  const { children, orgId, userId, currentStatus, salesOrderId } = params;
   const childIds = children.map((c) => c.id);
+
+  const saleStatus = salesOrderId
+    ? await getSaleStatusBySalesOrderId(supabase, salesOrderId, orgId)
+    : null;
+
+  const { data: childRows } = await supabase
+    .from("orders")
+    .select("id, status")
+    .in("id", childIds)
+    .eq("organization_id", orgId);
+
+  const childStatusMap = new Map(
+    (childRows ?? []).map((c) => [c.id, c.status])
+  );
 
   const { data: allAssignedItems } = (await supabase
     .from("quote_items")
-    .select("id, quantity, parent_quote_item_id")
+    .select("id, quantity, parent_quote_item_id, assigned_order_id")
     .in("assigned_order_id", childIds)) as {
-    data: QuoteItemWithParent[] | null;
+    data: Array<
+      QuoteItemWithParent & { assigned_order_id: string | null }
+    > | null;
   };
 
   const splitItems =
@@ -387,18 +435,31 @@ async function cancelAllChildrenAndRestoreStock(
   const regularItems =
     allAssignedItems?.filter((i) => i.parent_quote_item_id == null) ?? [];
 
+  const shouldRestoreForChild = (childId: string | null): boolean => {
+    const childStatus = childId ? childStatusMap.get(childId) : null;
+    return shouldRestoreStock(saleStatus) || childStatus === "STOCK_RESERVED";
+  };
+
   if (splitItems.length > 0) {
-    const splitItemIds = splitItems.map((i) => i.id);
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      splitItemIds,
-      "Reversión de pedido padre - stock restaurado"
+    const restoreSplitItems = splitItems.filter((i) =>
+      shouldRestoreForChild(i.assigned_order_id)
     );
+    if (restoreSplitItems.length > 0) {
+      const splitItemIds = restoreSplitItems.map((i) => i.id);
+      await restoreStockForOrderItems(
+        supabase,
+        orgId,
+        splitItemIds,
+        "Reversión de pedido padre - stock restaurado"
+      );
+    }
     await mergeSplitItemsBack(supabase, splitItems);
   }
 
-  const assignedItemIds = regularItems.map((i) => i.id);
+  const restoreRegularItems = regularItems.filter((i) =>
+    shouldRestoreForChild(i.assigned_order_id)
+  );
+  const assignedItemIds = restoreRegularItems.map((i) => i.id);
 
   if (assignedItemIds.length > 0) {
     await restoreStockForOrderItems(
@@ -499,6 +560,7 @@ async function cascadeRevertParent(
       orgId,
       userId,
       currentStatus,
+      salesOrderId,
     });
     if (cancelResult.error) {
       return { success: false, error: cancelResult.error };
