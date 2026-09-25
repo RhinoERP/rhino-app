@@ -95,7 +95,7 @@ function computeProratedBase(
 function buildCommissionRows(params: {
   orgId: string;
   insertedPayments: InsertedPayment[];
-  accounts: Array<{ id: string; sales_order_id: string }>;
+  accounts: Array<{ id: string; sales_order_id: string | null }>;
   saleMap: Map<string, SaleForCommission>;
   baseRateMap: Map<string, number>;
   extraRateMap: Map<string, number>;
@@ -115,54 +115,85 @@ function buildCommissionRows(params: {
   const result: CommissionInsertRow[] = [];
 
   for (const payment of insertedPayments) {
-    const account = accounts.find(
-      (a) => a.id === payment.account_receivable_id
-    );
-    if (!account) {
-      continue;
-    }
-
-    const sale = saleMap.get(account.sales_order_id);
-    if (!sale?.user_id) {
-      continue;
-    }
-
-    const baseRate = baseRateMap.get(sale.user_id) ?? 0;
-    const extraRate = sale.price_level_id
-      ? (extraRateMap.get(sale.price_level_id) ?? 0)
-      : 0;
-    const supplierId = supplierBySale.get(account.sales_order_id);
-    const supplierRate = supplierId
-      ? (supplierRateMap.get(`${sale.user_id}|${supplierId}`) ?? 0)
-      : 0;
-    const rate = baseRate + extraRate + supplierRate;
-
-    if (rate <= 0) {
-      continue;
-    }
-
-    const proratedBase = computeProratedBase(
-      payment.amount,
-      sale.sub_total,
-      sale.total_amount
-    );
-    const commissionAmount = truncateMoney((proratedBase * rate) / 100);
-
-    result.push({
-      organization_id: orgId,
-      user_id: sale.user_id,
-      sales_order_id: account.sales_order_id,
-      receivable_payment_id: payment.id,
-      sales_price_list_id: sale.sales_price_list_id ?? null,
-      base_commission_rate: baseRate,
-      extra_commission_rate: extraRate,
-      supplier_commission_rate: supplierRate,
-      commission_amount: commissionAmount,
-      paid_amount: payment.amount,
+    const row = buildCommissionRowForPayment({
+      payment,
+      accounts,
+      saleMap,
+      baseRateMap,
+      extraRateMap,
+      supplierRateMap,
+      supplierBySale,
     });
+    if (row) {
+      result.push({ organization_id: orgId, ...row });
+    }
   }
 
   return result;
+}
+
+function buildCommissionRowForPayment(params: {
+  payment: InsertedPayment;
+  accounts: Array<{ id: string; sales_order_id: string | null }>;
+  saleMap: Map<string, SaleForCommission>;
+  baseRateMap: Map<string, number>;
+  extraRateMap: Map<string, number>;
+  supplierRateMap: Map<string, number>;
+  supplierBySale: Map<string, string>;
+}): Omit<CommissionInsertRow, "organization_id"> | null {
+  const {
+    payment,
+    accounts,
+    saleMap,
+    baseRateMap,
+    extraRateMap,
+    supplierRateMap,
+    supplierBySale,
+  } = params;
+
+  const account = accounts.find((a) => a.id === payment.account_receivable_id);
+  const saleId = account?.sales_order_id;
+  if (!(account && saleId)) {
+    return null;
+  }
+
+  const sale = saleMap.get(saleId);
+  if (!sale?.user_id) {
+    return null;
+  }
+
+  const baseRate = baseRateMap.get(sale.user_id) ?? 0;
+  const extraRate = sale.price_level_id
+    ? (extraRateMap.get(sale.price_level_id) ?? 0)
+    : 0;
+  const supplierId = supplierBySale.get(saleId);
+  const supplierRate = supplierId
+    ? (supplierRateMap.get(`${sale.user_id}|${supplierId}`) ?? 0)
+    : 0;
+  const rate = baseRate + extraRate + supplierRate;
+
+  if (rate <= 0) {
+    return null;
+  }
+
+  const proratedBase = computeProratedBase(
+    payment.amount,
+    sale.sub_total,
+    sale.total_amount
+  );
+  const commissionAmount = truncateMoney((proratedBase * rate) / 100);
+
+  return {
+    user_id: sale.user_id,
+    sales_order_id: saleId,
+    receivable_payment_id: payment.id,
+    sales_price_list_id: sale.sales_price_list_id ?? null,
+    base_commission_rate: baseRate,
+    extra_commission_rate: extraRate,
+    supplier_commission_rate: supplierRate,
+    commission_amount: commissionAmount,
+    paid_amount: payment.amount,
+  };
 }
 
 /**

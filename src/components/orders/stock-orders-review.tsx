@@ -132,7 +132,12 @@ export function StockOrdersReview({
         <div className="space-y-4">
           <h2 className="font-heading text-lg">En compra</h2>
           {purchasingOrders?.map((order) => (
-            <PurchasingCard key={order.id} order={order} orgSlug={orgSlug} />
+            <PurchasingCard
+              key={order.id}
+              order={order}
+              orgSlug={orgSlug}
+              revertInfoMap={revertInfoMap}
+            />
           ))}
         </div>
       )}
@@ -143,10 +148,20 @@ export function StockOrdersReview({
 type PurchasingCardProps = {
   order: PurchasingOrder;
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
+function PurchasingCard({
+  order,
+  orgSlug,
+  revertInfoMap,
+}: PurchasingCardProps) {
+  const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const revertInfo = revertInfoMap[order.id];
+  const canRevert =
+    order.status === "PURCHASE_REQUIRED" && (revertInfo?.canRevert ?? false);
 
   return (
     <Card className="overflow-hidden opacity-75 transition-shadow">
@@ -175,6 +190,20 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
           {order.parent_customer_name}
         </span>
         <div className="flex-1" />
+        {canRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            onClick={(event) => {
+              event.stopPropagation();
+              setRevertOpen(true);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
         {isExpanded ? (
           <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
         ) : (
@@ -206,6 +235,19 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
             ))}
           </div>
         </CardContent>
+      )}
+      {canRevert && revertInfo?.previousStatus && revertInfo.previousLabel && (
+        <RevertOrderModal
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={revertInfo.previousStatus}
+          previousStatusLabel={revertInfo.previousLabel}
+          revertType={revertInfo.revertType}
+        />
       )}
     </Card>
   );
@@ -241,6 +283,7 @@ function StockOrderCard({
   const childNotesRef = useRef(childNotes);
   childNotesRef.current = childNotes;
   const [pendingDirectTransition, setPendingDirectTransition] = useState(false);
+  const [directConfirmPending, setDirectConfirmPending] = useState(false);
   const [isReleasePending, setIsReleasePending] = useState(false);
 
   const prevChildrenLenRef = useRef(order.children.length);
@@ -382,7 +425,8 @@ function StockOrderCard({
     allSelected &&
     assignedItems.length === 0 &&
     reassignableItems.length === 0 &&
-    selectedRoute !== "reserve";
+    selectedRoute !== "reserve" &&
+    !(selectedRoute === "purchase" && supplierCount > 1);
 
   const availableRoutes = useMemo(() => {
     if (hasAssignedItemSelected) {
@@ -503,27 +547,32 @@ function StockOrderCard({
   ]);
 
   const handleDirectConfirm = useCallback(async () => {
-    const result = await directTransitionAction({
-      orgSlug,
-      orderId: order.id,
-      quoteItemIds: Array.from(selectedQuantitiesRef.current.keys()),
-      route: selectedRoute,
-      observations: childNotesRef.current || null,
-    });
+    setDirectConfirmPending(true);
+    try {
+      const result = await directTransitionAction({
+        orgSlug,
+        orderId: order.id,
+        quoteItemIds: Array.from(selectedQuantitiesRef.current.keys()),
+        route: selectedRoute,
+        observations: childNotesRef.current || null,
+      });
 
-    if (!result.success) {
-      toast.error(`Error al confirmar: ${result.error}`);
-      return;
+      if (!result.success) {
+        toast.error(`Error al confirmar: ${result.error}`);
+        return;
+      }
+
+      const routeLabel =
+        ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+        selectedRoute;
+      toast.success(`Pedido enviado a ${routeLabel}`);
+      setSelectedQuantities(new Map());
+      setChildNotes("");
+      setPendingDirectTransition(false);
+      router.refresh();
+    } finally {
+      setDirectConfirmPending(false);
     }
-
-    const routeLabel =
-      ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
-      selectedRoute;
-    toast.success(`Pedido enviado a ${routeLabel}`);
-    setSelectedQuantities(new Map());
-    setChildNotes("");
-    setPendingDirectTransition(false);
-    router.refresh();
   }, [orgSlug, order.id, selectedRoute, router]);
 
   const handleSubmit = useCallback(() => {
@@ -603,6 +652,7 @@ function StockOrderCard({
           availableRoutes={availableRoutes}
           childMap={childMap}
           childNotes={childNotes}
+          directConfirmPending={directConfirmPending}
           handleDirectConfirm={handleDirectConfirm}
           handleReleaseReservation={handleReleaseReservation}
           handleSubmit={handleSubmit}
@@ -660,6 +710,7 @@ type StockOrderCardBodyProps = {
   isDirectTransition: boolean;
   isLoadingStock: boolean;
   isPending: boolean;
+  directConfirmPending: boolean;
   isReleasePending: boolean;
   itemStockMap: Map<string, StockInfo | undefined>;
   noAssigned: boolean;
@@ -693,6 +744,7 @@ function StockOrderCardBody({
   isDirectTransition,
   isLoadingStock,
   isPending,
+  directConfirmPending,
   isReleasePending,
   itemStockMap,
   noAssigned,
@@ -769,7 +821,7 @@ function StockOrderCardBody({
       )}
       {pendingDirectTransition && (
         <ConfirmReviewBar
-          isPending={isPending}
+          isPending={isPending || directConfirmPending}
           onCancel={() => setPendingDirectTransition(false)}
           onConfirm={handleDirectConfirm}
           orderId={order.id}

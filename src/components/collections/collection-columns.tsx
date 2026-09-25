@@ -213,7 +213,20 @@ export function createReceivableColumns(
       ),
       cell: ({ row }) => {
         const label = row.getValue("invoice") as string;
-        return <div className="font-mono text-xs">{label}</div>;
+        const isAdvance = row.original.sale?.document_type === "ADVANCE";
+        return (
+          <div className="flex items-center gap-2">
+            {isAdvance ? (
+              <Badge
+                className="border-indigo-200 bg-indigo-50 text-indigo-800"
+                variant="outline"
+              >
+                Anticipo
+              </Badge>
+            ) : null}
+            <span className="font-mono text-xs">{label}</span>
+          </div>
+        );
       },
       sortingFn: "alphanumeric",
       enableSorting: true,

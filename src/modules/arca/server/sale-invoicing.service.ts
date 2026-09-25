@@ -135,6 +135,7 @@ type LoadedSaleQueryRecord = {
   id: string;
   organization_id: string;
   status: OrderStatus;
+  document_type: string | null;
   sale_date: string;
   expiration_date: string | null;
   credit_days: number | null;
@@ -795,6 +796,7 @@ async function loadSaleForArcaInvoicing(params: {
         id,
         organization_id,
         status,
+        document_type,
         sale_date,
         expiration_date,
         credit_days,
@@ -862,6 +864,12 @@ async function loadSaleForArcaInvoicing(params: {
   }
 
   const saleData = data as LoadedSaleQueryRecord;
+
+  if (saleData.document_type !== "STANDARD") {
+    throw new ArcaValidationError(
+      "Este documento no corresponde a una venta y no puede emitirse en ARCA."
+    );
+  }
 
   return {
     organizationId: access.organization.id,

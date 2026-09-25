@@ -239,7 +239,12 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
                       return (
                         <tr className="border-b last:border-0" key={item.id}>
                           <td className="py-1.5 pr-2">
-                            {item.description}
+                            <div>{item.description}</div>
+                            {item.product?.sku && (
+                              <div className="text-muted-foreground text-xs">
+                                SKU {item.product.sku}
+                              </div>
+                            )}
                             <ItemExtrasList
                               currency={quote.currency}
                               extras={item.quote_item_extras}

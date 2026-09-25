@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { downloadStoredDocument } from "@/modules/documents/server/documents-storage.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
@@ -42,14 +43,10 @@ export async function downloadPaymentInvoiceAction(
       return { success: false, error: "Este pago no tiene factura cargada" };
     }
 
-    const response = await fetch(payment.invoice_pdf_url);
-    if (!response.ok) {
-      throw new Error(
-        "No se pudo descargar la factura desde el almacenamiento"
-      );
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const buffer = await downloadStoredDocument(
+      payment.invoice_pdf_url,
+      supabase
+    );
     const filename =
       payment.invoice_filename ?? `Factura_${paymentId.slice(0, 8)}.pdf`;
 

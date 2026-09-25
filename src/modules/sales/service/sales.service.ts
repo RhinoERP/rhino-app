@@ -57,6 +57,9 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
   "NOTA_DE_VENTA";
 
+const INFORMAL_ADVANCE_NOTA_DE_VENTA_ERROR =
+  "El anticipo informal solo está disponible para notas de venta";
+
 function assertCommercialExchangeRate(rate: number | null | undefined): void {
   if (
     rate !== undefined &&
@@ -312,6 +315,7 @@ export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
   items: SalesOrderItemDetail[];
   taxes: SalesOrderTaxDetail[];
   supplier?: { id: string; name: string } | null;
+  advance_pending: boolean;
 };
 
 export type ConfirmSaleResult = {
@@ -1648,7 +1652,7 @@ export async function getSalesOrdersByOrgSlug(
 
   salesQuery = salesQuery
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE");
+    .in("document_type", ["STANDARD"]);
 
   const [{ data, error }, sellersByUserId] = await Promise.all([
     salesQuery.order("created_at", { ascending: false }),
@@ -1884,7 +1888,7 @@ function buildSalesQuery(
     )
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE");
+    .in("document_type", ["STANDARD"]);
 
   if (params.status) {
     query = query.eq("status", params.status);
@@ -2191,7 +2195,7 @@ async function fetchSalesMetrics(
     .select("*", { count: "exact", head: true })
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE");
+    .in("document_type", ["STANDARD"]);
 
   if (userId) {
     baseQuery = baseQuery.eq("user_id", userId);
@@ -2202,7 +2206,7 @@ async function fetchSalesMetrics(
     .select("*", { count: "exact", head: true })
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE")
+    .in("document_type", ["STANDARD"])
     .gte("sale_date", monthStart)
     .lte("sale_date", monthEnd);
 
@@ -2215,7 +2219,7 @@ async function fetchSalesMetrics(
     .select("total_amount, status")
     .eq("organization_id", orgId)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE")
+    .in("document_type", ["STANDARD"])
     .gte("sale_date", monthStart)
     .lte("sale_date", monthEnd)
     .in("status", countedStatuses);
@@ -2317,7 +2321,7 @@ export async function getAllSalesForExport(
     )
     .eq("organization_id", org.id)
     .neq("is_historical", true)
-    .neq("document_type" as never, "ADVANCE")
+    .in("document_type", ["STANDARD"])
     .limit(10_000);
 
   if (filters?.status) {
@@ -2684,6 +2688,16 @@ export async function getSalesOrderById(
     access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
   };
 
+  const advancePending =
+    typeof sale.advance_payment_percentage === "number" &&
+    sale.advance_payment_percentage > 0
+      ? await isInformalAdvancePending({
+          supabase,
+          orgId: org.id,
+          saleId,
+        })
+      : false;
+
   return {
     ...saleBase,
     supplier: normalizeSupplierFromSale(sale),
@@ -2695,6 +2709,7 @@ export async function getSalesOrderById(
     remittance_number: sale.remittance_number ?? null,
     items,
     taxes,
+    advance_pending: advancePending,
   };
 }
 
@@ -2809,13 +2824,23 @@ export async function createPreSaleOrder(
     Math.max(0, discountedSubtotal + totalTaxAmount)
   );
 
+  const invoiceType = input.invoiceType || defaultInvoiceType;
+
+  const normalizedAdvancePercentage =
+    input.advancePaymentPercentage !== null &&
+    input.advancePaymentPercentage !== undefined
+      ? Math.min(Math.max(Number(input.advancePaymentPercentage), 0), 100)
+      : null;
+
+  if (normalizedAdvancePercentage !== null && invoiceType !== "NOTA_DE_VENTA") {
+    throw new Error(INFORMAL_ADVANCE_NOTA_DE_VENTA_ERROR);
+  }
+
   const dueDate = computeDueDate(
     saleDate,
     input.expirationDate,
     input.creditDays
   );
-
-  const invoiceType = input.invoiceType || defaultInvoiceType;
 
   const { data: order, error: orderError } = await supabase
     .from("sales_orders")
@@ -2836,6 +2861,7 @@ export async function createPreSaleOrder(
       total_amount: totalAmount,
       sales_price_list_id: input.salesPriceListId ?? null,
       price_level_id: input.priceLevelId ?? null,
+      advance_payment_percentage: normalizedAdvancePercentage,
       status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
       created_by: userId,
     })
@@ -2882,6 +2908,41 @@ export async function createPreSaleOrder(
     await supabase.from("sales_orders").delete().eq("id", saleOrderId);
 
     throw error;
+  }
+
+  if (normalizedAdvancePercentage !== null) {
+    const advanceAmount = truncateMoney(
+      (totalAmount * normalizedAdvancePercentage) / 100
+    );
+    try {
+      await createInformalAdvanceDocument({
+        supabase,
+        orgId: org.id,
+        parentSaleId: saleOrderId,
+        customerId,
+        userId: resolvedSellerId as string,
+        createdBy: userId,
+        amount: advanceAmount,
+        dueDate,
+        currency: "ARS",
+      });
+    } catch (error) {
+      await supabase
+        .from("sales_order_items")
+        .delete()
+        .eq("sales_order_id", saleOrderId);
+      await supabase
+        .from("sales_order_taxes")
+        .delete()
+        .eq("sales_order_id", saleOrderId);
+      await supabase
+        .from("sales_orders")
+        .delete()
+        .eq("id", saleOrderId)
+        .eq("organization_id", org.id);
+
+      throw error;
+    }
   }
 
   return saleOrderId;
@@ -3971,7 +4032,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4012,6 +4073,20 @@ export async function confirmSaleOrder(
   if (currentStatus !== "DRAFT" && currentStatus !== "INCOMPLETE") {
     throw new Error(
       "Solo las preventas en borrador o incompletas pueden confirmarse"
+    );
+  }
+
+  if (
+    existingSale.advance_payment_percentage &&
+    existingSale.advance_payment_percentage > 0 &&
+    (await isInformalAdvancePending({
+      supabase,
+      orgId: org.id,
+      saleId,
+    }))
+  ) {
+    throw new Error(
+      "La preventa tiene un anticipo pendiente de cobro. Registrá el pago del anticipo antes de confirmarla."
     );
   }
 
@@ -4589,7 +4664,7 @@ export async function dispatchSaleOrder(
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount, currency"
+      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount, currency, advance_payment_percentage"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4643,9 +4718,16 @@ export async function dispatchSaleOrder(
     creditDays: sale.credit_days ?? null,
     currency: sale.currency ?? "ARS",
     dispatchedAt,
+    advancePaymentPercentage: resolveDispatchAdvancePercentage(sale),
   });
 
   return { status: "DISPATCH" };
+}
+
+function resolveDispatchAdvancePercentage(sale: {
+  advance_payment_percentage: number | null;
+}): number {
+  return Number(sale.advance_payment_percentage ?? 0);
 }
 
 export async function deliverSaleOrder(
@@ -4727,11 +4809,12 @@ async function validateSaleForUpdate(
   invoiceType: Database["public"]["Enums"]["invoice_type"] | null;
   customerId: string | null;
   userId: string | null;
+  advancePaymentPercentage: number | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status"
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status, advance_payment_percentage, document_type"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -4745,6 +4828,12 @@ async function validateSaleForUpdate(
 
   if (!existingSale) {
     throw new Error("Venta no encontrada");
+  }
+
+  if (existingSale.document_type !== "STANDARD") {
+    throw new Error(
+      "Este documento se genera automáticamente y no puede editarse"
+    );
   }
 
   const currentStatus = existingSale.status as SalesOrderStatus;
@@ -4788,6 +4877,10 @@ async function validateSaleForUpdate(
         : null,
     userId:
       typeof existingSale.user_id === "string" ? existingSale.user_id : null,
+    advancePaymentPercentage:
+      typeof existingSale.advance_payment_percentage === "number"
+        ? existingSale.advance_payment_percentage
+        : null,
   };
 }
 
@@ -4827,6 +4920,9 @@ function buildSaleUpdateData(
   }
   if (input.observations !== undefined) {
     updateData.observations = input.observations;
+  }
+  if (input.advancePaymentPercentage !== undefined) {
+    updateData.advance_payment_percentage = input.advancePaymentPercentage;
   }
   if (input.globalDiscountPercentage !== undefined) {
     updateData.global_discount_percentage = input.globalDiscountPercentage;
@@ -4894,6 +4990,74 @@ function assertNoAuthorizedSaleFiscalChanges(
   throw new Error(
     "No se pueden modificar datos fiscales de una venta con factura ARCA emitida."
   );
+}
+
+function assertInformalAdvanceUpdateAllowed(
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  input: UpdateSaleOrderInput
+): void {
+  if (input.advancePaymentPercentage === undefined) {
+    return;
+  }
+
+  if (
+    input.advancePaymentPercentage !== null &&
+    (input.advancePaymentPercentage < 0 || input.advancePaymentPercentage > 100)
+  ) {
+    throw new Error("El anticipo debe estar entre 0 y 100");
+  }
+
+  if (
+    input.advancePaymentPercentage !== null &&
+    input.advancePaymentPercentage > 0 &&
+    (input.invoiceType ?? existingSale.invoiceType) !== "NOTA_DE_VENTA"
+  ) {
+    throw new Error(INFORMAL_ADVANCE_NOTA_DE_VENTA_ERROR);
+  }
+}
+
+async function assertInformalAdvanceUpdateRules(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>;
+  input: UpdateSaleOrderInput;
+}): Promise<void> {
+  const { supabase, orgId, saleId, existingSale, input } = params;
+
+  if (
+    input.advancePaymentPercentage !== undefined &&
+    (await informalAdvanceHasPayments({ supabase, orgId, saleId }))
+  ) {
+    throw new Error("El anticipo ya registró pagos y no puede modificarse");
+  }
+
+  const hasAdvancePercentage =
+    existingSale.advancePaymentPercentage !== null &&
+    existingSale.advancePaymentPercentage > 0;
+
+  if (isStockedSaleStatus(existingSale.status)) {
+    const changingAdvance =
+      input.advancePaymentPercentage !== undefined &&
+      (input.advancePaymentPercentage ?? 0) > 0 !== hasAdvancePercentage;
+
+    if (changingAdvance) {
+      throw new Error(
+        "No se puede agregar, quitar o modificar un anticipo en una venta ya confirmada"
+      );
+    }
+
+    if (
+      hasAdvancePercentage &&
+      (input.items !== undefined ||
+        input.globalDiscountPercentage !== undefined ||
+        input.advancePaymentPercentage !== undefined)
+    ) {
+      throw new Error(
+        "Una venta confirmada con anticipo no puede modificar su monto ni el porcentaje de anticipo"
+      );
+    }
+  }
 }
 
 function calculateSaleTotals(
@@ -5576,9 +5740,17 @@ function resolveReceivableUpdateContext(params: {
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
 }): ReceivableUpdateContext {
-  const totalAmount = truncateMoney(
+  const fullTotal = truncateMoney(
     Number(params.updatedSale.total_amount ?? 0) || 0
   );
+  const advancePercentage = Number(
+    params.updatedSale.advance_payment_percentage ?? 0
+  );
+  const advanceAmount =
+    advancePercentage > 0
+      ? truncateMoney((fullTotal * advancePercentage) / 100)
+      : 0;
+  const totalAmount = truncateMoney(Math.max(0, fullTotal - advanceAmount));
   const creditDays =
     params.input.creditDays ?? params.updatedSale.credit_days ?? null;
   const dueDate = computeReceivableDueDateFromDispatch(
@@ -5811,6 +5983,423 @@ async function insertReceivableIfNeeded(params: {
   }
 }
 
+async function createInformalAdvanceDocument(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  parentSaleId: string;
+  customerId: string;
+  userId: string;
+  createdBy: string | null;
+  amount: number;
+  dueDate: string;
+  currency?: string;
+}): Promise<void> {
+  const advanceAmount = truncateMoney(params.amount);
+  if (advanceAmount <= 0) {
+    return;
+  }
+
+  const { data: advanceDoc, error: advanceError } = await params.supabase
+    .from("sales_orders")
+    .insert({
+      organization_id: params.orgId,
+      customer_id: params.customerId,
+      user_id: params.userId,
+      sale_date: new Date().toISOString().slice(0, 10),
+      expiration_date: params.dueDate,
+      credit_days: 0,
+      currency: params.currency === "USD" ? "USD" : "ARS",
+      invoice_type: "NOTA_DE_VENTA",
+      sub_total: advanceAmount,
+      total_tax_amount: null,
+      total_amount: advanceAmount,
+      status: "CONFIRMED",
+      document_type: "ADVANCE",
+      parent_sales_order_id: params.parentSaleId,
+      created_by: params.createdBy,
+    })
+    .select("id")
+    .single();
+
+  if (advanceError || !advanceDoc) {
+    throw new Error(
+      `No se pudo crear el documento de anticipo: ${advanceError?.message ?? "Sin respuesta"}`
+    );
+  }
+
+  try {
+    const { error: itemsError } = await params.supabase
+      .from("sales_order_items")
+      .insert({
+        organization_id: params.orgId,
+        sales_order_id: advanceDoc.id,
+        product_id: null,
+        product_variant_id: null,
+        description: "Anticipo de producción",
+        quantity: 1,
+        unit_price: advanceAmount,
+        base_price: advanceAmount,
+        discount_percentage: 0,
+        discount_amount: 0,
+        subtotal: advanceAmount,
+        is_adjustment: true,
+      });
+
+    if (itemsError) {
+      throw new Error(
+        `No se pudo crear el ítem del anticipo: ${itemsError.message}`
+      );
+    }
+
+    await insertInformalAdvanceReceivable({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: advanceDoc.id,
+      customerId: params.customerId,
+      amount: advanceAmount,
+      dueDate: params.dueDate,
+      currency: params.currency,
+    });
+  } catch (error) {
+    await params.supabase
+      .from("sales_order_items")
+      .delete()
+      .eq("sales_order_id", advanceDoc.id);
+    await params.supabase.from("sales_orders").delete().eq("id", advanceDoc.id);
+    throw error;
+  }
+}
+
+async function insertInformalAdvanceReceivable(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  amount: number;
+  dueDate: string;
+  currency?: string;
+}): Promise<void> {
+  if (!(params.customerId && params.dueDate)) {
+    return;
+  }
+
+  const { error } = await params.supabase.from("accounts_receivable").insert({
+    organization_id: params.orgId,
+    customer_id: params.customerId,
+    sales_order_id: params.saleId,
+    total_amount: truncateMoney(params.amount),
+    pending_balance: truncateMoney(params.amount),
+    currency: params.currency === "USD" ? "USD" : "ARS",
+    due_date: params.dueDate,
+    status:
+      "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
+  });
+
+  if (error) {
+    throw new Error(
+      `No se pudo crear la cuenta por cobrar del anticipo: ${error.message}`
+    );
+  }
+}
+
+async function ensureBalanceReceivableAfterAdvance(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  context: ReceivableUpdateContext;
+}): Promise<void> {
+  if (!(params.context.customerId && params.context.dueDate)) {
+    return;
+  }
+
+  const { data: existing } = await params.supabase
+    .from("accounts_receivable")
+    .select("id")
+    .eq("sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (existing?.id) {
+    return;
+  }
+
+  const { error } = await params.supabase.from("accounts_receivable").insert({
+    organization_id: params.orgId,
+    customer_id: params.context.customerId,
+    sales_order_id: params.saleId,
+    total_amount: truncateMoney(params.context.totalAmount),
+    pending_balance: truncateMoney(params.context.totalAmount),
+    currency: params.context.currency ?? "ARS",
+    due_date: params.context.dueDate,
+    status:
+      "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
+  });
+
+  if (error) {
+    throw new Error(
+      `No se pudo crear la cuenta por cobrar del saldo: ${error.message}`
+    );
+  }
+}
+
+async function syncInformalAdvanceReceivable(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  totalAmount: number;
+  advancePercentage: number | null;
+  customerId: string;
+  dueDate: string;
+  currency: string;
+  createdBy: string | null;
+}): Promise<void> {
+  const advanceAmount =
+    params.advancePercentage && params.advancePercentage > 0
+      ? truncateMoney((params.totalAmount * params.advancePercentage) / 100)
+      : 0;
+
+  const { data: advanceDoc } = await params.supabase
+    .from("sales_orders")
+    .select("id, total_amount")
+    .eq("parent_sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .eq("document_type", "ADVANCE")
+    .maybeSingle();
+
+  if (advanceAmount <= 0) {
+    if (advanceDoc?.id) {
+      await removeInformalAdvanceDocument({
+        supabase: params.supabase,
+        orgId: params.orgId,
+        advanceDocId: advanceDoc.id,
+      });
+    }
+    return;
+  }
+
+  if (advanceDoc?.id) {
+    await updateInformalAdvanceDocument({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      advanceDocId: advanceDoc.id,
+      advanceAmount,
+      dueDate: params.dueDate,
+      currency: params.currency,
+    });
+    return;
+  }
+
+  const { data: parentSale } = await params.supabase
+    .from("sales_orders")
+    .select("user_id")
+    .eq("id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (!parentSale?.user_id) {
+    throw new Error(
+      "No se pudo crear el anticipo porque la preventa no tiene un vendedor asignado"
+    );
+  }
+
+  await createInformalAdvanceDocument({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    parentSaleId: params.saleId,
+    customerId: params.customerId,
+    userId: parentSale.user_id,
+    createdBy: params.createdBy,
+    amount: advanceAmount,
+    dueDate: params.dueDate,
+    currency: params.currency,
+  });
+}
+
+async function updateInformalAdvanceDocument(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  advanceDocId: string;
+  advanceAmount: number;
+  dueDate: string;
+  currency: string;
+}): Promise<void> {
+  const { error: docError } = await params.supabase
+    .from("sales_orders")
+    .update({
+      total_amount: truncateMoney(params.advanceAmount),
+      sub_total: truncateMoney(params.advanceAmount),
+      expiration_date: params.dueDate,
+    })
+    .eq("id", params.advanceDocId)
+    .eq("organization_id", params.orgId);
+
+  if (docError) {
+    throw new Error(
+      `No se pudo actualizar el documento de anticipo: ${docError.message}`
+    );
+  }
+
+  const { error: itemsError } = await params.supabase
+    .from("sales_order_items")
+    .update({
+      unit_price: truncateMoney(params.advanceAmount),
+      base_price: truncateMoney(params.advanceAmount),
+      subtotal: truncateMoney(params.advanceAmount),
+    })
+    .eq("sales_order_id", params.advanceDocId)
+    .eq("is_adjustment", true);
+
+  if (itemsError) {
+    throw new Error(
+      `No se pudo actualizar el ítem del anticipo: ${itemsError.message}`
+    );
+  }
+
+  const { data: receivable } = await params.supabase
+    .from("accounts_receivable")
+    .select("id, pending_balance")
+    .eq("sales_order_id", params.advanceDocId)
+    .eq("organization_id", params.orgId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!receivable?.id) {
+    return;
+  }
+
+  const { error: receivableError } = await params.supabase
+    .from("accounts_receivable")
+    .update({
+      total_amount: truncateMoney(params.advanceAmount),
+      pending_balance: truncateMoney(params.advanceAmount),
+      due_date: params.dueDate,
+      currency: params.currency === "USD" ? "USD" : "ARS",
+    })
+    .eq("id", receivable.id)
+    .eq("organization_id", params.orgId);
+
+  if (receivableError) {
+    throw new Error(
+      `No se pudo actualizar la cuenta por cobrar del anticipo: ${receivableError.message}`
+    );
+  }
+}
+
+async function removeInformalAdvanceDocument(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  advanceDocId: string;
+}): Promise<void> {
+  const { data: receivable } = await params.supabase
+    .from("accounts_receivable")
+    .select("id")
+    .eq("sales_order_id", params.advanceDocId)
+    .eq("organization_id", params.orgId)
+    .limit(1)
+    .maybeSingle();
+
+  if (receivable?.id) {
+    const { data: payments } = await params.supabase
+      .from("receivable_payments")
+      .select("id")
+      .eq("account_receivable_id", receivable.id)
+      .limit(1);
+
+    if ((payments?.length ?? 0) > 0) {
+      throw new Error(
+        "No se puede quitar el anticipo porque ya registró pagos"
+      );
+    }
+
+    await params.supabase
+      .from("accounts_receivable")
+      .delete()
+      .eq("id", receivable.id)
+      .eq("organization_id", params.orgId);
+  }
+
+  await params.supabase
+    .from("sales_order_items")
+    .delete()
+    .eq("sales_order_id", params.advanceDocId);
+
+  await params.supabase
+    .from("sales_orders")
+    .delete()
+    .eq("id", params.advanceDocId)
+    .eq("organization_id", params.orgId);
+}
+
+async function isInformalAdvancePending(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<boolean> {
+  const { data: advanceDoc } = await params.supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("parent_sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .eq("document_type", "ADVANCE")
+    .maybeSingle();
+
+  if (!advanceDoc?.id) {
+    return false;
+  }
+
+  const { data: receivable } = await params.supabase
+    .from("accounts_receivable")
+    .select("status, pending_balance")
+    .eq("sales_order_id", advanceDoc.id)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (!receivable) {
+    return false;
+  }
+
+  const pendingBalance = Number(receivable.pending_balance ?? 0);
+  return receivable.status !== "PAID" || pendingBalance > 0;
+}
+
+async function informalAdvanceHasPayments(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<boolean> {
+  const { data: advanceDoc } = await params.supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("parent_sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .eq("document_type", "ADVANCE")
+    .maybeSingle();
+
+  if (!advanceDoc?.id) {
+    return false;
+  }
+
+  const { data: receivable } = await params.supabase
+    .from("accounts_receivable")
+    .select("id")
+    .eq("sales_order_id", advanceDoc.id)
+    .eq("organization_id", params.orgId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!receivable?.id) {
+    return false;
+  }
+
+  const { data: payments } = await params.supabase
+    .from("receivable_payments")
+    .select("id")
+    .eq("account_receivable_id", receivable.id)
+    .limit(1);
+
+  return (payments?.length ?? 0) > 0;
+}
+
 export async function ensureReceivableForAuthorizedPreventaInvoice(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -5860,17 +6449,37 @@ async function updateReceivableForDispatchedSale(params: {
   creditDays: number | null;
   dispatchedAt: string;
   currency?: string;
+  advancePaymentPercentage?: number;
 }): Promise<void> {
   const dueDate = computeReceivableDueDateFromDispatch(
     params.dispatchedAt,
     params.creditDays
   );
+  const advanceAmount =
+    params.advancePaymentPercentage && params.advancePaymentPercentage > 0
+      ? truncateMoney(
+          (params.totalAmount * params.advancePaymentPercentage) / 100
+        )
+      : 0;
+  const balanceAmount = truncateMoney(params.totalAmount - advanceAmount);
+
   const context: ReceivableUpdateContext = {
-    totalAmount: truncateMoney(params.totalAmount),
+    totalAmount: balanceAmount,
     dueDate,
     customerId: params.customerId,
     currency: params.currency ?? "ARS",
   };
+
+  if (advanceAmount > 0) {
+    await ensureBalanceReceivableAfterAdvance({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
+      context,
+    });
+    return;
+  }
+
   const receivable = await fetchReceivableRecord({
     supabase: params.supabase,
     orgId: params.orgId,
@@ -6062,6 +6671,7 @@ export async function updateSaleOrder(
 
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  const actorUserId = await getCurrentUserId(supabase);
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
@@ -6078,6 +6688,16 @@ export async function updateSaleOrder(
   if (input.sellerId !== undefined) {
     assertCanAssignSeller(accessContext, input.sellerId);
   }
+
+  assertInformalAdvanceUpdateAllowed(existingSale, input);
+
+  await assertInformalAdvanceUpdateRules({
+    supabase,
+    orgId: org.id,
+    saleId,
+    existingSale,
+    input,
+  });
 
   const isStockedSale = isStockedSaleStatus(existingSale.status);
 
@@ -6116,6 +6736,24 @@ export async function updateSaleOrder(
         saleId,
         input,
         updatedSale,
+      });
+    }
+
+    if (!isStockedSale && input.advancePaymentPercentage !== undefined) {
+      await syncInformalAdvanceReceivable({
+        supabase,
+        orgId: org.id,
+        saleId,
+        totalAmount: Number(updatedSale.total_amount ?? 0),
+        advancePercentage: input.advancePaymentPercentage,
+        customerId: updatedSale.customer_id,
+        dueDate: computeDueDate(
+          updatedSale.sale_date,
+          updatedSale.expiration_date,
+          updatedSale.credit_days
+        ),
+        currency: updatedSale.currency ?? "ARS",
+        createdBy: actorUserId,
       });
     }
   } catch (error) {

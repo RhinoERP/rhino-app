@@ -1545,63 +1545,60 @@ export function QuoteForm({
                           />
                           Pago anticipado
                         </label>
-                        {(field.value ?? false) && (
-                          <FormField
-                            control={form.control}
-                            name="advancePaymentPercentage"
-                            render={({ field: pctField }) => (
-                              <FormItem className="pl-6">
-                                <FormControl>
-                                  <div className="flex w-32 items-center gap-2">
-                                    <Input
-                                      className="w-20"
-                                      max={100}
-                                      min={1}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (val === "") {
-                                          pctField.onChange(null);
-                                          return;
-                                        }
-                                        const num = Number(val);
-                                        if (
-                                          Number.isNaN(num) ||
-                                          num < 1 ||
-                                          num > 100
-                                        ) {
-                                          return;
-                                        }
-                                        pctField.onChange(num);
-                                      }}
-                                      placeholder="%"
-                                      type="number"
-                                      value={pctField.value ?? ""}
-                                    />
-                                    <span className="text-muted-foreground text-sm">
-                                      %
-                                    </span>
-                                  </div>
-                                </FormControl>
-                                {advancePaymentPercentage ? (
-                                  <p className="mt-2 text-muted-foreground text-sm">
-                                    Anticipo estimado:{" "}
-                                    {formatCurrency(
-                                      truncateMoney(
-                                        (quoteTotal *
-                                          advancePaymentPercentage) /
-                                          100
-                                      ),
-                                      currency
-                                    )}
-                                    . Se confirmará y podrá editarse al generar
-                                    el anticipo.
-                                  </p>
-                                ) : null}
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        )}
+                        <FormField
+                          control={form.control}
+                          name="advancePaymentPercentage"
+                          render={({ field: pctField }) => (
+                            <FormItem className="pl-6">
+                              <FormControl>
+                                <div className="flex w-32 items-center gap-2">
+                                  <Input
+                                    className="w-20"
+                                    disabled={!(field.value ?? false)}
+                                    max={100}
+                                    min={1}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === "") {
+                                        pctField.onChange(null);
+                                        return;
+                                      }
+                                      const num = Number(val);
+                                      if (
+                                        Number.isNaN(num) ||
+                                        num < 1 ||
+                                        num > 100
+                                      ) {
+                                        return;
+                                      }
+                                      pctField.onChange(num);
+                                    }}
+                                    type="number"
+                                    value={pctField.value ?? ""}
+                                  />
+                                  <span className="text-muted-foreground text-sm">
+                                    %
+                                  </span>
+                                </div>
+                              </FormControl>
+                              {advancePaymentPercentage ? (
+                                <p className="mt-2 text-muted-foreground text-sm">
+                                  Anticipo estimado:{" "}
+                                  {formatCurrency(
+                                    truncateMoney(
+                                      (quoteTotal * advancePaymentPercentage) /
+                                        100
+                                    ),
+                                    currency
+                                  )}
+                                  . Se confirmará y podrá editarse al generar el
+                                  anticipo.
+                                </p>
+                              ) : null}
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
                       </FormItem>
                     )}
                   />

@@ -13,6 +13,7 @@ import type {
   StockFilters,
   StockItem,
   StockMetrics,
+  StockMovementSource,
   StockMovementType,
   StockMovementWithLot,
   StockPaginatedParams,
@@ -1403,8 +1404,11 @@ export async function adjustVariantStock(input: {
   type: StockMovementType;
   quantity: number;
   reason: string;
+  createdBy?: string | null;
+  source?: StockMovementSource;
 }): Promise<void> {
-  const { orgSlug, variantId, type, quantity, reason } = input;
+  const { orgSlug, variantId, type, quantity, reason, createdBy, source } =
+    input;
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -1435,6 +1439,8 @@ export async function adjustVariantStock(input: {
     type,
     quantity,
     reason,
+    createdBy,
+    source,
   });
 }
 
@@ -2099,10 +2105,7 @@ export async function getStockMovementsForProduct(
 
   const lotIds = lots.map((lot) => lot.id);
 
-  const movementsQuery = supabase
-    .from("stock_movements")
-    .select(
-      `
+  const stockMovementSelect: string = `
         id,
         lot_id,
         type,
@@ -2111,6 +2114,8 @@ export async function getStockMovementsForProduct(
         new_stock,
         unit_quantity,
         reason,
+        source,
+        created_by,
         created_at,
         product_lots:lot_id (
           id,
@@ -2119,8 +2124,10 @@ export async function getStockMovementsForProduct(
           product_id,
           product_variants!product_variants_lot_id_fkey(talle, color)
         )
-      `
-    )
+      `;
+  const movementsQuery = supabase
+    .from("stock_movements")
+    .select(stockMovementSelect)
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
 
@@ -2134,7 +2141,45 @@ export async function getStockMovementsForProduct(
     throw new Error(`Error fetching stock movements: ${error.message}`);
   }
 
-  return (data ?? [])
+  const { data: members } = await supabase.rpc(
+    "get_organization_members_with_users",
+    { org_slug_param: orgSlug }
+  );
+  const memberNames = new Map<string, string>();
+  for (const member of (members ?? []) as Array<{
+    user_id: string | null;
+    full_name: string | null;
+    email: string | null;
+  }>) {
+    if (member.user_id) {
+      memberNames.set(
+        member.user_id,
+        member.full_name ?? member.email ?? "Usuario"
+      );
+    }
+  }
+
+  const movementRows = (data ?? []) as unknown as Array<{
+    id: string;
+    lot_id: string;
+    type: StockMovementWithLot["type"];
+    quantity: number;
+    previous_stock: number;
+    new_stock: number;
+    unit_quantity: number | null;
+    reason: string | null;
+    source: StockMovementSource;
+    created_by: string | null;
+    created_at: string | null;
+    product_lots: {
+      id: string;
+      lot_number: string;
+      expiration_date: string | null;
+      product_variants: Array<{ talle: string; color: string }> | null;
+    } | null;
+  }>;
+
+  return movementRows
     .filter((movement) => movement.product_lots)
     .map((movement) => {
       const variant =
@@ -2158,6 +2203,11 @@ export async function getStockMovementsForProduct(
         new_stock: movement.new_stock,
         unit_quantity: movement.unit_quantity ?? null,
         reason: movement.reason,
+        source: movement.source ?? "SYSTEM",
+        created_by: movement.created_by,
+        created_by_name: movement.created_by
+          ? (memberNames.get(movement.created_by) ?? "Usuario")
+          : null,
         created_at: movement.created_at,
       };
     });
@@ -2170,6 +2220,8 @@ export type CreateProductLotInput = {
   expirationDate: string | null;
   quantity: number;
   unitQuantity?: number;
+  createdBy?: string | null;
+  source?: StockMovementSource;
 };
 
 /**
@@ -2186,6 +2238,8 @@ export async function createProductLotForOrg(
     expirationDate,
     quantity,
     unitQuantity,
+    createdBy,
+    source,
   } = input;
 
   if (!lotNumber?.trim()) {
@@ -2258,11 +2312,13 @@ export async function createProductLotForOrg(
       product_id: productId,
       lot_number: lotNumber.trim(),
       expiration_date: resolvedExpiration,
-      quantity_available: sanitizedQuantity,
+      quantity_available:
+        createdBy && sanitizedQuantity > 0 ? 0 : sanitizedQuantity,
     };
 
   if (isUnitTracked) {
-    insertPayload.unit_quantity_available = sanitizedUnitQuantity ?? 0;
+    insertPayload.unit_quantity_available =
+      createdBy && sanitizedQuantity > 0 ? 0 : (sanitizedUnitQuantity ?? 0);
   }
 
   const { data, error } = await supabase
@@ -2279,6 +2335,29 @@ export async function createProductLotForOrg(
     throw new Error("No se pudo crear el lote");
   }
 
+  if (createdBy && sanitizedQuantity > 0) {
+    try {
+      await createStockMovementForOrg({
+        orgSlug,
+        productId,
+        lotId: data.id,
+        type: "INBOUND",
+        quantity: sanitizedQuantity,
+        unitQuantity: isUnitTracked ? sanitizedUnitQuantity : undefined,
+        reason: "Stock inicial del lote",
+        createdBy,
+        source: source ?? "MANUAL",
+      });
+      data.quantity_available = sanitizedQuantity;
+      if (isUnitTracked) {
+        data.unit_quantity_available = sanitizedUnitQuantity ?? 0;
+      }
+    } catch (movementError) {
+      await supabase.from("product_lots").delete().eq("id", data.id);
+      throw movementError;
+    }
+  }
+
   return addLotStatus(data);
 }
 
@@ -2290,6 +2369,8 @@ export type UpdateProductLotInput = {
   expirationDate: string | null;
   quantity: number;
   unitQuantity?: number;
+  createdBy?: string | null;
+  source?: StockMovementSource;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: lot edition includes inventory consistency checks tied to sales usage
@@ -2304,6 +2385,8 @@ export async function updateProductLotForOrg(
     expirationDate,
     quantity,
     unitQuantity,
+    createdBy,
+    source,
   } = input;
 
   if (!lotId) {
@@ -2426,13 +2509,8 @@ export async function updateProductLotForOrg(
     {
       lot_number: lotNumber.trim(),
       expiration_date: resolvedExpiration,
-      quantity_available: normalizedQuantity,
       updated_at: new Date().toISOString(),
     };
-
-  if (isUnitTracked) {
-    updatePayload.unit_quantity_available = sanitizedUnitQuantity ?? 0;
-  }
 
   const { data: updatedLot, error: updateError } = await supabase
     .from("product_lots")
@@ -2448,6 +2526,35 @@ export async function updateProductLotForOrg(
 
   if (!updatedLot) {
     throw new Error("No se pudo actualizar el lote");
+  }
+
+  const quantityDelta = normalizedQuantity - (lot.quantity_available ?? 0);
+  const unitQuantityDelta = isUnitTracked
+    ? (sanitizedUnitQuantity ?? 0) - (lot.unit_quantity_available ?? 0)
+    : null;
+
+  if (quantityDelta !== 0 || (unitQuantityDelta ?? 0) !== 0) {
+    if (!createdBy) {
+      throw new Error(
+        "Se requiere un usuario para modificar el stock del lote"
+      );
+    }
+
+    await createStockMovementForOrg({
+      orgSlug,
+      productId,
+      lotId,
+      type: "ADJUSTMENT",
+      quantity: quantityDelta,
+      unitQuantity: unitQuantityDelta,
+      reason: "Edición manual del lote",
+      createdBy,
+      source: source ?? "MANUAL",
+    });
+    updatedLot.quantity_available = normalizedQuantity;
+    if (isUnitTracked) {
+      updatedLot.unit_quantity_available = sanitizedUnitQuantity ?? 0;
+    }
   }
 
   return addLotStatus(updatedLot, lotUsage);
@@ -2555,6 +2662,8 @@ export type CreateStockMovementInput = {
   quantity: number;
   reason?: string | null;
   unitQuantity?: number | null;
+  createdBy?: string | null;
+  source?: StockMovementSource;
 };
 
 /**
@@ -2564,8 +2673,17 @@ export type CreateStockMovementInput = {
 export async function createStockMovementForOrg(
   input: CreateStockMovementInput
 ) {
-  const { orgSlug, productId, lotId, type, quantity, reason, unitQuantity } =
-    input;
+  const {
+    orgSlug,
+    productId,
+    lotId,
+    type,
+    quantity,
+    reason,
+    unitQuantity,
+    createdBy,
+    source = "SYSTEM",
+  } = input;
 
   if (!lotId) {
     throw new Error("El lote es requerido");
@@ -2581,7 +2699,11 @@ export async function createStockMovementForOrg(
     throw new Error("La cantidad debe ser mayor a 0");
   }
 
-  if (type === "ADJUSTMENT" && normalizedQuantity === 0) {
+  if (
+    type === "ADJUSTMENT" &&
+    normalizedQuantity === 0 &&
+    normalizedUnitQuantity === 0
+  ) {
     throw new Error("La cantidad del ajuste no puede ser 0");
   }
 
@@ -2727,18 +2849,24 @@ export async function createStockMovementForOrg(
     }
   }
 
+  const movementPayload = {
+    organization_id: org.id,
+    lot_id: lotId,
+    type,
+    quantity: movementQuantity,
+    previous_stock: previousStock,
+    new_stock: newStock,
+    unit_quantity: movementUnitQuantity,
+    reason: reason?.trim() || null,
+    created_by: createdBy ?? null,
+    source,
+  };
+
   const { data: movement, error: movementError } = await supabase
     .from("stock_movements")
-    .insert({
-      organization_id: org.id,
-      lot_id: lotId,
-      type,
-      quantity: movementQuantity,
-      previous_stock: previousStock,
-      new_stock: newStock,
-      unit_quantity: movementUnitQuantity,
-      reason: reason?.trim() || null,
-    })
+    .insert(
+      movementPayload as Database["public"]["Tables"]["stock_movements"]["Insert"]
+    )
     .select("*")
     .maybeSingle();
 

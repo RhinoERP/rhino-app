@@ -62,10 +62,7 @@ async function resolveAccessContext(
 export type PurchasePayableOrigin = "PURCHASE_NOTE" | "SUPPLIER_INVOICE";
 
 export type PurchaseOrder =
-  Database["public"]["Tables"]["purchase_orders"]["Row"] & {
-    /** Added by the purchase-payable-origin migration. */
-    payable_origin?: PurchasePayableOrigin | null;
-  };
+  Database["public"]["Tables"]["purchase_orders"]["Row"];
 export type PurchaseOrderItem =
   Database["public"]["Tables"]["purchase_order_items"]["Row"];
 export type ProductWithPrice =
@@ -2518,16 +2515,22 @@ export async function getPurchaseOrderWithItems(
 }
 
 // Helper functions for processBulkSupplierPayment
+type PendingPayableAccount = {
+  id: string;
+  purchase_order_id: string;
+  total_amount: number;
+  pending_balance: number;
+  due_date: string;
+  currency: string;
+  exchange_rate: number | null;
+  purchase?:
+    | { purchase_number?: number | null }
+    | Array<{ purchase_number?: number | null }>
+    | null;
+};
+
 function calculateSupplierPaymentDistributions(
-  pendingAccounts: Array<{
-    id: string;
-    total_amount: number;
-    pending_balance: number;
-    due_date: string;
-    purchase?: {
-      purchase_number?: number | null;
-    } | null;
-  }>,
+  pendingAccounts: PendingPayableAccount[],
   totalAmount: number
 ) {
   let remainingAmount = truncateMoney(totalAmount);
@@ -2811,7 +2814,10 @@ export async function processBulkSupplierPayment(input: {
     };
   }
 
-  if (!pendingAccounts || pendingAccounts.length === 0) {
+  const payableAccounts = (pendingAccounts ??
+    []) as unknown as PendingPayableAccount[];
+
+  if (payableAccounts.length === 0) {
     return {
       success: false,
       error: "No hay cuentas pendientes para este proveedor",
@@ -2819,10 +2825,10 @@ export async function processBulkSupplierPayment(input: {
     };
   }
 
-  const batchAccounts = pendingAccounts.filter(
+  const batchAccounts = payableAccounts.filter(
     (account) => (account.currency ?? "ARS") === batchCurrency
   );
-  const excludedCount = pendingAccounts.length - batchAccounts.length;
+  const excludedCount = payableAccounts.length - batchAccounts.length;
 
   if (batchAccounts.length === 0) {
     return {
@@ -3049,12 +3055,15 @@ export async function calculateBulkSupplierPaymentDistribution(
     throw new Error(`Error al obtener cuentas: ${error.message}`);
   }
 
-  if (!pendingAccounts || pendingAccounts.length === 0) {
+  const payableAccounts = (pendingAccounts ??
+    []) as unknown as PendingPayableAccount[];
+
+  if (payableAccounts.length === 0) {
     return [];
   }
 
   const batchCurrency = (currency ?? "ARS").toUpperCase();
-  const batchAccounts = pendingAccounts.filter(
+  const batchAccounts = payableAccounts.filter(
     (account) => (account.currency ?? "ARS") === batchCurrency
   );
 

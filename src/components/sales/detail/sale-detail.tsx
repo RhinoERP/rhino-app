@@ -884,6 +884,7 @@ export function SaleDetail({
   const canShowAdvanceCard =
     salesAdvancesEnabled &&
     !isFullAdvanceQuote &&
+    sale.invoice_type !== "NOTA_DE_VENTA" &&
     (isDraftSale ||
       isConfirmedSale ||
       isDispatchedSale ||
@@ -963,6 +964,14 @@ export function SaleDetail({
   });
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
+  );
+  const [saleAdvancePercentage, setSaleAdvancePercentage] = useState<
+    number | null
+  >(
+    typeof sale.advance_payment_percentage === "number" &&
+      sale.advance_payment_percentage > 0
+      ? sale.advance_payment_percentage
+      : null
   );
   const [commercialExchangeRate, setCommercialExchangeRate] = useState<
     number | null
@@ -1791,6 +1800,7 @@ export function SaleDetail({
     canManageSale &&
     isDraftSale &&
     !relatedOrder &&
+    !sale.advance_pending &&
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
@@ -1893,6 +1903,8 @@ export function SaleDetail({
     return {
       ...buildFiscalSaleMutationPayload(),
       remittanceNumber: remittanceNumber || null,
+      advancePaymentPercentage:
+        invoiceType === "NOTA_DE_VENTA" ? saleAdvancePercentage : null,
     };
   };
 
@@ -2465,6 +2477,17 @@ export function SaleDetail({
         </div>
       ) : null}
 
+      {sale.advance_payment_percentage &&
+      sale.advance_payment_percentage > 0 ? (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="font-medium text-indigo-800 text-sm">
+            Venta con anticipo del {sale.advance_payment_percentage}% — el
+            anticipo se registró como cuenta por cobrar al crear la preventa; el
+            saldo se genera al despachar.
+          </p>
+        </div>
+      ) : null}
+
       {canShowArcaCard ? (
         <Card>
           <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
@@ -2943,6 +2966,36 @@ export function SaleDetail({
                   </Select>
                 </div>
 
+                {invoiceType === "NOTA_DE_VENTA" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="saleAdvancePercentage">
+                      Anticipo (% del total)
+                    </Label>
+                    <Input
+                      disabled={!canEditFiscalFields}
+                      id="saleAdvancePercentage"
+                      inputMode="numeric"
+                      max={100}
+                      min={0}
+                      onChange={(event) => {
+                        const parsed = Number.parseInt(event.target.value, 10);
+                        setSaleAdvancePercentage(
+                          Number.isNaN(parsed)
+                            ? null
+                            : Math.min(Math.max(parsed, 0), 100)
+                        );
+                      }}
+                      placeholder="Sin anticipo"
+                      step="1"
+                      type="number"
+                      value={saleAdvancePercentage ?? ""}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Si la preventa tiene anticipo, se registra una cuenta por
+                      cobrar por ese porcentaje al guardar.
+                    </p>
+                  </div>
+                ) : null}
                 {sale.currency === "USD" ? (
                   <div className="space-y-2">
                     <Label htmlFor="commercialExchangeRate">
@@ -4066,6 +4119,12 @@ export function SaleDetail({
                       </div>
                     )}
                   </Button>
+                ) : null}
+                {sale.advance_pending ? (
+                  <p className="text-muted-foreground text-xs">
+                    No se puede confirmar la venta: hay un anticipo pendiente de
+                    cobro.
+                  </p>
                 ) : null}
                 <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
                   <span>Descuento %</span>
