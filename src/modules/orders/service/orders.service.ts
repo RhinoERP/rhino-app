@@ -266,7 +266,7 @@ export async function getParentOrdersPendingStock(
     `
     )
     .eq("organization_id", org.id)
-    .in("status", ["PENDING_STOCK", "GOODS_RECEIVED"])
+    .in("status", ["PENDING_STOCK", "GOODS_RECEIVED", "STOCK_RESERVED"])
     .is("parent_order_id", null);
 
   const filtered = applyScopeFilter(query, accessContext);
@@ -1876,6 +1876,20 @@ export async function syncSaleStatus(
 
   const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
   if (!saleStatus) {
+    return;
+  }
+
+  const NO_REGRESAR_A: ReadonlySet<string> = new Set(["INCOMPLETE", "DRAFT"]);
+  const VENTA_AVANZADA: ReadonlySet<string> = new Set([
+    "CONFIRMED",
+    "DISPATCH",
+    "DELIVERED",
+  ]);
+  if (
+    NO_REGRESAR_A.has(saleStatus) &&
+    currentStatus !== null &&
+    VENTA_AVANZADA.has(currentStatus)
+  ) {
     return;
   }
 
