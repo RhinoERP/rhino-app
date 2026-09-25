@@ -25,6 +25,10 @@ type QuoteItemWithParent = Pick<
   "id" | "quantity" | "parent_quote_item_id"
 >;
 
+function isPurchaseStatus(status: OrderFlowStatus) {
+  return status === "PURCHASE_REQUIRED" || status === "PURCHASING";
+}
+
 async function validateAndFetchOrder(
   orgSlug: string,
   orderId: string,
@@ -65,7 +69,8 @@ async function validateAndFetchOrder(
 
 async function cancelLinkedPurchaseOrderIfExists(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  orderId: string
+  orderId: string,
+  unlink = false
 ) {
   const { data: order } = await supabase
     .from("orders")
@@ -74,10 +79,31 @@ async function cancelLinkedPurchaseOrderIfExists(
     .single();
 
   if (order?.purchase_order_id) {
-    await supabase
+    const { error: cancelError } = await supabase
       .from("purchase_orders")
-      .update({ status: "CANCELLED" })
+      .update({
+        status: "CANCELLED",
+        cancelled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", order.purchase_order_id);
+
+    if (cancelError) {
+      throw new Error(`Error al cancelar la compra: ${cancelError.message}`);
+    }
+
+    if (unlink) {
+      const { error: unlinkError } = await supabase
+        .from("orders")
+        .update({ purchase_order_id: null })
+        .eq("id", orderId);
+
+      if (unlinkError) {
+        throw new Error(
+          `Error al desvincular la compra: ${unlinkError.message}`
+        );
+      }
+    }
   }
 }
 
@@ -201,7 +227,7 @@ async function undoCreatedChild(
 
   await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
 
-  if (allItemIds.length > 0) {
+  if (allItemIds.length > 0 && !isPurchaseStatus(currentStatus)) {
     const { data: childOrder } = await supabase
       .from("orders")
       .select("order_number")
@@ -303,12 +329,14 @@ async function undoChildCreation(
 
   if (splitItems.length > 0) {
     const splitItemIds = splitItems.map((i) => i.id);
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      splitItemIds,
-      "Reversión de sub-pedido - stock restaurado"
-    );
+    if (!isPurchaseStatus(currentStatus)) {
+      await restoreStockForOrderItems(
+        supabase,
+        orgId,
+        splitItemIds,
+        "Reversión de sub-pedido - stock restaurado"
+      );
+    }
     await mergeSplitItemsBack(supabase, splitItems);
   }
 
@@ -604,6 +632,16 @@ async function revertSaleStatus(
   }
 }
 
+function isDirectPurchaseRevert(
+  parentOrderId: string | null,
+  currentStatus: OrderFlowStatus
+) {
+  return (
+    parentOrderId === null &&
+    (currentStatus === "PURCHASE_REQUIRED" || currentStatus === "PURCHASING")
+  );
+}
+
 async function applyNormalRevert(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
@@ -635,11 +673,20 @@ async function applyNormalRevert(
     }
   }
 
-  const { data: latestHistory, error: historyError } = await supabase
+  let historyQuery = supabase
     .from("order_status_history")
     .select("from_status")
     .eq("order_id", orderId)
-    .order("changed_at", { ascending: false })
+    .order("changed_at", { ascending: false });
+
+  if (
+    isDirectPurchaseRevert(parentOrderId, currentStatus) &&
+    currentStatus === "PURCHASING"
+  ) {
+    historyQuery = historyQuery.eq("to_status", "PURCHASE_REQUIRED");
+  }
+
+  const { data: latestHistory, error: historyError } = await historyQuery
     .limit(1)
     .single();
 
@@ -651,6 +698,10 @@ async function applyNormalRevert(
   }
 
   const previousStatus = latestHistory.from_status;
+
+  if (isDirectPurchaseRevert(parentOrderId, currentStatus)) {
+    await cancelLinkedPurchaseOrderIfExists(supabase, orderId, true);
+  }
 
   const { error: updateError } = await supabase
     .from("orders")
