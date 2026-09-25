@@ -36,6 +36,7 @@ import {
   type PurchasingOrder,
   type StockInfo,
 } from "../types";
+import { buildSplitQuoteItemExtras } from "../utils/split-quote-item-extras";
 
 type OrdersScope = "all" | "own";
 
@@ -3030,6 +3031,10 @@ async function insertSplitQuoteItem(
     product_id: string | null;
     product_variant_id: string | null;
     id: string;
+    quote_item_extras: Array<{
+      description: string;
+      price: number;
+    }>;
   },
   assignedQty: number,
   quoteId: string
@@ -3057,6 +3062,19 @@ async function insertSplitQuoteItem(
       `Error al crear item dividido: ${error?.message ?? "No data"}`
     );
   }
+
+  if (item.quote_item_extras.length > 0) {
+    const { error: extrasError } = await supabase
+      .from("quote_item_extras")
+      .insert(buildSplitQuoteItemExtras(data.id, item.quote_item_extras));
+
+    if (extrasError) {
+      throw new Error(
+        `Error al copiar extras del item dividido: ${extrasError.message}`
+      );
+    }
+  }
+
   return data.id;
 }
 
@@ -3086,7 +3104,7 @@ async function processItemSplits(
   const { data: originalItems, error } = await supabase
     .from("quote_items")
     .select(
-      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id"
+      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id, quote_item_extras(description, price)"
     )
     .in("id", splitIds);
 
