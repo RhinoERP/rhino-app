@@ -2904,17 +2904,35 @@ export async function createPreSaleOrder(
     const advanceAmount = truncateMoney(
       (totalAmount * normalizedAdvancePercentage) / 100
     );
-    await createInformalAdvanceDocument({
-      supabase,
-      orgId: org.id,
-      parentSaleId: saleOrderId,
-      customerId,
-      userId: resolvedSellerId as string,
-      createdBy: userId,
-      amount: advanceAmount,
-      dueDate,
-      currency: "ARS",
-    });
+    try {
+      await createInformalAdvanceDocument({
+        supabase,
+        orgId: org.id,
+        parentSaleId: saleOrderId,
+        customerId,
+        userId: resolvedSellerId as string,
+        createdBy: userId,
+        amount: advanceAmount,
+        dueDate,
+        currency: "ARS",
+      });
+    } catch (error) {
+      await supabase
+        .from("sales_order_items")
+        .delete()
+        .eq("sales_order_id", saleOrderId);
+      await supabase
+        .from("sales_order_taxes")
+        .delete()
+        .eq("sales_order_id", saleOrderId);
+      await supabase
+        .from("sales_orders")
+        .delete()
+        .eq("id", saleOrderId)
+        .eq("organization_id", org.id);
+
+      throw error;
+    }
   }
 
   return saleOrderId;
@@ -4769,7 +4787,7 @@ async function validateSaleForUpdate(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status, advance_payment_percentage"
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status, advance_payment_percentage, document_type"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -4783,6 +4801,12 @@ async function validateSaleForUpdate(
 
   if (!existingSale) {
     throw new Error("Venta no encontrada");
+  }
+
+  if (existingSale.document_type !== "STANDARD") {
+    throw new Error(
+      "Este documento se genera automáticamente y no puede editarse"
+    );
   }
 
   const currentStatus = existingSale.status as SalesOrderStatus;
@@ -4982,16 +5006,27 @@ async function assertInformalAdvanceUpdateRules(params: {
     existingSale.advancePaymentPercentage !== null &&
     existingSale.advancePaymentPercentage > 0;
 
-  if (
-    isStockedSaleStatus(existingSale.status) &&
-    hasAdvancePercentage &&
-    (input.items !== undefined ||
-      input.globalDiscountPercentage !== undefined ||
-      input.advancePaymentPercentage !== undefined)
-  ) {
-    throw new Error(
-      "Una venta confirmada con anticipo no puede modificar su monto ni el porcentaje de anticipo"
-    );
+  if (isStockedSaleStatus(existingSale.status)) {
+    const changingAdvance =
+      input.advancePaymentPercentage !== undefined &&
+      (input.advancePaymentPercentage ?? 0) > 0 !== hasAdvancePercentage;
+
+    if (changingAdvance) {
+      throw new Error(
+        "No se puede agregar, quitar o modificar un anticipo en una venta ya confirmada"
+      );
+    }
+
+    if (
+      hasAdvancePercentage &&
+      (input.items !== undefined ||
+        input.globalDiscountPercentage !== undefined ||
+        input.advancePaymentPercentage !== undefined)
+    ) {
+      throw new Error(
+        "Una venta confirmada con anticipo no puede modificar su monto ni el porcentaje de anticipo"
+      );
+    }
   }
 }
 
@@ -5672,9 +5707,17 @@ function resolveReceivableUpdateContext(params: {
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
 }): ReceivableUpdateContext {
-  const totalAmount = truncateMoney(
+  const fullTotal = truncateMoney(
     Number(params.updatedSale.total_amount ?? 0) || 0
   );
+  const advancePercentage = Number(
+    params.updatedSale.advance_payment_percentage ?? 0
+  );
+  const advanceAmount =
+    advancePercentage > 0
+      ? truncateMoney((fullTotal * advancePercentage) / 100)
+      : 0;
+  const totalAmount = truncateMoney(Math.max(0, fullTotal - advanceAmount));
   const creditDays =
     params.input.creditDays ?? params.updatedSale.credit_days ?? null;
   const dueDate = computeReceivableDueDateFromDispatch(
@@ -6041,7 +6084,6 @@ async function ensureBalanceReceivableAfterAdvance(params: {
     .select("id")
     .eq("sales_order_id", params.saleId)
     .eq("organization_id", params.orgId)
-    .eq("total_amount", truncateMoney(params.context.totalAmount))
     .maybeSingle();
 
   if (existing?.id) {
