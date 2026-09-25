@@ -45,6 +45,7 @@ describe("accounting proxy route", () => {
       userId: "user-1",
       supabase: {
         from: vi.fn().mockReturnValue(membershipQuery),
+        rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
       },
     });
     getOrganizationBySlugMock.mockResolvedValue({

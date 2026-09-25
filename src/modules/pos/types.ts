@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EventoVentaPos } from "@/modules/accounting/types";
 import type { PaymentMethod } from "@/modules/collections/types";
 import type { Database } from "@/types/supabase";
 
@@ -263,6 +264,17 @@ export type CreatePosSaleResult = {
     cae?: string | null;
     error?: string | null;
   };
+  accountingStatus?:
+    | "NOT_REQUIRED"
+    | "PENDING"
+    | "REVIEW_REQUIRED"
+    | "PARTIALLY_POSTED"
+    | "POSTED"
+    | "SETTLED_INFORMAL"
+    | "ERROR";
+  // Presente sólo cuando el paso correspondiente todavía no se pudo crear
+  // automáticamente; el frontend lo usa para abrir el modal de revisión.
+  accountingSalePayload?: EventoVentaPos | null;
 };
 
 export type PosTerminalFormValues = z.infer<typeof posTerminalFormSchema>;

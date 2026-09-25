@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 import { calculateSalePriceFromCostAndMargin } from "./price-calculations";
 
 describe("calculateSalePriceFromCostAndMargin", () => {
@@ -12,6 +11,6 @@ describe("calculateSalePriceFromCostAndMargin", () => {
       profitMargin
     );
 
-    assert.equal(salePrice, 100.0);
+    expect(salePrice).toBe(100.0);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildCreditNoteItemsFromReturn,
   buildCreditNoteSourceDocumentsFromReturn,
@@ -6,6 +6,8 @@ import {
   resolveReturnLines,
   type SaleReturnSourceSale,
 } from "./sale-return.service";
+
+vi.mock("server-only", () => ({}));
 
 const QUANTITY_ERROR_PATTERN = /supera lo disponible/;
 const UNIT_QUANTITY_ERROR_PATTERN =
@@ -79,8 +81,8 @@ describe("sale return credit-note helpers", () => {
       unitPrice: 100,
       discountAmount: 30,
       netAmount: 170,
-      taxAmount: 35.69,
-      totalAmount: 205.69,
+      taxAmount: 35.7,
+      totalAmount: 205.7,
       restock: true,
     });
   });
@@ -320,7 +322,7 @@ describe("sale return credit-note helpers", () => {
           name: "IVA 21%",
           rate: 21,
           baseAmount: returnedNetAmount,
-          taxAmount: 35.69,
+          taxAmount: 35.7,
           taxCodeSnapshot: "IVA_21",
         },
       ]
@@ -330,12 +332,12 @@ describe("sale return credit-note helpers", () => {
       buildCreditNoteSourceDocumentsFromReturn({
         saleId: "sale-1",
         sale,
-        returnTotal: 205.69,
+        returnTotal: 205.7,
       })
     ).toEqual([
       expect.objectContaining({
         salesOrderId: "sale-1",
-        appliedAmount: 205.69,
+        appliedAmount: 205.7,
         invoiceType: "FACTURA_A",
         invoiceNumber: "FAC-0001",
         arcaStatus: "authorized",

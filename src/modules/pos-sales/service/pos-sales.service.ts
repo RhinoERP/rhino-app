@@ -798,5 +798,9 @@ export async function createDirectSale(
     });
   }
 
-  return { posSaleId };
+  return {
+    posSaleId,
+    accountingStatus: undefined,
+    accountingSalePayload: null,
+  } satisfies CreateDirectSaleResult;
 }

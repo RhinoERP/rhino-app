@@ -62,4 +62,6 @@ export type CreateDirectSaleInput = {
 
 export type CreateDirectSaleResult = {
   posSaleId: string;
+  accountingStatus?: string;
+  accountingSalePayload?: unknown;
 };

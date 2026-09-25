@@ -199,4 +199,51 @@ async function createSellerRole(
   return newRole.id;
 }
 
-export { getUniqueSlug, getOrCreateAdminRole, createSellerRole };
+/**
+ * Creates the "Consumidor Final" customer for a new org and sets it as the
+ * default POS customer, so POS accounting never lacks a customer to invoice.
+ */
+async function createDefaultConsumidorFinalCustomer(
+  organizationId: string,
+  supabaseAdmin: SupabaseClient
+): Promise<void> {
+  const { data: customer, error: customerError } = await supabaseAdmin
+    .from("customers")
+    .insert({
+      organization_id: organizationId,
+      business_name: "Consumidor Final",
+      tax_condition: "CONSUMIDOR_FINAL",
+      is_active: true,
+    })
+    .select("id")
+    .single();
+
+  if (customerError || !customer) {
+    throw new Error(
+      `Error creating default Consumidor Final customer: ${customerError?.message ?? "Unknown error"}`
+    );
+  }
+
+  const { error: settingsError } = await supabaseAdmin
+    .from("organization_settings")
+    .upsert(
+      {
+        organization_id: organizationId,
+        settings: { pos_default_customer_id: customer.id },
+      },
+      { onConflict: "organization_id" }
+    );
+
+  if (settingsError) {
+    throw new Error(
+      `Error setting default POS customer: ${settingsError.message}`
+    );
+  }
+}
+
+export {
+  getUniqueSlug,
+  getOrCreateAdminRole,
+  createSellerRole,
+  createDefaultConsumidorFinalCustomer,
+};

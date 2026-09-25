@@ -1,12 +1,19 @@
+import { buildVentaPos } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import type { ArcaSaleInvoiceResult } from "@/modules/arca/types";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
   getDirectSaleConfigByOrgSlug,
   getOrganizationBySlug,
 } from "@/modules/organizations/service/organizations.service";
+import {
+  type PosSaleAccountingPatch,
+  resolvePosCobroDefaultAccountCode,
+  runPosSaleAccountingFlow,
+} from "@/modules/pos/service/pos-sale-accounting.service";
 import { resolvePosAccessContext } from "@/modules/pos/service/pos-sessions.service";
 import {
   buildItemizedTaxPlan,
@@ -2262,6 +2269,268 @@ export async function searchPosProductsForTerminal(params: {
   });
 }
 
+async function buildPosSaleAccountingLineas(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  insertedItems: InsertedPosSaleItem[];
+  splitTaxPlan: ItemizedTaxPlan;
+}) {
+  const { supabase, orgId, insertedItems, splitTaxPlan } = params;
+  const productIds = [
+    ...new Set(
+      insertedItems
+        .map((item) => item.product_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+
+  const { data: productRows, error } = await supabase
+    .from("products")
+    .select("id, category_id, accounting_account_code")
+    .eq("organization_id", orgId)
+    .in("id", productIds);
+
+  if (error) {
+    throw new Error(
+      `No se pudo obtener la cuenta contable de los productos: ${error.message}`
+    );
+  }
+
+  const typedProductRows = (productRows ?? []) as Array<{
+    id: string;
+    category_id: string | null;
+    accounting_account_code: string | null;
+  }>;
+  const categoryIds = [
+    ...new Set(
+      typedProductRows
+        .map((row) => row.category_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const { data: categoryRules, error: categoryRulesError } = categoryIds.length
+    ? await supabase
+        .from("category_accounting_rules" as never)
+        .select("category_id, account_code")
+        .eq("organization_id", orgId)
+        .in("category_id", categoryIds)
+    : { data: [], error: null };
+
+  if (categoryRulesError) {
+    throw new Error(
+      `No se pudieron obtener las cuentas contables de categorías: ${categoryRulesError.message}`
+    );
+  }
+
+  const accountCodeByCategoryId = new Map(
+    (
+      (categoryRules ?? []) as Array<{
+        category_id: string;
+        account_code: string;
+      }>
+    ).map((row) => [row.category_id, row.account_code])
+  );
+  const accountCodeByProductId = new Map(
+    typedProductRows.map((row) => [
+      row.id,
+      row.accounting_account_code ??
+        (row.category_id
+          ? (accountCodeByCategoryId.get(row.category_id) ?? null)
+          : null),
+    ])
+  );
+
+  return insertedItems
+    .map((item) => {
+      const montoNeto = splitTaxPlan.lineBases.get(item.id) ?? 0;
+      const impuestos = splitTaxPlan.itemTaxes
+        .filter((tax) => tax.lineId === item.id && tax.taxAmount > 0)
+        .map((tax) => ({
+          monto: tax.taxAmount,
+          accountCode: null,
+          taxCode: tax.taxCodeSnapshot,
+          nombre: tax.name,
+        }));
+      const montoImpuestos = impuestos.reduce((sum, tax) => sum + tax.monto, 0);
+
+      return {
+        montoNeto,
+        montoImpuestos,
+        accountCode: item.product_id
+          ? (accountCodeByProductId.get(item.product_id) ?? null)
+          : null,
+        impuestos,
+      };
+    })
+    .filter((line) => line.montoNeto > 0 || line.montoImpuestos > 0);
+}
+
+function normalizePosAccountingPaymentMethod(
+  paymentMethod: string
+): "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ" {
+  if (paymentMethod === "efectivo") {
+    return "EFECTIVO";
+  }
+  if (paymentMethod === "cheque") {
+    return "CHEQUE";
+  }
+  if (paymentMethod === "e-cheq") {
+    return "E-CHEQ";
+  }
+  return "TRANSFERENCIA";
+}
+
+// Fallback por si pos_default_customer_id no está seteado (orgs previas al seed automático).
+async function resolveConsumidorFinalCustomerId(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+}): Promise<string | null> {
+  const { data } = await params.supabase
+    .from("customers")
+    .select("id")
+    .eq("organization_id", params.orgId)
+    .ilike("business_name", "consumidor final")
+    .limit(1)
+    .maybeSingle();
+
+  return data?.id ?? null;
+}
+
+// Nunca debe lanzar: un fallo contable no puede revertir venta/pago/stock ya persistidos.
+async function finalizePosSaleAccounting(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  posSaleId: string;
+  posPaymentId: string | null;
+  receiptNumber: string;
+  saleDate: string;
+  customerId: string | null;
+  paymentMethod: string;
+  totalAmount: number;
+  totalTaxAmount: number;
+  isTicketX: boolean;
+  insertedItems: InsertedPosSaleItem[];
+  splitTaxPlan: ItemizedTaxPlan;
+}): Promise<PosSaleAccountingPatch> {
+  const {
+    supabase,
+    orgSlug,
+    orgId,
+    posSaleId,
+    posPaymentId,
+    receiptNumber,
+    saleDate,
+    customerId,
+    paymentMethod,
+    totalAmount,
+    totalTaxAmount,
+    isTicketX,
+    insertedItems,
+    splitTaxPlan,
+  } = params;
+
+  const nowIso = new Date().toISOString();
+  let patch: PosSaleAccountingPatch = {
+    accounting_status: "NOT_REQUIRED",
+    accounting_sale_entry_id: null,
+    accounting_payment_entry_id: null,
+    accounting_last_error: null,
+    accounting_sale_event_snapshot: null,
+    accounting_payment_event_snapshot: null,
+    accounting_updated_at: nowIso,
+  };
+
+  try {
+    const orgSettings = await getOrgSettings(orgSlug);
+
+    if (!orgSettings.accounting_integration_enabled) {
+      return patch;
+    }
+
+    const clienteId =
+      customerId ??
+      orgSettings.pos_default_customer_id ??
+      (await resolveConsumidorFinalCustomerId({ supabase, orgId }));
+
+    if (clienteId) {
+      if (!posPaymentId) {
+        throw new Error(
+          "No se pudo obtener el ID del pago POS para contabilidad."
+        );
+      }
+
+      const accountingLineas = await buildPosSaleAccountingLineas({
+        supabase,
+        orgId,
+        insertedItems,
+        splitTaxPlan,
+      });
+
+      // El servicio contable exige fecha YYYY-MM-DD; saleDate trae hora incluida.
+      const accountingDate = saleDate.slice(0, 10);
+
+      const bancoAccountCode = resolvePosCobroDefaultAccountCode({
+        paymentMethod,
+        cashAccountCode: orgSettings.pos_cash_account_code,
+        cardAccountCode: orgSettings.pos_card_account_code,
+        transferAccountCode: orgSettings.pos_transfer_account_code,
+        electronicAccountCode: orgSettings.pos_electronic_account_code,
+      });
+
+      const eventoVenta = buildVentaPos(
+        {
+          id: posSaleId,
+          organization_id: orgId,
+          sale_date: accountingDate,
+          receipt_number: receiptNumber,
+        },
+        { total: totalAmount, totalTaxAmount },
+        clienteId,
+        {
+          items: accountingLineas,
+          metodoPago: normalizePosAccountingPaymentMethod(paymentMethod),
+          bancoAccountCode,
+        }
+      );
+
+      patch = await runPosSaleAccountingFlow({
+        eventoVenta,
+        isTicketX,
+        automaticAccountingEnabled:
+          orgSettings.automatic_accounting_enabled || Boolean(bancoAccountCode),
+        orgId,
+      });
+    } else {
+      patch = {
+        ...patch,
+        accounting_status: "REVIEW_REQUIRED",
+        accounting_last_error:
+          "Falta configurar el cliente Consumidor Final para ventas directas de esta organización.",
+      };
+    }
+  } catch (error) {
+    patch = {
+      accounting_status: "ERROR",
+      accounting_sale_entry_id: null,
+      accounting_payment_entry_id: null,
+      accounting_last_error:
+        error instanceof Error ? error.message : "Error de contabilidad POS",
+      accounting_sale_event_snapshot: null,
+      accounting_payment_event_snapshot: null,
+      accounting_updated_at: new Date().toISOString(),
+    };
+  }
+
+  await supabase
+    .from("pos_sales")
+    .update(patch as never)
+    .eq("organization_id", orgId)
+    .eq("id", posSaleId);
+
+  return patch;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: POS checkout orchestrates multiple persistence steps with compensating rollback.
 export async function createPosSale(
   input: CreatePosSaleInput
@@ -2457,9 +2726,10 @@ export async function createPosSale(
 
     let insertedPaymentMethod: PosPaymentMethodValue | null = null;
     let paymentInsertError: string | null = null;
+    let posPaymentId: string | null = null;
 
     for (const paymentMethod of paymentCandidates) {
-      const { error: paymentError } = await supabase
+      const { data: insertedPayment, error: paymentError } = await supabase
         .from("pos_payments")
         .insert({
           pos_sale_id: posSaleId,
@@ -2467,10 +2737,13 @@ export async function createPosSale(
           amount: totalAmount,
           reference_number: sanitizeText(payload.paymentReference),
           card_brand: sanitizeText(payload.cardBrand),
-        });
+        })
+        .select("id")
+        .maybeSingle();
 
       if (!paymentError) {
         insertedPaymentMethod = paymentMethod;
+        posPaymentId = insertedPayment?.id ?? null;
         paymentInsertError = null;
         break;
       }
@@ -2499,22 +2772,45 @@ export async function createPosSale(
       });
     }
 
-    const arcaInvoice = isNonInvoicedPaymentMethod
-      ? ({
-          status: "not_requested",
-          error: null,
-        } satisfies CreatePosSaleResult["arcaInvoice"])
-      : await tryAutoEmitPosSaleInvoice({
-          supabase,
-          orgSlug: payload.orgSlug,
-          orgId: org.id,
-          posSaleId,
-          invoiceType: autoInvoiceType,
-        });
+    const arcaInvoice =
+      isNonInvoicedPaymentMethod || !autoInvoiceType
+        ? ({
+            status: "not_requested",
+            error: null,
+          } satisfies CreatePosSaleResult["arcaInvoice"])
+        : await tryAutoEmitPosSaleInvoice({
+            supabase,
+            orgSlug: payload.orgSlug,
+            orgId: org.id,
+            posSaleId,
+            invoiceType: autoInvoiceType,
+          });
+
+    const accountingPatch = await finalizePosSaleAccounting({
+      supabase,
+      orgSlug: payload.orgSlug,
+      orgId: org.id,
+      posSaleId,
+      posPaymentId,
+      receiptNumber,
+      saleDate,
+      customerId: payload.customerId ?? null,
+      paymentMethod: payload.paymentMethod,
+      totalAmount,
+      totalTaxAmount,
+      isTicketX: persistedInvoiceType === "TICKET_X",
+      insertedItems: (insertedItems ?? []) as InsertedPosSaleItem[],
+      splitTaxPlan,
+    });
 
     return {
       posSaleId,
       arcaInvoice,
+      accountingStatus: accountingPatch.accounting_status,
+      // REVIEW_REQUIRED: se expone el evento del paso pendiente para el modal de dos pasos (Fase 4).
+      accountingSalePayload: accountingPatch.accounting_sale_entry_id
+        ? null
+        : accountingPatch.accounting_sale_event_snapshot,
     };
   } catch (error) {
     if (stockContext) {

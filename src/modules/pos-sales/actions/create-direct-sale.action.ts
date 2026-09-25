@@ -6,6 +6,8 @@ import type { CreateDirectSaleInput } from "../types";
 export type CreateDirectSaleActionResult = {
   success: boolean;
   posSaleId?: string;
+  accountingStatus?: string;
+  accountingSalePayload?: unknown;
   error?: string;
 };
 
@@ -18,6 +20,8 @@ export async function createDirectSaleAction(
     return {
       success: true,
       posSaleId: result.posSaleId,
+      accountingStatus: result.accountingStatus,
+      accountingSalePayload: result.accountingSalePayload ?? null,
     };
   } catch (error) {
     console.error("Error creating direct sale:", error);

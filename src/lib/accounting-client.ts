@@ -8,6 +8,7 @@ import type {
   EventoNcVenta,
   EventoNdVenta,
   EventoOrdenPago,
+  EventoVentaPos,
   InformalEntry,
   InformalEntryFormalizationStatus,
   InformalEntrySourceType,
@@ -872,6 +873,62 @@ export function buildCobro(
       clienteId: receivable.customer_id,
       facturaId: receivable.sales_order_id ?? undefined,
       bancoAccountCode: options.bancoAccountCode ?? undefined,
+      ...buildCurrencyDatos(options),
+    },
+  };
+}
+
+// ------------------------------------------------------------
+// buildVentaPos
+// Evento único de una venta directa POS. clienteId siempre debe venir
+// resuelto (cliente real o "consumidor final" configurado por org) antes
+// de llamar a estos builders — no se resuelve acá.
+// ------------------------------------------------------------
+export function buildVentaPos(
+  posSale: {
+    id: string;
+    organization_id: string;
+    sale_date: string;
+    receipt_number?: string | null;
+  },
+  totals: { total: number; totalTaxAmount: number },
+  clienteId: string,
+  options: {
+    items?: LineaDesglosadaInput[];
+    metodoPago?: "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ";
+    bancoAccountCode?: string | null;
+  } & CurrencyFields = {}
+): EventoVentaPos {
+  const montoNeto = totals.total - totals.totalTaxAmount;
+  const comprobanteNumero =
+    posSale.receipt_number?.trim() || `POS-${posSale.id.slice(0, 8)}`;
+  const lineasDesglosadas = options.items?.length
+    ? buildLineasDesglosadas(options.items)
+    : [
+        {
+          accountCode: null,
+          montoNeto: toAccountingStr(montoNeto),
+          montoImpuestos: toAccountingStr(totals.totalTaxAmount),
+        },
+      ];
+
+  return {
+    tipoEvento: "VENTA_POS",
+    orgId: posSale.organization_id,
+    referenciaId: posSale.id,
+    referenciaTabla: "pos_sales",
+    fecha: posSale.sale_date,
+    descripcion: `Venta directa POS ${comprobanteNumero}`,
+    idempotencyKey: `VENTA_POS_${posSale.id}`,
+    datos: {
+      totalVenta: toAccountingStr(totals.total),
+      montoNeto: toAccountingStr(montoNeto),
+      montoImpuestos: toAccountingStr(totals.totalTaxAmount),
+      metodoPago: options.metodoPago,
+      bancoAccountCode: options.bancoAccountCode ?? undefined,
+      clienteId,
+      comprobanteNumero,
+      lineasDesglosadas,
       ...buildCurrencyDatos(options),
     },
   };

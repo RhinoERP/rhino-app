@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { formalizeSinglePosSaleAccountingEntry } from "@/modules/pos/service/pos-sale-accounting.service";
 import type { Database, Json } from "@/types/supabase";
 import {
   ArcaConnectionError,
@@ -887,6 +888,42 @@ async function recoverPosVoucherReservationConflict(params: {
     : "blocked";
 }
 
+// Nunca lanza: un fallo al formalizar no debe revertir la autorización ARCA
+// ya obtenida, ni bloquear la respuesta al usuario.
+async function formalizePosSaleAccountingIfPending(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  posSaleId: string;
+  accountingStatus?: string | null;
+  saleEntryId?: string | null;
+}): Promise<void> {
+  const isPendingFormalization =
+    params.accountingStatus === "PENDING" ||
+    params.accountingStatus === "PARTIALLY_POSTED";
+
+  if (!(isPendingFormalization && params.saleEntryId)) {
+    return;
+  }
+
+  try {
+    const patch = await formalizeSinglePosSaleAccountingEntry({
+      orgId: params.orgId,
+      saleEntryId: params.saleEntryId,
+    });
+
+    await params.supabase
+      .from("pos_sales")
+      .update(patch as never)
+      .eq("organization_id", params.orgId)
+      .eq("id", params.posSaleId);
+  } catch (error) {
+    console.error(
+      "No se pudo formalizar el asiento contable de la venta POS tras la autorización ARCA",
+      { posSaleId: params.posSaleId, error }
+    );
+  }
+}
+
 async function persistAuthorizedPosInvoice(params: {
   orgId: string;
   posSaleId: string;
@@ -939,6 +976,27 @@ async function persistAuthorizedPosInvoice(params: {
       `ARCA autorizó la factura POS, pero no se pudo persistir el resultado: ${error?.message ?? "sin respuesta"}`
     );
   }
+
+  // Select aparte: columnas todavía no reflejadas en los tipos generados de Supabase.
+  const { data: accountingRow } = await supabase
+    .from("pos_sales")
+    .select("accounting_status, accounting_sale_entry_id" as never)
+    .eq("organization_id", params.orgId)
+    .eq("id", params.posSaleId)
+    .maybeSingle();
+
+  const typedAccountingRow = accountingRow as unknown as {
+    accounting_status?: string | null;
+    accounting_sale_entry_id?: string | null;
+  } | null;
+
+  await formalizePosSaleAccountingIfPending({
+    supabase,
+    orgId: params.orgId,
+    posSaleId: params.posSaleId,
+    accountingStatus: typedAccountingRow?.accounting_status,
+    saleEntryId: typedAccountingRow?.accounting_sale_entry_id,
+  });
 
   return toArcaSaleInvoiceResult(
     {

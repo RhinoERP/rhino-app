@@ -143,6 +143,31 @@ export const EventoNcCompraSchema = EventoBaseSchema.extend({
 export type EventoNcCompra = z.infer<typeof EventoNcCompraSchema>;
 
 // ------------------------------------------------------------
+// VENTA_POS
+// Venta directa POS. Ticket X se asienta directo; Factura B/C se formaliza
+// cuando ARCA autoriza.
+// ------------------------------------------------------------
+export const EventoVentaPosSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("VENTA_POS"),
+  referenciaTabla: z.literal("pos_sales"),
+  datos: z.object({
+    totalVenta: montoStr,
+    montoNeto: montoStr.optional(),
+    montoImpuestos: montoStr.optional(),
+    metodoPago: z
+      .enum(["EFECTIVO", "TRANSFERENCIA", "CHEQUE", "E-CHEQ"])
+      .optional(),
+    bancoAccountCode: z.string().optional(),
+    clienteId: z.string().uuid(),
+    comprobanteNumero: z.string(),
+    lineasDesglosadas: z.array(lineaDesglosadaSchema).optional(),
+    ...usdFields,
+  }),
+});
+
+export type EventoVentaPos = z.infer<typeof EventoVentaPosSchema>;
+
+// ------------------------------------------------------------
 // COBRO
 // ------------------------------------------------------------
 export const EventoCobroSchema = EventoBaseSchema.extend({
@@ -338,6 +363,7 @@ export const AnyEventoSchema = z.discriminatedUnion("tipoEvento", [
   EventoNcVentaSchema,
   EventoNdVentaSchema,
   EventoNcCompraSchema,
+  EventoVentaPosSchema,
   EventoCobroSchema,
   EventoOrdenPagoSchema,
   EventoAsientoManualSchema,
@@ -357,6 +383,7 @@ export type AnyEvento =
   | EventoNcVenta
   | EventoNdVenta
   | EventoNcCompra
+  | EventoVentaPos
   | EventoCobro
   | EventoOrdenPago
   | EventoAsientoManual

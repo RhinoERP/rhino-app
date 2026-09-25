@@ -8,6 +8,7 @@ import {
   EventoNcCompraSchema,
   EventoNdVentaSchema,
   EventoOrdenPagoSchema,
+  EventoVentaPosSchema,
 } from "../eventos.schema";
 
 const ventaBase = {
@@ -185,6 +186,36 @@ describe("EventoCobroSchema", () => {
   });
 });
 
+describe("EventoVentaPosSchema", () => {
+  it("acepta una venta POS con cuenta de cobro y líneas desglosadas", () => {
+    const ventaPos = {
+      tipoEvento: "VENTA_POS" as const,
+      orgId: "00000000-0000-0000-0000-000000000001",
+      referenciaId: "00000000-0000-0000-0000-000000000500",
+      referenciaTabla: "pos_sales" as const,
+      fecha: "2026-09-15",
+      descripcion: "Venta POS final",
+      idempotencyKey: "VENTA_POS_00000000-0000-0000-0000-000000000500",
+      datos: {
+        totalVenta: "1250.0000",
+        metodoPago: "EFECTIVO" as const,
+        bancoAccountCode: "CAJA_PESOS",
+        clienteId: "00000000-0000-0000-0000-000000000003",
+        comprobanteNumero: "0001",
+        lineasDesglosadas: [
+          {
+            accountCode: "VENTAS_MERCADERIAS",
+            montoNeto: "1250.0000",
+            montoImpuestos: "0.0000",
+          },
+        ],
+      },
+    };
+
+    expect(() => EventoVentaPosSchema.parse(ventaPos)).not.toThrow();
+  });
+});
+
 describe("EventoOrdenPagoSchema", () => {
   it("valida una orden de pago con banco informado", () => {
     const ordenPago = {
@@ -217,9 +248,7 @@ describe("EventoAsientoManualSchema", () => {
     fecha: "2026-06-09",
     descripcion: "Asiento manual - Ajuste de caja",
     idempotencyKey: "MANUAL_00000000-0000-0000-0000-000000000099",
-    datos: {
-      referenciaLibre: "Ajuste cierre Z",
-    },
+    datos: { referenciaLibre: "Ajuste cierre Z" },
   };
 
   it("valida un asiento manual con referencia libre opcional", () => {
