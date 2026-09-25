@@ -103,6 +103,17 @@ const movementLabels: Record<
   },
 };
 
+const sourceLabels = {
+  MANUAL: "Manual",
+  IMPORT: "Importación",
+  PURCHASE: "Compra",
+  SALE: "Venta",
+  POS: "POS",
+  ORDER: "Pedido",
+  RETURN: "Devolución",
+  SYSTEM: "Sistema",
+} as const;
+
 const formatChange = (
   previous: number | null | undefined,
   next: number | null | undefined
@@ -738,6 +749,7 @@ export function StockMovementsCard({
                 {tracksUnits && (
                   <TableHead className="text-right">Unidades</TableHead>
                 )}
+                <TableHead>Realizado por</TableHead>
                 <TableHead>Motivo</TableHead>
               </TableRow>
             </TableHeader>
@@ -746,7 +758,7 @@ export function StockMovementsCard({
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
-                    colSpan={tracksUnits ? 6 : 5}
+                    colSpan={tracksUnits ? 7 : 6}
                   >
                     Cargando movimientos…
                   </TableCell>
@@ -756,7 +768,7 @@ export function StockMovementsCard({
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
-                    colSpan={tracksUnits ? 6 : 5}
+                    colSpan={tracksUnits ? 7 : 6}
                   >
                     Aún no hay movimientos registrados para este producto.
                   </TableCell>
@@ -803,6 +815,10 @@ export function StockMovementsCard({
                           {unitChange}
                         </TableCell>
                       )}
+                      <TableCell className="text-muted-foreground text-sm">
+                        {movement.created_by_name ??
+                          sourceLabels[movement.source]}
+                      </TableCell>
                       <TableCell className="max-w-[280px] truncate text-muted-foreground text-sm">
                         {movement.reason || "—"}
                       </TableCell>
@@ -835,6 +851,7 @@ export function StockMovementsCard({
                   {tracksUnits && (
                     <TableHead className="text-right">Unidades</TableHead>
                   )}
+                  <TableHead>Realizado por</TableHead>
                   <TableHead>Motivo</TableHead>
                 </TableRow>
               </TableHeader>
@@ -843,7 +860,7 @@ export function StockMovementsCard({
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
-                      colSpan={tracksUnits ? 6 : 5}
+                      colSpan={tracksUnits ? 7 : 6}
                     >
                       Cargando movimientos…
                     </TableCell>
@@ -853,7 +870,7 @@ export function StockMovementsCard({
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
-                      colSpan={tracksUnits ? 6 : 5}
+                      colSpan={tracksUnits ? 7 : 6}
                     >
                       Aún no hay movimientos registrados para este producto.
                     </TableCell>
@@ -892,6 +909,10 @@ export function StockMovementsCard({
                             {unitChange}
                           </TableCell>
                         )}
+                        <TableCell className="text-muted-foreground text-sm">
+                          {movement.created_by_name ??
+                            sourceLabels[movement.source]}
+                        </TableCell>
                         <TableCell className="max-w-[360px] truncate text-muted-foreground text-sm">
                           {movement.reason || "—"}
                         </TableCell>
@@ -957,6 +978,18 @@ export function StockMovementsCard({
                     </p>
                   </div>
                 ) : null}
+                <div className="space-y-1">
+                  <p className="text-muted-foreground">Origen</p>
+                  <p className="font-medium">
+                    {sourceLabels[selectedMovement.source]}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground">Realizado por</p>
+                  <p className="font-medium">
+                    {selectedMovement.created_by_name ?? "Sistema"}
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-2">
