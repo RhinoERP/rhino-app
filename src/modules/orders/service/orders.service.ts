@@ -4152,7 +4152,7 @@ type CancelOrderResult = {
   error?: string;
 };
 
-function shouldRestoreStock(saleStatus: string | null): boolean {
+export function shouldRestoreStock(saleStatus: string | null): boolean {
   return (
     saleStatus === "CONFIRMED" ||
     saleStatus === "DISPATCH" ||
@@ -4213,7 +4213,7 @@ async function cancelLinkedPurchaseOrder(
   }
 }
 
-async function getSaleStatusForOrderParent(
+export async function getSaleStatusForOrderParent(
   supabase: SupabaseClient<Database>,
   parentOrderId: string,
   orgId: string

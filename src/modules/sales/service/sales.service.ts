@@ -60,6 +60,16 @@ const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
 const INFORMAL_ADVANCE_NOTA_DE_VENTA_ERROR =
   "El anticipo informal solo está disponible para notas de venta";
 
+function assertCommercialExchangeRate(rate: number | null | undefined): void {
+  if (
+    rate !== undefined &&
+    rate !== null &&
+    (!Number.isFinite(rate) || rate <= 0)
+  ) {
+    throw new Error("El tipo de cambio comercial debe ser mayor a cero.");
+  }
+}
+
 // Explicitly add remittance_number because generated types might be outdated
 export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"] & {
   accounting_informal_entry_id?: string | null;
@@ -3990,6 +4000,7 @@ export async function confirmSaleOrder(
   input: ConfirmSaleOrderInput
 ): Promise<ConfirmSaleResult> {
   const { orgSlug, saleId, customerId, sellerId, saleDate } = input;
+  assertCommercialExchangeRate(input.commercialExchangeRate);
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -4039,6 +4050,16 @@ export async function confirmSaleOrder(
 
   assertCanManageSale(accessContext, existingSale.user_id ?? null);
 
+  if (
+    input.commercialExchangeRate !== undefined &&
+    (existingSale.arca_status === "pending" ||
+      existingSale.arca_status === "authorized")
+  ) {
+    throw new Error(
+      "No se puede cambiar el tipo de cambio comercial con una emisión ARCA pendiente o autorizada."
+    );
+  }
+
   const currentStatus = existingSale.status as SalesOrderStatus;
 
   if (currentStatus === "CANCELLED") {
@@ -4074,6 +4095,9 @@ export async function confirmSaleOrder(
       .from("sales_orders")
       .update({
         status: "CONFIRMED",
+        ...(input.commercialExchangeRate !== undefined
+          ? { commercial_exchange_rate: input.commercialExchangeRate }
+          : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", saleId)
@@ -4245,6 +4269,9 @@ export async function confirmSaleOrder(
       expiration_date: dueDate,
       invoice_type: invoiceType,
       invoice_number: sanitizeText(input.invoiceNumber),
+      ...(input.commercialExchangeRate !== undefined
+        ? { commercial_exchange_rate: input.commercialExchangeRate }
+        : {}),
       observations: sanitizeText(input.observations),
       sub_total: subTotalAmount,
       total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
@@ -4884,6 +4911,9 @@ function buildSaleUpdateData(
   }
   if (input.invoiceNumber !== undefined) {
     updateData.invoice_number = input.invoiceNumber;
+  }
+  if (input.commercialExchangeRate !== undefined) {
+    updateData.commercial_exchange_rate = input.commercialExchangeRate;
   }
   if (input.remittanceNumber !== undefined) {
     updateData.remittance_number = input.remittanceNumber;
@@ -5648,6 +5678,9 @@ async function persistSaleUpdate(params: {
             : null,
           global_discount_amount: globalDiscountAmount,
           total_amount: totalAmount,
+          ...(params.input.commercialExchangeRate !== undefined
+            ? { commercial_exchange_rate: params.input.commercialExchangeRate }
+            : {}),
           updated_at: new Date().toISOString(),
         })
         .eq("id", params.saleId)
@@ -6624,6 +6657,7 @@ export async function updateSaleOrder(
   input: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
   const { orgSlug, saleId } = input;
+  assertCommercialExchangeRate(input.commercialExchangeRate);
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -6642,6 +6676,14 @@ export async function updateSaleOrder(
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
   assertNoAuthorizedSaleFiscalChanges(existingSale, input);
+  if (
+    existingSale.arcaStatus === "pending" &&
+    input.commercialExchangeRate !== undefined
+  ) {
+    throw new Error(
+      "Conciliá la emisión pendiente en ARCA antes de cambiar el tipo de cambio comercial."
+    );
+  }
 
   if (input.sellerId !== undefined) {
     assertCanAssignSeller(accessContext, input.sellerId);

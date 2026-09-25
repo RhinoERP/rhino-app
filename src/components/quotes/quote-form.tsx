@@ -1317,7 +1317,9 @@ export function QuoteForm({
                     name="exchangeRate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Tipo de cambio (USD → ARS)</FormLabel>
+                        <FormLabel>
+                          Tipo de cambio comercial (USD → ARS)
+                        </FormLabel>
                         <div className="flex items-center gap-2">
                           {editingRate || field.value == null ? (
                             <>

@@ -108,6 +108,7 @@ export type ConfirmSaleOrderInput = {
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
+  commercialExchangeRate?: number | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   accountingInformalEntryId?: string | null;
@@ -158,6 +159,7 @@ export type UpdateSaleOrderInput = {
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
+  commercialExchangeRate?: number | null;
   remittanceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;
