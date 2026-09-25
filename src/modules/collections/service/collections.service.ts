@@ -55,6 +55,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sub_total?: number | null;
         global_discount_amount?: number | null;
         remittance_number?: string | null;
+        document_type?: string | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
@@ -68,6 +69,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sub_total?: number | null;
         global_discount_amount?: number | null;
         remittance_number?: string | null;
+        document_type?: string | null;
         items?: SaleItemRaw[] | null;
       }>
     | null;
@@ -471,6 +473,7 @@ function normalizeSaleInfo(
       rawSale.global_discount_amount as number | null | undefined
     ),
     remittance_number: (rawSale.remittance_number as string | null) ?? null,
+    document_type: (rawSale.document_type as string | null) ?? null,
   };
 }
 
@@ -2552,7 +2555,7 @@ export async function getReceivablesPaginated(
       due_date,
       created_at,
       customer:customers(id, business_name, fantasy_name, city),
-      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at),
+      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at, document_type),
       manual_invoice:manual_fiscal_invoices(created_by)
     `
   );
