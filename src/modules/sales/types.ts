@@ -133,6 +133,7 @@ export type CreatePreSaleOrderInput = {
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
   taxes?: PreSaleTaxInput[];
+  advancePaymentPercentage?: number | null;
 };
 
 export type DispatchSaleOrderInput = {
@@ -162,6 +163,7 @@ export type UpdateSaleOrderInput = {
   salesPriceListId?: string | null;
   priceLevelId?: string | null;
   globalDiscountPercentage?: number | null;
+  advancePaymentPercentage?: number | null;
   items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];
 };
