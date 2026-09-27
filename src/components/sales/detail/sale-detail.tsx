@@ -80,7 +80,6 @@ import {
 } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
-import { computeLineExtrasTotal } from "@/lib/line-values";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaVenta } from "@/modules/accounting/types";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
@@ -686,6 +685,8 @@ function buildComparableTaxFingerprint(
 }
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
+  quoteItemId: item.quoteItemId,
+  extras: item.extras,
   type: item.type,
   productId: item.type === "product" ? item.productId : null,
   productVariantId:
@@ -766,7 +767,12 @@ function calculateItemTotals(item: ItemState) {
     ? (item.weightQuantity ?? 0)
     : item.quantity;
   const effectiveUnitPrice = usesWeight ? item.basePrice : item.unitPrice;
-  const gross = effectiveQuantity * effectiveUnitPrice;
+  const extrasPerUnit = (item.extras ?? []).reduce(
+    (sum, extra) => sum + extra.price,
+    0
+  );
+  const gross =
+    effectiveQuantity * effectiveUnitPrice + item.quantity * extrasPerUnit;
   const discount = Math.min(
     Math.max(0, (item.discountPercent / 100) * gross),
     Math.max(0, gross)
@@ -1529,17 +1535,6 @@ export function SaleDetail({
     totals.total,
     totals.totalDiscountAmount,
   ]);
-
-  const getExtrasAmount = (item: ItemState): number => {
-    if (!item.extras || item.extras.length === 0) {
-      return 0;
-    }
-    return computeLineExtrasTotal(item.extras) * item.quantity;
-  };
-
-  const itemsExtrasTotal = truncateMoney(
-    items.reduce((sum, item) => sum + getExtrasAmount(item), 0)
-  );
 
   const dueDate = computeDueDate(
     saleDateString,
@@ -3597,8 +3592,7 @@ export function SaleDetail({
 
                       if (isAdjustment) {
                         const subtotal = truncateMoney(
-                          calculateItemTotals(item).subtotal +
-                            getExtrasAmount(item)
+                          calculateItemTotals(item).subtotal
                         );
                         return (
                           <div
@@ -3819,8 +3813,7 @@ export function SaleDetail({
                                 <p className="whitespace-nowrap text-right font-medium tabular-nums">
                                   {formatCurrency(
                                     truncateMoney(
-                                      calculateItemTotals(item).subtotal +
-                                        getExtrasAmount(item)
+                                      calculateItemTotals(item).subtotal
                                     )
                                   )}
                                 </p>
@@ -3981,14 +3974,7 @@ export function SaleDetail({
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>
-                      {formatCurrency(
-                        isEditingDetails
-                          ? truncateMoney(
-                              summaryTotals.subtotal + itemsExtrasTotal
-                            )
-                          : summaryTotals.subtotal,
-                        sale.currency
-                      )}
+                      {formatCurrency(summaryTotals.subtotal, sale.currency)}
                     </span>
                   </div>
                   {totals.adjustmentsTotal !== 0 ? (

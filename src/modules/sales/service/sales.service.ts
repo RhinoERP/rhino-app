@@ -1138,7 +1138,12 @@ function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
     useWeightQuantity && Number.isFinite(item.basePrice)
       ? (item.basePrice as number)
       : item.unitPrice;
-  const gross = truncateMoney(effectiveQuantity * effectiveUnitPrice);
+  const extrasPerUnit = truncateMoney(
+    (item.extras ?? []).reduce((sum, extra) => sum + extra.price, 0)
+  );
+  const gross = truncateMoney(
+    effectiveQuantity * effectiveUnitPrice + item.quantity * extrasPerUnit
+  );
   const discountPercent = item.discountPercentage ?? 0;
   const discount = truncateMoney(
     Math.min(Math.max(0, (discountPercent / 100) * gross), Math.max(0, gross))
@@ -5098,6 +5103,7 @@ function calculateSaleTotals(
       unitPrice: item.unitPrice,
       basePrice: item.basePrice,
       discountPercentage: item.discountPercentage ?? null,
+      extras: item.extras ?? null,
     });
     return truncateMoney(total + subtotal);
   }, 0);
@@ -5167,6 +5173,8 @@ function normalizeUpdateItemsForConfirm(
       unitPrice: item.unitPrice,
       basePrice: item.basePrice,
       discountPercentage: item.discountPercentage ?? null,
+      quoteItemId: item.quoteItemId ?? null,
+      extras: item.extras ?? null,
       tracksStockUnits:
         item.tracksStockUnits !== undefined
           ? Boolean(item.tracksStockUnits)
@@ -5582,6 +5590,8 @@ async function persistSaleUpdate(params: {
       unitPrice: item.unitPrice,
       basePrice: item.basePrice ?? item.unitPrice,
       discountPercentage: item.discountPercentage ?? 0,
+      quoteItemId: item.quoteItemId ?? null,
+      extras: item.extras ?? [],
     }));
 
     const rpcTaxes = (params.input.taxes ?? []).map((tax) => ({
@@ -5600,7 +5610,7 @@ async function persistSaleUpdate(params: {
           error: { message: string } | null;
         }>;
       }
-    ).rpc("update_sale_order_atomic", {
+    ).rpc("update_sale_order_with_extras_atomic", {
       p_org_id: params.orgId,
       p_sale_id: params.saleId,
       p_customer_id: params.input.customerId ?? null,
@@ -6653,6 +6663,41 @@ export async function regenerateSaleLevelRemito(params: {
   }
 }
 
+async function assertEditedItemsIncludeExtras(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string,
+  items: UpdateSaleOrderInput["items"]
+): Promise<void> {
+  if (!items?.length) {
+    return;
+  }
+
+  const { data: persistedItems, error } = await supabase
+    .from("sales_order_items")
+    .select("id, sales_order_item_extras(id)")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId);
+  if (error) {
+    throw new Error(`No se pudieron verificar los extras: ${error.message}`);
+  }
+
+  const itemsWithExtras = new Set(
+    (persistedItems ?? [])
+      .filter((item) => item.sales_order_item_extras?.length)
+      .map((item) => item.id)
+  );
+  if (
+    items.some(
+      (item) => item.id && itemsWithExtras.has(item.id) && !item.extras
+    )
+  ) {
+    throw new Error(
+      "La edición debe incluir los extras de los ítems de la venta"
+    );
+  }
+}
+
 export async function updateSaleOrder(
   input: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
@@ -6675,6 +6720,7 @@ export async function updateSaleOrder(
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
+  await assertEditedItemsIncludeExtras(supabase, org.id, saleId, input.items);
   assertNoAuthorizedSaleFiscalChanges(existingSale, input);
   if (
     existingSale.arcaStatus === "pending" &&

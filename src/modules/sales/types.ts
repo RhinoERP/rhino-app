@@ -93,6 +93,8 @@ export type ConfirmSaleItemInput = {
   unitPrice: number;
   basePrice?: number;
   discountPercentage?: number | null;
+  quoteItemId?: string | null;
+  extras?: Array<{ description: string; price: number }> | null;
   tracksStockUnits?: boolean;
   unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   taxes?: ItemTaxInput[];
