@@ -289,7 +289,7 @@ export function ManualFiscalInvoicesPanel({
             </div>
             {currency === "USD" && (
               <div>
-                <Label>Cotización USD → ARS</Label>
+                <Label>Tipo de cambio comercial USD → ARS</Label>
                 <Input
                   min="0"
                   onChange={(e) => setExchangeRate(e.target.value)}

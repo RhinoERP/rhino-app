@@ -85,6 +85,10 @@ export default async function SaleDetailPage({
     notFound();
   }
 
+  if (sale.document_type === "ADVANCE") {
+    notFound();
+  }
+
   return (
     <div className="space-y-6">
       <SaleDetail

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateProductLotInput,
@@ -30,12 +31,28 @@ export type DeleteProductLotActionResult = {
   error?: string;
 };
 
+async function getAuthenticatedUserId(): Promise<string> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    throw new Error("Usuario no autenticado");
+  }
+
+  return data.user.id;
+}
+
 export async function createProductLotAction(
   input: CreateProductLotInput
 ): Promise<ProductLotActionResult> {
   await ensure("inventory.manage", input.orgSlug);
   try {
-    const lot = await createProductLotForOrg(input);
+    const createdBy = await getAuthenticatedUserId();
+    const lot = await createProductLotForOrg({
+      ...input,
+      createdBy,
+      source: "MANUAL",
+    });
     revalidatePath(`/org/${input.orgSlug}/stock`);
     revalidatePath(`/org/${input.orgSlug}/stock/${input.productId}`);
 
@@ -59,7 +76,12 @@ export async function createStockMovementAction(
 ): Promise<StockMovementActionResult> {
   await ensure("inventory.manage", input.orgSlug);
   try {
-    const movement = await createStockMovementForOrg(input);
+    const createdBy = await getAuthenticatedUserId();
+    const movement = await createStockMovementForOrg({
+      ...input,
+      createdBy,
+      source: "MANUAL",
+    });
     revalidatePath(`/org/${input.orgSlug}/stock`);
     revalidatePath(`/org/${input.orgSlug}/stock/${input.productId}`);
 
@@ -83,7 +105,12 @@ export async function updateProductLotAction(
 ): Promise<ProductLotActionResult> {
   await ensure("inventory.manage", input.orgSlug);
   try {
-    const lot = await updateProductLotForOrg(input);
+    const createdBy = await getAuthenticatedUserId();
+    const lot = await updateProductLotForOrg({
+      ...input,
+      createdBy,
+      source: "MANUAL",
+    });
     revalidatePath(`/org/${input.orgSlug}/stock`);
     revalidatePath(`/org/${input.orgSlug}/stock/${input.productId}`);
 

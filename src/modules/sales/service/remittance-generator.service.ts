@@ -512,6 +512,20 @@ export function buildRemittanceFromSale(
       unitPrice: truncateMoney(extra.price),
     }));
 
+    // El subtotal persistido en sales_order_items es la fuente de verdad:
+    // ya contempla la venta por peso (unit_quantity × precio por kg) o por
+    // unidad (quantity × precio unitario), con su descuento de línea aplicado.
+    // Fallback solo para datos legacy sin subtotal válido.
+    const fallbackSubtotal = computeLineGross(
+      item.unitPrice,
+      item.quantity,
+      item.extras ?? undefined
+    );
+    const lineSubtotal =
+      Number.isFinite(item.subtotal) && item.subtotal > 0
+        ? item.subtotal
+        : fallbackSubtotal;
+
     return {
       sku: item.sku,
       name: item.name,
@@ -525,11 +539,7 @@ export function buildRemittanceFromSale(
           ? undefined
           : (item.weightQuantity ?? undefined),
       unitPrice: item.unitPrice,
-      subtotal: computeLineGross(
-        item.unitPrice,
-        item.quantity,
-        item.extras ?? undefined
-      ),
+      subtotal: truncateMoney(lineSubtotal),
       discountPercentage:
         item.type === "adjustment"
           ? undefined

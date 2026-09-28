@@ -67,6 +67,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import {
   hasActiveBrowserSession,
@@ -598,6 +599,10 @@ export function PreSaleForm({
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
+  const [hasAdvance, setHasAdvance] = useState(false);
+  const [advancePercentage, setAdvancePercentage] = useState<number | null>(
+    null
+  );
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [observations, setObservations] = useState<string>("");
 
@@ -1500,6 +1505,9 @@ export function PreSaleForm({
     }
   };
 
+  const resolvedAdvancePaymentPercentage =
+    invoiceType === "NOTA_DE_VENTA" && hasAdvance ? advancePercentage : null;
+
   const onSubmit = async () => {
     if (!canSubmit) {
       setError("Completa los datos requeridos antes de guardar");
@@ -1521,6 +1529,7 @@ export function PreSaleForm({
         expirationDate: expirationDateString || null,
         creditDays: normalizedExpirationDays,
         invoiceType,
+        advancePaymentPercentage: resolvedAdvancePaymentPercentage,
         observations: composePaymentObservations(
           observations,
           paymentMethodOptions,
@@ -2067,6 +2076,63 @@ export function PreSaleForm({
                     </SelectContent>
                   </Select>
                 </div>
+
+                {invoiceType === "NOTA_DE_VENTA" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="hasAdvance">Anticipo</Label>
+                    <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                      <div className="space-y-0.5">
+                        <label
+                          className="flex cursor-pointer items-center gap-2 font-medium text-sm"
+                          htmlFor="hasAdvance"
+                        >
+                          <input
+                            checked={hasAdvance}
+                            className="size-4 accent-primary"
+                            id="hasAdvance"
+                            onChange={(event) => {
+                              setHasAdvance(event.target.checked);
+                              if (!event.target.checked) {
+                                setAdvancePercentage(null);
+                              }
+                            }}
+                            type="checkbox"
+                          />
+                          Pago anticipado
+                        </label>
+                        <p className="text-muted-foreground text-xs">
+                          Se registra automáticamente una cuenta por cobrar por
+                          el porcentaje elegido al guardar la preventa.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="w-20"
+                          disabled={!hasAdvance}
+                          id="advancePercentage"
+                          inputMode="numeric"
+                          max={100}
+                          min={1}
+                          onChange={(event) => {
+                            const parsed = Number.parseInt(
+                              event.target.value,
+                              10
+                            );
+                            setAdvancePercentage(
+                              Number.isNaN(parsed)
+                                ? null
+                                : Math.min(Math.max(parsed, 1), 100)
+                            );
+                          }}
+                          step="1"
+                          type="number"
+                          value={advancePercentage ?? ""}
+                        />
+                        <span className="text-muted-foreground text-sm">%</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label htmlFor="paymentMethod">Método de pago</Label>
@@ -3183,6 +3249,19 @@ export function PreSaleForm({
               <span className="text-muted-foreground">Productos</span>
               <span className="font-medium">{totals.totalItems}</span>
             </div>
+            {invoiceType === "NOTA_DE_VENTA" &&
+            hasAdvance &&
+            advancePercentage ? (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Anticipo</span>
+                <span className="text-right font-medium">
+                  {advancePercentage}% —{" "}
+                  {formatCurrency(
+                    truncateMoney((totals.total * advancePercentage) / 100)
+                  )}
+                </span>
+              </div>
+            ) : null}
             <Separator />
             <div className="flex items-center justify-between gap-4 text-base">
               <span className="font-medium">Total</span>

@@ -47,6 +47,7 @@ export type ReceivableAccount = {
     sub_total?: number | null;
     global_discount_amount?: number | null;
     remittance_number?: string | null;
+    document_type?: string | null;
   } | null;
   seller?: {
     id: string;

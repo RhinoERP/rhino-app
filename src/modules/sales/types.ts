@@ -93,6 +93,8 @@ export type ConfirmSaleItemInput = {
   unitPrice: number;
   basePrice?: number;
   discountPercentage?: number | null;
+  quoteItemId?: string | null;
+  extras?: Array<{ description: string; price: number }> | null;
   tracksStockUnits?: boolean;
   unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   taxes?: ItemTaxInput[];
@@ -108,6 +110,7 @@ export type ConfirmSaleOrderInput = {
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
+  commercialExchangeRate?: number | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   accountingInformalEntryId?: string | null;
@@ -133,6 +136,7 @@ export type CreatePreSaleOrderInput = {
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
   taxes?: PreSaleTaxInput[];
+  advancePaymentPercentage?: number | null;
 };
 
 export type DispatchSaleOrderInput = {
@@ -157,11 +161,13 @@ export type UpdateSaleOrderInput = {
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
+  commercialExchangeRate?: number | null;
   remittanceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;
   priceLevelId?: string | null;
   globalDiscountPercentage?: number | null;
+  advancePaymentPercentage?: number | null;
   items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];
 };

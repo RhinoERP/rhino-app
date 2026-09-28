@@ -132,7 +132,12 @@ export function StockOrdersReview({
         <div className="space-y-4">
           <h2 className="font-heading text-lg">En compra</h2>
           {purchasingOrders?.map((order) => (
-            <PurchasingCard key={order.id} order={order} orgSlug={orgSlug} />
+            <PurchasingCard
+              key={order.id}
+              order={order}
+              orgSlug={orgSlug}
+              revertInfoMap={revertInfoMap}
+            />
           ))}
         </div>
       )}
@@ -143,10 +148,20 @@ export function StockOrdersReview({
 type PurchasingCardProps = {
   order: PurchasingOrder;
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
+function PurchasingCard({
+  order,
+  orgSlug,
+  revertInfoMap,
+}: PurchasingCardProps) {
+  const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const revertInfo = revertInfoMap[order.id];
+  const canRevert =
+    order.status === "PURCHASE_REQUIRED" && (revertInfo?.canRevert ?? false);
 
   return (
     <Card className="overflow-hidden opacity-75 transition-shadow">
@@ -175,6 +190,20 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
           {order.parent_customer_name}
         </span>
         <div className="flex-1" />
+        {canRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            onClick={(event) => {
+              event.stopPropagation();
+              setRevertOpen(true);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
         {isExpanded ? (
           <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
         ) : (
@@ -206,6 +235,19 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
             ))}
           </div>
         </CardContent>
+      )}
+      {canRevert && revertInfo?.previousStatus && revertInfo.previousLabel && (
+        <RevertOrderModal
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={revertInfo.previousStatus}
+          previousStatusLabel={revertInfo.previousLabel}
+          revertType={revertInfo.revertType}
+        />
       )}
     </Card>
   );
