@@ -174,7 +174,6 @@ export type CreateDirectSaleActionResult = {
   ticketSaleData?: TicketSaleData;
   arcaInvoice?: CreateDirectSaleResult["arcaInvoice"];
   accountingStatus?: CreateDirectSaleResult["accountingStatus"];
-  accountingSalePayload?: CreateDirectSaleResult["accountingSalePayload"];
   error?: string;
 };
 
@@ -225,7 +224,6 @@ export async function createDirectSaleAction(
       ticketSaleData,
       arcaInvoice: result.arcaInvoice,
       accountingStatus: result.accountingStatus,
-      accountingSalePayload: result.accountingSalePayload ?? null,
     };
   } catch (error) {
     console.error("Error creating direct sale:", error);

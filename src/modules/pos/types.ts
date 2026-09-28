@@ -256,6 +256,15 @@ export type PosCashControlData = {
 
 export type CreatePosSaleInput = z.infer<typeof createPosSaleSchema>;
 
+export type PosSaleAccountingStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "REVIEW_REQUIRED"
+  | "FORMALIZATION_ERROR"
+  | "POSTED"
+  | "SETTLED_INFORMAL"
+  | "ERROR";
+
 export type CreatePosSaleResult = {
   posSaleId: string;
   arcaInvoice?: {
@@ -264,17 +273,22 @@ export type CreatePosSaleResult = {
     cae?: string | null;
     error?: string | null;
   };
-  accountingStatus?:
-    | "NOT_REQUIRED"
-    | "PENDING"
-    | "REVIEW_REQUIRED"
-    | "PARTIALLY_POSTED"
-    | "POSTED"
-    | "SETTLED_INFORMAL"
-    | "ERROR";
-  // Presente sólo cuando el paso correspondiente todavía no se pudo crear
-  // automáticamente; el frontend lo usa para abrir el modal de revisión.
-  accountingSalePayload?: EventoVentaPos | null;
+  accountingStatus?: PosSaleAccountingStatus;
+};
+
+export type PosSaleAccountingInboxItem = {
+  id: string;
+  saleDate: string;
+  receiptNumber: string | null;
+  invoiceType: string | null;
+  invoiceNumber: string | null;
+  totalAmount: number;
+  paymentMethod: string | null;
+  arcaStatus: string | null;
+  accountingStatus: PosSaleAccountingStatus;
+  accountingLastError: string | null;
+  accountingUpdatedAt: string | null;
+  eventSnapshot: EventoVentaPos | null;
 };
 
 export type PosTerminalFormValues = z.infer<typeof posTerminalFormSchema>;

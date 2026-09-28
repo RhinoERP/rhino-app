@@ -14,7 +14,6 @@ import {
 } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,13 +46,6 @@ import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import type { DirectSaleConfig } from "@/modules/organizations/types";
 import { useBarcodeScannerInput } from "@/modules/pos/hooks/use-barcode-scanner-input";
-import {
-  clearPosAccountingReviewFlow,
-  type PosAccountingReviewFlow,
-  resolvePosAccountingReviewSequence,
-  restorePosAccountingReviewFlow,
-  savePosAccountingReviewFlow,
-} from "@/modules/pos/utils/accounting-review";
 import type { CreateDirectSaleActionResult } from "@/modules/sales/actions/create-direct-sale.action";
 import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-customers";
 import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
@@ -423,28 +415,16 @@ async function printDirectSaleTicketAfterSuccess({
   }
 }
 
-function buildAccountingReviewFlow(
-  result: CreateDirectSaleActionResult
-): PosAccountingReviewFlow | null {
-  const reviewSteps = resolvePosAccountingReviewSequence({
-    accountingStatus: result.accountingStatus,
-    accountingSalePayload: result.accountingSalePayload ?? null,
-  });
-
-  if (reviewSteps.length === 0) {
-    return null;
+// El cajero no resuelve asientos: la venta queda en la bandeja contable.
+function notifyPendingAccounting(result: CreateDirectSaleActionResult) {
+  if (
+    result.accountingStatus === "REVIEW_REQUIRED" ||
+    result.accountingStatus === "ERROR"
+  ) {
+    toast.info(
+      "Venta registrada. El asiento contable quedó pendiente de revisión por administración."
+    );
   }
-
-  return {
-    salePayload: result.accountingSalePayload ?? null,
-  };
-}
-
-function resetAccountingReviewFlow(
-  setAccountingReviewFlow: (value: PosAccountingReviewFlow | null) => void
-) {
-  setAccountingReviewFlow(null);
-  clearPosAccountingReviewFlow();
 }
 
 function useDefaultTerminalSelection(params: {
@@ -581,7 +561,6 @@ function useDefaultPaymentMethod(params: {
   }, [enabledPaymentMethodOptions, form]);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This component orchestrates multiple POS lifecycle concerns, but logic is intentionally delegated to small helper hooks and actions.
 export function PosTerminal({
   orgSlug,
   taxes,
@@ -594,20 +573,8 @@ export function PosTerminal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [didInitializeDefaultTax, setDidInitializeDefaultTax] = useState(false);
-  const [accountingReviewFlow, setAccountingReviewFlow] =
-    useState<PosAccountingReviewFlow | null>(null);
-
-  useEffect(() => {
-    const restored = restorePosAccountingReviewFlow();
-    if (!restored) {
-      return;
-    }
-
-    setAccountingReviewFlow(restored);
-  }, []);
   const scanFeedbackTimerRef = useRef<number | null>(null);
   const saleConfirmedAtRef = useRef<string | null>(null);
-  const currentPosSaleIdRef = useRef<string | null>(null);
 
   const deferredSearch = useDeferredValue(searchTerm);
 
@@ -635,15 +602,8 @@ export function PosTerminal({
       const confirmedAt =
         saleConfirmedAtRef.current ?? new Date().toISOString();
       saleConfirmedAtRef.current = null;
-      currentPosSaleIdRef.current = result.posSaleId ?? null;
 
-      const nextFlow = buildAccountingReviewFlow(result);
-
-      if (nextFlow) {
-        setAccountingReviewFlow(nextFlow);
-        savePosAccountingReviewFlow(nextFlow);
-        return;
-      }
+      notifyPendingAccounting(result);
 
       await printDirectSaleTicketAfterSuccess({
         result,
@@ -1100,53 +1060,6 @@ export function PosTerminal({
     );
   };
 
-  const handleAccountingReviewConfirm = async (informalEntryId: string) => {
-    if (!accountingReviewFlow) {
-      return;
-    }
-
-    try {
-      const { confirmPosSaleAccountingStepAction } = await import(
-        "@/modules/pos/actions/confirm-pos-sale-accounting.action"
-      );
-
-      const posSaleId = currentPosSaleIdRef.current;
-      if (!posSaleId) {
-        throw new Error(
-          "No se pudo identificar la venta POS para confirmar el asiento."
-        );
-      }
-
-      const result = await confirmPosSaleAccountingStepAction({
-        orgSlug,
-        posSaleId,
-        step: "venta",
-        informalEntryId,
-      });
-
-      if (!result.success) {
-        throw new Error(
-          result.error ?? "No se pudo confirmar el asiento contable."
-        );
-      }
-
-      resetAccountingReviewFlow(setAccountingReviewFlow);
-      toast.success("Asiento contable del POS confirmado.");
-    } catch (error) {
-      resetAccountingReviewFlow(setAccountingReviewFlow);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "No se pudo confirmar el asiento contable."
-      );
-    }
-  };
-
-  const handleAccountingReviewCancel = () => {
-    setAccountingReviewFlow(null);
-    clearPosAccountingReviewFlow();
-  };
-
   const onSubmit = form.handleSubmit(async (values) => {
     const validationError = getSaleSubmissionError(
       activeTerminals.length,
@@ -1168,7 +1081,7 @@ export function PosTerminal({
         rate: tax.rate,
       }));
 
-      const result = await createDirectSale.mutateAsync({
+      await createDirectSale.mutateAsync({
         terminalId: values.terminalId,
         customerId: values.customerId ?? null,
         saleDate:
@@ -1190,10 +1103,7 @@ export function PosTerminal({
         taxes: taxesPayload.length ? taxesPayload : undefined,
       });
 
-      // No navegar si quedó pendiente la revisión contable: navegar desmontaría el modal recién abierto.
-      if (!buildAccountingReviewFlow(result)) {
-        router.push(`/org/${orgSlug}/venta-directa`);
-      }
+      router.push(`/org/${orgSlug}/venta-directa`);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -1205,21 +1115,8 @@ export function PosTerminal({
 
   const isSubmitting = createDirectSale.isPending;
 
-  const currentAccountingEvent = accountingReviewFlow?.salePayload;
-
   return (
     <div className="space-y-6">
-      {accountingReviewFlow && currentAccountingEvent ? (
-        <AsientoModal
-          eventoPayload={currentAccountingEvent}
-          mode="gate"
-          onCancel={handleAccountingReviewCancel}
-          onConfirm={handleAccountingReviewConfirm}
-          open={Boolean(accountingReviewFlow && currentAccountingEvent)}
-          persistAs="informal"
-          sourceType="VENTA_POS"
-        />
-      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link href={`/org/${orgSlug}/venta-directa`}>
           <Button size="sm" variant="ghost">

@@ -123,7 +123,6 @@ export function AsientosPendientes({ orgId, orgSlug }: Props) {
               <SelectItem value="COBRO">Cobro</SelectItem>
               <SelectItem value="ORDEN_PAGO">Orden de Pago</SelectItem>
               <SelectItem value="VENTA_POS">Venta POS</SelectItem>
-              <SelectItem value="COBRO_POS">Cobro POS</SelectItem>
             </SelectContent>
           </Select>
         </div>

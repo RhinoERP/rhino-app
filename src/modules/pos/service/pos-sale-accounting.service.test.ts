@@ -5,17 +5,27 @@ vi.mock("server-only", () => ({}));
 
 const asentarInformalEntry = vi.fn();
 const createInformalEntry = vi.fn();
+const formalizarEntry = vi.fn();
+const findJournalEntryIdByReferenceServer = vi.fn();
 const previewAccountingEvent = vi.fn();
 
 vi.mock("@/lib/accounting-server", () => ({
   asentarInformalEntry: (...args: unknown[]) => asentarInformalEntry(...args),
   createInformalEntry: (...args: unknown[]) => createInformalEntry(...args),
+  findJournalEntryIdByReferenceServer: (...args: unknown[]) =>
+    findJournalEntryIdByReferenceServer(...args),
+  formalizarEntry: (...args: unknown[]) => formalizarEntry(...args),
+  isAccountingNotFoundError: (error: unknown) =>
+    (error as { status?: number }).status === 404,
   previewAccountingEvent: (...args: unknown[]) =>
     previewAccountingEvent(...args),
 }));
 
-const { resolvePosCobroDefaultAccountCode, runPosSaleAccountingFlow } =
-  await import("./pos-sale-accounting.service");
+const {
+  formalizeSinglePosSaleAccountingEntry,
+  resolvePosCobroDefaultAccountCode,
+  runPosSaleAccountingFlow,
+} = await import("./pos-sale-accounting.service");
 
 const eventoVenta: EventoVentaPos = {
   tipoEvento: "VENTA_POS",
@@ -89,7 +99,6 @@ describe("runPosSaleAccountingFlow", () => {
     expect(patch).toMatchObject({
       accounting_status: "PENDING",
       accounting_sale_entry_id: "informal-sale-1",
-      accounting_payment_entry_id: null,
     });
   });
 
@@ -163,5 +172,119 @@ describe("runPosSaleAccountingFlow", () => {
 
     expect(patch.accounting_status).toBe("ERROR");
     expect(patch.accounting_last_error).toBe("servicio caído");
+  });
+
+  it("formaliza en el acto cuando ARCA ya autorizó la factura", async () => {
+    previewAccountingEvent.mockResolvedValue({ estadoImputacion: "COMPLETO" });
+    createInformalEntry.mockResolvedValue("informal-sale-1");
+    formalizarEntry.mockResolvedValue("journal-1");
+
+    const patch = await runPosSaleAccountingFlow({
+      eventoVenta,
+      isTicketX: false,
+      automaticAccountingEnabled: true,
+      orgId: "org-1",
+      isArcaAuthorized: true,
+    });
+
+    expect(formalizarEntry).toHaveBeenCalledWith("informal-sale-1", "org-1");
+    expect(patch).toMatchObject({
+      accounting_status: "POSTED",
+      accounting_sale_entry_id: "journal-1",
+    });
+  });
+
+  it("queda FORMALIZATION_ERROR si falla la formalización tras la autorización", async () => {
+    formalizarEntry.mockRejectedValue(new Error("timeout"));
+
+    const patch = await runPosSaleAccountingFlow({
+      eventoVenta,
+      isTicketX: false,
+      automaticAccountingEnabled: false,
+      orgId: "org-1",
+      existingSaleEntryId: "informal-sale-1",
+      isArcaAuthorized: true,
+    });
+
+    expect(patch).toMatchObject({
+      accounting_status: "FORMALIZATION_ERROR",
+      accounting_sale_entry_id: "informal-sale-1",
+      accounting_last_error: "timeout",
+    });
+  });
+
+  it("no formaliza Ticket X aunque se indique autorización", async () => {
+    const patch = await runPosSaleAccountingFlow({
+      eventoVenta,
+      isTicketX: true,
+      automaticAccountingEnabled: false,
+      orgId: "org-1",
+      existingSaleEntryId: "informal-sale-1",
+      isArcaAuthorized: true,
+    });
+
+    expect(formalizarEntry).not.toHaveBeenCalled();
+    expect(patch.accounting_status).toBe("SETTLED_INFORMAL");
+  });
+
+  it("conserva el asiento creado si falla el asentado de Ticket X", async () => {
+    previewAccountingEvent.mockResolvedValue({ estadoImputacion: "COMPLETO" });
+    createInformalEntry.mockResolvedValue("informal-sale-1");
+    asentarInformalEntry.mockRejectedValueOnce(new Error("timeout"));
+
+    const patch = await runPosSaleAccountingFlow({
+      eventoVenta,
+      isTicketX: true,
+      automaticAccountingEnabled: true,
+      orgId: "org-1",
+    });
+
+    expect(patch).toMatchObject({
+      accounting_status: "ERROR",
+      accounting_sale_entry_id: "informal-sale-1",
+    });
+  });
+});
+
+const notFoundError = () =>
+  Object.assign(new Error("Asiento informal no encontrado"), { status: 404 });
+
+describe("formalizeSinglePosSaleAccountingEntry", () => {
+  it("recupera el id formal si el informal ya fue formalizado", async () => {
+    formalizarEntry.mockRejectedValue(notFoundError());
+    findJournalEntryIdByReferenceServer.mockResolvedValue("journal-1");
+
+    const patch = await formalizeSinglePosSaleAccountingEntry({
+      orgId: "org-1",
+      posSaleId: "sale-1",
+      saleEntryId: "informal-sale-1",
+    });
+
+    expect(findJournalEntryIdByReferenceServer).toHaveBeenCalledWith({
+      orgId: "org-1",
+      referenciaId: "sale-1",
+      referenciaTabla: "pos_sales",
+      tipoEvento: "VENTA_POS",
+    });
+    expect(patch).toMatchObject({
+      accounting_status: "POSTED",
+      accounting_sale_entry_id: "journal-1",
+    });
+  });
+
+  it("no marca POSTED si no existe asiento formal para la venta", async () => {
+    formalizarEntry.mockRejectedValue(notFoundError());
+    findJournalEntryIdByReferenceServer.mockResolvedValue(null);
+
+    const patch = await formalizeSinglePosSaleAccountingEntry({
+      orgId: "org-1",
+      posSaleId: "sale-1",
+      saleEntryId: "informal-sale-1",
+    });
+
+    expect(patch).toMatchObject({
+      accounting_status: "FORMALIZATION_ERROR",
+      accounting_sale_entry_id: "informal-sale-1",
+    });
   });
 });

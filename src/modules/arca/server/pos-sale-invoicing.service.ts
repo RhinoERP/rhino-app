@@ -1,7 +1,10 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import { formalizeSinglePosSaleAccountingEntry } from "@/modules/pos/service/pos-sale-accounting.service";
+import {
+  formalizeSinglePosSaleAccountingEntry,
+  persistPosSaleAccountingPatch,
+} from "@/modules/pos/service/pos-sale-accounting.service";
 import type { Database, Json } from "@/types/supabase";
 import {
   ArcaConnectionError,
@@ -894,28 +897,55 @@ async function formalizePosSaleAccountingIfPending(params: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgId: string;
   posSaleId: string;
-  accountingStatus?: string | null;
-  saleEntryId?: string | null;
 }): Promise<void> {
-  const isPendingFormalization =
-    params.accountingStatus === "PENDING" ||
-    params.accountingStatus === "PARTIALLY_POSTED";
-
-  if (!(isPendingFormalization && params.saleEntryId)) {
-    return;
-  }
-
   try {
+    // Select aparte: columnas todavía no reflejadas en los tipos generados de Supabase.
+    const { data, error } = await params.supabase
+      .from("pos_sales")
+      .select("accounting_status, accounting_sale_entry_id" as never)
+      .eq("organization_id", params.orgId)
+      .eq("id", params.posSaleId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const row = data as unknown as {
+      accounting_status: string | null;
+      accounting_sale_entry_id: string | null;
+    } | null;
+    const isPendingFormalization =
+      row?.accounting_status === "PENDING" ||
+      row?.accounting_status === "FORMALIZATION_ERROR";
+
+    if (!(isPendingFormalization && row?.accounting_sale_entry_id)) {
+      return;
+    }
+
     const patch = await formalizeSinglePosSaleAccountingEntry({
       orgId: params.orgId,
-      saleEntryId: params.saleEntryId,
+      posSaleId: params.posSaleId,
+      saleEntryId: row.accounting_sale_entry_id,
     });
 
-    await params.supabase
-      .from("pos_sales")
-      .update(patch as never)
-      .eq("organization_id", params.orgId)
-      .eq("id", params.posSaleId);
+    const updateError = await persistPosSaleAccountingPatch({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      posSaleId: params.posSaleId,
+      patch,
+    });
+
+    if (updateError) {
+      console.error(
+        "Se formalizó el asiento de la venta POS, pero no se pudo persistir el estado contable",
+        {
+          posSaleId: params.posSaleId,
+          journalEntryId: patch.accounting_sale_entry_id,
+          error: updateError,
+        }
+      );
+    }
   } catch (error) {
     console.error(
       "No se pudo formalizar el asiento contable de la venta POS tras la autorización ARCA",
@@ -977,25 +1007,10 @@ async function persistAuthorizedPosInvoice(params: {
     );
   }
 
-  // Select aparte: columnas todavía no reflejadas en los tipos generados de Supabase.
-  const { data: accountingRow } = await supabase
-    .from("pos_sales")
-    .select("accounting_status, accounting_sale_entry_id" as never)
-    .eq("organization_id", params.orgId)
-    .eq("id", params.posSaleId)
-    .maybeSingle();
-
-  const typedAccountingRow = accountingRow as unknown as {
-    accounting_status?: string | null;
-    accounting_sale_entry_id?: string | null;
-  } | null;
-
   await formalizePosSaleAccountingIfPending({
     supabase,
     orgId: params.orgId,
     posSaleId: params.posSaleId,
-    accountingStatus: typedAccountingRow?.accounting_status,
-    saleEntryId: typedAccountingRow?.accounting_sale_entry_id,
   });
 
   return toArcaSaleInvoiceResult(

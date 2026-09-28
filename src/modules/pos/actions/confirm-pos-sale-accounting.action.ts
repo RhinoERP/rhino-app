@@ -1,35 +1,29 @@
 "use server";
 
+import { getInformalEntryServer } from "@/lib/accounting-server";
 import { createClient } from "@/lib/supabase/server";
-import type { EventoVentaPos } from "@/modules/accounting/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
-import { runPosSaleAccountingFlow } from "../service/pos-sale-accounting.service";
+import {
+  loadPosSaleAccountingRow,
+  persistPosSaleAccountingPatch,
+  runPosSaleAccountingFlow,
+} from "../service/pos-sale-accounting.service";
 
-export type ConfirmPosSaleAccountingStepInput = {
+export type ConfirmPosSaleAccountingInput = {
   orgSlug: string;
   posSaleId: string;
-  step: "venta" | "cobro";
   informalEntryId: string;
 };
 
-export type ConfirmPosSaleAccountingStepResult =
+export type ConfirmPosSaleAccountingResult =
   | { success: true; accountingStatus: string }
   | { success: false; error: string };
 
-type PosSaleAccountingRow = {
-  invoice_type: string | null;
-  accounting_sale_entry_id: string | null;
-  accounting_payment_entry_id: string | null;
-  accounting_sale_event_snapshot: EventoVentaPos | null;
-};
-
-// Persistido junto con create-pos-sale para el paso pendiente que el
-// cajero no resolvió automáticamente; sólo back-office (accounting.manage)
-// puede asignar cuentas y confirmar cada asiento.
-export async function confirmPosSaleAccountingStepAction(
-  input: ConfirmPosSaleAccountingStepInput
-): Promise<ConfirmPosSaleAccountingStepResult> {
+// Vincula el asiento creado desde la bandeja de revisión a su venta POS.
+export async function confirmPosSaleAccountingAction(
+  input: ConfirmPosSaleAccountingInput
+): Promise<ConfirmPosSaleAccountingResult> {
   await ensure("accounting.manage", input.orgSlug);
 
   const org = await getOrganizationBySlug(input.orgSlug);
@@ -39,55 +33,79 @@ export async function confirmPosSaleAccountingStepAction(
   }
 
   const supabase = await createClient();
+  const row = await loadPosSaleAccountingRow({
+    supabase,
+    orgId: org.id,
+    posSaleId: input.posSaleId,
+  });
 
-  const { data: row, error } = await supabase
-    .from("pos_sales")
-    .select(
-      "invoice_type, accounting_sale_entry_id, accounting_sale_event_snapshot"
-    )
-    .eq("organization_id", org.id)
-    .eq("id", input.posSaleId)
-    .maybeSingle();
-
-  if (error || !row) {
+  if (!row) {
     return { success: false, error: "Venta POS no encontrada" };
   }
 
-  const typedRow = row as unknown as PosSaleAccountingRow;
-
-  if (!typedRow.accounting_sale_event_snapshot) {
+  if (!row.accounting_sale_event_snapshot) {
     return {
       success: false,
       error: "Esta venta no tiene un asiento contable pendiente de revisión.",
     };
   }
 
-  if (input.step !== "venta") {
+  const isAwaitingReview =
+    row.accounting_status === "REVIEW_REQUIRED" ||
+    row.accounting_status === "ERROR";
+
+  if (!isAwaitingReview) {
     return {
       success: false,
-      error:
-        "El flujo POS de asiento único no tiene un paso de cobro separado.",
+      error: "Esta venta no está pendiente de revisión contable.",
+    };
+  }
+
+  if (
+    row.accounting_sale_entry_id &&
+    row.accounting_sale_entry_id !== input.informalEntryId
+  ) {
+    return {
+      success: false,
+      error: "La venta ya tiene otro asiento contable vinculado.",
+    };
+  }
+
+  const entry = await getInformalEntryServer(input.informalEntryId, org.id);
+
+  const belongsToSale =
+    entry?.referencia_id === input.posSaleId &&
+    entry.referencia_tabla === "pos_sales" &&
+    entry.source_type === "VENTA_POS" &&
+    entry.estado_formalizacion === "PENDIENTE";
+
+  if (!belongsToSale) {
+    return {
+      success: false,
+      error: "El asiento indicado no corresponde a esta venta POS.",
     };
   }
 
   const patch = await runPosSaleAccountingFlow({
-    eventoVenta: typedRow.accounting_sale_event_snapshot,
-    isTicketX: typedRow.invoice_type === "TICKET_X",
+    eventoVenta: row.accounting_sale_event_snapshot,
+    isTicketX: row.invoice_type === "TICKET_X",
     automaticAccountingEnabled: false,
     orgId: org.id,
     existingSaleEntryId: input.informalEntryId,
+    isArcaAuthorized: row.arca_status === "authorized",
   });
 
-  const { error: updateError } = await supabase
-    .from("pos_sales")
-    .update(patch as never)
-    .eq("organization_id", org.id)
-    .eq("id", input.posSaleId);
+  const updateError = await persistPosSaleAccountingPatch({
+    supabase,
+    orgId: org.id,
+    posSaleId: input.posSaleId,
+    patch,
+  });
 
   if (updateError) {
     return {
       success: false,
-      error: `No se pudo guardar el estado contable: ${updateError.message}`,
+      error: `No se pudo guardar el estado contable: ${updateError}`,
     };
   }
 

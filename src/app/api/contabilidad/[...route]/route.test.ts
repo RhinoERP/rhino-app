@@ -144,4 +144,57 @@ describe("accounting proxy route", () => {
     const body = (await response.json()) as { error: string; ok?: boolean };
     expect(body.error).toContain("Sin acceso");
   });
+
+  it("bloquea formalizar un asiento de venta POS fuera de su bandeja", async () => {
+    const membershipQuery = createMembershipQuery({
+      data: { organization_id: "org-server" },
+      error: null,
+    });
+
+    requireAuthMock.mockResolvedValue({
+      userId: "user-1",
+      supabase: {
+        from: vi.fn().mockReturnValue(membershipQuery),
+        rpc: vi
+          .fn()
+          .mockResolvedValue({ data: ["accounting.manage"], error: null }),
+      },
+    });
+    getOrganizationBySlugMock.mockResolvedValue({
+      id: "org-server",
+      slug: "acme",
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ok: true, data: { source_type: "VENTA_POS" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { POST } = await import("./route");
+    const request = new NextRequest(
+      "http://localhost/api/contabilidad/informal-entries/entry-1/formalizar",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-org-slug": "acme",
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({
+        route: ["informal-entries", "entry-1", "formalizar"],
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
