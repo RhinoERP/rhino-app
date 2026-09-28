@@ -29,7 +29,7 @@ export async function GET(
 
     const supabase = await createClient();
 
-    // Get customers that have at least one sale_order in the organization
+    // Get customers that have at least one standard sale_order in the organization
     const { data: customers, error } = await supabase
       .from("customers")
       .select(`
@@ -39,6 +39,7 @@ export async function GET(
       `)
       .eq("organization_id", org.id)
       .eq("is_active", true)
+      .eq("sales_orders.document_type", "STANDARD")
       .order("business_name");
 
     if (error) {

@@ -80,7 +80,6 @@ import {
 } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
-import { computeLineExtrasTotal } from "@/lib/line-values";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaVenta } from "@/modules/accounting/types";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
@@ -686,6 +685,8 @@ function buildComparableTaxFingerprint(
 }
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
+  quoteItemId: item.quoteItemId,
+  extras: item.extras,
   type: item.type,
   productId: item.type === "product" ? item.productId : null,
   productVariantId:
@@ -766,7 +767,12 @@ function calculateItemTotals(item: ItemState) {
     ? (item.weightQuantity ?? 0)
     : item.quantity;
   const effectiveUnitPrice = usesWeight ? item.basePrice : item.unitPrice;
-  const gross = effectiveQuantity * effectiveUnitPrice;
+  const extrasPerUnit = (item.extras ?? []).reduce(
+    (sum, extra) => sum + extra.price,
+    0
+  );
+  const gross =
+    effectiveQuantity * effectiveUnitPrice + item.quantity * extrasPerUnit;
   const discount = Math.min(
     Math.max(0, (item.discountPercent / 100) * gross),
     Math.max(0, gross)
@@ -884,6 +890,7 @@ export function SaleDetail({
   const canShowAdvanceCard =
     salesAdvancesEnabled &&
     !isFullAdvanceQuote &&
+    sale.invoice_type !== "NOTA_DE_VENTA" &&
     (isDraftSale ||
       isConfirmedSale ||
       isDispatchedSale ||
@@ -911,12 +918,21 @@ export function SaleDetail({
       : persistedArcaStatus;
   const isArcaAuthorized = normalizedArcaStatus === "authorized";
   const isArcaPending = normalizedArcaStatus === "pending";
+  let commercialRateHint = "Requerido antes de emitir la factura ARCA.";
+  if (isArcaAuthorized) {
+    commercialRateHint =
+      "La cotización comercial queda fija tras la autorización ARCA.";
+  } else if (isArcaPending) {
+    commercialRateHint =
+      "Conciliá la emisión pendiente antes de cambiar la cotización.";
+  }
   const startsInReturnMode =
     canReturnProducts && initialMode === "return" && !isArcaAuthorized;
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
   const canEditInternalFields = isEditingDetails;
-  const canEditFiscalFields = isEditingDetails && !isArcaAuthorized;
+  const canEditFiscalFields =
+    isEditingDetails && !isArcaAuthorized && !isArcaPending;
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -955,6 +971,17 @@ export function SaleDetail({
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
+  const [saleAdvancePercentage, setSaleAdvancePercentage] = useState<
+    number | null
+  >(
+    typeof sale.advance_payment_percentage === "number" &&
+      sale.advance_payment_percentage > 0
+      ? sale.advance_payment_percentage
+      : null
+  );
+  const [commercialExchangeRate, setCommercialExchangeRate] = useState<
+    number | null
+  >(sale.commercial_exchange_rate ?? null);
   const [observations, setObservations] = useState<string>(
     sale.observations ?? ""
   );
@@ -1509,17 +1536,6 @@ export function SaleDetail({
     totals.totalDiscountAmount,
   ]);
 
-  const getExtrasAmount = (item: ItemState): number => {
-    if (!item.extras || item.extras.length === 0) {
-      return 0;
-    }
-    return computeLineExtrasTotal(item.extras) * item.quantity;
-  };
-
-  const itemsExtrasTotal = truncateMoney(
-    items.reduce((sum, item) => sum + getExtrasAmount(item), 0)
-  );
-
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
@@ -1779,6 +1795,7 @@ export function SaleDetail({
     canManageSale &&
     isDraftSale &&
     !relatedOrder &&
+    !sale.advance_pending &&
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
@@ -1857,6 +1874,7 @@ export function SaleDetail({
       sale.credit_days ?? null
     ),
     invoiceType,
+    commercialExchangeRate,
     invoiceNumber: invoiceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
@@ -1873,13 +1891,15 @@ export function SaleDetail({
       observations: observations || null,
     };
 
-    if (isArcaAuthorized) {
+    if (isArcaAuthorized || isArcaPending) {
       return internalPayload;
     }
 
     return {
       ...buildFiscalSaleMutationPayload(),
       remittanceNumber: remittanceNumber || null,
+      advancePaymentPercentage:
+        invoiceType === "NOTA_DE_VENTA" ? saleAdvancePercentage : null,
     };
   };
 
@@ -1957,7 +1977,7 @@ export function SaleDetail({
       {
         items: buildSaleAccountingItems(items, totals.taxPlan),
         moneda: sale.currency === "USD" ? "USD" : "ARS",
-        tipoCambio: sale.exchange_rate,
+        tipoCambio: commercialExchangeRate,
         montoUSD: sale.currency === "USD" ? totals.total : undefined,
       }
     );
@@ -2452,6 +2472,17 @@ export function SaleDetail({
         </div>
       ) : null}
 
+      {sale.advance_payment_percentage &&
+      sale.advance_payment_percentage > 0 ? (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="font-medium text-indigo-800 text-sm">
+            Venta con anticipo del {sale.advance_payment_percentage}% — el
+            anticipo se registró como cuenta por cobrar al crear la preventa; el
+            saldo se genera al despachar.
+          </p>
+        </div>
+      ) : null}
+
       {canShowArcaCard ? (
         <Card>
           <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
@@ -2929,6 +2960,63 @@ export function SaleDetail({
                     </SelectContent>
                   </Select>
                 </div>
+
+                {invoiceType === "NOTA_DE_VENTA" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="saleAdvancePercentage">
+                      Anticipo (% del total)
+                    </Label>
+                    <Input
+                      disabled={!canEditFiscalFields}
+                      id="saleAdvancePercentage"
+                      inputMode="numeric"
+                      max={100}
+                      min={0}
+                      onChange={(event) => {
+                        const parsed = Number.parseInt(event.target.value, 10);
+                        setSaleAdvancePercentage(
+                          Number.isNaN(parsed)
+                            ? null
+                            : Math.min(Math.max(parsed, 0), 100)
+                        );
+                      }}
+                      placeholder="Sin anticipo"
+                      step="1"
+                      type="number"
+                      value={saleAdvancePercentage ?? ""}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Si la preventa tiene anticipo, se registra una cuenta por
+                      cobrar por ese porcentaje al guardar.
+                    </p>
+                  </div>
+                ) : null}
+                {sale.currency === "USD" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="commercialExchangeRate">
+                      Tipo de cambio comercial USD → ARS
+                    </Label>
+                    <Input
+                      disabled={!canEditFiscalFields}
+                      id="commercialExchangeRate"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setCommercialExchangeRate(
+                          value === "" ? null : Number(value)
+                        );
+                      }}
+                      placeholder="Cotización comercial"
+                      step="any"
+                      type="number"
+                      value={commercialExchangeRate ?? ""}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      {commercialRateHint}
+                    </p>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label htmlFor="taxes">Impuestos</Label>
@@ -3504,8 +3592,7 @@ export function SaleDetail({
 
                       if (isAdjustment) {
                         const subtotal = truncateMoney(
-                          calculateItemTotals(item).subtotal +
-                            getExtrasAmount(item)
+                          calculateItemTotals(item).subtotal
                         );
                         return (
                           <div
@@ -3726,8 +3813,7 @@ export function SaleDetail({
                                 <p className="whitespace-nowrap text-right font-medium tabular-nums">
                                   {formatCurrency(
                                     truncateMoney(
-                                      calculateItemTotals(item).subtotal +
-                                        getExtrasAmount(item)
+                                      calculateItemTotals(item).subtotal
                                     )
                                   )}
                                 </p>
@@ -3888,14 +3974,7 @@ export function SaleDetail({
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>
-                      {formatCurrency(
-                        isEditingDetails
-                          ? truncateMoney(
-                              summaryTotals.subtotal + itemsExtrasTotal
-                            )
-                          : summaryTotals.subtotal,
-                        sale.currency
-                      )}
+                      {formatCurrency(summaryTotals.subtotal, sale.currency)}
                     </span>
                   </div>
                   {totals.adjustmentsTotal !== 0 ? (
@@ -4026,6 +4105,12 @@ export function SaleDetail({
                       </div>
                     )}
                   </Button>
+                ) : null}
+                {sale.advance_pending ? (
+                  <p className="text-muted-foreground text-xs">
+                    No se puede confirmar la venta: hay un anticipo pendiente de
+                    cobro.
+                  </p>
                 ) : null}
                 <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
                   <span>Descuento %</span>

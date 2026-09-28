@@ -140,7 +140,7 @@ export function ProductSearch({
         const sku = normalizeSearchValue(product.sku || "");
 
         return searchTokens.every((token) => {
-          if (sku.startsWith(token)) {
+          if (sku.includes(token)) {
             return true;
           }
           return nameTokens.some((word) => word.startsWith(token));

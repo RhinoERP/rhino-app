@@ -21,6 +21,7 @@ import {
   buildArcaQrVerifierUrl,
   buildArcaQrPayload as buildSharedArcaQrPayload,
 } from "../arca-qr";
+import { formatCommercialExchangeRate } from "../commercial-exchange-rate";
 import { ArcaValidationError } from "../errors";
 import { readAuthorizedFiscalCurrency } from "../fiscal-currency";
 import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
@@ -435,6 +436,10 @@ async function generateFiscalInvoiceHtml(params: {
   const request = extractWsfeRequest(sale.arca_request_json);
   const fiscalCurrency = readAuthorizedFiscalCurrency(sale.arca_request_json);
   const displayCurrency = fiscalCurrency.code === "DOL" ? "USD" : "ARS";
+  const commercialRate = formatCommercialExchangeRate(
+    displayCurrency,
+    sale.commercial_exchange_rate
+  );
   const qrPayload = buildArcaQrPayload({
     sale,
     organization,
@@ -525,6 +530,7 @@ async function generateFiscalInvoiceHtml(params: {
             <div class="voucher-row"><span>Fecha de venta</span><strong>${formatDateOnly(sale.sale_date)}</strong></div>
             <div class="voucher-row"><span>Venta interna</span><strong>#${sale.sale_number ?? "—"}</strong></div>
             <div class="voucher-row"><span>Moneda</span><strong>${displayCurrency}</strong></div>
+            ${commercialRate ? `<div class="voucher-row"><span>Tipo de cambio comercial USD → ARS</span><strong>${commercialRate}</strong></div>` : ""}
           </div>
         </section>
       </header>

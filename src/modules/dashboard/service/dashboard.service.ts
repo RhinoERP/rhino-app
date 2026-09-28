@@ -505,7 +505,8 @@ export async function getFinancialBreakdown(
     .eq("organization_id", organizationId)
     .gte("sale_date", dateFrom)
     .lte("sale_date", dateTo)
-    .neq("is_historical", true);
+    .neq("is_historical", true)
+    .eq("document_type", "STANDARD");
 
   if (filters.customerId) {
     normalSalesQuery = normalSalesQuery.eq("customer_id", filters.customerId);
@@ -1472,7 +1473,8 @@ export async function getCustomerProfitabilityDashboard(
         .gte("sale_date", dateFrom)
         .lte("sale_date", dateTo)
         .in("status", [...COMPLETED_SALES_ORDER_STATUSES])
-        .neq("is_historical", true),
+        .neq("is_historical", true)
+        .eq("document_type", "STANDARD"),
       supabase
         .from("pos_sales")
         .select(

@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { downloadStoredDocument } from "@/modules/documents/server/documents-storage.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadPaymentDocument } from "@/modules/sales/server/documents-storage.service";
@@ -16,7 +17,7 @@ type DownloadReceiptResult =
 /**
  * Server Action: download receipt PDF for a customer payment.
  * - If receipt_pdf_url exists, downloads from storage
- * - Otherwise generates the PDF, uploads it and saves the URL
+ * - Otherwise generates the PDF, uploads it and saves the object path
  */
 export async function downloadReceiptAction(
   orgSlug: string,
@@ -40,11 +41,10 @@ export async function downloadReceiptAction(
       .single();
 
     if (payment?.receipt_pdf_url) {
-      const response = await fetch(payment.receipt_pdf_url);
-      if (!response.ok) {
-        throw new Error("No se pudo descargar el PDF desde el almacenamiento");
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await downloadStoredDocument(
+        payment.receipt_pdf_url,
+        supabase
+      );
       const sanitizedNumber = (payment.receipt_number ?? "sin-numero").replace(
         /[^0-9]/g,
         ""

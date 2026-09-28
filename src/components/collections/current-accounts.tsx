@@ -160,7 +160,10 @@ function buildItemFromAccount(account: ReceivableAccount) {
   if (account.collection_label) {
     label = account.collection_label;
   } else if (saleNumber !== null && saleNumber !== undefined) {
-    label = `Venta N° ${saleNumber}`;
+    label =
+      account.sale?.document_type === "ADVANCE"
+        ? `Anticipo de venta N° ${saleNumber}`
+        : `Venta N° ${saleNumber}`;
   } else if (invoice) {
     label = `Venta ${invoice}`;
   }

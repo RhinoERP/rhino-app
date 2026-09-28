@@ -69,7 +69,6 @@ async function uploadPdfIfPresent(params: {
 }): Promise<{
   filename: string;
   path: string;
-  url: string;
 } | null> {
   const { file, invoiceId, orgSlug } = params;
   if (!(file instanceof File) || file.size === 0) {
@@ -86,13 +85,9 @@ async function uploadPdfIfPresent(params: {
     throw new Error(`No se pudo adjuntar el PDF: ${uploadError.message}`);
   }
 
-  const { data: urlData } = supabase.storage
-    .from("documents")
-    .getPublicUrl(path);
   return {
     filename,
     path,
-    url: `${urlData.publicUrl}?v=${Date.now()}`,
   };
 }
 
@@ -154,7 +149,7 @@ export async function createSupplierInvoiceAction(
         invoiceId: invoice.id,
         orgSlug,
         filename: uploadedPdf.filename,
-        url: uploadedPdf.url,
+        url: uploadedPdf.path,
       });
     }
 
