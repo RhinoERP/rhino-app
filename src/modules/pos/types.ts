@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EventoVentaPos } from "@/modules/accounting/types";
 import type { PaymentMethod } from "@/modules/collections/types";
 import type { Database } from "@/types/supabase";
 
@@ -255,6 +256,15 @@ export type PosCashControlData = {
 
 export type CreatePosSaleInput = z.infer<typeof createPosSaleSchema>;
 
+export type PosSaleAccountingStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "REVIEW_REQUIRED"
+  | "FORMALIZATION_ERROR"
+  | "POSTED"
+  | "SETTLED_INFORMAL"
+  | "ERROR";
+
 export type CreatePosSaleResult = {
   posSaleId: string;
   arcaInvoice?: {
@@ -263,6 +273,22 @@ export type CreatePosSaleResult = {
     cae?: string | null;
     error?: string | null;
   };
+  accountingStatus?: PosSaleAccountingStatus;
+};
+
+export type PosSaleAccountingInboxItem = {
+  id: string;
+  saleDate: string;
+  receiptNumber: string | null;
+  invoiceType: string | null;
+  invoiceNumber: string | null;
+  totalAmount: number;
+  paymentMethod: string | null;
+  arcaStatus: string | null;
+  accountingStatus: PosSaleAccountingStatus;
+  accountingLastError: string | null;
+  accountingUpdatedAt: string | null;
+  eventSnapshot: EventoVentaPos | null;
 };
 
 export type PosTerminalFormValues = z.infer<typeof posTerminalFormSchema>;

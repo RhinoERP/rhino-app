@@ -73,3 +73,23 @@ export async function getJournalEntryById(
 
   return { ...entry, lineas };
 }
+
+export async function findActiveJournalEntryIdByReference(params: {
+  orgId: string;
+  referenciaId: string;
+  referenciaTabla: string;
+  tipoEvento: string;
+}): Promise<string | undefined> {
+  const entry = await db
+    .selectFrom("accounting.journal_entries")
+    .select("id")
+    .where("org_id", "=", params.orgId)
+    .where("referencia_id", "=", params.referenciaId)
+    .where("referencia_tabla", "=", params.referenciaTabla)
+    .where("tipo_evento", "=", params.tipoEvento)
+    .where("estado", "=", "ACTIVO")
+    .orderBy("creado_at", "desc")
+    .executeTakeFirst();
+
+  return entry?.id;
+}

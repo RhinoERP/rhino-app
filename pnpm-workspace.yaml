@@ -2,6 +2,8 @@ packages:
   - services/accounting
   - services/whatsapp-agent
 allowBuilds:
+  core-js: false
   esbuild: false
   msw: true
   node: set this to true or false
+  sharp: false

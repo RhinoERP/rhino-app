@@ -171,7 +171,8 @@ function accumLineas(
     if (!l) {
       continue;
     }
-    if (l.esSeleccionable && !overrides.assignments[i]) {
+    const cuentaId = overrides.assignments[i] ?? l.cuentaId;
+    if (l.esSeleccionable && !cuentaId) {
       continue;
     }
     const ars = convertAccountingAmountToArs(
@@ -239,9 +240,14 @@ function getLineAccountOptions(
     return cuentas;
   }
 
-  const configuredOptions = line.opcionesCuenta ?? [];
+  // opcionesCuenta null = sin restricción (mismo criterio que el motor de
+  // reglas server-side): cualquier cuenta del plan es válida.
+  if (!line.opcionesCuenta) {
+    return cuentas;
+  }
+
   const allowedAccountCodes = new Set(
-    configuredOptions.map((option) => option.accountCode)
+    line.opcionesCuenta.map((option) => option.accountCode)
   );
 
   return cuentas.filter(
@@ -358,7 +364,9 @@ function LineRow({
   );
 
   const selectedCuenta =
-    cuentas.find((cuenta) => cuenta.id === assignedCuentaId) ?? null;
+    cuentas.find(
+      (cuenta) => cuenta.id === (assignedCuentaId ?? line.cuentaId)
+    ) ?? null;
   const accountOptions = getLineAccountOptions(cuentas, line);
 
   return (
@@ -370,7 +378,7 @@ function LineRow({
       <TableCell className="min-w-[160px]">
         <Select
           onValueChange={(v) => onAssign(index, v)}
-          value={assignedCuentaId ?? ""}
+          value={assignedCuentaId ?? line.cuentaId ?? ""}
         >
           <SelectTrigger className="h-7 w-full text-xs">
             <SelectValue placeholder="Seleccionar cuenta..." />
@@ -615,7 +623,9 @@ export function AsientoModal(props: AsientoModalProps) {
     if (!preview) {
       return false;
     }
-    return preview.lineas.every((_, i) => Boolean(assignments[i]));
+    return preview.lineas.every((line, i) =>
+      Boolean(assignments[i] ?? line.cuentaId)
+    );
   }
 
   function extrasAreValid(): boolean {
@@ -647,7 +657,7 @@ export function AsientoModal(props: AsientoModalProps) {
       lineasEditadas:
         preview?.lineas.map((line, index) => ({
           index,
-          cuentaId: assignments[index],
+          cuentaId: assignments[index] ?? line.cuentaId ?? undefined,
           monto: toAccountingStr(
             convertAccountingAmountToArs(
               parseAccountingAmount(montoOverrides[index] ?? line.monto),
