@@ -269,14 +269,33 @@ async function rejectPosSaleEntryMutation(params: {
     });
 
     if (!res.ok) {
-      return null;
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            res.status === 404
+              ? "Asiento informal no encontrado"
+              : "No se pudo verificar el tipo de asiento informal",
+        },
+        { status: res.status === 404 ? 404 : HTTP_BAD_GATEWAY }
+      );
     }
 
     const json = (await res.json().catch(() => null)) as {
       data?: { source_type?: string };
     } | null;
 
-    if (json?.data?.source_type !== "VENTA_POS") {
+    if (!json?.data || typeof json.data.source_type !== "string") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "El servicio contable no devolvió el tipo de asiento informal",
+        },
+        { status: HTTP_BAD_GATEWAY }
+      );
+    }
+
+    if (json.data.source_type !== "VENTA_POS") {
       return null;
     }
 
