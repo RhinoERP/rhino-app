@@ -151,6 +151,32 @@ export async function getOrderIdBySaleId(
   return data;
 }
 
+export async function getOrderQuotePaymentConditionBySaleId(
+  orgSlug: string,
+  saleId: string
+): Promise<string | null> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("quote:quotes(payment_condition)")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  const quote = Array.isArray(data.quote) ? data.quote[0] : data.quote;
+  return quote?.payment_condition?.trim() || null;
+}
+
 export async function getOrdersByOrg(
   orgSlug: string
 ): Promise<OrderWithDetails[]> {
