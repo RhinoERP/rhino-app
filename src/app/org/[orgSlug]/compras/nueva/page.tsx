@@ -179,6 +179,7 @@ function NewPurchaseContent() {
           subtotal: item.subtotal,
           unit_of_measure: item.unit_of_measure,
           variant_stocks: item.has_variants ? item.variant_stocks : undefined,
+          taxes: item.taxes,
         };
       }),
       taxes: selectedTaxIds.length > 0 ? fallbackTaxes : undefined,
@@ -303,6 +304,7 @@ function NewPurchaseContent() {
           <PurchaseItemsList
             categories={categories}
             fallbackTaxes={fallbackTaxes}
+            globalDiscountPercent={globalDiscountPercent}
             isLoadingProducts={isLoadingProducts}
             items={purchaseItems}
             onAddItem={handleAddItem}
@@ -311,6 +313,7 @@ function NewPurchaseContent() {
             orgSlug={orgSlug}
             products={products}
             productTaxes={productTaxes}
+            taxes={taxes}
           />
         </div>
 

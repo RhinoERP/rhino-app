@@ -17,62 +17,16 @@ import {
 } from "@/components/ui/tooltip";
 import type { PurchaseItem } from "@/hooks/use-purchase-form";
 import type { VariantMeta } from "@/hooks/use-variant-loader";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
-
-type TaxIndicator = {
-  label: string;
-  summary: string;
-  variant: "product" | "fallback";
-};
-
-function formatTaxSummary(taxes: ItemTaxInput[]): string {
-  return taxes.map((tax) => `${tax.name} (${tax.rate}%)`).join(", ");
-}
-
-function getItemTaxIndicator(
-  item: PurchaseItem,
-  productTaxes: Map<string, ItemTaxInput[]>,
-  fallbackTaxes: ItemTaxInput[]
-): TaxIndicator | null {
-  const productItemTaxes = productTaxes.get(item.product_id);
-  if (productItemTaxes && productItemTaxes.length > 0) {
-    return {
-      label: "Impuesto producto",
-      summary: formatTaxSummary(productItemTaxes),
-      variant: "product",
-    };
-  }
-  if (fallbackTaxes.length > 0) {
-    return {
-      label: "Impuesto compra",
-      summary: formatTaxSummary(fallbackTaxes),
-      variant: "fallback",
-    };
-  }
-  return null;
-}
-
-function TaxIndicatorLabel({ indicator }: { indicator: TaxIndicator }) {
-  if (!indicator) {
-    return null;
-  }
-  return (
-    <p
-      className={cn(
-        "min-w-0 text-xs leading-relaxed",
-        indicator.variant === "product"
-          ? "text-primary"
-          : "text-muted-foreground"
-      )}
-    >
-      <span className="font-medium">{indicator.label}</span>
-      {indicator.summary ? `: ${indicator.summary}` : null}
-    </p>
-  );
-}
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxSnapshot,
+} from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
 
 function isWeightOrVolumeUnit(unit: string): boolean {
   return unit === "KG" || unit === "LT" || unit === "MT";
@@ -125,7 +79,6 @@ function VariantItemCard({
   product,
   variantMeta,
   currency = "ARS",
-  taxIndicator,
   onRemoveItem,
   onUpdateUnitCost,
   onVariantStockChange,
@@ -136,7 +89,6 @@ function VariantItemCard({
   product: ProductWithPrice | undefined;
   variantMeta: VariantMeta | undefined;
   currency?: string;
-  taxIndicator: TaxIndicator | null;
   onRemoveItem: (index: number) => void;
   onUpdateUnitCost: (index: number, cost: number) => void;
   onVariantStockChange: (
@@ -261,7 +213,6 @@ function VariantItemCard({
             {formatCurrency(item.subtotal, currency)}
           </p>
         </div>
-        {taxIndicator && <TaxIndicatorLabel indicator={taxIndicator} />}
       </div>
     </div>
   );
@@ -272,7 +223,6 @@ function NonVariantItemRow({
   index,
   product,
   currency = "ARS",
-  taxIndicator,
   onRemoveItem,
   onUpdateQuantity,
   onUpdateUnitCost,
@@ -283,7 +233,6 @@ function NonVariantItemRow({
   index: number;
   product: ProductWithPrice | undefined;
   currency?: string;
-  taxIndicator: TaxIndicator | null;
   onRemoveItem: (index: number) => void;
   onUpdateQuantity: (index: number, quantity: number) => void;
   onUpdateUnitCost: (index: number, cost: number) => void;
@@ -447,7 +396,6 @@ function NonVariantItemRow({
           </Tooltip>
         </div>
       </div>
-      {taxIndicator && <TaxIndicatorLabel indicator={taxIndicator} />}
     </div>
   );
 }
@@ -460,6 +408,9 @@ type RenderItemProps = {
   variantMetaMap: Record<string, VariantMeta>;
   productTaxes: Map<string, ItemTaxInput[]>;
   fallbackTaxes: ItemTaxInput[];
+  taxes: Tax[];
+  calculatedTaxes: ItemTaxSnapshot[];
+  onUpdateItem: (index: number, item: PurchaseItem) => void;
   onRemoveItem: (index: number) => void;
   handleUpdateDiscount: (index: number, percent: number) => void;
   handleUpdateUnitCost: (index: number, cost: number) => void;
@@ -482,6 +433,9 @@ function renderPurchaseItem(props: RenderItemProps) {
     variantMetaMap,
     productTaxes,
     fallbackTaxes,
+    taxes,
+    calculatedTaxes,
+    onUpdateItem,
     onRemoveItem,
     handleUpdateDiscount,
     handleUpdateUnitCost,
@@ -492,40 +446,67 @@ function renderPurchaseItem(props: RenderItemProps) {
 
   const product = products.find((p) => p.id === item.product_id);
   const isVariantItem = item.has_variants && product?.has_variants;
-  const taxIndicator = getItemTaxIndicator(item, productTaxes, fallbackTaxes);
 
   if (isVariantItem) {
     return (
-      <VariantItemCard
+      <div key={`${item.product_id}-${index}`}>
+        <VariantItemCard
+          currency={currency}
+          index={index}
+          item={item}
+          key={`${item.product_id}-${index}`}
+          onRemoveItem={onRemoveItem}
+          onUpdateDiscount={handleUpdateDiscount}
+          onUpdateUnitCost={handleUpdateUnitCost}
+          onVariantStockChange={handleVariantStockChange}
+          product={product}
+          variantMeta={variantMetaMap[item.product_id]}
+        />
+        <div className="px-4 pb-3">
+          <PurchaseItemTaxPicker
+            availableTaxes={taxes}
+            calculatedTaxes={calculatedTaxes}
+            currency={currency}
+            editable
+            fallbackTaxes={fallbackTaxes}
+            onChange={(next) => onUpdateItem(index, { ...item, taxes: next })}
+            productName={item.product_name}
+            productTaxes={productTaxes.get(item.product_id)}
+            taxes={item.taxes}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div key={`${item.product_id}-${index}`}>
+      <NonVariantItemRow
         currency={currency}
         index={index}
         item={item}
         key={`${item.product_id}-${index}`}
         onRemoveItem={onRemoveItem}
         onUpdateDiscount={handleUpdateDiscount}
+        onUpdatePricePerKg={handleUpdatePricePerKg}
+        onUpdateQuantity={handleUpdateQuantity}
         onUpdateUnitCost={handleUpdateUnitCost}
-        onVariantStockChange={handleVariantStockChange}
         product={product}
-        taxIndicator={taxIndicator}
-        variantMeta={variantMetaMap[item.product_id]}
       />
-    );
-  }
-
-  return (
-    <NonVariantItemRow
-      currency={currency}
-      index={index}
-      item={item}
-      key={`${item.product_id}-${index}`}
-      onRemoveItem={onRemoveItem}
-      onUpdateDiscount={handleUpdateDiscount}
-      onUpdatePricePerKg={handleUpdatePricePerKg}
-      onUpdateQuantity={handleUpdateQuantity}
-      onUpdateUnitCost={handleUpdateUnitCost}
-      product={product}
-      taxIndicator={taxIndicator}
-    />
+      <div className="px-4 pb-3">
+        <PurchaseItemTaxPicker
+          availableTaxes={taxes}
+          calculatedTaxes={calculatedTaxes}
+          currency={currency}
+          editable
+          fallbackTaxes={fallbackTaxes}
+          onChange={(next) => onUpdateItem(index, { ...item, taxes: next })}
+          productName={item.product_name}
+          productTaxes={productTaxes.get(item.product_id)}
+          taxes={item.taxes}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -536,6 +517,9 @@ type ItemsViewProps = {
   variantMetaMap: Record<string, VariantMeta>;
   productTaxes: Map<string, ItemTaxInput[]>;
   fallbackTaxes?: ItemTaxInput[];
+  taxes: Tax[];
+  globalDiscountPercent: number;
+  onUpdateItem: (index: number, item: PurchaseItem) => void;
   onRemoveItem: (index: number) => void;
   handleUpdateDiscount: (index: number, percent: number) => void;
   handleUpdateUnitCost: (index: number, cost: number) => void;
@@ -556,6 +540,9 @@ export function ItemsView({
   variantMetaMap,
   productTaxes,
   fallbackTaxes = [],
+  taxes,
+  globalDiscountPercent,
+  onUpdateItem,
   onRemoveItem,
   handleUpdateDiscount,
   handleUpdateUnitCost,
@@ -578,6 +565,23 @@ export function ItemsView({
     );
   }
 
+  const subtotal = items.reduce(
+    (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
+    0
+  );
+  const plan = buildItemizedTaxPlan({
+    lines: items.map((item, index) => ({
+      lineId: `item-${index}`,
+      productId: item.product_id,
+      netAmount: item.subtotal,
+      taxes: item.taxes ?? productTaxes.get(item.product_id),
+    })),
+    globalDiscountAmount: truncateMoney(
+      Math.min(subtotal, (subtotal * globalDiscountPercent) / 100)
+    ),
+    fallbackTaxes,
+  });
+
   return (
     <div className="rounded-lg border">
       <div className="divide-y">
@@ -590,6 +594,11 @@ export function ItemsView({
             variantMetaMap,
             productTaxes,
             fallbackTaxes,
+            taxes,
+            calculatedTaxes: plan.itemTaxes.filter(
+              (tax) => tax.lineId === `item-${index}`
+            ),
+            onUpdateItem,
             onRemoveItem,
             handleUpdateDiscount,
             handleUpdateUnitCost,

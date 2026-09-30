@@ -1,5 +1,9 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createAdminClient } from "@/lib/supabase/admin-client";
+import {
+  buildPurchaseTaxPlan,
+  persistPurchaseFiscalState,
+} from "./purchase-tax-snapshots.service";
 
 type GroupedProductItem = {
   totalQty: number;
@@ -8,7 +12,8 @@ type GroupedProductItem = {
 
 async function fetchVariantDetails(
   supabase: ReturnType<typeof createAdminClient>,
-  items: Array<{ product_variant_id: string | null }>
+  orgId: string,
+  items: Array<{ product_variant_id: string | null; product_id: string }>
 ): Promise<Map<string, { talle: string; color: string }>> {
   const variantIds = items
     .map((item) => item.product_variant_id)
@@ -21,8 +26,24 @@ async function fetchVariantDetails(
 
   const { data: variants } = await supabase
     .from("product_variants")
-    .select("id, talle, color")
+    .select("id, talle, color, product_id")
+    .eq("organization_id", orgId)
     .in("id", variantIds);
+
+  const byId = new Map(
+    (variants ?? []).map((variant) => [variant.id, variant])
+  );
+  for (const item of items) {
+    if (!item.product_variant_id) {
+      continue;
+    }
+    const variant = byId.get(item.product_variant_id);
+    if (!variant || variant.product_id !== item.product_id) {
+      throw new Error(
+        "Una variante no pertenece al producto y organización de la pre-compra"
+      );
+    }
+  }
 
   for (const v of variants ?? []) {
     variantMap.set(v.id, { talle: v.talle, color: v.color });
@@ -93,15 +114,53 @@ export async function createDraftPurchaseFromChildOrder(params: {
 }): Promise<{ purchaseOrderId: string; purchaseOrderNumber: number }> {
   const supabase = createAdminClient();
 
+  if (
+    params.quoteItemIds.length === 0 ||
+    new Set(params.quoteItemIds).size !== params.quoteItemIds.length
+  ) {
+    throw new Error("Los ítems solicitados para la pre-compra son inválidos");
+  }
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select("id, quote_id, purchase_order_id")
+    .eq("id", params.orderId)
+    .eq("organization_id", params.orgId)
+    .single();
+  if (orderError || !order?.quote_id || order.purchase_order_id) {
+    throw new Error(
+      "El pedido no pertenece a la organización o ya tiene una pre-compra"
+    );
+  }
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("id")
+    .eq("id", order.quote_id)
+    .eq("organization_id", params.orgId)
+    .single();
+  if (!quote) {
+    throw new Error("El presupuesto del pedido no pertenece a la organización");
+  }
+
   const { data: items, error: itemsError } = await supabase
     .from("quote_items")
     .select(
-      "id, quote_id, product_id, quantity, description, product_variant_id"
+      "id, quote_id, product_id, quantity, description, product_variant_id, assigned_order_id"
     )
+    .eq("quote_id", order.quote_id)
     .in("id", params.quoteItemIds);
 
-  if (itemsError || !items || items.length === 0) {
-    throw new Error("Error al obtener items del presupuesto");
+  if (
+    itemsError ||
+    !items ||
+    items.length !== params.quoteItemIds.length ||
+    items.some(
+      (item) =>
+        item.assigned_order_id && item.assigned_order_id !== params.orderId
+    )
+  ) {
+    throw new Error(
+      "Los ítems no pertenecen al presupuesto y pedido indicados"
+    );
   }
 
   const itemsWithProduct = items.filter(
@@ -113,11 +172,44 @@ export async function createDraftPurchaseFromChildOrder(params: {
     throw new Error("Ningún item del presupuesto tiene un producto asignado");
   }
 
-  const variantMap = await fetchVariantDetails(supabase, itemsWithProduct);
+  const variantMap = await fetchVariantDetails(
+    supabase,
+    params.orgId,
+    itemsWithProduct
+  );
 
   const grouped = groupQuoteItemsByProduct(itemsWithProduct, variantMap);
 
   const productIds = Array.from(grouped.keys());
+  const { data: ownedProducts, error: productsError } = await supabase
+    .from("products")
+    .select("id, supplier_id")
+    .eq("organization_id", params.orgId)
+    .in("id", productIds);
+  if (productsError || ownedProducts?.length !== productIds.length) {
+    throw new Error("Uno o más productos no pertenecen a la organización");
+  }
+  const supplierIds = [
+    ...new Set(
+      (ownedProducts ?? [])
+        .map((product) => product.supplier_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const supplierId = supplierIds.length === 1 ? supplierIds[0] : null;
+  if (supplierId) {
+    const { data: supplier } = await supabase
+      .from("suppliers")
+      .select("id")
+      .eq("id", supplierId)
+      .eq("organization_id", params.orgId)
+      .single();
+    if (!supplier) {
+      throw new Error(
+        "El proveedor de la pre-compra no pertenece a la organización"
+      );
+    }
+  }
 
   const { data: productCosts } = await supabase
     .from("products_with_price")
@@ -160,11 +252,13 @@ export async function createDraftPurchaseFromChildOrder(params: {
       .from("purchase_orders")
       .insert({
         organization_id: params.orgId,
+        supplier_id: supplierId,
         purchase_number: purchaseNumber,
         status: "DRAFT",
         currency: purchaseCurrency,
         subtotal_amount: 0,
         tax_amount: 0,
+        tax_snapshot_initialized: true,
         total_amount: 0,
       })
       .select("id")
@@ -187,6 +281,7 @@ export async function createDraftPurchaseFromChildOrder(params: {
       const unitCost = costMap.get(productId) ?? 0;
       const subtotal = truncateMoney(unitCost * group.totalQty);
       return {
+        id: crypto.randomUUID(),
         organization_id: params.orgId,
         purchase_order_id: purchaseOrder.id,
         product_id: productId,
@@ -210,62 +305,67 @@ export async function createDraftPurchaseFromChildOrder(params: {
     throw new Error(`Error al crear items de pre-compra: ${piError.message}`);
   }
 
-  const { subtotalAmount, totalAmount } = computeDraftTotals(purchaseItems);
-
-  const { error: totalsError } = await supabase
-    .from("purchase_orders")
-    .update({
-      subtotal_amount: subtotalAmount,
-      total_amount: totalAmount,
-    })
-    .eq("id", purchaseOrder.id);
-
-  if (totalsError) {
+  const { subtotalAmount } = computeDraftTotals(purchaseItems);
+  try {
+    const taxPlan = await buildPurchaseTaxPlan({
+      supabase,
+      orgId: params.orgId,
+      lines: purchaseItems.map((item) => ({
+        id: item.id,
+        product_id: item.product_id,
+        subtotal: item.subtotal,
+      })),
+      globalDiscountAmount: 0,
+    });
+    await persistPurchaseFiscalState({
+      supabase,
+      orgId: params.orgId,
+      orderId: purchaseOrder.id,
+      mode: "confirm",
+      items: purchaseItems.map((item) => ({
+        ...item,
+        unit_quantity: null,
+        tax_override: null,
+      })),
+      plan: taxPlan,
+      subtotal: subtotalAmount,
+      discountPercentage: 0,
+      discountAmount: 0,
+      fallbackTaxes: [],
+      supplierId,
+      purchaseDate: new Date().toISOString().split("T")[0] ?? "",
+      expirationDate: null,
+      remittanceNumber: null,
+    });
+  } catch (error) {
+    await supabase
+      .from("purchase_order_item_taxes")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", params.orgId);
+    await supabase
+      .from("purchase_order_taxes")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", params.orgId);
     await supabase
       .from("purchase_order_items")
       .delete()
-      .eq("purchase_order_id", purchaseOrder.id);
-    await supabase.from("purchase_orders").delete().eq("id", purchaseOrder.id);
-    throw new Error(
-      `Error al actualizar totales de pre-compra: ${totalsError.message}`
-    );
-  }
-
-  const { data: products } = await supabase
-    .from("products")
-    .select("supplier_id")
-    .in("id", productIds);
-
-  const uniqueSupplierIds = [
-    ...new Set((products ?? []).map((p) => p.supplier_id).filter(Boolean)),
-  ] as string[];
-
-  if (uniqueSupplierIds.length === 1) {
-    const supplierId = uniqueSupplierIds[0];
-    const { error: supplierError } = await supabase
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", params.orgId);
+    await supabase
       .from("purchase_orders")
-      .update({ supplier_id: supplierId })
-      .eq("id", purchaseOrder.id);
-
-    if (supplierError) {
-      await supabase
-        .from("purchase_order_items")
-        .delete()
-        .eq("purchase_order_id", purchaseOrder.id);
-      await supabase
-        .from("purchase_orders")
-        .delete()
-        .eq("id", purchaseOrder.id);
-      throw new Error(
-        `Error al asignar proveedor a pre-compra: ${supplierError.message}`
-      );
-    }
+      .delete()
+      .eq("id", purchaseOrder.id)
+      .eq("organization_id", params.orgId);
+    throw error;
   }
 
   const { error: updateError } = await supabase
     .from("orders")
     .update({ purchase_order_id: purchaseOrder.id })
-    .eq("id", params.orderId);
+    .eq("id", params.orderId)
+    .eq("organization_id", params.orgId);
 
   if (updateError) {
     await supabase

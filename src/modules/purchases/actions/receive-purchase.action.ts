@@ -11,6 +11,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   advanceLinkedChildOrderToGoodsReceived,
+  prevalidatePurchaseReceiptFiscalState,
   processPurchaseReceipt,
   updatePurchaseOrderStatus,
 } from "../service/purchases.service";
@@ -110,6 +111,39 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
       .single();
     const purchaseNumber = po?.purchase_number ?? "";
 
+    const receivedItemIds = itemsToProcess.map((item) => item.itemId);
+    const itemUpdates = itemsToProcess.map((item) => ({
+      itemId: item.itemId,
+      unitQuantity: item.variantStocks
+        ? 0
+        : item.lots.reduce((sum, lot) => sum + lot.unitQuantity, 0),
+      quantity: item.variantStocks
+        ? item.variantStocks.reduce((sum, vs) => sum + vs.quantity, 0)
+        : item.lots.reduce((sum, lot) => sum + lot.quantity, 0),
+      unitCost: item.unitCost,
+    }));
+    await prevalidatePurchaseReceiptFiscalState(
+      orgSlug,
+      purchaseOrderId,
+      receivedItemIds,
+      itemUpdates
+    );
+    for (const item of itemsToProcess) {
+      if (
+        !item.variantStocks?.length &&
+        (item.lots.length === 0 ||
+          item.lots.some(
+            (lot) =>
+              !(lot.lotNumber?.trim() && lot.expirationDate) ||
+              (lot.quantity <= 0 && lot.unitQuantity <= 0)
+          ))
+      ) {
+        throw new Error(
+          `Los lotes del producto ${item.productId} son inválidos`
+        );
+      }
+    }
+
     const processPromises = itemsToProcess.map(async (item) => {
       // Get product info (has_variants, unit_of_measure, tracks_stock_units)
       const { data: product } = await supabase
@@ -153,23 +187,6 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
     });
 
     await Promise.all(processPromises);
-
-    // Aggregate totals per item for purchase_order_items update
-    const receivedItemIds = itemsToProcess.map((item) => item.itemId);
-    const itemUpdates = itemsToProcess.map((item) => {
-      const totalUnitQuantity = item.variantStocks
-        ? 0 // variant products are always unit-based
-        : item.lots.reduce((sum, lot) => sum + lot.unitQuantity, 0);
-      const totalQuantity = item.variantStocks
-        ? item.variantStocks.reduce((sum, vs) => sum + vs.quantity, 0)
-        : item.lots.reduce((sum, lot) => sum + lot.quantity, 0);
-      return {
-        itemId: item.itemId,
-        unitQuantity: totalUnitQuantity,
-        quantity: totalQuantity,
-        unitCost: item.unitCost,
-      };
-    });
 
     await processPurchaseReceipt(
       orgSlug,

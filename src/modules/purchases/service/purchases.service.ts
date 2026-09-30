@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
@@ -11,18 +10,23 @@ import {
 import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import {
-  buildItemizedTaxPlan,
-  type TaxableItemLine,
-  toFallbackItemTaxes,
-} from "@/modules/taxes/item-tax-calculations";
-import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
+import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
 import type {
   PaginatedResult,
   PaginationParams,
   PurchaseMetrics,
 } from "../types";
+import { legacyPurchaseFiscalFieldsChanged } from "../utils/purchase-legacy";
+import {
+  buildPurchaseTaxPlan,
+  getPurchaseItemTaxRows,
+  parsePurchaseTaxInputs,
+  persistPurchaseFiscalState,
+  resolvePurchaseTaxSelections,
+  toPurchaseItemTaxInput,
+  tryParsePurchaseTaxInputs,
+} from "./purchase-tax-snapshots.service";
 import { applyFilters } from "./purchases-filters";
 
 type AccessContext = {
@@ -75,18 +79,6 @@ type ExistingAccountsPayable = Pick<
   AccountsPayableRow,
   "id" | "total_amount" | "pending_balance"
 >;
-type ExistingAccountsPayableWithDueDate = Pick<
-  AccountsPayableRow,
-  "id" | "due_date"
->;
-
-const recalculatedTotalsSchema = z.object({
-  subtotal: z.number().finite().nonnegative(),
-  tax_amount: z.number().finite().nonnegative(),
-  global_discount_percentage: z.number().finite().min(0).max(100),
-  global_discount_amount: z.number().finite().nonnegative(),
-  total_amount: z.number().finite().nonnegative(),
-});
 
 const derivePayableStatus = (
   totalAmount: number,
@@ -129,10 +121,6 @@ type PurchaseTaxInput = Array<{
   name: string;
   rate: number;
 }>;
-
-function resolvePurchaseFallbackTaxes(taxes?: PurchaseTaxInput) {
-  return taxes && taxes.length > 0 ? toFallbackItemTaxes(taxes) : undefined;
-}
 
 async function syncAccountsPayable(params: {
   supabase: Awaited<ReturnType<typeof createClient>>;
@@ -237,87 +225,6 @@ async function syncAccountsPayable(params: {
   }
 }
 
-async function syncAccountsPayableAfterTotalRecalculation(params: {
-  supabase: Awaited<ReturnType<typeof createClient>>;
-  orgId: string;
-  supplierId: string | null;
-  purchaseOrderId: string;
-  purchaseDate: string;
-  expirationDate: string | null;
-  totalAmount: number;
-}) {
-  const {
-    supabase,
-    orgId,
-    supplierId,
-    purchaseOrderId,
-    purchaseDate,
-    expirationDate,
-    totalAmount,
-  } = params;
-
-  if (!supplierId) {
-    return;
-  }
-
-  const { data: existingPayableData, error: existingPayableError } =
-    await supabase
-      .from("accounts_payable")
-      .select("id, due_date")
-      .eq("purchase_order_id", purchaseOrderId)
-      .eq("organization_id", orgId)
-      .maybeSingle();
-  const existingPayable =
-    existingPayableData as ExistingAccountsPayableWithDueDate | null;
-
-  if (existingPayableError) {
-    throw new Error(
-      `No se pudo obtener la cuenta por pagar para sincronizar totales: ${existingPayableError.message}`
-    );
-  }
-
-  if (!(existingPayable?.id || expirationDate)) {
-    return;
-  }
-
-  const dueDate = existingPayable?.due_date ?? expirationDate ?? purchaseDate;
-
-  await syncAccountsPayable({
-    supabase,
-    orgId,
-    supplierId,
-    purchaseOrderId,
-    totalAmount,
-    dueDate,
-  });
-}
-
-function validateRecalculatedTotals(input: {
-  subtotal: number;
-  tax_amount: number;
-  global_discount_percentage: number;
-  global_discount_amount: number;
-  total_amount: number;
-}) {
-  const parsed = recalculatedTotalsSchema.safeParse({
-    subtotal: truncateMoney(input.subtotal),
-    tax_amount: truncateMoney(input.tax_amount),
-    global_discount_percentage: input.global_discount_percentage,
-    global_discount_amount: truncateMoney(input.global_discount_amount),
-    total_amount: truncateMoney(input.total_amount),
-  });
-
-  if (!parsed.success) {
-    throw new Error(
-      `Montos recalculados inválidos para la compra: ${parsed.error.issues
-        .map((issue) => issue.message)
-        .join(", ")}`
-    );
-  }
-
-  return parsed.data;
-}
-
 export type CreatePurchaseOrderInput = {
   orgSlug: string;
   supplier_id: string;
@@ -334,6 +241,7 @@ export type CreatePurchaseOrderInput = {
     subtotal: number;
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>>;
+    taxes?: ItemTaxInput[];
   }[];
   taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
@@ -430,76 +338,6 @@ export async function getAllProductsByOrg(
 /**
  * Inserts purchase order items
  */
-async function insertPurchaseOrderItems(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  orgId: string,
-  purchaseOrderId: string,
-  items: CreatePurchaseOrderInput["items"]
-): Promise<void> {
-  const itemsToInsert = items.map((item) => {
-    const uom = item.unit_of_measure ?? "";
-    const isWeightOrVolume = uom === "KG" || uom === "LT" || uom === "MT";
-    const minQuantity = isWeightOrVolume ? 0 : 1;
-
-    return {
-      organization_id: orgId,
-      purchase_order_id: purchaseOrderId,
-      product_id: item.product_id,
-      quantity: Math.max(minQuantity, item.quantity),
-      unit_quantity: item.unit_quantity,
-      unit_cost: truncateMoney(item.unit_cost),
-      subtotal: truncateMoney(item.subtotal),
-      variant_stocks: item.variant_stocks ?? null,
-    };
-  });
-
-  const { error } = await supabase
-    .from("purchase_order_items")
-    .insert(itemsToInsert);
-
-  if (error) {
-    throw new Error(`Error creating purchase order items: ${error.message}`);
-  }
-}
-
-/**
- * Inserts purchase order taxes
- */
-async function insertPurchaseOrderTaxes(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  orgId: string,
-  purchaseOrderId: string,
-  taxAmounts: Array<{
-    tax_id: string;
-    name: string;
-    rate: number;
-    base_amount: number;
-    tax_amount: number;
-  }>
-): Promise<void> {
-  if (taxAmounts.length === 0) {
-    return;
-  }
-
-  const taxesToInsert = taxAmounts.map((tax) => ({
-    organization_id: orgId,
-    purchase_order_id: purchaseOrderId,
-    tax_id: tax.tax_id,
-    name: tax.name,
-    rate: tax.rate,
-    base_amount: truncateMoney(tax.base_amount),
-    tax_amount: truncateMoney(tax.tax_amount),
-  }));
-
-  const { error } = await supabase
-    .from("purchase_order_taxes")
-    .insert(taxesToInsert);
-
-  if (error) {
-    throw new Error(`Error creating purchase order taxes: ${error.message}`);
-  }
-}
-
 /**
  * Rolls back a failed purchase order creation
  */
@@ -508,6 +346,11 @@ async function rollbackPurchaseOrder(
   orgId: string,
   purchaseOrderId: string
 ): Promise<void> {
+  await supabase
+    .from("purchase_order_item_taxes")
+    .delete()
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId);
   await supabase
     .from("purchase_order_items")
     .delete()
@@ -528,6 +371,7 @@ async function rollbackPurchaseOrder(
 /**
  * Creates a new purchase order with its items
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: resolves fiscal selections and persists the order before syncing its payable.
 export async function createPurchaseOrder(
   input: CreatePurchaseOrderInput
 ): Promise<PurchaseOrder> {
@@ -554,29 +398,26 @@ export async function createPurchaseOrder(
       input.global_discount_percentage ?? 0
     );
 
-  const productIds = Array.from(
-    new Set(input.items.map((item) => item.product_id).filter(Boolean))
-  );
-  const productTaxes = await getProductTaxAssignments({
+  const selections = await resolvePurchaseTaxSelections({
     supabase,
     orgId: org.id,
-    productIds,
+    lines: input.items,
+    fallbackTaxes: input.taxes ?? [],
   });
-
-  const taxLines: TaxableItemLine[] = input.items.map((item, index) => {
-    const taxes = productTaxes.get(item.product_id);
-    return {
-      lineId: `item-${index}`,
-      productId: item.product_id,
-      netAmount: truncateMoney(item.subtotal),
-      taxes: taxes?.length ? taxes : undefined,
-    };
-  });
-
-  const fallbackTaxes = resolvePurchaseFallbackTaxes(input.taxes);
-
-  const taxPlan = buildItemizedTaxPlan({
-    lines: taxLines,
+  const fallbackTaxes = selections.fallbackTaxes;
+  const resolvedItems = input.items.map((item, index) => ({
+    ...item,
+    taxes: selections.lineTaxes[index],
+  }));
+  const taxPlan = await buildPurchaseTaxPlan({
+    supabase,
+    orgId: org.id,
+    lines: resolvedItems.map((item, index) => ({
+      id: `item-${index}`,
+      product_id: item.product_id,
+      subtotal: item.subtotal,
+      taxes: item.taxes,
+    })),
     globalDiscountAmount: global_discount_amount,
     fallbackTaxes,
   });
@@ -617,7 +458,9 @@ export async function createPurchaseOrder(
       total_amount,
       status: "ORDERED",
       payable_origin: input.payable_origin ?? "PURCHASE_NOTE",
-    } as never)
+      fallback_taxes: fallbackTaxes ?? [],
+      tax_snapshot_initialized: true,
+    })
     .select("*")
     .single();
 
@@ -626,37 +469,45 @@ export async function createPurchaseOrder(
   }
 
   try {
-    await insertPurchaseOrderItems(
-      supabase,
-      org.id,
-      purchaseOrder.id,
-      input.items
+    const storedItems = resolvedItems.map((item) => ({
+      id: crypto.randomUUID(),
+      product_id: item.product_id,
+      quantity: Math.max(
+        ["KG", "LT", "MT"].includes(item.unit_of_measure ?? "") ? 0 : 1,
+        item.quantity
+      ),
+      unit_quantity: item.unit_quantity,
+      unit_cost: truncateMoney(item.unit_cost),
+      subtotal: truncateMoney(item.subtotal),
+      variant_stocks: item.variant_stocks ?? null,
+      tax_override: item.taxes ?? null,
+    }));
+    const idByLine = new Map(
+      storedItems.map((item, index) => [`item-${index}`, item.id])
     );
-    await insertPurchaseOrderTaxes(
+    await persistPurchaseFiscalState({
       supabase,
-      org.id,
-      purchaseOrder.id,
-      taxPlan.aggregateTaxes.map((tax) => ({
-        tax_id: tax.taxId ?? "",
-        name: tax.name,
-        rate: tax.rate,
-        base_amount: tax.baseAmount,
-        tax_amount: tax.taxAmount,
-      }))
-    );
-
-    // Only create payable account if expiration_date is provided
-    const payableDueDate = input.expiration_date ?? null;
-    if (payableDueDate) {
-      await syncAccountsPayable({
-        supabase,
-        orgId: org.id,
-        supplierId: input.supplier_id,
-        purchaseOrderId: purchaseOrder.id,
-        totalAmount: total_amount,
-        dueDate: payableDueDate,
-      });
-    }
+      mode: "replace",
+      items: storedItems,
+      orgId: org.id,
+      orderId: purchaseOrder.id,
+      plan: {
+        ...taxPlan,
+        itemTaxes: taxPlan.itemTaxes.map((tax) => ({
+          ...tax,
+          lineId: idByLine.get(tax.lineId) ?? tax.lineId,
+        })),
+      },
+      subtotal: subtotal_amount,
+      discountPercentage: global_discount_percentage,
+      discountAmount: global_discount_amount,
+      fallbackTaxes,
+      supplierId: input.supplier_id,
+      purchaseDate: input.purchase_date,
+      expirationDate: input.expiration_date ?? null,
+      payableDueDate: input.expiration_date ?? null,
+      remittanceNumber: input.remittance_number ?? null,
+    });
   } catch (error) {
     await rollbackPurchaseOrder(supabase, org.id, purchaseOrder.id);
     throw error instanceof Error
@@ -795,64 +646,6 @@ function computeDraftTotals(updatedItems: Array<{ subtotal: number }>): {
   };
 }
 
-async function updateDraftToOrdered(options: {
-  supabase: Awaited<ReturnType<typeof createClient>>;
-  purchaseOrderId: string;
-  supplierId: string;
-  orgId: string;
-  subtotalAmount: number;
-  totalAmount: number;
-}): Promise<void> {
-  const {
-    supabase,
-    purchaseOrderId,
-    supplierId,
-    orgId,
-    subtotalAmount,
-    totalAmount,
-  } = options;
-  const { error: updatePoError } = await supabase
-    .from("purchase_orders")
-    .update({
-      supplier_id: supplierId,
-      status: "ORDERED",
-      purchase_date: new Date().toISOString().split("T")[0],
-      subtotal_amount: subtotalAmount,
-      tax_amount: 0,
-      total_amount: totalAmount,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", purchaseOrderId)
-    .eq("organization_id", orgId);
-
-  if (updatePoError) {
-    throw new Error(`Error al confirmar pre-compra: ${updatePoError.message}`);
-  }
-}
-
-async function updateDraftItemPrices(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  updatedItems: Array<{ id: string; unit_cost: number; subtotal: number }>,
-  orgId: string
-): Promise<void> {
-  for (const item of updatedItems) {
-    const { error: itemError } = await supabase
-      .from("purchase_order_items")
-      .update({
-        unit_cost: item.unit_cost,
-        subtotal: item.subtotal,
-      })
-      .eq("id", item.id)
-      .eq("organization_id", orgId);
-
-    if (itemError) {
-      throw new Error(
-        `Error al actualizar item de compra: ${itemError.message}`
-      );
-    }
-  }
-}
-
 async function advanceLinkedChildOrder(
   supabase: Awaited<ReturnType<typeof createClient>>,
   purchaseOrderId: string,
@@ -888,6 +681,7 @@ async function advanceLinkedChildOrder(
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: prepares frozen line taxes and final costs before one atomic confirmation.
 export async function confirmDraftPurchaseOrder(params: {
   orgSlug: string;
   purchaseOrderId: string;
@@ -923,29 +717,85 @@ export async function confirmDraftPurchaseOrder(params: {
 
   const updatedItems = await calculateDraftItemCosts(items, org.id, supabase);
 
-  const { subtotalAmount, totalAmount } = computeDraftTotals(updatedItems);
-
-  await updateDraftToOrdered({
-    supabase,
-    purchaseOrderId: params.purchaseOrderId,
-    supplierId: params.supplierId,
-    orgId: org.id,
-    subtotalAmount,
-    totalAmount,
-  });
-
-  await updateDraftItemPrices(supabase, updatedItems, org.id);
-
-  if ((purchaseOrder as PurchaseOrder).payable_origin !== "SUPPLIER_INVOICE") {
-    await syncAccountsPayable({
-      supabase,
-      orgId: org.id,
-      supplierId: params.supplierId,
-      purchaseOrderId: params.purchaseOrderId,
-      totalAmount,
-      dueDate: params.expirationDate ?? purchaseOrder.purchase_date,
-    });
+  const { subtotalAmount } = computeDraftTotals(updatedItems);
+  const { data: supplier } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("id", params.supplierId)
+    .eq("organization_id", org.id)
+    .single();
+  if (!supplier) {
+    throw new Error("El proveedor no pertenece a la organización");
   }
+  const snapshots = await getPurchaseItemTaxRows(
+    supabase,
+    org.id,
+    params.purchaseOrderId
+  );
+  const savedByItem = new Map<string, ItemTaxInput[]>();
+  for (const tax of snapshots) {
+    if (tax.source === "fallback" || tax.source === "legacy_prorated") {
+      continue;
+    }
+    savedByItem.set(tax.purchase_order_item_id, [
+      ...(savedByItem.get(tax.purchase_order_item_id) ?? []),
+      toPurchaseItemTaxInput(tax),
+    ]);
+  }
+  const fallbackTaxes = parsePurchaseTaxInputs(purchaseOrder.fallback_taxes);
+  const { global_discount_percentage, global_discount_amount } =
+    calculateGlobalDiscount(
+      subtotalAmount,
+      purchaseOrder.global_discount_percentage ?? 0
+    );
+  const plan = await buildPurchaseTaxPlan({
+    supabase,
+    orgId: org.id,
+    lines: updatedItems.map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      subtotal: item.subtotal,
+      taxes:
+        item.tax_override === null
+          ? (savedByItem.get(item.id) ??
+            (purchaseOrder.tax_snapshot_initialized ? [] : undefined))
+          : parsePurchaseTaxInputs(item.tax_override),
+    })),
+    globalDiscountAmount: global_discount_amount,
+    fallbackTaxes,
+  });
+  const now =
+    new Date().toISOString().split("T")[0] ?? purchaseOrder.purchase_date;
+  await persistPurchaseFiscalState({
+    supabase,
+    orgId: org.id,
+    orderId: params.purchaseOrderId,
+    mode: "confirm",
+    items: updatedItems.map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      quantity: item.quantity,
+      unit_quantity: item.unit_quantity,
+      unit_cost: item.unit_cost,
+      subtotal: item.subtotal,
+      variant_stocks: item.variant_stocks,
+      tax_override:
+        item.tax_override === null
+          ? null
+          : parsePurchaseTaxInputs(item.tax_override),
+    })),
+    plan,
+    subtotal: subtotalAmount,
+    discountPercentage: global_discount_percentage,
+    discountAmount: global_discount_amount,
+    fallbackTaxes,
+    supplierId: params.supplierId,
+    purchaseDate: now,
+    expirationDate: purchaseOrder.expiration_date,
+    payableDueDate: params.expirationDate ?? purchaseOrder.purchase_date,
+    remittanceNumber: purchaseOrder.remittance_number,
+    nextStatus: "ORDERED",
+  });
 
   await advanceLinkedChildOrder(supabase, params.purchaseOrderId, org.id);
 
@@ -1586,495 +1436,220 @@ export type UpdateReceivedItemInput = {
   unitCost?: number;
 };
 
-async function deleteNonReceivedPurchaseOrderItems(params: {
-  supabase: Awaited<ReturnType<typeof createClient>>;
-  orgId: string;
-  purchaseOrderId: string;
-  receivedItemIds: string[];
-}) {
-  const { supabase, orgId, purchaseOrderId, receivedItemIds } = params;
-
-  const { data: allItems } = await supabase
-    .from("purchase_order_items")
-    .select("id")
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", orgId);
-
-  if (!allItems) {
-    return;
-  }
-
-  const allItemIds = allItems.map((item) => item.id);
-  const itemsToDelete = allItemIds.filter(
-    (id) => !receivedItemIds.includes(id)
-  );
-
-  if (itemsToDelete.length === 0) {
-    return;
-  }
-
-  const { error: deleteError } = await supabase
-    .from("purchase_order_items")
-    .delete()
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", orgId)
-    .in("id", itemsToDelete);
-
-  if (deleteError) {
-    throw new Error(
-      `Error deleting non-received items: ${deleteError.message}`
-    );
-  }
-}
-
-/**
- * Updates purchase order items with adjusted values during receipt
- */
-export async function updateReceivedPurchaseOrderItems(
-  orgSlug: string,
-  purchaseOrderId: string,
-  receivedItems: UpdateReceivedItemInput[]
-): Promise<void> {
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-
-  const supabase = await createClient();
-
-  const updatePromises = receivedItems.map(async (item) => {
-    const updateData: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    };
-
-    if (item.unitQuantity !== undefined) {
-      updateData.unit_quantity = item.unitQuantity;
-    }
-    if (item.quantity !== undefined) {
-      updateData.quantity = item.quantity;
-    }
-    if (item.unitCost !== undefined) {
-      updateData.unit_cost = item.unitCost;
-    }
-
-    // Subtotal is always unit_cost × unit_quantity (kg/lts/etc.)
-    const { data: currentItem } = await supabase
-      .from("purchase_order_items")
-      .select("unit_quantity, unit_cost")
-      .eq("id", item.itemId)
-      .single();
-
-    if (currentItem) {
-      const cost = item.unitCost ?? currentItem.unit_cost ?? 0;
-      const unitQty = item.unitQuantity ?? currentItem.unit_quantity ?? 0;
-      updateData.subtotal = truncateMoney(unitQty * cost);
-    }
-
-    const { error } = await supabase
-      .from("purchase_order_items")
-      .update(updateData)
-      .eq("id", item.itemId)
-      .eq("purchase_order_id", purchaseOrderId);
-
-    if (error) {
-      throw new Error(`Error updating item: ${error.message}`);
-    }
-  });
-
-  await Promise.all(updatePromises);
-
-  // Recalculate purchase order totals
-  const { data: updatedItems } = await supabase
-    .from("purchase_order_items")
-    .select("subtotal")
-    .eq("purchase_order_id", purchaseOrderId);
-
-  if (updatedItems) {
-    const subtotal = updatedItems.reduce(
-      (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal ?? 0)),
-      0
-    );
-
-    // Get global discount percentage
-    const { data: purchaseOrder } = await supabase
-      .from("purchase_orders")
-      .select(
-        "global_discount_percentage, supplier_id, expiration_date, purchase_date"
-      )
-      .eq("id", purchaseOrderId)
-      .eq("organization_id", org.id)
-      .single();
-
-    const {
-      global_discount_percentage,
-      global_discount_amount,
-      taxable_base_amount,
-    } = calculateGlobalDiscount(
-      subtotal,
-      purchaseOrder?.global_discount_percentage ?? 0
-    );
-
-    // Get taxes to calculate totals
-    const { data: taxes } = await supabase
-      .from("purchase_order_taxes")
-      .select("id, rate")
-      .eq("purchase_order_id", purchaseOrderId);
-
-    const tax_amount = taxes
-      ? taxes.reduce(
-          (sum, tax) =>
-            truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
-          0
-        )
-      : 0;
-
-    const total_amount = truncateMoney(
-      Math.max(0, taxable_base_amount + tax_amount)
-    );
-    const validatedTotals = validateRecalculatedTotals({
-      subtotal,
-      tax_amount,
-      global_discount_percentage,
-      global_discount_amount,
-      total_amount,
-    });
-
-    if (taxes?.length) {
-      await Promise.all(
-        taxes.map((tax) =>
-          supabase
-            .from("purchase_order_taxes")
-            .update({
-              base_amount: taxable_base_amount,
-              tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
-            })
-            .eq("id", tax.id)
-            .eq("purchase_order_id", purchaseOrderId)
-            .eq("organization_id", org.id)
-        )
-      );
-    }
-
-    const { error: updateOrderError } = await supabase
-      .from("purchase_orders")
-      .update({
-        subtotal_amount: validatedTotals.subtotal,
-        tax_amount: validatedTotals.tax_amount,
-        global_discount_percentage: validatedTotals.global_discount_percentage,
-        global_discount_amount: validatedTotals.global_discount_amount,
-        total_amount: validatedTotals.total_amount,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", purchaseOrderId)
-      .eq("organization_id", org.id);
-
-    if (updateOrderError) {
-      throw new Error(
-        `Error updating purchase order totals: ${updateOrderError.message}`
-      );
-    }
-
-    if (purchaseOrder) {
-      await syncAccountsPayableAfterTotalRecalculation({
-        supabase,
-        orgId: org.id,
-        supplierId: purchaseOrder.supplier_id,
-        purchaseOrderId,
-        purchaseDate: purchaseOrder.purchase_date,
-        expirationDate: purchaseOrder.expiration_date,
-        totalAmount: validatedTotals.total_amount,
-      });
-    }
-  }
-}
-
-/**
- * Processes purchase receipt: updates received items, removes non-received items, and recalculates totals
- */
-async function updateReceivedItem(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  item: UpdateReceivedItemInput,
-  purchaseOrderId: string,
-  orgId: string
-): Promise<void> {
-  const updateData: Record<string, unknown> = {};
-
-  if (item.unitQuantity !== undefined) {
-    updateData.unit_quantity = item.unitQuantity;
-  }
-  if (item.quantity !== undefined) {
-    updateData.quantity = item.quantity;
-  }
-  if (item.unitCost !== undefined) {
-    updateData.unit_cost = item.unitCost;
-  }
-
-  const { data: currentItem } = await supabase
-    .from("purchase_order_items")
-    .select("unit_quantity, quantity, unit_cost")
-    .eq("id", item.itemId)
-    .single();
-
-  if (currentItem) {
-    const cost = item.unitCost ?? currentItem.unit_cost ?? 0;
-    const unitQty = item.unitQuantity ?? currentItem.unit_quantity ?? 0;
-    const qty = item.quantity ?? currentItem.quantity ?? 0;
-    updateData.subtotal = unitQty > 0 ? unitQty * cost : qty * cost;
-  }
-
-  const { error } = await supabase
-    .from("purchase_order_items")
-    .update(updateData)
-    .eq("id", item.itemId)
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", orgId);
-
-  if (error) {
-    throw new Error(`Error updating item: ${error.message}`);
-  }
-}
-
 export async function processPurchaseReceipt(
   orgSlug: string,
   purchaseOrderId: string,
   receivedItemIds: string[],
   itemUpdates: UpdateReceivedItemInput[]
 ): Promise<void> {
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-
-  const supabase = await createClient();
-
-  const updatePromises = itemUpdates.map((item) =>
-    updateReceivedItem(supabase, item, purchaseOrderId, org.id)
-  );
-
-  await Promise.all(updatePromises);
-
-  await deleteNonReceivedPurchaseOrderItems({
-    supabase,
-    orgId: org.id,
+  const prepared = await preparePurchaseReceiptFiscalState(
+    orgSlug,
     purchaseOrderId,
     receivedItemIds,
+    itemUpdates
+  );
+  await persistPurchaseFiscalState({
+    supabase: prepared.supabase,
+    orgId: prepared.orgId,
+    orderId: purchaseOrderId,
+    mode: prepared.order.tax_snapshot_initialized
+      ? "receipt"
+      : "receipt_legacy",
+    items: prepared.items,
+    plan: prepared.plan,
+    subtotal: prepared.subtotal,
+    discountPercentage: prepared.discountPercentage,
+    discountAmount: prepared.discountAmount,
+    fallbackTaxes: prepared.fallbackTaxes,
+    supplierId: prepared.order.supplier_id,
+    purchaseDate: prepared.order.purchase_date,
+    expirationDate: prepared.order.expiration_date,
+    remittanceNumber: prepared.order.remittance_number,
   });
-
-  // Recalculate purchase order totals
-  const { data: remainingItems } = await supabase
-    .from("purchase_order_items")
-    .select("subtotal")
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", org.id);
-
-  if (remainingItems) {
-    const subtotal = remainingItems.reduce(
-      (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal ?? 0)),
-      0
-    );
-
-    // Get taxes to calculate tax_amount
-    const { data: taxes } = await supabase
-      .from("purchase_order_taxes")
-      .select("id, rate")
-      .eq("purchase_order_id", purchaseOrderId)
-      .eq("organization_id", org.id);
-
-    // Get current global discount percentage
-    const { data: purchaseOrder } = await supabase
-      .from("purchase_orders")
-      .select(
-        "global_discount_percentage, supplier_id, expiration_date, purchase_date"
-      )
-      .eq("id", purchaseOrderId)
-      .eq("organization_id", org.id)
-      .single();
-
-    const {
-      global_discount_percentage,
-      global_discount_amount,
-      taxable_base_amount,
-    } = calculateGlobalDiscount(
-      subtotal,
-      purchaseOrder?.global_discount_percentage ?? 0
-    );
-
-    const tax_amount = taxes
-      ? taxes.reduce(
-          (sum, tax) =>
-            truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
-          0
-        )
-      : 0;
-
-    if (taxes?.length) {
-      await Promise.all(
-        taxes.map((tax) =>
-          supabase
-            .from("purchase_order_taxes")
-            .update({
-              base_amount: taxable_base_amount,
-              tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
-            })
-            .eq("id", tax.id)
-            .eq("purchase_order_id", purchaseOrderId)
-            .eq("organization_id", org.id)
-        )
-      );
-    }
-
-    // Calculate total: base imponible neta + impuestos
-    const total = truncateMoney(Math.max(0, taxable_base_amount + tax_amount));
-    const validatedTotals = validateRecalculatedTotals({
-      subtotal,
-      tax_amount,
-      global_discount_percentage,
-      global_discount_amount,
-      total_amount: total,
-    });
-
-    const { error: updateOrderError } = await supabase
-      .from("purchase_orders")
-      .update({
-        subtotal_amount: validatedTotals.subtotal,
-        tax_amount: validatedTotals.tax_amount,
-        global_discount_percentage: validatedTotals.global_discount_percentage,
-        global_discount_amount: validatedTotals.global_discount_amount,
-        total_amount: validatedTotals.total_amount,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", purchaseOrderId)
-      .eq("organization_id", org.id);
-
-    if (updateOrderError) {
-      throw new Error(
-        `Error updating purchase order totals: ${updateOrderError.message}`
-      );
-    }
-
-    if (purchaseOrder) {
-      await syncAccountsPayableAfterTotalRecalculation({
-        supabase,
-        orgId: org.id,
-        supplierId: purchaseOrder.supplier_id,
-        purchaseOrderId,
-        purchaseDate: purchaseOrder.purchase_date,
-        expirationDate: purchaseOrder.expiration_date,
-        totalAmount: validatedTotals.total_amount,
-      });
-    }
-  }
 }
 
-/**
- * Updates only the taxes for a purchase order and recalculates totals
- */
-export async function updatePurchaseOrderTaxesOnly(
+/** Validate fiscal inputs before the receipt starts creating lots or moving stock. */
+export async function prevalidatePurchaseReceiptFiscalState(
   orgSlug: string,
   purchaseOrderId: string,
-  taxes: {
-    tax_id: string;
-    name: string;
-    rate: number;
-  }[]
+  receivedItemIds: string[],
+  itemUpdates: UpdateReceivedItemInput[]
 ): Promise<void> {
-  const org = await getOrganizationBySlug(orgSlug);
+  await preparePurchaseReceiptFiscalState(
+    orgSlug,
+    purchaseOrderId,
+    receivedItemIds,
+    itemUpdates
+  );
+}
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates the receipt and prepares the fiscal state without modifying stock.
+async function preparePurchaseReceiptFiscalState(
+  orgSlug: string,
+  purchaseOrderId: string,
+  receivedItemIds: string[],
+  itemUpdates: UpdateReceivedItemInput[]
+) {
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
-
   const supabase = await createClient();
-
-  // Get current subtotal and global discount
-  const { data: purchaseOrder } = await supabase
+  const { data: order } = await supabase
     .from("purchase_orders")
-    .select("subtotal_amount, global_discount_percentage")
+    .select("*")
     .eq("id", purchaseOrderId)
     .eq("organization_id", org.id)
     .single();
-
-  if (!purchaseOrder) {
-    throw new Error("Orden de compra no encontrada");
+  if (!order || order.status !== "IN_TRANSIT") {
+    throw new Error("Solo se puede recibir una compra en tránsito");
   }
-
-  const subtotal = truncateMoney(purchaseOrder.subtotal_amount ?? 0);
-  const { global_discount_amount, taxable_base_amount } =
-    calculateGlobalDiscount(
-      subtotal,
-      purchaseOrder.global_discount_percentage ?? 0
-    );
-
-  // Delete existing taxes
-  await supabase
-    .from("purchase_order_taxes")
-    .delete()
+  const { data: storedItems, error } = await supabase
+    .from("purchase_order_items")
+    .select("*")
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
-
-  // Insert new taxes
-  if (taxes.length > 0) {
-    const taxesToInsert = taxes.map((tax) => ({
-      organization_id: org.id,
-      purchase_order_id: purchaseOrderId,
-      tax_id: tax.tax_id,
-      name: tax.name,
-      rate: tax.rate,
-      base_amount: taxable_base_amount,
-      tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
-    }));
-
-    const { error: taxesError } = await supabase
-      .from("purchase_order_taxes")
-      .insert(taxesToInsert);
-
-    if (taxesError) {
-      throw new Error(`Error updating taxes: ${taxesError.message}`);
-    }
+  if (error) {
+    throw new Error(`Error al validar ítems de recepción: ${error.message}`);
   }
-
-  // Recalculate totals
-  const tax_amount = taxes.reduce(
-    (sum, tax) => truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
+  const byId = new Map((storedItems ?? []).map((item) => [item.id, item]));
+  if (
+    receivedItemIds.length === 0 ||
+    new Set(receivedItemIds).size !== receivedItemIds.length ||
+    receivedItemIds.some((id) => !byId.has(id)) ||
+    itemUpdates.length !== receivedItemIds.length ||
+    new Set(itemUpdates.map((item) => item.itemId)).size !==
+      itemUpdates.length ||
+    itemUpdates.some(
+      (item) =>
+        !(
+          receivedItemIds.includes(item.itemId) &&
+          Number.isFinite(item.unitCost ?? 0) &&
+          Number.isFinite(item.quantity ?? 0) &&
+          Number.isFinite(item.unitQuantity ?? 0) &&
+          (item.unitCost ?? 0) >= 0 &&
+          (item.quantity ?? 0) >= 0 &&
+          (item.unitQuantity ?? 0) >= 0
+        )
+    )
+  ) {
+    throw new Error("La recepción contiene ítems o importes inválidos");
+  }
+  const snapshots = await getPurchaseItemTaxRows(
+    supabase,
+    org.id,
+    purchaseOrderId
+  );
+  const byItem = new Map<string, ItemTaxInput[]>();
+  for (const tax of snapshots) {
+    if (tax.source === "fallback" || tax.source === "legacy_prorated") {
+      continue;
+    }
+    byItem.set(tax.purchase_order_item_id, [
+      ...(byItem.get(tax.purchase_order_item_id) ?? []),
+      toPurchaseItemTaxInput(tax),
+    ]);
+  }
+  const items = itemUpdates.map((update) => {
+    const stored = byId.get(update.itemId);
+    if (!stored) {
+      throw new Error("El ítem no pertenece a la compra");
+    }
+    const unitQuantity = update.unitQuantity ?? stored.unit_quantity ?? 0;
+    const quantity = update.quantity ?? stored.quantity;
+    const cost = update.unitCost ?? stored.unit_cost ?? 0;
+    return {
+      id: stored.id,
+      product_id: stored.product_id,
+      quantity,
+      unit_quantity: unitQuantity,
+      unit_cost: cost,
+      variant_stocks: stored.variant_stocks,
+      tax_override:
+        stored.tax_override === null
+          ? null
+          : parsePurchaseTaxInputs(stored.tax_override),
+      subtotal: truncateMoney(
+        (unitQuantity > 0 ? unitQuantity : quantity) * cost
+      ),
+      taxes:
+        stored.tax_override === null
+          ? (byItem.get(stored.id) ??
+            (order.tax_snapshot_initialized ? [] : undefined))
+          : parsePurchaseTaxInputs(stored.tax_override),
+    };
+  });
+  const subtotal = items.reduce(
+    (sum, line) => truncateMoney(sum + line.subtotal),
     0
   );
-  const total = truncateMoney(Math.max(0, taxable_base_amount + tax_amount));
-
-  const { data: updatedPurchaseOrder } = await supabase
-    .from("purchase_orders")
-    .update({
-      tax_amount,
-      global_discount_amount,
-      total_amount: total,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", purchaseOrderId)
-    .eq("organization_id", org.id)
-    .select("purchase_date, supplier_id")
-    .single();
-
-  if (!updatedPurchaseOrder) {
-    throw new Error("No se pudo actualizar la orden de compra");
-  }
-
-  // Sync the updated total to accounts_payable
-  if (updatedPurchaseOrder.supplier_id) {
-    await syncAccountsPayable({
+  const { global_discount_percentage, global_discount_amount } =
+    calculateGlobalDiscount(subtotal, order.global_discount_percentage ?? 0);
+  const fallbackTaxes = parsePurchaseTaxInputs(order.fallback_taxes);
+  if (!order.tax_snapshot_initialized) {
+    const { data: aggregate, error: aggregateError } = await supabase
+      .from("purchase_order_taxes")
+      .select("tax_id, name, rate, tax_code_snapshot")
+      .eq("purchase_order_id", purchaseOrderId)
+      .eq("organization_id", org.id);
+    if (aggregateError) {
+      throw new Error(
+        `Error al validar impuestos históricos: ${aggregateError.message}`
+      );
+    }
+    const base = truncateMoney(Math.max(0, subtotal - global_discount_amount));
+    const aggregateTaxes = (aggregate ?? []).map((tax) => ({
+      taxId: tax.tax_id,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: base,
+      taxAmount: truncateMoney((base * tax.rate) / 100),
+      taxCodeSnapshot: tax.tax_code_snapshot,
+    }));
+    return {
       supabase,
       orgId: org.id,
-      supplierId: updatedPurchaseOrder.supplier_id,
-      purchaseOrderId,
-      totalAmount: total,
-      dueDate: updatedPurchaseOrder.purchase_date,
-    });
+      order,
+      items,
+      subtotal,
+      discountPercentage: global_discount_percentage,
+      discountAmount: global_discount_amount,
+      fallbackTaxes,
+      plan: {
+        lineBases: new Map<string, number>(),
+        itemTaxes: [],
+        aggregateTaxes,
+        totalTaxAmount: aggregateTaxes.reduce(
+          (sum, tax) => truncateMoney(sum + tax.taxAmount),
+          0
+        ),
+      },
+    };
   }
+  const plan = await buildPurchaseTaxPlan({
+    supabase,
+    orgId: org.id,
+    lines: items,
+    globalDiscountAmount: global_discount_amount,
+    fallbackTaxes,
+  });
+  return {
+    supabase,
+    orgId: org.id,
+    order,
+    items,
+    subtotal,
+    discountPercentage: global_discount_percentage,
+    discountAmount: global_discount_amount,
+    fallbackTaxes,
+    plan,
+  };
 }
 
 export type UpdatePurchaseOrderInput = {
   orgSlug: string;
   purchaseOrderId: string;
+  convertLegacyTaxes?: boolean;
   supplier_id?: string;
   purchase_date?: string;
   expiration_date?: string | null;
@@ -2088,6 +1663,7 @@ export type UpdatePurchaseOrderInput = {
     subtotal: number;
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
+    taxes?: ItemTaxInput[];
   }[];
   taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
@@ -2120,141 +1696,9 @@ function buildPurchaseOrderUpdateData(
 }
 
 /**
- * Calculates and adds totals to update data if items are provided
- */
-function calculateAndAddTotals(
-  updateData: Record<string, unknown>,
-  items: UpdatePurchaseOrderInput["items"],
-  totalTaxAmount: number,
-  globalDiscountPercentage?: number
-): void {
-  if (!items || items.length === 0) {
-    return;
-  }
-
-  const subtotal_amount = items.reduce(
-    (sum, item) =>
-      truncateMoney(
-        sum + truncateMoney(item.subtotal ?? item.quantity * item.unit_cost)
-      ),
-    0
-  );
-
-  const { global_discount_percentage, global_discount_amount } =
-    calculateGlobalDiscount(subtotal_amount, globalDiscountPercentage ?? 0);
-
-  const total_amount = truncateMoney(
-    Math.max(
-      0,
-      truncateMoney(subtotal_amount - global_discount_amount) + totalTaxAmount
-    )
-  );
-
-  updateData.subtotal_amount = subtotal_amount;
-  updateData.tax_amount = totalTaxAmount;
-  updateData.global_discount_percentage = global_discount_percentage;
-  updateData.global_discount_amount = global_discount_amount;
-  updateData.total_amount = total_amount;
-}
-
-/**
- * Updates purchase order items in the database
- */
-async function updatePurchaseOrderItems(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  orgId: string,
-  purchaseOrderId: string,
-  items: UpdatePurchaseOrderInput["items"]
-): Promise<void> {
-  if (!items) {
-    return;
-  }
-
-  await supabase
-    .from("purchase_order_items")
-    .delete()
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", orgId);
-
-  const itemsToInsert = items.map((item) => {
-    const uom = item.unit_of_measure ?? "";
-    const isWeightOrVolume = uom === "KG" || uom === "LT" || uom === "MT";
-    const minQuantity = isWeightOrVolume ? 0 : 1;
-
-    return {
-      organization_id: orgId,
-      purchase_order_id: purchaseOrderId,
-      product_id: item.product_id,
-      quantity: Math.max(minQuantity, item.quantity),
-      unit_quantity: item.unit_quantity,
-      unit_cost: truncateMoney(item.unit_cost),
-      subtotal: truncateMoney(item.subtotal),
-      variant_stocks: item.variant_stocks ?? null,
-    };
-  });
-
-  const { error: itemsError } = await supabase
-    .from("purchase_order_items")
-    .insert(itemsToInsert);
-
-  if (itemsError) {
-    throw new Error(
-      `Error updating purchase order items: ${itemsError.message}`
-    );
-  }
-}
-
-/**
- * Updates purchase order taxes in the database
- */
-async function updatePurchaseOrderTaxes(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  options: {
-    orgId: string;
-    purchaseOrderId: string;
-    taxes: Array<{
-      tax_id: string;
-      name: string;
-      rate: number;
-      base_amount: number;
-      tax_amount: number;
-    }>;
-  }
-): Promise<void> {
-  await supabase
-    .from("purchase_order_taxes")
-    .delete()
-    .eq("purchase_order_id", options.purchaseOrderId)
-    .eq("organization_id", options.orgId);
-
-  if (options.taxes.length === 0) {
-    return;
-  }
-
-  const taxesToInsert = options.taxes.map((tax) => ({
-    organization_id: options.orgId,
-    purchase_order_id: options.purchaseOrderId,
-    tax_id: tax.tax_id,
-    name: tax.name,
-    rate: tax.rate,
-    base_amount: truncateMoney(tax.base_amount),
-    tax_amount: truncateMoney(tax.tax_amount),
-  }));
-
-  const { error: taxesError } = await supabase
-    .from("purchase_order_taxes")
-    .insert(taxesToInsert);
-
-  if (taxesError) {
-    throw new Error(
-      `Error updating purchase order taxes: ${taxesError.message}`
-    );
-  }
-}
-
-/**
  * Updates a purchase order with its items
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates editability and synchronizes purchase items, tax snapshots and payables.
 export async function updatePurchaseOrder(
   input: UpdatePurchaseOrderInput
 ): Promise<PurchaseOrder> {
@@ -2267,38 +1711,114 @@ export async function updatePurchaseOrder(
   const supabase = await createClient();
 
   const updateData = buildPurchaseOrderUpdateData(input);
-
-  let taxPlanAggregateTaxes: Array<{
-    tax_id: string;
-    name: string;
-    rate: number;
-    base_amount: number;
-    tax_amount: number;
-  }> = [];
-
-  if (input.items && input.items.length > 0) {
-    const productIds = Array.from(
-      new Set(input.items.map((item) => item.product_id).filter(Boolean))
-    );
-    const productTaxes = await getProductTaxAssignments({
-      supabase,
-      orgId: org.id,
-      productIds,
-    });
-
-    const taxLines: TaxableItemLine[] = input.items.map((item, index) => {
-      const taxes = productTaxes.get(item.product_id);
-      return {
-        lineId: `item-${index}`,
-        productId: item.product_id,
-        netAmount: truncateMoney(
-          item.subtotal ?? item.quantity * item.unit_cost
-        ),
-        taxes: taxes?.length ? taxes : undefined,
-      };
-    });
-
-    const subtotal = input.items.reduce(
+  if (input.items && input.items.length === 0) {
+    throw new Error("La orden de compra debe tener al menos un producto");
+  }
+  const { data: existingOrder } = await supabase
+    .from("purchase_orders")
+    .select("*")
+    .eq("id", input.purchaseOrderId)
+    .eq("organization_id", org.id)
+    .single();
+  if (!(existingOrder && ["ORDERED", "DRAFT"].includes(existingOrder.status))) {
+    throw new Error("Solo se pueden editar compras en borrador u ordenadas");
+  }
+  if (
+    !existingOrder.tax_snapshot_initialized &&
+    existingOrder.status !== "DRAFT"
+  ) {
+    if (!input.convertLegacyTaxes) {
+      const { data: savedItems, error: savedItemsError } = await supabase
+        .from("purchase_order_items")
+        .select(
+          "id, product_id, quantity, unit_quantity, unit_cost, subtotal, variant_stocks"
+        )
+        .eq("purchase_order_id", input.purchaseOrderId)
+        .eq("organization_id", org.id);
+      if (savedItemsError) {
+        throw new Error(
+          `Error al validar compra histórica: ${savedItemsError.message}`
+        );
+      }
+      if (
+        legacyPurchaseFiscalFieldsChanged({
+          savedItems: savedItems ?? [],
+          inputItems: input.items,
+          savedDiscountPercent: existingOrder.global_discount_percentage ?? 0,
+          inputDiscountPercent: input.global_discount_percentage,
+          selectedTaxCount: input.taxes?.length ?? 0,
+        })
+      ) {
+        throw new Error(
+          "Para editar importes o impuestos históricos, convertí la compra por ítem explícitamente"
+        );
+      }
+      const { data: updated, error } = await supabase
+        .from("purchase_orders")
+        .update(updateData)
+        .eq("id", input.purchaseOrderId)
+        .eq("organization_id", org.id)
+        .select("*")
+        .single();
+      if (error || !updated) {
+        throw new Error(
+          `Error al editar compra histórica: ${error?.message ?? "No encontrada"}`
+        );
+      }
+      const dueDate = input.expiration_date ?? updated.expiration_date;
+      if (dueDate && updated.supplier_id) {
+        await syncAccountsPayable({
+          supabase,
+          orgId: org.id,
+          supplierId: updated.supplier_id,
+          purchaseOrderId: updated.id,
+          totalAmount: updated.total_amount,
+          dueDate,
+        });
+      }
+      return updated;
+    }
+    if (
+      !input.items?.length ||
+      input.items.some((item) => !Array.isArray(item.taxes))
+    ) {
+      throw new Error(
+        "La conversión requiere revisar los impuestos de cada producto"
+      );
+    }
+  }
+  const savedFallbackTaxes = parsePurchaseTaxInputs(
+    existingOrder.fallback_taxes
+  );
+  const savedRows = await getPurchaseItemTaxRows(
+    supabase,
+    org.id,
+    input.purchaseOrderId
+  );
+  const savedLineTaxes = new Map<string, ItemTaxInput[]>();
+  for (const row of savedRows) {
+    if (row.source === "fallback" || row.source === "legacy_prorated") {
+      continue;
+    }
+    const current = savedLineTaxes.get(row.purchase_order_item_id) ?? [];
+    current.push(toPurchaseItemTaxInput(row));
+    savedLineTaxes.set(row.purchase_order_item_id, current);
+  }
+  const selections = await resolvePurchaseTaxSelections({
+    supabase,
+    orgId: org.id,
+    lines: input.items ?? [],
+    fallbackTaxes: input.taxes ?? savedFallbackTaxes,
+    savedLineTaxes,
+    savedFallbackTaxes,
+  });
+  const fallbackTaxes = selections.fallbackTaxes;
+  const resolvedItems = input.items?.map((item, index) => ({
+    ...item,
+    taxes: selections.lineTaxes[index],
+  }));
+  if (resolvedItems && resolvedItems.length > 0) {
+    const subtotal = resolvedItems.reduce(
       (sum, item) =>
         truncateMoney(
           sum + truncateMoney(item.subtotal ?? item.quantity * item.unit_cost)
@@ -2307,33 +1827,80 @@ export async function updatePurchaseOrder(
     );
     const { global_discount_amount } = calculateGlobalDiscount(
       subtotal,
-      input.global_discount_percentage ?? 0
+      input.global_discount_percentage ??
+        existingOrder.global_discount_percentage ??
+        0
     );
-
-    const updateFallbackTaxes = resolvePurchaseFallbackTaxes(input.taxes);
-
-    const taxPlan = buildItemizedTaxPlan({
-      lines: taxLines,
+    const taxPlan = await buildPurchaseTaxPlan({
+      supabase,
+      orgId: org.id,
+      lines: resolvedItems.map((item, index) => ({
+        id: `item-${index}`,
+        product_id: item.product_id,
+        subtotal: item.subtotal ?? item.quantity * item.unit_cost,
+        taxes: item.taxes,
+      })),
       globalDiscountAmount: global_discount_amount,
-      fallbackTaxes: updateFallbackTaxes,
+      fallbackTaxes,
     });
 
-    calculateAndAddTotals(
-      updateData,
-      input.items,
-      taxPlan.totalTaxAmount,
-      input.global_discount_percentage
-    );
-
-    taxPlanAggregateTaxes = taxPlan.aggregateTaxes.map((tax) => ({
-      tax_id: tax.taxId ?? "",
-      name: tax.name,
-      rate: tax.rate,
-      base_amount: tax.baseAmount,
-      tax_amount: tax.taxAmount,
+    const storedItems = resolvedItems.map((item) => ({
+      id: crypto.randomUUID(),
+      product_id: item.product_id,
+      quantity: Math.max(
+        ["KG", "LT", "MT"].includes(item.unit_of_measure ?? "") ? 0 : 1,
+        item.quantity
+      ),
+      unit_quantity: item.unit_quantity,
+      unit_cost: truncateMoney(item.unit_cost),
+      subtotal: truncateMoney(item.subtotal),
+      variant_stocks: item.variant_stocks ?? null,
+      tax_override: item.taxes ?? null,
     }));
+    const idByLine = new Map(
+      storedItems.map((item, index) => [`item-${index}`, item.id])
+    );
+    return persistPurchaseFiscalState({
+      supabase,
+      orgId: org.id,
+      orderId: input.purchaseOrderId,
+      mode: "replace",
+      items: storedItems,
+      plan: {
+        ...taxPlan,
+        itemTaxes: taxPlan.itemTaxes.map((tax) => ({
+          ...tax,
+          lineId: idByLine.get(tax.lineId) ?? tax.lineId,
+        })),
+      },
+      subtotal,
+      discountPercentage:
+        input.global_discount_percentage ??
+        existingOrder.global_discount_percentage ??
+        0,
+      discountAmount: global_discount_amount,
+      fallbackTaxes,
+      supplierId: input.supplier_id ?? existingOrder.supplier_id,
+      purchaseDate: input.purchase_date ?? existingOrder.purchase_date,
+      expirationDate:
+        input.expiration_date !== undefined
+          ? input.expiration_date
+          : existingOrder.expiration_date,
+      payableDueDate:
+        input.expiration_date !== undefined
+          ? input.expiration_date
+          : existingOrder.expiration_date,
+      remittanceNumber:
+        input.remittance_number !== undefined
+          ? input.remittance_number
+          : existingOrder.remittance_number,
+    });
   }
-
+  if (input.taxes !== undefined) {
+    throw new Error(
+      "Para cambiar impuestos hay que enviar los ítems de la compra"
+    );
+  }
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
     .update(updateData)
@@ -2348,26 +1915,8 @@ export async function updatePurchaseOrder(
     );
   }
 
-  await updatePurchaseOrderItems(
-    supabase,
-    org.id,
-    input.purchaseOrderId,
-    input.items
-  );
-
-  if (input.items && input.items.length > 0) {
-    await updatePurchaseOrderTaxes(supabase, {
-      orgId: org.id,
-      purchaseOrderId: input.purchaseOrderId,
-      taxes: taxPlanAggregateTaxes,
-    });
-  }
-
   const payableDueDate =
     input.expiration_date ?? purchaseOrder.expiration_date ?? null;
-  const payableTotal = truncateMoney(
-    (updateData.total_amount as number) ?? purchaseOrder.total_amount ?? 0
-  );
 
   if (payableDueDate && purchaseOrder.supplier_id) {
     await syncAccountsPayable({
@@ -2375,7 +1924,7 @@ export async function updatePurchaseOrder(
       orgId: org.id,
       supplierId: purchaseOrder.supplier_id,
       purchaseOrderId: input.purchaseOrderId,
-      totalAmount: payableTotal,
+      totalAmount: purchaseOrder.total_amount,
       dueDate: payableDueDate,
     });
   }
@@ -2399,12 +1948,17 @@ export async function getPurchaseOrderWithItems(
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean;
+      tax_override?: ItemTaxInput[] | null;
+      item_taxes?: Awaited<ReturnType<typeof getPurchaseItemTaxRows>>;
     })[];
+    fallback_taxes?: ItemTaxInput[];
+    fiscal_data_invalid: boolean;
     taxes: Array<{
-      tax_id: string;
+      tax_id: string | null;
       name: string;
       rate: number;
       tax_amount: number;
+      tax_code_snapshot: string | null;
     }> | null;
   }
 > {
@@ -2446,7 +2000,7 @@ export async function getPurchaseOrderWithItems(
 
   const { data: taxes, error: taxesError } = await supabase
     .from("purchase_order_taxes")
-    .select("tax_id, name, rate, tax_amount")
+    .select("tax_id, name, rate, tax_amount, tax_code_snapshot")
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
 
@@ -2455,6 +2009,11 @@ export async function getPurchaseOrderWithItems(
       `Error fetching purchase order taxes: ${taxesError.message}`
     );
   }
+  const itemTaxRows = await getPurchaseItemTaxRows(
+    supabase,
+    org.id,
+    purchaseOrderId
+  );
 
   const categoryIds = Array.from(
     new Set(
@@ -2478,25 +2037,31 @@ export async function getPurchaseOrderWithItems(
   const accountingRuleByCategoryId = new Map(
     categoryRules.map((rule) => [rule.categoryId, rule.accountCode])
   );
-
-  return {
-    ...order,
-    taxes: taxes || null,
-    items: (items || []).map(
-      (
-        item: PurchaseOrderItem & {
-          product?: {
-            id: string;
-            name: string;
-            sku: string;
-            category_id?: string | null;
-            accounting_account_code?: string | null;
-            weight_per_unit?: number | null;
-            unit_of_measure?: string | null;
-            has_variants?: boolean | null;
-          } | null;
-        }
-      ) => ({
+  const parsedFallback = tryParsePurchaseTaxInputs(order.fallback_taxes);
+  let fiscalDataInvalid = parsedFallback === null;
+  const mappedItems = (items || []).map(
+    (
+      item: PurchaseOrderItem & {
+        product?: {
+          id: string;
+          name: string;
+          sku: string;
+          category_id?: string | null;
+          accounting_account_code?: string | null;
+          weight_per_unit?: number | null;
+          unit_of_measure?: string | null;
+          has_variants?: boolean | null;
+        } | null;
+      }
+    ) => {
+      const parsedOverride =
+        item.tax_override === null
+          ? null
+          : tryParsePurchaseTaxInputs(item.tax_override);
+      if (item.tax_override !== null && parsedOverride === null) {
+        fiscalDataInvalid = true;
+      }
+      return {
         ...item,
         category_id: item.product?.category_id ?? null,
         accountingAccountCode:
@@ -2509,8 +2074,20 @@ export async function getPurchaseOrderWithItems(
         weight_per_unit: item.product?.weight_per_unit ?? null,
         unit_of_measure: item.product?.unit_of_measure ?? null,
         has_variants: item.product?.has_variants ?? false,
-      })
-    ),
+        tax_override: parsedOverride,
+        item_taxes: itemTaxRows.filter(
+          (tax) => tax.purchase_order_item_id === item.id
+        ),
+      };
+    }
+  );
+
+  return {
+    ...order,
+    fallback_taxes: parsedFallback ?? [],
+    fiscal_data_invalid: fiscalDataInvalid,
+    taxes: taxes || null,
+    items: mappedItems,
   };
 }
 
