@@ -1,5 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import {
+  etagMatches,
+  getSellerOfflineSnapshotEtag,
+} from "@/modules/offline/server/seller-offline-snapshot-version";
+import {
   createSellerOfflineSnapshot,
   SellerOfflineSnapshotError,
 } from "@/modules/offline/service/seller-offline-snapshot.service";
@@ -10,24 +14,39 @@ type RouteContext = {
 
 const PRIVATE_NO_STORE = "private, no-store, max-age=0";
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   const startedAt = performance.now();
 
   try {
     const { orgSlug } = await context.params;
     const snapshot = await createSellerOfflineSnapshot(orgSlug);
-    const body = JSON.stringify(snapshot);
     const durationMs = Math.round(performance.now() - startedAt);
+    const etag = getSellerOfflineSnapshotEtag(snapshot);
+    const commonHeaders = {
+      "Cache-Control": PRIVATE_NO_STORE,
+      ETag: etag,
+      "Server-Timing": `snapshot;dur=${durationMs}`,
+      "X-Snapshot-Expires-At": snapshot.expiresAt,
+      "X-Snapshot-Generated-At": snapshot.generatedAt,
+      "X-Snapshot-Schema-Version": String(snapshot.schemaVersion),
+    };
+
+    if (etagMatches(request.headers.get("if-none-match"), etag)) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: commonHeaders,
+      });
+    }
+
+    const body = JSON.stringify(snapshot);
 
     return new NextResponse(body, {
       headers: {
-        "Cache-Control": PRIVATE_NO_STORE,
+        ...commonHeaders,
         "Content-Type": "application/json; charset=utf-8",
-        "Server-Timing": `snapshot;dur=${durationMs}`,
         "X-Snapshot-Bytes": String(Buffer.byteLength(body, "utf8")),
         "X-Snapshot-Customers": String(snapshot.customers.length),
         "X-Snapshot-Products": String(snapshot.products.length),
-        "X-Snapshot-Schema-Version": String(snapshot.schemaVersion),
       },
     });
   } catch (error) {

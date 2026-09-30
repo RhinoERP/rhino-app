@@ -9,17 +9,19 @@ import {
 } from "@phosphor-icons/react";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import { Button } from "@/components/ui/button";
-import { sellerOfflineSnapshotV1Schema } from "@/modules/offline/contracts/seller-offline-snapshot";
 import {
   getSellerSnapshot,
   isSellerSnapshotExpired,
   type StoredSellerSnapshot,
-  saveSellerSnapshot,
 } from "@/modules/offline/storage/offline-db";
+import {
+  OFFLINE_SNAPSHOT_REFRESH_INTERVAL_MS,
+  refreshSellerOfflineSnapshot,
+} from "@/modules/offline/sync/offline-snapshot-refresh";
 
 type OfflineDataManagerProps = {
   orgSlug: string;
@@ -63,15 +65,19 @@ function getStatusTitle(expired: boolean, hasSnapshot: boolean) {
 
 function getStatusDescription(
   loading: boolean,
-  record: StoredSellerSnapshot | null
+  record: StoredSellerSnapshot | null,
+  refreshError: string | null
 ) {
   if (loading) {
     return "Revisando datos locales...";
   }
   if (!record) {
+    if (refreshError) {
+      return refreshError;
+    }
     return "Descarga clientes, productos y precios de referencia";
   }
-  return `${record.snapshot.customers.length} clientes, ${record.snapshot.products.length} productos, ${formatBytes(record.byteSize)} · ${formatDistanceToNow(new Date(record.downloadedAt), { addSuffix: true, locale: es })}`;
+  return `Listos para usar sin conexion · ${record.snapshot.customers.length} clientes, ${record.snapshot.products.length} productos, ${formatBytes(record.byteSize)} · verificados ${formatDistanceToNow(new Date(record.lastCheckedAt), { addSuffix: true, locale: es })}`;
 }
 
 function ActionIcon({
@@ -90,6 +96,51 @@ function ActionIcon({
   return <CloudArrowDownIcon />;
 }
 
+function getActionLabel(downloading: boolean, hasSnapshot: boolean) {
+  if (downloading) {
+    return "Cancelar actualizacion offline";
+  }
+  return hasSnapshot ? "Actualizar datos offline" : "Preparar datos offline";
+}
+
+function showRefreshError(error: unknown, showFeedback: boolean) {
+  if (!showFeedback) {
+    return;
+  }
+  toast.error(
+    error instanceof Error
+      ? error.message
+      : "No se pudieron actualizar los datos offline"
+  );
+}
+
+function handleRefreshSuccess(
+  status: "skipped" | "unchanged" | "updated",
+  showFeedback: boolean
+) {
+  if (status === "updated") {
+    navigator.storage?.persist?.().catch(() => false);
+    if (showFeedback) {
+      toast.success("Datos offline actualizados");
+    }
+  } else if (status === "unchanged" && showFeedback) {
+    toast.success("Los datos offline ya estan actualizados");
+  }
+}
+
+function canStartRefresh(inFlight: boolean, showFeedback: boolean) {
+  if (inFlight) {
+    return false;
+  }
+  if (navigator.onLine) {
+    return true;
+  }
+  if (showFeedback) {
+    toast.error("No hay conexion para actualizar los datos offline");
+  }
+  return false;
+}
+
 export function OfflineDataManager({
   orgSlug,
   organizationId,
@@ -100,6 +151,8 @@ export function OfflineDataManager({
   const [record, setRecord] = useState<StoredSellerSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const canPrepare =
     wholesaleEnabled && (can("sales.manage") || can("sales.manage.all"));
 
@@ -109,51 +162,87 @@ export function OfflineDataManager({
     setLoading(false);
   }, [organizationId, ownerUserId]);
 
+  const refreshSnapshot = useCallback(
+    async (force: boolean, showFeedback: boolean) => {
+      if (!canStartRefresh(Boolean(abortRef.current), showFeedback)) {
+        return;
+      }
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setDownloading(true);
+      setRefreshError(null);
+      try {
+        const result = await refreshSellerOfflineSnapshot({
+          force,
+          organizationId,
+          orgSlug,
+          ownerUserId,
+          signal: controller.signal,
+        });
+        setRecord(result.record);
+        handleRefreshSuccess(result.status, showFeedback);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        setRefreshError(
+          error instanceof Error
+            ? error.message
+            : "No se pudieron actualizar los datos offline"
+        );
+        showRefreshError(error, showFeedback);
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          setDownloading(false);
+        }
+      }
+    },
+    [organizationId, orgSlug, ownerUserId]
+  );
+
   useEffect(() => {
     loadLocalSnapshot().catch(() => setLoading(false));
   }, [loadLocalSnapshot]);
 
+  useEffect(() => {
+    if (!canPrepare || loading) {
+      return;
+    }
+
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    if (!standalone) {
+      return;
+    }
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        refreshSnapshot(false, false).catch(() => null);
+      }
+    };
+    const initialRefresh = window.setTimeout(refreshIfVisible, 0);
+    const interval = window.setInterval(
+      refreshIfVisible,
+      OFFLINE_SNAPSHOT_REFRESH_INTERVAL_MS
+    );
+    window.addEventListener("online", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+      window.removeEventListener("online", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      abortRef.current?.abort();
+    };
+  }, [canPrepare, loading, refreshSnapshot]);
+
   if (!canPrepare) {
     return null;
   }
-
-  const download = async () => {
-    setDownloading(true);
-    try {
-      const response = await fetch(
-        `/api/v1/org/${encodeURIComponent(orgSlug)}/seller-offline-snapshot`,
-        { cache: "no-store" }
-      );
-      const body = await response.text();
-      const payload = JSON.parse(body) as unknown;
-
-      if (!response.ok) {
-        const error = payload as { error?: string };
-        throw new Error(error.error ?? "No se pudieron preparar los datos");
-      }
-
-      const snapshot = sellerOfflineSnapshotV1Schema.parse(payload);
-      if (
-        snapshot.ownerUserId !== ownerUserId ||
-        snapshot.organizationId !== organizationId
-      ) {
-        throw new Error("El snapshot no corresponde a la sesion actual");
-      }
-
-      const saved = await saveSellerSnapshot(snapshot, new Blob([body]).size);
-      setRecord(saved);
-      navigator.storage?.persist?.().catch(() => false);
-      toast.success("Datos preparados para trabajar sin conexion");
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "No se pudo guardar el snapshot"
-      );
-    } finally {
-      setDownloading(false);
-    }
-  };
 
   const expired = record ? isSellerSnapshotExpired(record.snapshot) : false;
 
@@ -168,15 +257,19 @@ export function OfflineDataManager({
             {getStatusTitle(expired, Boolean(record))}
           </p>
           <p className="truncate text-muted-foreground text-xs">
-            {getStatusDescription(loading, record)}
+            {getStatusDescription(loading, record, refreshError)}
           </p>
         </div>
         <Button
-          aria-label={
-            record ? "Actualizar datos offline" : "Preparar datos offline"
-          }
-          disabled={downloading || loading}
-          onClick={download}
+          aria-label={getActionLabel(downloading, Boolean(record))}
+          disabled={loading}
+          onClick={() => {
+            if (downloading) {
+              abortRef.current?.abort();
+            } else {
+              refreshSnapshot(true, true).catch(() => null);
+            }
+          }}
           size="icon-sm"
           variant={record && !expired ? "ghost" : "default"}
         >

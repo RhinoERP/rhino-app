@@ -32,8 +32,10 @@ export type StoredSellerSnapshot = {
   orgSlug: string;
   schemaVersion: number;
   downloadedAt: string;
+  lastCheckedAt: string;
   lastActiveAt: string;
   byteSize: number;
+  etag: string | null;
   snapshot: SellerOfflineSnapshotV1;
 };
 
@@ -149,10 +151,12 @@ export function isSellerSnapshotExpired(
 
 export async function saveSellerSnapshot(
   value: unknown,
-  byteSize: number
+  byteSize: number,
+  etag: string | null = null,
+  checkedAt = new Date().toISOString()
 ): Promise<StoredSellerSnapshot> {
   const snapshot = sellerOfflineSnapshotV1Schema.parse(value);
-  const now = new Date().toISOString();
+  const now = checkedAt;
   const key = getSellerSnapshotKey(
     snapshot.ownerUserId,
     snapshot.organizationId
@@ -164,8 +168,10 @@ export async function saveSellerSnapshot(
     orgSlug: snapshot.organization.slug,
     schemaVersion: snapshot.schemaVersion,
     downloadedAt: now,
+    lastCheckedAt: now,
     lastActiveAt: now,
     byteSize,
+    etag,
     snapshot,
   };
   const database = await getDatabase();
@@ -192,12 +198,49 @@ async function readAndValidateSnapshot(
 
   const parsed = sellerOfflineSnapshotV1Schema.safeParse(record.snapshot);
   if (parsed.success) {
-    return { ...record, snapshot: parsed.data };
+    return {
+      ...record,
+      etag: record.etag ?? null,
+      lastCheckedAt: record.lastCheckedAt ?? record.downloadedAt,
+      snapshot: parsed.data,
+    };
   }
 
   const database = await getDatabase();
   await database.delete("snapshots", record.key);
   return null;
+}
+
+export async function markSellerSnapshotChecked(params: {
+  ownerUserId: string;
+  organizationId: string;
+  etag: string | null;
+  generatedAt: string;
+  expiresAt: string;
+  checkedAt?: string;
+}): Promise<StoredSellerSnapshot | null> {
+  const database = await getDatabase();
+  const key = getSellerSnapshotKey(params.ownerUserId, params.organizationId);
+  const current = await readAndValidateSnapshot(
+    await database.get("snapshots", key)
+  );
+  if (!current) {
+    return null;
+  }
+
+  const snapshot = sellerOfflineSnapshotV1Schema.parse({
+    ...current.snapshot,
+    generatedAt: params.generatedAt,
+    expiresAt: params.expiresAt,
+  });
+  const updated: StoredSellerSnapshot = {
+    ...current,
+    etag: params.etag,
+    lastCheckedAt: params.checkedAt ?? new Date().toISOString(),
+    snapshot,
+  };
+  await database.put("snapshots", updated);
+  return updated;
 }
 
 export async function getSellerSnapshot(

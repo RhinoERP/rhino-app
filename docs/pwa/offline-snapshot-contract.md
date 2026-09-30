@@ -16,6 +16,8 @@
 - Logout centralizado con purga previa de IndexedDB y React Query.
 - Mantenimiento implementado para cambio de cuenta, `SIGNED_OUT`, reanudacion y 72 horas de inactividad.
 - La formula de precios se comparte con el flujo de borradores; las diferencias se vuelven a validar en servidor al sincronizar.
+- La PWA instalada prepara el primer snapshot automaticamente y comprueba cambios cada 20 minutos mientras permanece visible y online.
+- Las comprobaciones usan `ETag`/`If-None-Match`; un `304` renueva la vigencia local sin transferir nuevamente el payload.
 
 ## Alcance
 
@@ -91,7 +93,30 @@ X-Snapshot-Bytes: {bytes}
 X-Snapshot-Customers: {cantidad}
 X-Snapshot-Products: {cantidad}
 X-Snapshot-Schema-Version: 1
+ETag: "{huella-del-contenido}"
+X-Snapshot-Generated-At: {fecha ISO}
+X-Snapshot-Expires-At: {fecha ISO}
 ```
+
+La huella excluye `snapshotId`, `generatedAt` y `expiresAt`. El endpoint siempre
+vuelve a autenticar, autorizar y construir el snapshot fresco antes de responder
+`304 Not Modified`; por lo tanto, una membresia revocada o un feature flag
+deshabilitado no se ocultan detras del validador condicional.
+
+## Actualizacion automatica
+
+- Solo se activa automaticamente en modo PWA `standalone`.
+- Se ejecuta al abrir, recuperar conectividad, volver a primer plano y cada 20
+  minutos mientras la aplicacion esta visible.
+- Usa Web Locks por usuario y organizacion, con single-flight dentro de cada
+  contexto, para evitar descargas concurrentes.
+- Conserva el snapshot anterior si la red, validacion o escritura local fallan.
+- Un `304` actualiza `lastCheckedAt`, `generatedAt` y `expiresAt`, pero conserva
+  el `snapshotId` para no alterar borradores existentes.
+- Un `200` validado reemplaza el snapshot. Los borradores conservan el
+  `snapshotId` anterior y pasan por la revision/migracion comercial existente.
+- Safari iOS puede suspender timers; los 20 minutos son una frecuencia minima
+  en foreground, no una garantia de ejecucion en background.
 
 La funcionalidad queda deshabilitada por defecto. La configuracion de la organizacion piloto debe incluir:
 
