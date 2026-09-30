@@ -59,6 +59,7 @@ export type PurchaseOrderPDFSource = {
   tax_amount: number | null;
   total_amount: number;
   items: Array<{
+    id?: string;
     product_name?: string;
     unit_of_measure?: string | null;
     weight_per_unit?: number | null;
@@ -152,7 +153,7 @@ function buildPurchaseOrderItems(
         ? item.quantity * item.weight_per_unit
         : null);
 
-    const lineId = String(index);
+    const lineId = item.id ?? String(index);
     const itemTaxes = itemTaxesByLine?.get(lineId) ?? [];
 
     return {

@@ -11,11 +11,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+} from "@/modules/taxes/item-tax-calculations";
 import type { PurchaseDetailItem } from "./purchase-detail-items";
 
 type PurchaseOrderTax = {
-  tax_id: string;
+  tax_id: string | null;
   name: string;
   rate: number;
   tax_amount?: number;
@@ -29,12 +34,15 @@ type PurchaseDetailSummaryProps = {
   isDraftSale: boolean;
   isConfirmingDraft: boolean;
   isEditingDetails: boolean;
+  previewItemTaxes?: boolean;
   isSaving: boolean;
   onConfirmDraft: () => void;
   onSave: () => void;
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
   supplierId?: string;
+  productTaxes: Map<string, ItemTaxInput[]>;
+  fallbackTaxes: ItemTaxInput[];
 };
 
 export function PurchaseDetailSummary({
@@ -45,14 +53,20 @@ export function PurchaseDetailSummary({
   isDraftSale,
   isConfirmingDraft,
   isEditingDetails,
+  previewItemTaxes = isEditingDetails,
   isSaving,
   onConfirmDraft,
   onSave,
   globalDiscountPercentage,
   globalDiscountAmount,
   supplierId,
+  productTaxes,
+  fallbackTaxes,
 }: PurchaseDetailSummaryProps) {
-  const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+  const subtotal = items.reduce(
+    (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
+    0
+  );
   const totalUnits = items.reduce((sum, item) => sum + item.unit_quantity, 0);
   const totalWeight = items.reduce(
     (sum, item) => sum + (item.total_weight_kg ?? 0),
@@ -60,16 +74,37 @@ export function PurchaseDetailSummary({
   );
 
   const discountPercentage = globalDiscountPercentage ?? 0;
-  const discountAmount =
+  const discountAmount = truncateMoney(
     globalDiscountAmount ??
-    Math.min(
-      Math.max(0, (discountPercentage / 100) * subtotal),
-      Math.max(0, subtotal)
-    );
+      Math.min(
+        Math.max(0, (discountPercentage / 100) * subtotal),
+        Math.max(0, subtotal)
+      )
+  );
 
   const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
 
-  const totalTaxAmount = (purchaseOrderTaxes ?? []).reduce(
+  const taxPlan = previewItemTaxes
+    ? buildItemizedTaxPlan({
+        lines: items.map((item, index) => ({
+          lineId: item.id ?? `new-${index}`,
+          productId: item.product_id,
+          netAmount: item.subtotal,
+          taxes: item.taxes ?? productTaxes.get(item.product_id),
+        })),
+        globalDiscountAmount: discountAmount,
+        fallbackTaxes,
+      })
+    : null;
+  const displayTaxes = taxPlan
+    ? taxPlan.aggregateTaxes.map((tax) => ({
+        tax_id: tax.taxId ?? `${tax.name}-${tax.rate}`,
+        name: tax.name,
+        rate: tax.rate,
+        tax_amount: tax.taxAmount,
+      }))
+    : (purchaseOrderTaxes ?? []);
+  const totalTaxAmount = displayTaxes.reduce(
     (sum, tax) => sum + (tax.tax_amount ?? 0),
     0
   );
@@ -122,10 +157,10 @@ export function PurchaseDetailSummary({
                   </span>
                 </div>
               )}
-              {(purchaseOrderTaxes ?? []).map((tax) => (
+              {displayTaxes.map((tax) => (
                 <div
                   className="flex items-center justify-between"
-                  key={tax.tax_id}
+                  key={tax.tax_id ?? `${tax.name}-${tax.rate}`}
                 >
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)
