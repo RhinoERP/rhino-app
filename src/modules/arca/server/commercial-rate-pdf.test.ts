@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}), { virtual: true });
 
 const mocks = vi.hoisted(() => ({
   getSalesOrderById: vi.fn(),
+  getOrderQuotePaymentConditionBySaleId: vi.fn(),
   getManualFiscalInvoiceById: vi.fn(),
   getOrganizationBySlug: vi.fn(),
   getOrganizationArcaSettingsByOrganizationId: vi.fn(),
@@ -17,6 +18,10 @@ vi.mock("@/modules/sales/service/sales.service", () => ({
 }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
   getOrganizationBySlug: mocks.getOrganizationBySlug,
+}));
+vi.mock("@/modules/orders/service/orders.service", () => ({
+  getOrderQuotePaymentConditionBySaleId:
+    mocks.getOrderQuotePaymentConditionBySaleId,
 }));
 vi.mock("./manual-fiscal-invoices.service", () => ({
   getManualFiscalInvoiceById: mocks.getManualFiscalInvoiceById,
@@ -114,6 +119,7 @@ beforeEach(() => {
     cuit: "30123456789",
   });
   mocks.getOrganizationArcaSettingsByOrganizationId.mockResolvedValue(null);
+  mocks.getOrderQuotePaymentConditionBySaleId.mockResolvedValue(null);
 });
 
 describe("commercial rate in generated invoice PDFs", () => {
@@ -159,5 +165,35 @@ describe("commercial rate in generated invoice PDFs", () => {
       invoiceId: "manual-1",
     });
     expect(ars.html).not.toContain("Tipo de cambio comercial USD → ARS");
+  });
+});
+
+describe("payment condition in generated sale invoice PDFs", () => {
+  it("uses the quote condition when the sale has a related order", async () => {
+    mocks.getSalesOrderById.mockResolvedValue(sale(null, "ARS"));
+    mocks.getOrderQuotePaymentConditionBySaleId.mockResolvedValue(
+      "Transferencia a 30 días"
+    );
+
+    const result = await generateAuthorizedSaleInvoicePdf({
+      orgSlug: "test",
+      saleId: "sale-1",
+    });
+
+    expect(result.html).toContain("Transferencia a 30 días");
+  });
+
+  it("keeps the sale condition when there is no related order", async () => {
+    mocks.getSalesOrderById.mockResolvedValue({
+      ...sale(null, "ARS"),
+      credit_days: 15,
+    });
+
+    const result = await generateAuthorizedSaleInvoicePdf({
+      orgSlug: "test",
+      saleId: "sale-1",
+    });
+
+    expect(result.html).toContain("Cuenta corriente 15 días");
   });
 });
