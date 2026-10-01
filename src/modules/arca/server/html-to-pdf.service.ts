@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 import chromium from "@sparticuz/chromium-min";
 import type { Browser, Page } from "puppeteer-core";
 import puppeteer from "puppeteer-core";
+import { paginateFiscalInvoiceDocument } from "./fiscal-invoice-pagination";
 
 const DEFAULT_CHROMIUM_PACK_URL =
   "https://github.com/Sparticuz/chromium/releases/download/v141.0.0/chromium-v141.0.0-pack.x64.tar";
@@ -93,10 +94,11 @@ async function waitForPageAssets(page: Page): Promise<void> {
   });
 }
 
-export async function renderHtmlToPdfBuffer(
+async function withHtmlPage<T>(
   html: string,
+  operation: (page: Page) => Promise<T>,
   timeoutMs = 30_000
-): Promise<Buffer> {
+): Promise<T> {
   let browser: Browser | null = null;
 
   try {
@@ -127,20 +129,8 @@ export async function renderHtmlToPdfBuffer(
       waitUntil: ["domcontentloaded", "networkidle0"],
     });
     await waitForPageAssets(page);
-
-    const pdfBytes = await page.pdf({
-      format: "A4",
-      margin: {
-        bottom: "0mm",
-        left: "0mm",
-        right: "0mm",
-        top: "0mm",
-      },
-      preferCSSPageSize: true,
-      printBackground: true,
-    });
-
-    return Buffer.from(pdfBytes);
+    await page.evaluate(paginateFiscalInvoiceDocument);
+    return await operation(page);
   } catch (error) {
     throw new Error(
       `No se pudo renderizar el PDF fiscal: ${
@@ -150,4 +140,35 @@ export async function renderHtmlToPdfBuffer(
   } finally {
     await browser?.close();
   }
+}
+
+export function paginateFiscalInvoiceHtml(html: string): Promise<string> {
+  return withHtmlPage(html, (page) => page.content());
+}
+
+export function renderHtmlToPdfDocument(
+  html: string,
+  timeoutMs = 30_000
+): Promise<{ html: string; content: Buffer }> {
+  return withHtmlPage(
+    html,
+    async (page) => {
+      const paginatedHtml = await page.content();
+      const pdfBytes = await page.pdf({
+        format: "A4",
+        margin: { bottom: "0mm", left: "0mm", right: "0mm", top: "0mm" },
+        preferCSSPageSize: true,
+        printBackground: true,
+      });
+      return { html: paginatedHtml, content: Buffer.from(pdfBytes) };
+    },
+    timeoutMs
+  );
+}
+
+export async function renderHtmlToPdfBuffer(
+  html: string,
+  timeoutMs = 30_000
+): Promise<Buffer> {
+  return (await renderHtmlToPdfDocument(html, timeoutMs)).content;
 }
