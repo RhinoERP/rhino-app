@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckIcon, FileTextIcon } from "lucide-react";
+import { CheckIcon, DatabaseIcon, FileTextIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -47,11 +48,26 @@ const paymentMethods = [
 const invoiceTypes: { value: InvoiceType; label: string }[] =
   INVOICE_TYPE_OPTIONS;
 
-const formSchema = z.object({
-  allow_preventa_arca_invoicing: z.boolean(),
-  sales_default_tax_ids: z.array(z.string().uuid()),
-  sales_enabled_payment_methods: z.array(
-    z.enum([
+const formSchema = z
+  .object({
+    allow_preventa_arca_invoicing: z.boolean(),
+    seller_offline_snapshot_enabled: z.boolean(),
+    seller_offline_snapshot_ttl_hours: z.number().int().min(1).max(168),
+    seller_offline_purge_after_hours: z.number().int().min(1).max(720),
+    sales_default_tax_ids: z.array(z.string().uuid()),
+    sales_enabled_payment_methods: z.array(
+      z.enum([
+        "efectivo",
+        "tarjeta_de_credito",
+        "tarjeta_de_debito",
+        "transferencia",
+        "qr",
+        "cheque",
+        "deposito",
+        "e-cheq",
+      ])
+    ),
+    sales_default_payment_method: z.enum([
       "efectivo",
       "tarjeta_de_credito",
       "tarjeta_de_debito",
@@ -60,27 +76,25 @@ const formSchema = z.object({
       "cheque",
       "deposito",
       "e-cheq",
-    ])
-  ),
-  sales_default_payment_method: z.enum([
-    "efectivo",
-    "tarjeta_de_credito",
-    "tarjeta_de_debito",
-    "transferencia",
-    "qr",
-    "cheque",
-    "deposito",
-    "e-cheq",
-  ]),
-  sales_default_invoice_type: z.enum([
-    "NOTA_DE_VENTA",
-    "FACTURA_A",
-    "FACTURA_A_RETENCION",
-    "FACTURA_B",
-    "FACTURA_C",
-    "FACTURA_E",
-  ]),
-});
+    ]),
+    sales_default_invoice_type: z.enum([
+      "NOTA_DE_VENTA",
+      "FACTURA_A",
+      "FACTURA_A_RETENCION",
+      "FACTURA_B",
+      "FACTURA_C",
+      "FACTURA_E",
+    ]),
+  })
+  .refine(
+    (values) =>
+      values.seller_offline_purge_after_hours >=
+      values.seller_offline_snapshot_ttl_hours,
+    {
+      message: "La purga no puede ocurrir antes del vencimiento del snapshot",
+      path: ["seller_offline_purge_after_hours"],
+    }
+  );
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -98,6 +112,9 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
     resolver: zodResolver(formSchema),
     defaultValues: {
       allow_preventa_arca_invoicing: false,
+      seller_offline_snapshot_enabled: false,
+      seller_offline_snapshot_ttl_hours: 12,
+      seller_offline_purge_after_hours: 72,
       sales_default_tax_ids: [],
       sales_enabled_payment_methods: [],
       sales_default_payment_method: "efectivo",
@@ -114,6 +131,12 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
         form.reset({
           allow_preventa_arca_invoicing:
             result.data.allow_preventa_arca_invoicing ?? false,
+          seller_offline_snapshot_enabled:
+            result.data.seller_offline_snapshot_enabled ?? false,
+          seller_offline_snapshot_ttl_hours:
+            result.data.seller_offline_snapshot_ttl_hours ?? 12,
+          seller_offline_purge_after_hours:
+            result.data.seller_offline_purge_after_hours ?? 72,
           sales_default_tax_ids: result.data.sales_default_tax_ids ?? [],
           sales_enabled_payment_methods:
             result.data.sales_enabled_payment_methods ?? [],
@@ -198,6 +221,95 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
                 </FormItem>
               )}
             />
+
+            <div className="space-y-4 rounded-lg border p-4">
+              <div className="flex items-start gap-3">
+                <DatabaseIcon className="mt-0.5 size-5 text-primary" />
+                <div>
+                  <p className="font-medium">
+                    Datos para trabajar sin conexion
+                  </p>
+                  <p className="text-muted-foreground text-sm">
+                    Habilita la descarga controlada de clientes, productos y
+                    configuracion comercial para vendedores de esta
+                    organizacion.
+                  </p>
+                </div>
+              </div>
+
+              <FormField
+                control={form.control}
+                name="seller_offline_snapshot_enabled"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg bg-muted/40 p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel>Habilitar snapshot offline</FormLabel>
+                      <FormDescription>
+                        La descarga sigue requiriendo sesion y permisos de
+                        ventas. No habilita todavia preventas offline.
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="seller_offline_snapshot_ttl_hours"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vigencia del snapshot</FormLabel>
+                      <FormControl>
+                        <Input
+                          max={168}
+                          min={1}
+                          type="number"
+                          {...field}
+                          onChange={(event) =>
+                            field.onChange(event.target.valueAsNumber)
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>Horas antes de vencer.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="seller_offline_purge_after_hours"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Purga por inactividad</FormLabel>
+                      <FormControl>
+                        <Input
+                          max={720}
+                          min={1}
+                          type="number"
+                          {...field}
+                          onChange={(event) =>
+                            field.onChange(event.target.valueAsNumber)
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Horas sin actividad antes de eliminar los datos al
+                        reabrir la PWA.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
 
             <FormField
               control={form.control}
