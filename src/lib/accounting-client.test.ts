@@ -5,6 +5,7 @@ import {
   buildNcVenta,
   buildNdVenta,
   buildOrdenPago,
+  buildVentaPos,
 } from "./accounting-client";
 
 describe("buildNdVenta", () => {
@@ -93,6 +94,75 @@ describe("buildOrdenPago", () => {
 
     expect(event.descripcion).toBe("Orden de pago");
     expect(event.descripcion).not.toContain(event.referenciaId);
+  });
+});
+
+describe("buildVentaPos", () => {
+  it("preserves the product or category account code in the sale lines", () => {
+    const event = buildVentaPos(
+      {
+        id: "pos-sale-1",
+        organization_id: "org-1",
+        sale_date: "2026-09-22",
+        receipt_number: "POS-0001",
+      },
+      { total: 1210, totalTaxAmount: 210 },
+      "customer-1",
+      {
+        items: [
+          {
+            accountCode: "VENTAS_MERCADERIAS",
+            montoNeto: 1000,
+            montoImpuestos: 210,
+          },
+        ],
+        metodoPago: "TRANSFERENCIA",
+        bancoAccountCode: "BANCO_BBVA_PESOS",
+      }
+    );
+
+    expect(event).toMatchObject({
+      tipoEvento: "VENTA_POS",
+      referenciaTabla: "pos_sales",
+      referenciaId: "pos-sale-1",
+      idempotencyKey: "VENTA_POS_pos-sale-1",
+      datos: {
+        clienteId: "customer-1",
+        metodoPago: "TRANSFERENCIA",
+        bancoAccountCode: "BANCO_BBVA_PESOS",
+        totalVenta: "1210.0000",
+        lineasDesglosadas: [
+          {
+            accountCode: "VENTAS_MERCADERIAS",
+            montoNeto: "1000.0000",
+            montoImpuestos: "210.0000",
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps a null account code when the POS line has no account", () => {
+    const event = buildVentaPos(
+      {
+        id: "pos-sale-2",
+        organization_id: "org-1",
+        sale_date: "2026-09-22",
+      },
+      { total: 230, totalTaxAmount: 0 },
+      "customer-1",
+      {
+        items: [{ accountCode: null, montoNeto: 230, montoImpuestos: 0 }],
+      }
+    );
+
+    expect(event.datos.lineasDesglosadas).toEqual([
+      {
+        accountCode: null,
+        montoNeto: "230.0000",
+        montoImpuestos: "0.0000",
+      },
+    ]);
   });
 });
 

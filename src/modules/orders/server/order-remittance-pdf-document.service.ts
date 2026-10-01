@@ -1,11 +1,13 @@
 import "server-only";
 
 import { truncateMoney } from "@/lib/decimal";
+import { computeLineGross } from "@/lib/line-values";
 import { createClient } from "@/lib/supabase/server";
 import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
   generateRemittanceHTML,
   type RemittanceData,
@@ -137,9 +139,6 @@ async function fetchOrderItems(
       description: extra.description,
       unitPrice: Number(extra.price ?? 0),
     }));
-    const extrasTotal = truncateMoney(
-      extras.reduce((sum, extra) => sum + extra.unitPrice, 0)
-    );
 
     return {
       sku: item.products?.sku ?? "",
@@ -154,7 +153,11 @@ async function fetchOrderItems(
       unitOfMeasure: item.products?.unit_of_measure ?? "UN",
       weightQuantity: saleItem?.unit_quantity ?? undefined,
       unitPrice,
-      subtotal: truncateMoney(unitPrice * quantity + extrasTotal * quantity),
+      subtotal: computeLineGross(
+        unitPrice,
+        quantity,
+        item.quote_item_extras ?? undefined
+      ),
       discountPercentage:
         saleItem?.discount_percentage ?? item.discount_percentage ?? undefined,
       extras,
@@ -299,6 +302,9 @@ export async function getOrderRemittanceData(params: {
     total,
     observations: orderData.observations ?? null,
     singlePageDuplicate,
+    showProductBrand:
+      organization != null &&
+      isOrganizationModuleEnabled(organization, "production"),
     finalRemittanceVisibility,
   };
 

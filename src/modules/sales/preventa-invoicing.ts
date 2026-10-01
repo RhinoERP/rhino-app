@@ -1,11 +1,15 @@
 type PreSaleStatus = "DRAFT" | string | null | undefined;
 type ArcaStatus = "authorized" | string | null | undefined;
 
+export function isEarlyBillablePreventaStatus(status: PreSaleStatus): boolean {
+  return status === "DRAFT" || status === "INCOMPLETE";
+}
+
 export function canIssueArcaInvoiceForPreventa(
   status: PreSaleStatus,
   enabled: boolean
 ): boolean {
-  return status === "DRAFT" && enabled;
+  return isEarlyBillablePreventaStatus(status) && enabled;
 }
 
 export function isArcaInvoiceEligibleSaleStatus(
@@ -24,7 +28,7 @@ export function isAuthorizedPreventaInvoice(
   status: PreSaleStatus,
   arcaStatus: ArcaStatus
 ): boolean {
-  return status === "DRAFT" && arcaStatus === "authorized";
+  return isEarlyBillablePreventaStatus(status) && arcaStatus === "authorized";
 }
 
 export function hasFullFiscalReversal(params: {

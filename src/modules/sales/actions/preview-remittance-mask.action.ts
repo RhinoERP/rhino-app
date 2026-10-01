@@ -1,6 +1,8 @@
 "use server";
 
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { buildRemittanceFromSale } from "../service/remittance-generator.service";
 import {
@@ -36,7 +38,10 @@ export async function previewRemittanceMaskAction(
       };
     }
 
-    const sale = await getSalesOrderById(orgSlug, saleId);
+    const [sale, organization] = await Promise.all([
+      getSalesOrderById(orgSlug, saleId),
+      getOrganizationBySlug(orgSlug),
+    ]);
 
     if (!sale) {
       return { success: false, error: "Venta no encontrada" };
@@ -49,7 +54,11 @@ export async function previewRemittanceMaskAction(
       };
     }
 
-    const remittance = buildRemittanceFromSale(sale, "REMITO_FINAL");
+    const remittance = buildRemittanceFromSale(sale, "REMITO_FINAL", {
+      showProductBrand:
+        organization != null &&
+        isOrganizationModuleEnabled(organization, "production"),
+    });
     const mask = buildRemittanceMaskData(remittance, {
       carrierName: sale.carrier?.name,
       purchaseOrderNumber,

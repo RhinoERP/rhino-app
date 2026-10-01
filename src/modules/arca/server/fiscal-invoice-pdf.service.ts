@@ -3,7 +3,9 @@ import "server-only";
 import QRCode from "qrcode";
 import { remittanceIssuerConfig } from "@/config/remittance";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
+import { getOrderQuotePaymentConditionBySaleId } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getInvoiceTypeLabel,
@@ -20,6 +22,7 @@ import {
   buildArcaQrVerifierUrl,
   buildArcaQrPayload as buildSharedArcaQrPayload,
 } from "../arca-qr";
+import { formatCommercialExchangeRate } from "../commercial-exchange-rate";
 import { ArcaValidationError } from "../errors";
 import { readAuthorizedFiscalCurrency } from "../fiscal-currency";
 import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
@@ -179,7 +182,14 @@ function getVoucherTypeCodeLabel(value: number | null | undefined): string {
   return String(value).padStart(3, "0");
 }
 
-function getPaymentConditionLabel(sale: SalesOrderDetail): string {
+function getPaymentConditionLabel(
+  sale: SalesOrderDetail,
+  orderQuotePaymentCondition: string | null
+): string {
+  if (orderQuotePaymentCondition) {
+    return orderQuotePaymentCondition;
+  }
+
   if (sale.credit_days && sale.credit_days > 0) {
     return `Cuenta corriente ${sale.credit_days} días`;
   }
@@ -339,7 +349,14 @@ function generateInvoiceItemsRows(
           <td class="cell-right">${weightLabel ?? "—"}</td>
           <td class="cell-right">${formatCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatDiscountPercent(item.discountPercent)}</td>
-          <td class="cell-right cell-amount">${formatCurrency(item.subtotal, currency)}</td>
+          <td class="cell-right cell-amount">${formatCurrency(
+            computeLineGross(
+              item.unitPrice,
+              item.quantity,
+              item.extras ?? undefined
+            ),
+            currency
+          )}</td>
         </tr>
       `;
     })
@@ -415,8 +432,15 @@ async function generateFiscalInvoiceHtml(params: {
   organization: OrganizationSummary;
   branding: ArcaInvoiceBranding;
   commercialPreventaDetail?: CommercialPreventaDetail | null;
+  orderQuotePaymentCondition?: string | null;
 }): Promise<string> {
-  const { sale, organization, branding, commercialPreventaDetail } = params;
+  const {
+    sale,
+    organization,
+    branding,
+    commercialPreventaDetail,
+    orderQuotePaymentCondition,
+  } = params;
 
   if (sale.arca_status !== "authorized") {
     throw new ArcaValidationError(
@@ -427,6 +451,10 @@ async function generateFiscalInvoiceHtml(params: {
   const request = extractWsfeRequest(sale.arca_request_json);
   const fiscalCurrency = readAuthorizedFiscalCurrency(sale.arca_request_json);
   const displayCurrency = fiscalCurrency.code === "DOL" ? "USD" : "ARS";
+  const commercialRate = formatCommercialExchangeRate(
+    displayCurrency,
+    sale.commercial_exchange_rate
+  );
   const qrPayload = buildArcaQrPayload({
     sale,
     organization,
@@ -469,7 +497,10 @@ async function generateFiscalInvoiceHtml(params: {
   const voucherTypeCodeLabel = getVoucherTypeCodeLabel(
     sale.arca_voucher_type_code
   );
-  const paymentConditionLabel = getPaymentConditionLabel(sale);
+  const paymentConditionLabel = getPaymentConditionLabel(
+    sale,
+    orderQuotePaymentCondition ?? null
+  );
   const pointAndNumber =
     sale.arca_point_of_sale && sale.arca_voucher_number
       ? `${String(sale.arca_point_of_sale).padStart(4, "0")}-${String(
@@ -517,6 +548,7 @@ async function generateFiscalInvoiceHtml(params: {
             <div class="voucher-row"><span>Fecha de venta</span><strong>${formatDateOnly(sale.sale_date)}</strong></div>
             <div class="voucher-row"><span>Venta interna</span><strong>#${sale.sale_number ?? "—"}</strong></div>
             <div class="voucher-row"><span>Moneda</span><strong>${displayCurrency}</strong></div>
+            ${commercialRate ? `<div class="voucher-row"><span>Tipo de cambio comercial USD → ARS</span><strong>${commercialRate}</strong></div>` : ""}
           </div>
         </section>
       </header>
@@ -1150,9 +1182,10 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
   orgSlug: string;
   saleId: string;
 }): Promise<PrintableFiscalInvoice> {
-  const [sale, organization] = await Promise.all([
+  const [sale, organization, orderQuotePaymentCondition] = await Promise.all([
     getSalesOrderById(params.orgSlug, params.saleId),
     getOrganizationBySlug(params.orgSlug),
+    getOrderQuotePaymentConditionBySaleId(params.orgSlug, params.saleId),
   ]);
 
   if (!sale) {
@@ -1186,6 +1219,7 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
           items: commercialPreventaDetail.items,
         }
       : null,
+    orderQuotePaymentCondition,
   });
   const filename = `Factura_${sanitizeFilenamePart(
     sale.invoice_number ?? String(sale.sale_number ?? sale.id)

@@ -4,40 +4,53 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import {
+  calculateSalePrice,
+  type SalePriceAdjustment,
+} from "@/modules/price-levels/service/price-calculator";
+import type { PriceLevel } from "@/modules/price-levels/types";
+import {
+  convertPriceToQuoteCurrency,
+  needsExchangeRate,
+} from "@/modules/quotes/utils/currency-conversion";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
 type ProductSearchProps = {
   products: SaleProduct[];
   onSelectProduct: (product: SaleProduct, quantity?: number) => void;
-  priceList?: SalesPriceList | null;
+  level?: PriceLevel | null;
+  adjustment?: SalesPriceList | null;
   currency?: string;
+  exchangeRate?: number | null;
 };
 
-function getSearchPrice(
-  product: SaleProduct,
-  priceList: SalesPriceList | null | undefined
-): number {
-  if (!priceList?.is_active) {
-    return product.price || 0;
-  }
+function getSearchPrice(params: {
+  product: SaleProduct;
+  level: PriceLevel | null | undefined;
+  adjustment: SalesPriceList | null | undefined;
+  quoteCurrency: string;
+  exchangeRate: number | null | undefined;
+}): number {
+  const { product, level, adjustment, quoteCurrency, exchangeRate } = params;
+  const adjustments: SalePriceAdjustment[] = adjustment
+    ? [{ type: adjustment.type, value: adjustment.value }]
+    : [];
 
-  const today = new Date().toISOString().split("T")[0];
-  if (priceList.valid_from > today) {
-    return product.price || 0;
-  }
+  const { price } = calculateSalePrice({
+    basePrice: product.price || 0,
+    costPrice: product.costPrice,
+    level,
+    adjustments,
+  });
 
-  if (priceList.is_target_margin && product.costPrice != null) {
-    return truncateMoney(product.costPrice * (1 + priceList.value / 100));
-  }
-
-  if (priceList.type === "PRICE") {
-    return truncateMoney(Math.max(0, (product.price || 0) + priceList.value));
-  }
-
-  return truncateMoney((product.price || 0) * (1 + priceList.value / 100));
+  return convertPriceToQuoteCurrency(
+    price,
+    product.currency ?? "ARS",
+    quoteCurrency,
+    exchangeRate
+  );
 }
 
 const normalizeSearchValue = (value: string) =>
@@ -50,10 +63,16 @@ const normalizeSearchValue = (value: string) =>
 
 function ProductMetaLine({
   product,
-  priceList,
+  level,
+  adjustment,
+  quoteCurrency,
+  exchangeRate,
 }: {
   product: SaleProduct;
-  priceList?: SalesPriceList | null;
+  level?: PriceLevel | null;
+  adjustment?: SalesPriceList | null;
+  quoteCurrency: string;
+  exchangeRate?: number | null;
 }) {
   const metaParts = [
     product.sku ? `SKU: ${product.sku}` : null,
@@ -64,7 +83,18 @@ function ProductMetaLine({
     <span className="text-muted-foreground text-xs">
       {metaParts.join(" · ")}
       {metaParts.length > 0 ? " • " : ""}
-      {formatCurrency(getSearchPrice(product, priceList))}
+      {needsExchangeRate(product.currency, quoteCurrency, exchangeRate)
+        ? "—"
+        : formatCurrency(
+            getSearchPrice({
+              product,
+              level,
+              adjustment,
+              quoteCurrency,
+              exchangeRate,
+            }),
+            quoteCurrency
+          )}
     </span>
   );
 }
@@ -83,8 +113,10 @@ function CurrencyBadge({ currency }: { currency?: string }) {
 export function ProductSearch({
   products,
   onSelectProduct,
-  priceList,
-  currency,
+  level,
+  adjustment,
+  currency = "ARS",
+  exchangeRate,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [activatingId, setActivatingId] = useState<string | null>(null);
@@ -96,15 +128,11 @@ export function ProductSearch({
   }, [searchTerm]);
 
   const filteredProducts = useMemo(() => {
-    const byCurrency = currency
-      ? products.filter((product) => (product.currency ?? "ARS") === currency)
-      : products;
-
     if (searchTokens.length === 0) {
-      return byCurrency.slice(0, 10);
+      return products.slice(0, 10);
     }
 
-    return byCurrency
+    return products
       .filter((product) => {
         const nameTokens = normalizeSearchValue(product.name || "")
           .split(" ")
@@ -112,14 +140,14 @@ export function ProductSearch({
         const sku = normalizeSearchValue(product.sku || "");
 
         return searchTokens.every((token) => {
-          if (sku.startsWith(token)) {
+          if (sku.includes(token)) {
             return true;
           }
           return nameTokens.some((word) => word.startsWith(token));
         });
       })
       .slice(0, 20);
-  }, [products, searchTokens, currency]);
+  }, [products, searchTokens]);
 
   const handleStartAdd = (product: SaleProduct) => {
     setActivatingId(product.id);
@@ -153,9 +181,7 @@ export function ProductSearch({
         <div className="flex flex-col divide-y">
           {filteredProducts.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground text-sm">
-              {currency
-                ? `No hay productos en ${currency} para esta búsqueda.`
-                : "No se encontraron productos."}
+              No se encontraron productos.
             </div>
           ) : (
             filteredProducts.map((product) => {
@@ -171,7 +197,13 @@ export function ProductSearch({
                       {product.name}
                       <CurrencyBadge currency={product.currency} />
                     </span>
-                    <ProductMetaLine priceList={priceList} product={product} />
+                    <ProductMetaLine
+                      adjustment={adjustment}
+                      exchangeRate={exchangeRate}
+                      level={level}
+                      product={product}
+                      quoteCurrency={currency}
+                    />
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">

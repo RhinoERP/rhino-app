@@ -92,7 +92,7 @@ export async function getSupplierInvoices(
 
   let query = supplierInvoicesTable(supabase)
     .select(
-      "id, organization_id, supplier_id, purchase_order_id, invoice_type, point_of_sale, invoice_number, invoice_date, due_date, subtotal_amount, tax_amount, total_amount, currency, exchange_rate, status, invoice_pdf_url, invoice_filename, notes, created_at, created_by, supplier:suppliers(id, name), purchase_order:purchase_orders(id, purchase_number)"
+      "id, organization_id, supplier_id, purchase_order_id, invoice_type, point_of_sale, invoice_number, invoice_date, due_date, subtotal_amount, tax_amount, total_amount, currency, status, invoice_pdf_url, invoice_filename, notes, created_at, created_by, supplier:suppliers(id, name), purchase_order:purchase_orders(id, purchase_number)"
     )
     .eq("organization_id", org.id)
     .order("invoice_date", { ascending: false })

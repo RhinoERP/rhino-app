@@ -7,24 +7,30 @@ import {
 } from "./preventa-invoicing";
 
 describe("preventa fiscal invoicing policy", () => {
-  it("only enables ARCA issuance for draft preventas when configured", () => {
+  it("only enables ARCA issuance for draft or incomplete preventas when configured", () => {
     expect(canIssueArcaInvoiceForPreventa("DRAFT", true)).toBe(true);
     expect(canIssueArcaInvoiceForPreventa("DRAFT", false)).toBe(false);
+    expect(canIssueArcaInvoiceForPreventa("INCOMPLETE", true)).toBe(true);
+    expect(canIssueArcaInvoiceForPreventa("INCOMPLETE", false)).toBe(false);
     expect(canIssueArcaInvoiceForPreventa("CONFIRMED", true)).toBe(false);
   });
 
-  it("keeps normal sale statuses eligible and adds only configured drafts", () => {
+  it("keeps normal sale statuses eligible and adds only configured drafts or incomplete preventas", () => {
     expect(isArcaInvoiceEligibleSaleStatus("CONFIRMED", false)).toBe(true);
     expect(isArcaInvoiceEligibleSaleStatus("DISPATCH", false)).toBe(true);
     expect(isArcaInvoiceEligibleSaleStatus("DELIVERED", false)).toBe(true);
     expect(isArcaInvoiceEligibleSaleStatus("DRAFT", false)).toBe(false);
     expect(isArcaInvoiceEligibleSaleStatus("DRAFT", true)).toBe(true);
+    expect(isArcaInvoiceEligibleSaleStatus("INCOMPLETE", false)).toBe(false);
+    expect(isArcaInvoiceEligibleSaleStatus("INCOMPLETE", true)).toBe(true);
     expect(isArcaInvoiceEligibleSaleStatus("CANCELLED", true)).toBe(false);
   });
 
-  it("recognizes an authorized draft-preventa invoice", () => {
+  it("recognizes an authorized draft or incomplete preventa invoice", () => {
     expect(isAuthorizedPreventaInvoice("DRAFT", "authorized")).toBe(true);
     expect(isAuthorizedPreventaInvoice("DRAFT", "pending")).toBe(false);
+    expect(isAuthorizedPreventaInvoice("INCOMPLETE", "authorized")).toBe(true);
+    expect(isAuthorizedPreventaInvoice("INCOMPLETE", "pending")).toBe(false);
     expect(isAuthorizedPreventaInvoice("CONFIRMED", "authorized")).toBe(false);
   });
 

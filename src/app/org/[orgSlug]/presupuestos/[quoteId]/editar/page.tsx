@@ -6,6 +6,7 @@ import {
 } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
+import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import { getQuoteById } from "@/modules/quotes/actions/get-quote-by-id.action";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
@@ -25,13 +26,15 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
     "quotes.manage.all",
   ]);
 
-  const [org, quote, customers, products, salesPriceLists] = await Promise.all([
-    getOrganizationBySlug(orgSlug),
-    getQuoteById(quoteId, orgSlug),
-    getQuoteCustomersByOrgSlug(orgSlug),
-    getSaleProducts(orgSlug),
-    getSalesPriceListsByOrgSlug(orgSlug),
-  ]);
+  const [org, quote, customers, products, salesPriceLists, priceLevels] =
+    await Promise.all([
+      getOrganizationBySlug(orgSlug),
+      getQuoteById(quoteId, orgSlug),
+      getQuoteCustomersByOrgSlug(orgSlug),
+      getSaleProducts(orgSlug),
+      getSalesPriceListsByOrgSlug(orgSlug),
+      getPriceLevelsByOrgSlug(orgSlug),
+    ]);
 
   if (!(quote && org)) {
     notFound();
@@ -42,6 +45,7 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
       customers={customers}
       hasProduction={org.production_enabled === true}
       orgSlug={orgSlug}
+      priceLevels={priceLevels}
       products={products}
       quote={quote}
       salesPriceLists={salesPriceLists}

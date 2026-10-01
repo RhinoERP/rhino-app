@@ -136,12 +136,18 @@ export async function getFinancialResultsAction(
       : sum + balance;
   }, 0);
   const pendingPayables = (apResult.data ?? []).reduce((sum, r) => {
-    const balance = Number(r.pending_balance ?? 0);
-    if ((r.currency ?? "ARS").toUpperCase() !== "USD") {
+    const row = r as unknown as {
+      pending_balance: number;
+      currency?: string | null;
+      total_amount: number;
+      amount_ars?: number | null;
+    };
+    const balance = Number(row.pending_balance ?? 0);
+    if ((row.currency ?? "ARS").toUpperCase() !== "USD") {
       return sum + balance;
     }
-    const total = Number(r.total_amount ?? 0);
-    const amountArs = Number(r.amount_ars ?? 0);
+    const total = Number(row.total_amount ?? 0);
+    const amountArs = Number(row.amount_ars ?? 0);
     return total > 0 && amountArs > 0
       ? sum + truncateMoney(balance * (amountArs / total))
       : sum + balance;

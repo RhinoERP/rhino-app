@@ -26,4 +26,14 @@ describe("getAuthorizedSaleFiscalUpdateFields", () => {
       })
     ).toEqual(["customerId", "sellerId", "invoiceNumber", "items", "taxes"]);
   });
+
+  it("bloquea cambios de cotización comercial en ventas autorizadas", () => {
+    expect(
+      getAuthorizedSaleFiscalUpdateFields({
+        orgSlug: "demo",
+        saleId: "sale-1",
+        commercialExchangeRate: 1535,
+      })
+    ).toContain("commercialExchangeRate");
+  });
 });

@@ -104,17 +104,6 @@ export async function createDraftPurchaseFromChildOrder(params: {
     throw new Error("Error al obtener items del presupuesto");
   }
 
-  const quoteId = items.find((item) => item.quote_id)?.quote_id ?? null;
-  let quoteCurrency = "ARS";
-  if (quoteId) {
-    const { data: quote } = await supabase
-      .from("quotes")
-      .select("currency")
-      .eq("id", quoteId)
-      .maybeSingle();
-    quoteCurrency = quote?.currency ?? "ARS";
-  }
-
   const itemsWithProduct = items.filter(
     (item): item is typeof item & { product_id: string } =>
       item.product_id !== null
@@ -132,7 +121,7 @@ export async function createDraftPurchaseFromChildOrder(params: {
 
   const { data: productCosts } = await supabase
     .from("products_with_price")
-    .select("id, cost_price")
+    .select("id, cost_price, currency")
     .eq("organization_id", params.orgId)
     .in("id", productIds);
 
@@ -145,29 +134,49 @@ export async function createDraftPurchaseFromChildOrder(params: {
       .map((p) => [p.id, p.cost_price])
   );
 
-  const { data: lastPurchase } = await supabase
-    .from("purchase_orders")
-    .select("purchase_number")
-    .eq("organization_id", params.orgId)
-    .order("purchase_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // La OC se crea en la moneda del costo del producto (lista de precios), no
+  // en la del presupuesto. Asumimos una OC por proveedor con costos en una
+  // sola moneda; si mezclan, se toma la primera.
+  const purchaseCurrency =
+    (productCosts ?? []).find((p) => p.cost_price !== null)?.currency ?? "ARS";
 
-  const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+  const MAX_PURCHASE_NUMBER_RETRIES = 3;
+  let purchaseOrder: { id: string } | null = null;
+  let poError: { message: string; code?: string } | null = null;
+  let purchaseNumber = 0;
 
-  const { data: purchaseOrder, error: poError } = await supabase
-    .from("purchase_orders")
-    .insert({
-      organization_id: params.orgId,
-      purchase_number: purchaseNumber,
-      status: "DRAFT",
-      currency: quoteCurrency,
-      subtotal_amount: 0,
-      tax_amount: 0,
-      total_amount: 0,
-    })
-    .select("id")
-    .single();
+  for (let attempt = 0; attempt < MAX_PURCHASE_NUMBER_RETRIES; attempt++) {
+    const { data: lastPurchase } = await supabase
+      .from("purchase_orders")
+      .select("purchase_number")
+      .eq("organization_id", params.orgId)
+      .order("purchase_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+
+    const result = await supabase
+      .from("purchase_orders")
+      .insert({
+        organization_id: params.orgId,
+        purchase_number: purchaseNumber,
+        status: "DRAFT",
+        currency: purchaseCurrency,
+        subtotal_amount: 0,
+        tax_amount: 0,
+        total_amount: 0,
+      })
+      .select("id")
+      .single();
+
+    purchaseOrder = result.data;
+    poError = result.error;
+
+    if (!poError || poError.code !== "23505") {
+      break;
+    }
+  }
 
   if (poError || !purchaseOrder) {
     throw new Error(`Error al crear pre-compra: ${poError?.message}`);

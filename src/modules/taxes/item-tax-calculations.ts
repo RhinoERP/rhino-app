@@ -1,4 +1,4 @@
-import { truncateMoney } from "@/lib/decimal";
+import { truncateToDecimals } from "@/lib/decimal";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 
 export type ItemTaxInput = {
@@ -74,25 +74,27 @@ function normalizeTaxInput(tax: ItemTaxInput): ItemTaxInput {
   };
 }
 
-function moneyToCents(value: number): number {
-  return Math.round(truncateMoney(value) * 100);
+function moneyToCents(value: number, precision = 2): number {
+  const factor = 10 ** precision;
+  return Math.round(truncateToDecimals(value, precision) * factor);
 }
 
-function centsToMoney(value: number): number {
-  return truncateMoney(value / 100);
+function centsToMoney(value: number, precision = 2): number {
+  return truncateToDecimals(value / 10 ** precision, precision);
 }
 
 function computeLineBases(
   lines: TaxableItemLine[],
-  globalDiscountAmount: number
+  globalDiscountAmount: number,
+  precision = 2
 ) {
   const lineBases = new Map<string, number>();
   const lineNetCents = lines.map((line) =>
-    moneyToCents(Math.max(0, line.netAmount))
+    moneyToCents(Math.max(0, line.netAmount), precision)
   );
   const totalNetCents = lineNetCents.reduce((sum, cents) => sum + cents, 0);
   const safeGlobalDiscountCents = Math.min(
-    Math.max(0, moneyToCents(globalDiscountAmount)),
+    Math.max(0, moneyToCents(globalDiscountAmount, precision)),
     totalNetCents
   );
   let remainingBaseCents = Math.max(0, totalNetCents - safeGlobalDiscountCents);
@@ -108,7 +110,7 @@ function computeLineBases(
       ? Math.max(0, remainingBaseCents)
       : Math.max(0, netAmountCents - discountShareCents);
 
-    lineBases.set(line.lineId, centsToMoney(baseCents));
+    lineBases.set(line.lineId, centsToMoney(baseCents, precision));
     remainingBaseCents = Math.max(0, remainingBaseCents - baseCents);
   });
 
@@ -120,8 +122,15 @@ export function buildItemizedTaxPlan(params: {
   lines: TaxableItemLine[];
   globalDiscountAmount: number;
   fallbackTaxes?: ItemTaxInput[];
+  /** Decimales de precisión interna (default 2 centavos). Usar 6 para flujos con conversión de moneda. */
+  precision?: number;
 }): ItemizedTaxPlan {
-  const lineBases = computeLineBases(params.lines, params.globalDiscountAmount);
+  const precision = params.precision ?? 2;
+  const lineBases = computeLineBases(
+    params.lines,
+    params.globalDiscountAmount,
+    precision
+  );
   const fallbackTaxes = (params.fallbackTaxes ?? []).map((tax) => ({
     ...normalizeTaxInput(tax),
     source: tax.source ?? "fallback",
@@ -143,7 +152,7 @@ export function buildItemizedTaxPlan(params: {
         name: tax.name,
         rate: tax.rate,
         baseAmount,
-        taxAmount: truncateMoney(baseAmount * (tax.rate / 100)),
+        taxAmount: truncateToDecimals(baseAmount * (tax.rate / 100), precision),
         taxCodeSnapshot: tax.taxCodeSnapshot ?? null,
         source: tax.source ?? "product",
       });
@@ -159,18 +168,23 @@ export function buildItemizedTaxPlan(params: {
   }
 
   for (const group of itemTaxesByKey.values()) {
-    const expectedTaxAmount = truncateMoney(
-      group.reduce((sum, tax) => sum + tax.baseAmount * (tax.rate / 100), 0)
+    const expectedTaxAmount = truncateToDecimals(
+      group.reduce((sum, tax) => sum + tax.baseAmount * (tax.rate / 100), 0),
+      precision
     );
-    const currentTaxAmount = truncateMoney(
-      group.reduce((sum, tax) => sum + tax.taxAmount, 0)
+    const currentTaxAmount = truncateToDecimals(
+      group.reduce((sum, tax) => sum + tax.taxAmount, 0),
+      precision
     );
-    const diff = truncateMoney(expectedTaxAmount - currentTaxAmount);
+    const diff = truncateToDecimals(
+      expectedTaxAmount - currentTaxAmount,
+      precision
+    );
 
-    if (Math.abs(diff) >= 0.01 && group.length > 0) {
+    if (Math.abs(diff) >= 10 ** -precision && group.length > 0) {
       const last = group.at(-1);
       if (last) {
-        last.taxAmount = truncateMoney(last.taxAmount + diff);
+        last.taxAmount = truncateToDecimals(last.taxAmount + diff, precision);
       }
     }
   }
@@ -181,11 +195,13 @@ export function buildItemizedTaxPlan(params: {
     const existing = aggregateByKey.get(key);
 
     if (existing) {
-      existing.baseAmount = truncateMoney(
-        existing.baseAmount + itemTax.baseAmount
+      existing.baseAmount = truncateToDecimals(
+        existing.baseAmount + itemTax.baseAmount,
+        precision
       );
-      existing.taxAmount = truncateMoney(
-        existing.taxAmount + itemTax.taxAmount
+      existing.taxAmount = truncateToDecimals(
+        existing.taxAmount + itemTax.taxAmount,
+        precision
       );
       continue;
     }
@@ -201,8 +217,9 @@ export function buildItemizedTaxPlan(params: {
   }
 
   const aggregateTaxes = Array.from(aggregateByKey.values());
-  const totalTaxAmount = truncateMoney(
-    aggregateTaxes.reduce((sum, tax) => sum + tax.taxAmount, 0)
+  const totalTaxAmount = truncateToDecimals(
+    aggregateTaxes.reduce((sum, tax) => sum + tax.taxAmount, 0),
+    precision
   );
 
   return {

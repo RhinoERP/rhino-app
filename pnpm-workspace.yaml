@@ -4,6 +4,7 @@ packages:
 allowBuilds:
   '@sentry/cli': true
   '@swc/core': true
+  core-js: false
   esbuild: true
   msw: true
   node: set this to true or false

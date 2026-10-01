@@ -54,6 +54,7 @@ type BulkSupplierPaymentDistribution = {
   appliedAmount: number;
   newBalance: number;
   newStatus: "PENDING" | "PARTIAL" | "PAID";
+  exchangeRate: number | null;
 };
 
 const formSchema = z.object({
@@ -90,6 +91,7 @@ type BulkSupplierPaymentDialogProps = {
   preselectedSupplierId?: string;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this dialog coordinates a multi-step bulk payment flow with rate validation.
 export function BulkSupplierPaymentDialog({
   open,
   onOpenChange,
@@ -131,7 +133,6 @@ export function BulkSupplierPaymentDialog({
   const totalAmount = form.watch("totalAmount");
   const paymentMethod = form.watch("paymentMethod");
   const currency = form.watch("currency");
-  const exchangeRate = form.watch("exchangeRate");
   const showChequeFields =
     paymentMethod === "cheque" || paymentMethod === "e-cheq";
 
@@ -196,25 +197,38 @@ export function BulkSupplierPaymentDialog({
     enabled: Boolean(supplierId && totalAmount > 0),
   });
 
+  const usdPreviewRates =
+    currency === "USD" && preview
+      ? preview.map((item) => item.exchangeRate)
+      : [];
+  const missingInvoiceRate = usdPreviewRates.some((rate) => rate == null);
+  const ratesDiffer = new Set(usdPreviewRates).size > 1;
+  const bulkRateBlocked =
+    currency === "USD" && (missingInvoiceRate || ratesDiffer);
+  const uniformRate =
+    currency === "USD" && !bulkRateBlocked && usdPreviewRates.length > 0
+      ? (usdPreviewRates[0] ?? null)
+      : null;
+
   useEffect(() => {
-    if (currency !== "USD" || !open || exchangeRate) {
-      return;
+    if (currency === "USD" && uniformRate != null) {
+      form.setValue("exchangeRate", String(uniformRate));
     }
-    let cancelled = false;
-    fetch("/api/exchange-rate/usd")
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled && data?.venta) {
-          form.setValue("exchangeRate", String(data.venta));
-        }
-      })
-      .catch(() => {
-        // si no se puede obtener la cotización, el usuario la escribe
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currency, open, exchangeRate, form]);
+  }, [currency, uniformRate, form]);
+
+  let rateDescription: string;
+  let rateDescriptionWarning = false;
+  if (missingInvoiceRate) {
+    rateDescription =
+      "Hay deudas sin factura de compra registrada con cotización. Registrá la factura antes de pagar o pagá por factura.";
+    rateDescriptionWarning = true;
+  } else if (ratesDiffer) {
+    rateDescription =
+      "Las facturas tienen cotizaciones distintas. Pagá por factura.";
+    rateDescriptionWarning = true;
+  } else {
+    rateDescription = "Cotización fijada por las facturas de compra.";
+  }
 
   const mutation = useMutation({
     mutationFn: async (values: FormValues) => {
@@ -439,18 +453,22 @@ export function BulkSupplierPaymentDialog({
                         <FormLabel>Tipo de cambio (USD→ARS)</FormLabel>
                         <FormControl>
                           <Input
-                            placeholder="Ej. 1240.50"
+                            className="bg-muted"
+                            placeholder="Se carga desde las facturas"
+                            readOnly
                             step="any"
                             type="number"
                             {...field}
                           />
                         </FormControl>
-                        <FormDescription>
-                          {Number(exchangeRate) > 0 && totalAmount > 0
-                            ? `Equivalente en ARS: $${(
-                                totalAmount * Number(exchangeRate)
-                              ).toFixed(2)}`
-                            : "Cotización usada para valuar el pago en ARS."}
+                        <FormDescription
+                          className={
+                            rateDescriptionWarning
+                              ? "text-amber-600"
+                              : undefined
+                          }
+                        >
+                          {rateDescription}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -725,7 +743,8 @@ export function BulkSupplierPaymentDialog({
               <Button
                 disabled={
                   mutation.isPending ||
-                  (showPreview && (!preview || preview.length === 0))
+                  (showPreview && (!preview || preview.length === 0)) ||
+                  (showPreview && bulkRateBlocked)
                 }
                 type="submit"
               >

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
+import { hasFullFiscalReversal } from "@/modules/sales/preventa-invoicing";
 import {
   confirmIncompleteSaleWithStockDeduction,
   dispatchSaleFromOrders,
@@ -35,6 +36,7 @@ import {
   type PurchasingOrder,
   type StockInfo,
 } from "../types";
+import { buildSplitQuoteItemExtras } from "../utils/split-quote-item-extras";
 
 type OrdersScope = "all" | "own";
 
@@ -149,6 +151,32 @@ export async function getOrderIdBySaleId(
   return data;
 }
 
+export async function getOrderQuotePaymentConditionBySaleId(
+  orgSlug: string,
+  saleId: string
+): Promise<string | null> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("quote:quotes(payment_condition)")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  const quote = Array.isArray(data.quote) ? data.quote[0] : data.quote;
+  return quote?.payment_condition?.trim() || null;
+}
+
 export async function getOrdersByOrg(
   orgSlug: string
 ): Promise<OrderWithDetails[]> {
@@ -185,6 +213,7 @@ export async function getOrdersByOrg(
           product_id,
           product_variant_id,
           assigned_order_id,
+          product:products(name, sku),
           quote_item_extras(*)
         )
       ),
@@ -263,7 +292,7 @@ export async function getParentOrdersPendingStock(
     `
     )
     .eq("organization_id", org.id)
-    .in("status", ["PENDING_STOCK", "GOODS_RECEIVED"])
+    .in("status", ["PENDING_STOCK", "GOODS_RECEIVED", "STOCK_RESERVED"])
     .is("parent_order_id", null);
 
   const filtered = applyScopeFilter(query, accessContext);
@@ -955,6 +984,7 @@ export async function getOrderById(
           product_id,
           product_variant_id,
           assigned_order_id,
+          product:products(name, sku),
           quote_item_extras(*)
         )
       ),
@@ -1872,6 +1902,20 @@ export async function syncSaleStatus(
 
   const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
   if (!saleStatus) {
+    return;
+  }
+
+  const NO_REGRESAR_A: ReadonlySet<string> = new Set(["INCOMPLETE", "DRAFT"]);
+  const VENTA_AVANZADA: ReadonlySet<string> = new Set([
+    "CONFIRMED",
+    "DISPATCH",
+    "DELIVERED",
+  ]);
+  if (
+    NO_REGRESAR_A.has(saleStatus) &&
+    currentStatus !== null &&
+    VENTA_AVANZADA.has(currentStatus)
+  ) {
     return;
   }
 
@@ -3027,6 +3071,10 @@ async function insertSplitQuoteItem(
     product_id: string | null;
     product_variant_id: string | null;
     id: string;
+    quote_item_extras: Array<{
+      description: string;
+      price: number;
+    }>;
   },
   assignedQty: number,
   quoteId: string
@@ -3054,6 +3102,19 @@ async function insertSplitQuoteItem(
       `Error al crear item dividido: ${error?.message ?? "No data"}`
     );
   }
+
+  if (item.quote_item_extras.length > 0) {
+    const { error: extrasError } = await supabase
+      .from("quote_item_extras")
+      .insert(buildSplitQuoteItemExtras(data.id, item.quote_item_extras));
+
+    if (extrasError) {
+      throw new Error(
+        `Error al copiar extras del item dividido: ${extrasError.message}`
+      );
+    }
+  }
+
   return data.id;
 }
 
@@ -3083,7 +3144,7 @@ async function processItemSplits(
   const { data: originalItems, error } = await supabase
     .from("quote_items")
     .select(
-      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id"
+      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id, quote_item_extras(description, price)"
     )
     .in("id", splitIds);
 
@@ -4117,7 +4178,7 @@ type CancelOrderResult = {
   error?: string;
 };
 
-function shouldRestoreStock(saleStatus: string | null): boolean {
+export function shouldRestoreStock(saleStatus: string | null): boolean {
   return (
     saleStatus === "CONFIRMED" ||
     saleStatus === "DISPATCH" ||
@@ -4178,7 +4239,7 @@ async function cancelLinkedPurchaseOrder(
   }
 }
 
-async function getSaleStatusForOrderParent(
+export async function getSaleStatusForOrderParent(
   supabase: SupabaseClient<Database>,
   parentOrderId: string,
   orgId: string
@@ -4621,6 +4682,56 @@ async function cancelParentWithChildren(
   return { success: true };
 }
 
+// A linked sale that was already invoiced in ARCA (without an advance record)
+// must be fully reversed with an authorized credit note before the order can
+// be cancelled, otherwise its fiscal record would be left dangling.
+async function getAuthorizedSaleCancelError(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  salesOrderId: string | null
+): Promise<string | null> {
+  if (!salesOrderId) {
+    return null;
+  }
+
+  const { data: saleForCancel } = await supabase
+    .from("sales_orders")
+    .select("id, arca_status, total_amount")
+    .eq("id", salesOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleForCancel?.arca_status !== "authorized") {
+    return null;
+  }
+
+  const { data: creditNotes } = await supabase
+    .from("credit_notes")
+    .select("amount")
+    .eq("organization_id", orgId)
+    .eq("sales_order_id", salesOrderId)
+    .eq("arca_status", "authorized")
+    .neq("status", "CANCELLED");
+
+  const authorizedCreditAmount = truncateMoney(
+    (creditNotes ?? []).reduce(
+      (total, creditNote) => total + Number(creditNote.amount ?? 0),
+      0
+    )
+  );
+
+  if (
+    !hasFullFiscalReversal({
+      saleTotal: truncateMoney(Number(saleForCancel.total_amount ?? 0)),
+      authorizedCreditAmount,
+    })
+  ) {
+    return "El pedido tiene una factura ARCA emitida. Emití y autorizá una Nota de Crédito por el total facturado antes de cancelarlo.";
+  }
+
+  return null;
+}
+
 export async function cancelOrder(
   supabase: SupabaseClient<Database>,
   params: {
@@ -4672,6 +4783,15 @@ export async function cancelOrder(
           "El pedido tiene un anticipo facturado. Resolvé su nota de crédito, reintegro o traslado a una revisión antes de cancelarlo.",
       };
     }
+  }
+
+  const authorizedSaleError = await getAuthorizedSaleCancelError(
+    supabase,
+    params.orgId,
+    params.salesOrderId
+  );
+  if (authorizedSaleError) {
+    return { success: false, error: authorizedSaleError };
   }
 
   // Child order — cancel just this child

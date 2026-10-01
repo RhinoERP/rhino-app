@@ -87,16 +87,119 @@ async function syncPurchaseDrafts(
   }
 
   const groups = await groupQuoteItemsBySupplier(quoteItemIds);
-  const promises = [...groups.values()].map((itemIds) =>
-    createDraftPurchaseFromChildOrder({
+
+  // Serial: one draft per supplier group, generating the purchase number
+  // sequentially so concurrent groups never collide. Errors are propagated
+  // so a failed draft never drops items silently.
+  for (const itemIds of groups.values()) {
+    await createDraftPurchaseFromChildOrder({
       orgId,
       orderId,
       quoteItemIds: itemIds,
-    }).catch((e: unknown) =>
-      console.error("Error creating draft purchase order:", e)
-    )
-  );
-  await Promise.all(promises);
+    });
+  }
+}
+
+async function hasLinkedDraftPurchase(orderId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data: order } = await supabase
+    .from("orders")
+    .select("purchase_order_id")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (!order?.purchase_order_id) {
+    return false;
+  }
+
+  const { data: draft } = await supabase
+    .from("purchase_orders")
+    .select("id")
+    .eq("id", order.purchase_order_id)
+    .eq("status", "DRAFT")
+    .maybeSingle();
+
+  return Boolean(draft);
+}
+
+async function assertDirectTransitionRouteAllowed(
+  route: ChildOrderRoute,
+  quoteItemIds: string[]
+): Promise<void> {
+  if (route === "reserve") {
+    throw new Error(
+      "La ruta Reserva solo se puede crear como sub-pedido, no como transición directa del pedido padre"
+    );
+  }
+
+  if (route === "purchase") {
+    const supplierGroups = await groupQuoteItemsBySupplier(quoteItemIds);
+    if (supplierGroups.size > 1) {
+      throw new Error(
+        "Hay items de varios proveedores: usá 'Enviar a Compra' para crear sub-pedidos de compra separados"
+      );
+    }
+  }
+}
+
+function shouldSkipDirectTransition(params: {
+  currentStatus: OrderFlowStatus;
+  newStatus: OrderFlowStatus;
+  route: ChildOrderRoute;
+  orderId: string;
+}): Promise<boolean> {
+  if (params.currentStatus !== params.newStatus) {
+    return Promise.resolve(false);
+  }
+
+  if (params.route !== "purchase") {
+    return Promise.resolve(true);
+  }
+
+  // Re-submit: skip only if the draft already exists. If a previous attempt
+  // updated the status but failed to create the draft, proceed to create it.
+  return hasLinkedDraftPurchase(params.orderId);
+}
+
+async function recordDirectTransitionHistory(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orderId: string;
+  fromStatus: OrderFlowStatus;
+  toStatus: OrderFlowStatus;
+  observations?: string | null;
+  changedBy: string;
+  changedAt: string;
+}): Promise<void> {
+  const { error: historyError } = await params.supabase
+    .from("order_status_history")
+    .insert({
+      order_id: params.orderId,
+      from_status: params.fromStatus,
+      to_status: params.toStatus,
+      notes:
+        params.observations?.trim() ??
+        "Transición directa desde revisión de stock",
+      changed_by: params.changedBy,
+      changed_at: params.changedAt,
+    });
+
+  if (historyError) {
+    throw new Error(`Error al registrar historial: ${historyError.message}`);
+  }
+}
+
+function revalidateDirectTransitionPaths(
+  orgSlug: string,
+  orderId: string,
+  route: ChildOrderRoute
+): void {
+  revalidatePath(`/org/${orgSlug}/pedidos`);
+  revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+  revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
+  const revalidateSuffix = ROUTE_REVALIDATE[route];
+  if (revalidateSuffix) {
+    revalidatePath(`/org/${orgSlug}${revalidateSuffix}`);
+  }
 }
 
 export async function directTransitionAction(input: {
@@ -111,11 +214,7 @@ export async function directTransitionAction(input: {
 
   await ensure("orders.stock_review", input.orgSlug);
   try {
-    if (route === "reserve") {
-      throw new Error(
-        "La ruta Reserva solo se puede crear como sub-pedido, no como transición directa del pedido padre"
-      );
-    }
+    await assertDirectTransitionRouteAllowed(route, quoteItemIds);
 
     const newStatus = ROUTE_TO_STATUS[route];
 
@@ -141,6 +240,19 @@ export async function directTransitionAction(input: {
       throw new Error("Pedido no encontrado");
     }
 
+    const alreadyInTargetStatus = currentOrder.status === newStatus;
+
+    const shouldSkip = await shouldSkipDirectTransition({
+      currentStatus: currentOrder.status,
+      newStatus,
+      route,
+      orderId,
+    });
+
+    if (shouldSkip) {
+      return { success: true };
+    }
+
     deductionLotUpdates = await maybeDeductStockForDirectTransition({
       supabase,
       orgId: org.id,
@@ -159,19 +271,16 @@ export async function directTransitionAction(input: {
       throw new Error(`Error al actualizar pedido: ${updateError.message}`);
     }
 
-    const { error: historyError } = await supabase
-      .from("order_status_history")
-      .insert({
-        order_id: orderId,
-        from_status: currentOrder.status,
-        to_status: newStatus,
-        notes:
-          observations?.trim() ?? "Transición directa desde revisión de stock",
-        changed_by: user.id,
-        changed_at: now,
+    if (!alreadyInTargetStatus) {
+      await recordDirectTransitionHistory({
+        supabase,
+        orderId,
+        fromStatus: currentOrder.status,
+        toStatus: newStatus,
+        observations,
+        changedBy: user.id,
+        changedAt: now,
       });
-    if (historyError) {
-      throw new Error(`Error al registrar historial: ${historyError.message}`);
     }
 
     const saleSyncPromise = currentOrder.sales_order_id
@@ -188,23 +297,19 @@ export async function directTransitionAction(input: {
       syncPurchaseDrafts(org.id, orderId, route, quoteItemIds),
     ]);
 
-    createOrderNotifications({
-      orgSlug,
-      orgId: org.id,
-      orderId,
-      orderNumber: currentOrder.order_number,
-      status: newStatus,
-      changedByUserId: user.id,
-      changedByName: user.email ?? "Usuario",
-    }).catch(console.error);
-
-    revalidatePath(`/org/${orgSlug}/pedidos`);
-    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
-    revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
-    const revalidateSuffix = ROUTE_REVALIDATE[route];
-    if (revalidateSuffix) {
-      revalidatePath(`/org/${orgSlug}${revalidateSuffix}`);
+    if (!alreadyInTargetStatus) {
+      createOrderNotifications({
+        orgSlug,
+        orgId: org.id,
+        orderId,
+        orderNumber: currentOrder.order_number,
+        status: newStatus,
+        changedByUserId: user.id,
+        changedByName: user.email ?? "Usuario",
+      }).catch(console.error);
     }
+
+    revalidateDirectTransitionPaths(orgSlug, orderId, route);
 
     return { success: true };
   } catch (error) {

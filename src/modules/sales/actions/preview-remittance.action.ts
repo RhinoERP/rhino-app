@@ -3,6 +3,7 @@
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
@@ -50,6 +51,9 @@ export async function previewRemittanceAction(
       cuit: organization?.cuit,
       logoUrl: organization?.logo_url,
       singlePageDuplicate,
+      showProductBrand:
+        organization != null &&
+        isOrganizationModuleEnabled(organization, "production"),
       finalRemittanceVisibility,
     });
 

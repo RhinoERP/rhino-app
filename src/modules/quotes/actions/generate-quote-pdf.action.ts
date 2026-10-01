@@ -48,6 +48,7 @@ export async function generateQuotePDFAction(
         ),
         quote_items (
           *,
+          products (brand),
           quote_item_extras (*)
         ),
         quote_taxes (*)
@@ -70,6 +71,9 @@ export async function generateQuotePDFAction(
         address?: string | null;
       } | null;
       quote_items: (QuoteItemRow & {
+        products: {
+          brand: string | null;
+        } | null;
         quote_item_extras: QuoteItemExtraRow[];
       })[];
       quote_taxes: QuoteTaxRow[];

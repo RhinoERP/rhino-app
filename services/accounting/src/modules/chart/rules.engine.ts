@@ -269,10 +269,9 @@ async function resolveSelectableAccountLine(
   event: AnyEvento,
   orgId: string
 ): Promise<ResolvedLine> {
-  const selectedAccountCodeRaw = getNestedValue(
-    event,
-    "datos.bancoAccountCode"
-  );
+  const selectedAccountCodeRaw =
+    getNestedValue(event, "datos.bancoAccountCode") ??
+    getNestedValue(event, "datos.cuentaCobroAccountCode");
   const selectedAccountCode =
     typeof selectedAccountCodeRaw === "string"
       ? selectedAccountCodeRaw.trim()

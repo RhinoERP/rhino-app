@@ -179,6 +179,7 @@ async function loadEligibleSales(params: {
     .eq("customer_id", params.input.customerId)
     .in("status", ["CONFIRMED", "DISPATCH", "DELIVERED"])
     .eq("arca_status", "authorized")
+    .eq("document_type", "STANDARD")
     .gte("sale_date", params.input.periodStart)
     .lte("sale_date", params.input.periodEnd)
     .order("sale_date", { ascending: true });

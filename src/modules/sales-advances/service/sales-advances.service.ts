@@ -575,7 +575,10 @@ export async function createSalesAdvance(
         expiration_date: new Date().toISOString().slice(0, 10),
         credit_days: 0,
         currency: (finalSale as Raw).currency ?? "ARS",
+        commercial_exchange_rate:
+          (finalSale as Raw).commercial_exchange_rate ?? null,
         invoice_type: (finalSale as Raw).invoice_type,
+        price_level_id: (finalSale as Raw).price_level_id ?? null,
         observations: `Anticipo de producción · ${isPreventa ? "preventa" : "venta"} ${finalSale.id}`,
         sub_total: netAmount,
         total_tax_amount: targetTax,
@@ -826,7 +829,9 @@ export async function issuePreventaBalanceInvoice(
         expiration_date: new Date().toISOString().slice(0, 10),
         credit_days: 0,
         currency: sale.currency ?? "ARS",
+        commercial_exchange_rate: sale.commercial_exchange_rate ?? null,
         invoice_type: sale.invoice_type,
+        price_level_id: (sale as Raw).price_level_id ?? null,
         observations: `Saldo de preventa · venta ${sale.id}`,
         sub_total: netAmount,
         total_tax_amount: targetTax,
@@ -937,6 +942,25 @@ export async function issuePreventaBalanceInvoice(
     );
   }
   if (balanceDocument.arca_status !== "authorized") {
+    if (balanceDocument.currency === "USD") {
+      const rate = sale.commercial_exchange_rate;
+      if (!rate || rate <= 0) {
+        throw new Error(
+          "Cargá el tipo de cambio comercial en la preventa antes de facturar el saldo USD."
+        );
+      }
+      const { error: rateError } = await supabase
+        .from("sales_orders")
+        .update({ commercial_exchange_rate: rate })
+        .eq("id", balanceDocument.id)
+        .eq("organization_id", org.id)
+        .in("arca_status", ["not_requested", "error"]);
+      if (rateError) {
+        throw new Error(
+          `No se pudo guardar la cotización del saldo: ${rateError.message}`
+        );
+      }
+    }
     await emitSaleInvoice({
       orgSlug: input.orgSlug,
       saleId: balanceDocument.id,
@@ -1209,6 +1233,35 @@ export async function getSalesAdvancesPaginated(
   };
 }
 
+export async function isFullAdvanceQuoteForSale(params: {
+  orgSlug: string;
+  finalSalesOrderId: string;
+}): Promise<boolean> {
+  try {
+    const org = await getOrganizationBySlug(params.orgSlug);
+    if (!org?.id) {
+      return false;
+    }
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("sales_order_items")
+      .select(
+        "quote_items(id, quote_id, quotes(advance_payment, advance_payment_percentage))"
+      )
+      .eq("sales_order_id", params.finalSalesOrderId)
+      .eq("organization_id", org.id)
+      .limit(1)
+      .maybeSingle();
+    const quote = (data as Raw | null)?.quote_items?.quotes;
+    return Boolean(
+      quote?.advance_payment &&
+        Number(quote?.advance_payment_percentage) === 100
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function getSalesAdvanceSuggestion(params: {
   orgSlug: string;
   finalSalesOrderId: string;
@@ -1387,6 +1440,35 @@ export async function issueSalesAdvance(
     throw new Error(
       "El comprobante de anticipo debe ser Factura A, Factura B o Factura C"
     );
+  }
+  if (
+    advanceSaleForAccess?.currency === "USD" &&
+    advanceSaleForAccess.arca_status !== "authorized" &&
+    advanceSaleForAccess.arca_status !== "pending"
+  ) {
+    const { data: finalSale, error: finalSaleError } = await supabase
+      .from("sales_orders")
+      .select("commercial_exchange_rate")
+      .eq("id", advance.final_sales_order_id)
+      .eq("organization_id", org.id)
+      .single();
+    const rate = finalSale?.commercial_exchange_rate;
+    if (finalSaleError || !rate || rate <= 0) {
+      throw new Error(
+        "Cargá el tipo de cambio comercial en la venta antes de facturar el anticipo USD."
+      );
+    }
+    const { error: rateError } = await supabase
+      .from("sales_orders")
+      .update({ commercial_exchange_rate: rate })
+      .eq("id", advance.advance_sales_order_id)
+      .eq("organization_id", org.id)
+      .in("arca_status", ["not_requested", "error"]);
+    if (rateError) {
+      throw new Error(
+        `No se pudo guardar la cotización del anticipo: ${rateError.message}`
+      );
+    }
   }
   try {
     await assertAdvanceInvoiceAccountingReady({

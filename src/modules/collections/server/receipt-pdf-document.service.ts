@@ -102,6 +102,12 @@ export async function buildReceiptDocumentData(params: {
     throw new Error("Cuenta por cobrar no encontrada");
   }
 
+  if (!account.sales_order_id) {
+    throw new Error(
+      "La cuenta por cobrar no tiene una venta asociada para generar el recibo"
+    );
+  }
+
   const [customerResult, saleResult, creditApplicationsResult, orgResult] =
     await Promise.all([
       supabase

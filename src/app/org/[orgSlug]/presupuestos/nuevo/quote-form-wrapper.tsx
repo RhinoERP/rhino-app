@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import type { Customer } from "@/modules/customers/types";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import { createQuoteAction } from "@/modules/quotes/actions/create-quote.action";
 import { updateQuoteFileAction } from "@/modules/quotes/actions/update-quote-file.action";
 import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-file.action";
@@ -17,6 +18,7 @@ type NewQuoteFormWrapperProps = {
   customers: Customer[];
   products: SaleProduct[];
   salesPriceLists: SalesPriceList[];
+  priceLevels: PriceLevel[];
 };
 
 export function NewQuoteFormWrapper({
@@ -24,6 +26,7 @@ export function NewQuoteFormWrapper({
   customers,
   products,
   salesPriceLists,
+  priceLevels,
 }: NewQuoteFormWrapperProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -105,6 +108,7 @@ export function NewQuoteFormWrapper({
       onFileSelect={setSelectedFile}
       onSubmit={handleSubmit}
       orgSlug={orgSlug}
+      priceLevels={priceLevels}
       products={products}
       salesPriceLists={salesPriceLists}
       selectedDesignFile={selectedDesignFile}

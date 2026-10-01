@@ -22,6 +22,7 @@ import {
 } from "@/lib/accounting-client";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { EventoFacturaCompra } from "@/modules/accounting/types";
+import { getDocumentSignedUrlAction } from "@/modules/documents/actions/get-document-signed-url.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { createSupplierInvoiceAction } from "@/modules/purchases/actions/create-supplier-invoice.action";
 import {
@@ -141,21 +142,10 @@ function SupplierInvoicesTable({
               </td>
               <td className="px-4 py-3 text-center">
                 {invoice.invoice_pdf_url ? (
-                  <Button
-                    asChild
-                    size="icon-sm"
-                    title={invoice.invoice_filename ?? "Abrir PDF"}
-                    variant="ghost"
-                  >
-                    <a
-                      href={invoice.invoice_pdf_url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <FilePdfIcon className="size-4" />
-                      <span className="sr-only">Abrir comprobante PDF</span>
-                    </a>
-                  </Button>
+                  <SupplierInvoicePreviewButton
+                    filename={invoice.invoice_filename}
+                    reference={invoice.invoice_pdf_url}
+                  />
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
@@ -165,6 +155,53 @@ function SupplierInvoicesTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SupplierInvoicePreviewButton({
+  filename,
+  reference,
+}: {
+  filename: string | null;
+  reference: string;
+}) {
+  async function handleOpen() {
+    const previewWindow = window.open("about:blank", "_blank");
+    if (!previewWindow) {
+      toast.error(
+        "No se pudo abrir la vista previa. Habilitá las ventanas emergentes."
+      );
+      return;
+    }
+
+    previewWindow.opener = null;
+
+    try {
+      const result = await getDocumentSignedUrlAction(reference);
+      if (!result.success) {
+        previewWindow.close();
+        toast.error(result.error);
+        return;
+      }
+
+      previewWindow.location.href = result.url;
+    } catch {
+      previewWindow.close();
+      toast.error("No se pudo abrir el comprobante PDF");
+    }
+  }
+
+  return (
+    <Button
+      onClick={handleOpen}
+      size="icon-sm"
+      title={filename ?? "Abrir PDF"}
+      type="button"
+      variant="ghost"
+    >
+      <FilePdfIcon className="size-4" />
+      <span className="sr-only">Abrir comprobante PDF</span>
+    </Button>
   );
 }
 

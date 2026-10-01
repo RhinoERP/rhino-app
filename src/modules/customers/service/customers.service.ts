@@ -536,6 +536,7 @@ export async function getCustomerWithStats(
     )
     .eq("customer_id", customerId)
     .eq("organization_id", org.id)
+    .eq("document_type", "STANDARD")
     .order("sale_date", { ascending: false });
 
   if (salesError) {
@@ -614,6 +615,7 @@ export async function getCustomerActiveItems(
     .eq("customer_id", customerId)
     .eq("organization_id", org.id)
     .in("status", ["DRAFT", "CONFIRMED", "DISPATCH"])
+    .eq("document_type", "STANDARD")
     .order("sale_date", { ascending: false });
 
   if (salesError) {

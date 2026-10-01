@@ -115,8 +115,21 @@ export type StockMovementWithLot = {
   unit_previous_stock?: number | null;
   unit_new_stock?: number | null;
   reason: string | null;
+  source: StockMovementSource;
+  created_by: string | null;
+  created_by_name: string | null;
   created_at: string | null;
 };
+
+export type StockMovementSource =
+  | "MANUAL"
+  | "IMPORT"
+  | "PURCHASE"
+  | "SALE"
+  | "POS"
+  | "ORDER"
+  | "RETURN"
+  | "SYSTEM";
 
 export type StockPaginatedParams = {
   page: number;
