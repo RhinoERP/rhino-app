@@ -4,7 +4,6 @@ import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
-import { sendSaleInvoiceEmail } from "@/modules/email/service/send-sale-invoice-email";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
@@ -1631,19 +1630,6 @@ export async function emitSaleInvoice(params: {
         regenerateSaleLevelRemito({ supabase, ...regenerationParams }),
     }
   );
-
-  try {
-    const emailResult = await sendSaleInvoiceEmail({
-      orgSlug: params.orgSlug,
-      saleId: context.sale.id,
-    });
-
-    if (!emailResult.sent) {
-      console.warn("Sale invoice email was not sent:", emailResult);
-    }
-  } catch (emailError) {
-    console.error("Error sending sale invoice email:", emailError);
-  }
 
   return result;
 }

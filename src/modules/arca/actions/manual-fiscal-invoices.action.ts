@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sendManualFiscalInvoiceEmail } from "@/modules/email/service/send-manual-fiscal-invoice-email";
 import { toArcaUserMessage } from "../errors";
 import { generateAuthorizedManualFiscalInvoicePdfDocument } from "../server/manual-fiscal-invoice-pdf.service";
 import {
@@ -36,15 +35,11 @@ export async function emitManualFiscalInvoiceAction(input: {
 }) {
   try {
     const invoice = await emitManualFiscalInvoice(input);
-    const email = invoice.email_recipients?.trim()
-      ? await sendManualFiscalInvoiceEmail(input)
-      : null;
     revalidatePath(`/org/${input.orgSlug}/arca/facturas`);
     revalidatePath(`/org/${input.orgSlug}/cobranzas`);
     return {
       success: true as const,
       invoice,
-      emailWarning: email && !email.sent ? email.message : null,
     };
   } catch (error) {
     return { success: false as const, error: toArcaUserMessage(error) };
