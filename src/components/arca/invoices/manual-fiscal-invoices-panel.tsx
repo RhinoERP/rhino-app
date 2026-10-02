@@ -134,9 +134,6 @@ export function ManualFiscalInvoicesPanel({
         return;
       }
       toast.success("Factura autorizada por ARCA");
-      if (result.emailWarning) {
-        toast.warning(result.emailWarning);
-      }
     });
   const downloadPdf = (id: string) =>
     startTransition(async () => {
