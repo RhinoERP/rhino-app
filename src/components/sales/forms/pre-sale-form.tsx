@@ -2808,7 +2808,7 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
+                          className="grid min-w-0 gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
                           key={item.id}
                         >
                           {/*
@@ -2821,16 +2821,18 @@ export function PreSaleForm({
                         - Subtotal
                         - Remove action
                       */}
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium">{item.name}</p>
+                          <div className="min-w-0 overflow-hidden">
+                            <div className="min-w-0 space-y-1">
+                              <p className="break-words font-medium leading-snug">
+                                {item.name}
+                              </p>
                               {item.brand ? (
-                                <span className="text-muted-foreground text-xs">
+                                <p className="break-words text-muted-foreground text-xs">
                                   {item.brand}
-                                </span>
+                                </p>
                               ) : null}
                             </div>
-                            <p className="text-muted-foreground text-sm">
+                            <p className="break-all text-muted-foreground text-sm">
                               SKU {item.sku}
                             </p>
                           </div>
