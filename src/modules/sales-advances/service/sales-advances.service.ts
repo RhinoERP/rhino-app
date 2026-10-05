@@ -964,6 +964,7 @@ export async function issuePreventaBalanceInvoice(
     await emitSaleInvoice({
       orgSlug: input.orgSlug,
       saleId: balanceDocument.id,
+      formalAdvanceDocument: "BALANCE",
     });
   }
   await ensureReceivable({
@@ -1482,6 +1483,7 @@ export async function issueSalesAdvance(
     await emitSaleInvoice({
       orgSlug: input.orgSlug,
       saleId: advance.advance_sales_order_id,
+      formalAdvanceDocument: "ADVANCE",
     });
     const { data: sale } = await supabase
       .from("sales_orders")

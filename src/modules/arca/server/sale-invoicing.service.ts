@@ -135,6 +135,7 @@ type LoadedSaleQueryRecord = {
   organization_id: string;
   status: OrderStatus;
   document_type: string | null;
+  parent_sales_order_id: string | null;
   sale_date: string;
   expiration_date: string | null;
   credit_days: number | null;
@@ -777,9 +778,72 @@ function normalizeLoadedSale(data: {
   };
 }
 
+export async function assertInvoiceDocumentType(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  sale: Pick<
+    LoadedSaleQueryRecord,
+    "id" | "document_type" | "parent_sales_order_id" | "invoice_type"
+  >;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
+}): Promise<void> {
+  const { supabase, orgId, sale, formalAdvanceDocument } = params;
+  if (sale.document_type === "STANDARD") {
+    return;
+  }
+
+  let allowed = false;
+  if (
+    formalAdvanceDocument === "ADVANCE" &&
+    sale.document_type === "ADVANCE" &&
+    sale.invoice_type !== "NOTA_DE_VENTA"
+  ) {
+    const { data: advance, error } = await supabase
+      .from("sales_advances")
+      .select("id, final_sales_order_id, origin_type")
+      .eq("organization_id", orgId)
+      .eq("advance_sales_order_id", sale.id)
+      .maybeSingle();
+    if (error) {
+      throw new ArcaValidationError(error.message);
+    }
+    allowed = Boolean(
+      advance &&
+        (advance.origin_type === "PREVENTA"
+          ? advance.final_sales_order_id === sale.parent_sales_order_id
+          : advance.origin_type === "SALE" &&
+            sale.parent_sales_order_id === null)
+    );
+  } else if (
+    formalAdvanceDocument === "BALANCE" &&
+    sale.document_type === "BALANCE" &&
+    sale.parent_sales_order_id
+  ) {
+    const { data: advances, error } = await supabase
+      .from("sales_advances")
+      .select("id")
+      .eq("organization_id", orgId)
+      .eq("final_sales_order_id", sale.parent_sales_order_id)
+      .eq("origin_type", "PREVENTA")
+      .in("status", ["INVOICED", "PAID", "APPLIED"])
+      .limit(1);
+    if (error) {
+      throw new ArcaValidationError(error.message);
+    }
+    allowed = Boolean(advances?.length);
+  }
+
+  if (!allowed) {
+    throw new ArcaValidationError(
+      "Este documento no corresponde a una venta y no puede emitirse en ARCA."
+    );
+  }
+}
+
 async function loadSaleForArcaInvoicing(params: {
   orgSlug: string;
   saleId: string;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
 }): Promise<{
   organizationId: string;
   organizationCuit: string | null;
@@ -796,6 +860,7 @@ async function loadSaleForArcaInvoicing(params: {
         organization_id,
         status,
         document_type,
+        parent_sales_order_id,
         sale_date,
         expiration_date,
         credit_days,
@@ -864,11 +929,12 @@ async function loadSaleForArcaInvoicing(params: {
 
   const saleData = data as LoadedSaleQueryRecord;
 
-  if (saleData.document_type !== "STANDARD") {
-    throw new ArcaValidationError(
-      "Este documento no corresponde a una venta y no puede emitirse en ARCA."
-    );
-  }
+  await assertInvoiceDocumentType({
+    supabase,
+    orgId: access.organization.id,
+    sale: saleData,
+    formalAdvanceDocument: params.formalAdvanceDocument,
+  });
 
   return {
     organizationId: access.organization.id,
@@ -979,6 +1045,7 @@ export function mapInvoiceTypeToArcaVoucherType(
 export async function validateSaleForArcaInvoicing(params: {
   orgSlug: string;
   saleId: string;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
 }): Promise<
   ArcaSaleInvoiceValidationResult & { context?: ValidatedSaleContext }
 > {
@@ -1468,6 +1535,7 @@ async function persistInvoiceError(params: {
 export async function emitSaleInvoice(params: {
   orgSlug: string;
   saleId: string;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
 }): Promise<ArcaSaleInvoiceResult> {
   await assertCanIssueOrganizationArca(params.orgSlug);
   const validation = await validateSaleForArcaInvoicing(params);
