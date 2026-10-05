@@ -26,6 +26,10 @@ import type {
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
 import type { LotInput, VariantStockInput } from "@/modules/purchases/types";
+import type {
+  ItemTaxInput,
+  ItemTaxSource,
+} from "@/modules/taxes/item-tax-calculations";
 import { PurchaseReceiptItems } from "./purchase-receipt-items";
 import { PurchaseReceiptSummary } from "./purchase-receipt-summary";
 
@@ -66,9 +70,19 @@ type PurchaseReceiptProps = {
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean | null;
+      tax_override?: ItemTaxInput[] | null;
+      item_taxes?: Array<{
+        tax_id: string | null;
+        name: string;
+        rate: number;
+        tax_code_snapshot: string | null;
+        source: ItemTaxSource;
+      }>;
     })[];
+    fallback_taxes?: ItemTaxInput[];
+    tax_snapshot_initialized?: boolean;
     taxes: Array<{
-      tax_id: string;
+      tax_id: string | null;
       name: string;
       rate: number;
     }> | null;
@@ -572,9 +586,28 @@ export function PurchaseReceipt({
         <PurchaseReceiptSummary
           currency={purchaseOrder.currency ?? "ARS"}
           error={error}
+          fallbackTaxes={purchaseOrder.fallback_taxes ?? []}
           globalDiscountPercentage={purchaseOrder.global_discount_percentage}
+          hasItemTaxSnapshots={purchaseOrder.tax_snapshot_initialized ?? false}
           isReceiving={isReceiving}
           items={items}
+          itemTaxSelections={
+            new Map(
+              purchaseOrder.items.map((item) => [
+                item.id,
+                item.tax_override ??
+                  (item.item_taxes ?? [])
+                    .filter((tax) => tax.source !== "fallback")
+                    .map((tax) => ({
+                      taxId: tax.tax_id ?? "",
+                      name: tax.name,
+                      rate: tax.rate,
+                      taxCodeSnapshot: tax.tax_code_snapshot,
+                      source: tax.source,
+                    })),
+              ])
+            )
+          }
           onReceive={handleReceive}
           receivedCount={receivedCount}
           taxes={purchaseOrder.taxes || []}

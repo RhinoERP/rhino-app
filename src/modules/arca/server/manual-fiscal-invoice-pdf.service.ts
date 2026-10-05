@@ -3,6 +3,7 @@ import "server-only";
 import QRCode from "qrcode";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getInvoiceTypeLabel,
@@ -13,7 +14,10 @@ import { buildArcaQrPayload, buildArcaQrVerifierUrl } from "../arca-qr";
 import { formatCommercialExchangeRate } from "../commercial-exchange-rate";
 import { ArcaValidationError } from "../errors";
 import { readAuthorizedFiscalCurrency } from "../fiscal-currency";
-import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
+import {
+  paginateFiscalInvoiceHtml,
+  renderHtmlToPdfDocument,
+} from "./html-to-pdf.service";
 import {
   getManualFiscalInvoiceById,
   type ManualFiscalInvoice,
@@ -127,6 +131,7 @@ async function generateManualFiscalInvoiceHtml(params: {
     issuerLegalAddress: string | null;
     issuerLogoUrl: string | null;
   };
+  printDuplicate: boolean;
 }): Promise<string> {
   const { invoice, organization, branding } = params;
   if (!(organization && invoice.status === "authorized")) {
@@ -166,6 +171,10 @@ async function generateManualFiscalInvoiceHtml(params: {
   <meta charset="utf-8" />
   <style>
     @page { size: A4; margin: 12mm; }
+    [data-invoice-document] + [data-invoice-document] { break-before: page; }
+    .invoice-copy-label { margin-bottom: 8px; font-weight: 700; }
+    thead { display: table-header-group; }
+    tr, .footer { break-inside: avoid; }
     * { box-sizing: border-box; }
     body { color: #111827; font-family: Arial, sans-serif; font-size: 11px; line-height: 1.4; }
     .header { display: grid; grid-template-columns: 1fr 58px 1fr; gap: 14px; border-bottom: 2px solid #111827; padding-bottom: 14px; }
@@ -180,7 +189,9 @@ async function generateManualFiscalInvoiceHtml(params: {
     .message { margin-top: 18px; white-space: pre-wrap; } .qr { text-align: right; } .qr img { width: 120px; }
   </style>
 </head>
-<body>
+<body data-invoice-duplicate="${params.printDuplicate}">
+  <div data-invoice-document>
+  <p class="invoice-copy-label">ORIGINAL</p>
   <header class="header">
     <section>
       ${branding.issuerLogoUrl ? `<img class="logo" src="${escapeHtml(branding.issuerLogoUrl)}" alt="Logo" />` : ""}
@@ -218,17 +229,19 @@ async function generateManualFiscalInvoiceHtml(params: {
     </div>
     <div class="qr"><img src="${qrDataUrl}" alt="QR fiscal" /><table class="totals"><tbody><tr><td>Neto</td><td class="number">${formatCurrency(invoice.sub_total, currency)}</td></tr><tr><td>IVA</td><td class="number">${formatCurrency(invoice.total_tax_amount, currency)}</td></tr><tr><td>Total</td><td class="number">${formatCurrency(invoice.total_amount, currency)}</td></tr></tbody></table></div>
   </section>
+  </div>
 </body>
 </html>`;
 }
 
-export async function generateAuthorizedManualFiscalInvoicePdf(params: {
+async function buildAuthorizedManualFiscalInvoiceHtml(params: {
   orgSlug: string;
   invoiceId: string;
 }): Promise<PrintableManualFiscalInvoice> {
-  const [invoice, organization] = await Promise.all([
+  const [invoice, organization, orgSettings] = await Promise.all([
     getManualFiscalInvoiceById(params),
     getOrganizationBySlug(params.orgSlug),
+    getOrgSettings(params.orgSlug),
   ]);
   if (!organization) {
     throw new ArcaValidationError("Organización no encontrada.");
@@ -245,6 +258,7 @@ export async function generateAuthorizedManualFiscalInvoicePdf(params: {
       issuerLegalAddress: settings?.issuer_legal_address ?? null,
       issuerLogoUrl: settings?.issuer_logo_data_url ?? null,
     },
+    printDuplicate: orgSettings.invoice_print_duplicate,
   });
 
   return {
@@ -253,10 +267,18 @@ export async function generateAuthorizedManualFiscalInvoicePdf(params: {
   };
 }
 
+export async function generateAuthorizedManualFiscalInvoicePdf(params: {
+  orgSlug: string;
+  invoiceId: string;
+}): Promise<PrintableManualFiscalInvoice> {
+  const invoice = await buildAuthorizedManualFiscalInvoiceHtml(params);
+  return { ...invoice, html: await paginateFiscalInvoiceHtml(invoice.html) };
+}
+
 export async function generateAuthorizedManualFiscalInvoicePdfDocument(params: {
   orgSlug: string;
   invoiceId: string;
 }): Promise<PrintableManualFiscalInvoiceDocument> {
-  const printable = await generateAuthorizedManualFiscalInvoicePdf(params);
-  return { ...printable, content: await renderHtmlToPdfBuffer(printable.html) };
+  const printable = await buildAuthorizedManualFiscalInvoiceHtml(params);
+  return { ...printable, ...(await renderHtmlToPdfDocument(printable.html)) };
 }

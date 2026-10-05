@@ -92,13 +92,19 @@ export function PurchaseSummary({
       : localGlobalDiscount;
 
   const subtotal = useMemo(
-    () => items.reduce((sum, item) => sum + item.subtotal, 0),
+    () =>
+      items.reduce(
+        (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
+        0
+      ),
     [items]
   );
 
-  const discountAmount = Math.min(
-    Math.max(0, (globalDiscountPercent / 100) * subtotal),
-    Math.max(0, subtotal)
+  const discountAmount = truncateMoney(
+    Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * subtotal),
+      Math.max(0, subtotal)
+    )
   );
 
   const { totalTaxAmount, generalTaxes, productSummaryTaxes } = useMemo(() => {
@@ -107,7 +113,7 @@ export function PurchaseSummary({
         lineId: `item-${index}`,
         productId: item.product_id,
         netAmount: item.subtotal,
-        taxes: productTaxes.get(item.product_id),
+        taxes: item.taxes ?? productTaxes.get(item.product_id),
       })),
       globalDiscountAmount: discountAmount,
       fallbackTaxes,
@@ -118,12 +124,14 @@ export function PurchaseSummary({
         taxPlan.itemTaxes.filter((tax) => tax.source === "fallback")
       ),
       productSummaryTaxes: summarizeTaxes(
-        taxPlan.itemTaxes.filter((tax) => tax.source === "product")
+        taxPlan.itemTaxes.filter((tax) => tax.source !== "fallback")
       ),
     };
   }, [items, productTaxes, discountAmount, fallbackTaxes]);
 
-  const total = Math.max(0, subtotal - discountAmount + totalTaxAmount);
+  const total = truncateMoney(
+    Math.max(0, subtotal - discountAmount + totalTaxAmount)
+  );
 
   const handleGlobalDiscountChange = (value: string) => {
     const parsed = Number.parseFloat(value);

@@ -24,6 +24,7 @@ type PurchaseTaxSelectorProps = {
   selectedTaxIds: string[];
   onTaxesChange: (taxIds: string[]) => void;
   disabled?: boolean;
+  frozenTaxes?: Array<{ taxId: string; name: string; rate: number }>;
 };
 
 export function PurchaseTaxSelector({
@@ -31,10 +32,20 @@ export function PurchaseTaxSelector({
   selectedTaxIds,
   onTaxesChange,
   disabled = false,
+  frozenTaxes = [],
 }: PurchaseTaxSelectorProps) {
   const [open, setOpen] = useState(false);
 
-  const selectedTaxes = taxes.filter((tax) => selectedTaxIds.includes(tax.id));
+  const selectedTaxes = selectedTaxIds.flatMap((id) => {
+    const saved = frozenTaxes.find(
+      (savedTax, index) => (savedTax.taxId || `deleted-${index}`) === id
+    );
+    const active = taxes.find((activeTax) => activeTax.id === id);
+    const selectedTax = saved ?? active;
+    return selectedTax
+      ? [{ id, name: selectedTax.name, rate: selectedTax.rate }]
+      : [];
+  });
 
   const handleTaxToggle = (taxId: string) => {
     const newTaxIds = selectedTaxIds.includes(taxId)

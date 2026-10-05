@@ -36,6 +36,9 @@ type PurchaseDetailFormProps = {
   remittanceNumber: string;
   globalDiscountPercentage: number;
   isEditingDetails: boolean;
+  isEditingFiscal: boolean;
+  frozenTaxes?: Array<{ taxId: string; name: string; rate: number }>;
+  hasLegacyTaxes?: boolean;
   isSupplierPickerOpen: boolean;
   selectedTaxIds: string[];
   taxes: Tax[];
@@ -56,6 +59,9 @@ export function PurchaseDetailForm({
   remittanceNumber,
   globalDiscountPercentage,
   isEditingDetails,
+  isEditingFiscal,
+  frozenTaxes = [],
+  hasLegacyTaxes = false,
   isSupplierPickerOpen,
   selectedTaxIds,
   taxes,
@@ -239,7 +245,7 @@ export function PurchaseDetailForm({
               Descuento global (%)
             </Label>
             <Input
-              disabled={!isEditingDetails}
+              disabled={!isEditingFiscal}
               id="globalDiscountPercentage"
               inputMode="decimal"
               max={100}
@@ -266,13 +272,16 @@ export function PurchaseDetailForm({
           <div className="space-y-2">
             <Label htmlFor="purchaseTaxes">Impuestos</Label>
             <PurchaseTaxSelector
-              disabled={!isEditingDetails}
+              disabled={!isEditingFiscal}
+              frozenTaxes={frozenTaxes}
               onTaxesChange={onTaxesChange}
               selectedTaxIds={selectedTaxIds}
               taxes={taxes}
             />
             <p className="text-muted-foreground text-xs">
-              Impuestos generales aplicados a la compra.
+              {hasLegacyTaxes
+                ? "Impuestos históricos agregados; para asignarlos por ítem, convertí la compra explícitamente."
+                : "Impuestos generales aplicados a la compra."}
             </p>
           </div>
         </div>

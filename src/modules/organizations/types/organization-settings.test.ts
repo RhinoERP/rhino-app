@@ -4,6 +4,33 @@ import {
   organizationSettingsSchema,
 } from "./organization-settings";
 
+describe("invoice original and duplicate setting", () => {
+  it("keeps a single original for companies without an explicit preference", () => {
+    expect(organizationSettingsSchema.parse({}).invoice_print_duplicate).toBe(
+      false
+    );
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.invoice_print_duplicate).toBe(false);
+  });
+
+  it("preserves the printing preference when saving other company settings", () => {
+    const current = organizationSettingsSchema.parse({
+      invoice_print_duplicate: true,
+    });
+    const updated = organizationSettingsSchema.parse({
+      ...current,
+      invoice_email_attach_pdf: false,
+    });
+    expect(updated.invoice_print_duplicate).toBe(true);
+    expect(updated.invoice_email_attach_pdf).toBe(false);
+    expect(
+      organizationSettingsSchema.parse({
+        ...updated,
+        invoice_print_duplicate: false,
+      }).invoice_print_duplicate
+    ).toBe(false);
+  });
+});
+
 describe("organization remittance mask setting", () => {
   it("defaults to disabled for existing organizations", () => {
     expect(

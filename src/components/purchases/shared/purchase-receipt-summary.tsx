@@ -11,7 +11,12 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+} from "@/modules/taxes/item-tax-calculations";
 import type { ReceivedItemForm } from "./purchase-receipt";
 
 function getUnitLabel(unitOfMeasure?: string | null): string {
@@ -45,11 +50,14 @@ type PurchaseReceiptSummaryProps = {
   currency?: string;
   globalDiscountPercentage?: number | null;
   taxes: Array<{
-    tax_id: string;
+    tax_id: string | null;
     name: string;
     rate: number;
   }>;
   variantStockValues: Record<string, Record<string, Record<string, number>>>;
+  itemTaxSelections: Map<string, ItemTaxInput[]>;
+  fallbackTaxes: ItemTaxInput[];
+  hasItemTaxSnapshots: boolean;
 };
 
 export function PurchaseReceiptSummary({
@@ -62,6 +70,9 @@ export function PurchaseReceiptSummary({
   globalDiscountPercentage = 0,
   taxes,
   variantStockValues,
+  itemTaxSelections,
+  fallbackTaxes,
+  hasItemTaxSnapshots,
 }: PurchaseReceiptSummaryProps) {
   // Helper to get total quantity for an item (handles both lots and variants)
   function getItemEffectiveUnitQty(item: ReceivedItemForm): number {
@@ -91,27 +102,51 @@ export function PurchaseReceiptSummary({
 
   const subtotal = receivedItems.reduce((sum, item) => {
     const effectiveQty = getItemEffectiveUnitQty(item);
-    return sum + effectiveQty * (item.unitCost || 0);
+    return truncateMoney(
+      sum + truncateMoney(effectiveQty * (item.unitCost || 0))
+    );
   }, 0);
 
-  const discountAmount = Math.min(
-    Math.max(0, ((globalDiscountPercentage ?? 0) / 100) * subtotal),
-    Math.max(0, subtotal)
+  const discountAmount = truncateMoney(
+    Math.min(
+      Math.max(0, ((globalDiscountPercentage ?? 0) / 100) * subtotal),
+      Math.max(0, subtotal)
+    )
   );
-  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+  const subtotalAfterDiscount = truncateMoney(
+    Math.max(0, subtotal - discountAmount)
+  );
 
-  // Calculate taxes on discounted subtotal
-  const taxDetails = taxes.map((tax) => ({
-    tax,
-    amount: subtotalAfterDiscount * (tax.rate / 100),
-  }));
+  const taxPlan = hasItemTaxSnapshots
+    ? buildItemizedTaxPlan({
+        lines: receivedItems.map((item) => ({
+          lineId: item.itemId,
+          productId: item.productId,
+          netAmount: truncateMoney(
+            getItemEffectiveUnitQty(item) * (item.unitCost || 0)
+          ),
+          taxes: itemTaxSelections.get(item.itemId) ?? [],
+        })),
+        globalDiscountAmount: discountAmount,
+        fallbackTaxes,
+      })
+    : null;
+  const taxDetails = taxPlan
+    ? taxPlan.aggregateTaxes.map((tax) => ({
+        tax: { tax_id: tax.taxId, name: tax.name, rate: tax.rate },
+        amount: tax.taxAmount,
+      }))
+    : taxes.map((tax) => ({
+        tax,
+        amount: truncateMoney(subtotalAfterDiscount * (tax.rate / 100)),
+      }));
 
   const totalTaxAmount = taxDetails.reduce(
-    (sum, detail) => sum + detail.amount,
+    (sum, detail) => truncateMoney(sum + detail.amount),
     0
   );
 
-  const total = subtotalAfterDiscount + totalTaxAmount;
+  const total = truncateMoney(subtotalAfterDiscount + totalTaxAmount);
 
   const progress = totalItems > 0 ? (receivedCount / totalItems) * 100 : 0;
 
@@ -201,7 +236,7 @@ export function PurchaseReceiptSummary({
               {taxDetails.map(({ tax, amount }) => (
                 <div
                   className="flex items-center justify-between"
-                  key={tax.tax_id}
+                  key={tax.tax_id ?? `${tax.name}-${tax.rate}`}
                 >
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)

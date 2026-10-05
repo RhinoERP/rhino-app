@@ -6,6 +6,7 @@ import type { ManualFiscalInvoice } from "./manual-fiscal-invoices.service";
 vi.mock("server-only", () => ({}), { virtual: true });
 
 const mocks = vi.hoisted(() => ({
+  getOrgSettings: vi.fn(),
   getSalesOrderById: vi.fn(),
   getOrderQuotePaymentConditionBySaleId: vi.fn(),
   getManualFiscalInvoiceById: vi.fn(),
@@ -15,6 +16,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/modules/sales/service/sales.service", () => ({
   getSalesOrderById: mocks.getSalesOrderById,
+}));
+vi.mock("@/modules/organizations/service/org-settings.service", () => ({
+  getOrgSettings: mocks.getOrgSettings,
 }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
   getOrganizationBySlug: mocks.getOrganizationBySlug,
@@ -29,6 +33,11 @@ vi.mock("./manual-fiscal-invoices.service", () => ({
 vi.mock("./repository", () => ({
   getOrganizationArcaSettingsByOrganizationId:
     mocks.getOrganizationArcaSettingsByOrganizationId,
+}));
+// These tests cover invoice data; real browser layout is covered by the pagination suite.
+vi.mock("./html-to-pdf.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./html-to-pdf.service")>()),
+  paginateFiscalInvoiceHtml: async (html: string) => html,
 }));
 
 import { generateAuthorizedSaleInvoicePdf } from "./fiscal-invoice-pdf.service";
@@ -113,6 +122,7 @@ function manualInvoice(commercialRate: number, currency = "USD") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getOrgSettings.mockResolvedValue({ invoice_print_duplicate: false });
   mocks.getOrganizationBySlug.mockResolvedValue({
     id: "org-1",
     name: "Test",

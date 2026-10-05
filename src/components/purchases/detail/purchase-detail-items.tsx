@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
@@ -50,6 +51,13 @@ import {
   getUnitLabel,
   type InputUnit,
 } from "@/modules/purchases/utils/purchase-calculations";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+  type ItemTaxSnapshot,
+} from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
 
 export type PurchaseDetailItem = {
   id?: string;
@@ -66,6 +74,8 @@ export type PurchaseDetailItem = {
   discount_percent?: number;
   has_variants?: boolean;
   variant_stocks?: Record<string, Record<string, number>> | null;
+  taxes?: ItemTaxInput[];
+  persistedTaxes?: ItemTaxSnapshot[];
 };
 
 function renderVariantBreakdown(
@@ -98,9 +108,14 @@ type PurchaseDetailItemsProps = {
   supplierId: string;
   currency?: string;
   isEditingDetails: boolean;
+  hasItemTaxSnapshots: boolean;
   onItemsChange: (items: PurchaseDetailItem[]) => void;
   onError: (error: string | null) => void;
   categories?: Category[];
+  taxes: Tax[];
+  productTaxes: Map<string, ItemTaxInput[]>;
+  fallbackTaxes: ItemTaxInput[];
+  globalDiscountPercent: number;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Component handles multiple unit types, conversions, and complex state management
@@ -110,9 +125,14 @@ export function PurchaseDetailItems({
   supplierId,
   currency = "ARS",
   isEditingDetails,
+  hasItemTaxSnapshots,
   onItemsChange,
   onError,
   categories = [],
+  taxes,
+  productTaxes,
+  fallbackTaxes,
+  globalDiscountPercent,
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
@@ -122,6 +142,22 @@ export function PurchaseDetailItems({
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [isBrandFilterOpen, setIsBrandFilterOpen] = useState(false);
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+  const orderSubtotal = items.reduce(
+    (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
+    0
+  );
+  const taxPlan = buildItemizedTaxPlan({
+    lines: items.map((item, index) => ({
+      lineId: item.id ?? `new-${index}`,
+      productId: item.product_id,
+      netAmount: item.subtotal,
+      taxes: item.taxes ?? productTaxes.get(item.product_id),
+    })),
+    globalDiscountAmount: truncateMoney(
+      Math.min(orderSubtotal, (orderSubtotal * globalDiscountPercent) / 100)
+    ),
+    fallbackTaxes,
+  });
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableUnits = useMemo(
@@ -399,6 +435,7 @@ export function PurchaseDetailItems({
     const subtotal = gross;
 
     return {
+      id: crypto.randomUUID(),
       product_id: product.id,
       product_name: product.name,
       quantity: itemQuantity,
@@ -1081,6 +1118,37 @@ export function PurchaseDetailItems({
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                        </div>
+                      )}
+                      {(isEditingDetails || hasItemTaxSnapshots) && (
+                        <div className="sm:col-span-full">
+                          <PurchaseItemTaxPicker
+                            availableTaxes={taxes}
+                            calculatedTaxes={
+                              isEditingDetails
+                                ? taxPlan.itemTaxes.filter(
+                                    (tax) =>
+                                      tax.lineId ===
+                                      (item.id ?? `new-${items.indexOf(item)}`)
+                                  )
+                                : (item.persistedTaxes ?? [])
+                            }
+                            currency={currency}
+                            editable={isEditingDetails}
+                            fallbackTaxes={fallbackTaxes}
+                            onChange={(next) =>
+                              onItemsChange(
+                                items.map((current) =>
+                                  current === item
+                                    ? { ...current, taxes: next }
+                                    : current
+                                )
+                              )
+                            }
+                            productName={item.product_name}
+                            productTaxes={productTaxes.get(item.product_id)}
+                            taxes={item.taxes}
+                          />
                         </div>
                       )}
                     </div>
