@@ -122,6 +122,23 @@ import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
 const NO_PRICE_LIST = "none";
 
+function getCustomerLabel(customer: Customer): string {
+  return (
+    customer.fantasy_name ||
+    customer.business_name ||
+    customer.cuit ||
+    "Cliente sin nombre"
+  );
+}
+
+function normalizeCustomerSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .trim();
+}
+
 function getDisplayName(
   file: File | null | undefined,
   url: string | null | undefined,
@@ -499,6 +516,8 @@ export function QuoteForm({
   const [selectedProduct, setSelectedProduct] = useState<SaleProduct | null>(
     null
   );
+  const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
   const [isGridOpen, setIsGridOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingInitialQuantities, setEditingInitialQuantities] = useState<
@@ -1103,6 +1122,15 @@ export function QuoteForm({
     control: form.control,
     name: "customerId",
   });
+  const selectedCustomer = customers.find(
+    (customer) => customer.id === selectedCustomerId
+  );
+  const normalizedCustomerSearch = normalizeCustomerSearch(customerSearch);
+  const filteredCustomers = customers.filter((customer) =>
+    normalizeCustomerSearch(getCustomerLabel(customer)).includes(
+      normalizedCustomerSearch
+    )
+  );
 
   const currency = useWatch({
     control: form.control,
@@ -1229,23 +1257,91 @@ export function QuoteForm({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Cliente</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
+                        <Popover
+                          onOpenChange={(open) => {
+                            setIsCustomerPickerOpen(open);
+                            if (!open) {
+                              setCustomerSearch("");
+                            }
+                          }}
+                          open={isCustomerPickerOpen}
                         >
                           <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Seleccione un cliente" />
-                            </SelectTrigger>
+                            <PopoverTrigger asChild>
+                              <Button
+                                aria-expanded={isCustomerPickerOpen}
+                                className="w-full justify-between text-left font-normal"
+                                id="customer"
+                                role="combobox"
+                                variant="outline"
+                              >
+                                <span className="truncate">
+                                  {selectedCustomer
+                                    ? getCustomerLabel(selectedCustomer)
+                                    : "Seleccione un cliente"}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
                           </FormControl>
-                          <SelectContent>
-                            {customers.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {c.business_name || c.fantasy_name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <PopoverContent
+                            align="start"
+                            className="w-xs max-w-[90vw] p-0"
+                            sideOffset={8}
+                          >
+                            <div className="flex flex-col overflow-hidden rounded-md">
+                              <div className="border-b p-2">
+                                <Input
+                                  autoComplete="off"
+                                  onChange={(event) =>
+                                    setCustomerSearch(event.target.value)
+                                  }
+                                  placeholder="Buscar cliente..."
+                                  value={customerSearch}
+                                />
+                              </div>
+                              {filteredCustomers.length === 0 ? (
+                                <p className="py-6 text-center text-muted-foreground text-sm">
+                                  No se encontraron clientes.
+                                </p>
+                              ) : (
+                                <div
+                                  className="max-h-72 overflow-y-auto p-1"
+                                  key={customerSearch}
+                                >
+                                  {filteredCustomers.map((customer) => (
+                                    <button
+                                      aria-selected={
+                                        selectedCustomerId === customer.id
+                                      }
+                                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
+                                      key={customer.id}
+                                      onClick={() => {
+                                        field.onChange(customer.id);
+                                        setIsCustomerPickerOpen(false);
+                                        setCustomerSearch("");
+                                      }}
+                                      role="option"
+                                      type="button"
+                                    >
+                                      <span className="flex-1 truncate">
+                                        {getCustomerLabel(customer)}
+                                      </span>
+                                      <Check
+                                        className={cn(
+                                          "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                          selectedCustomerId === customer.id
+                                            ? "opacity-100"
+                                            : "opacity-0"
+                                        )}
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                         <FormMessage />
                       </FormItem>
                     )}
