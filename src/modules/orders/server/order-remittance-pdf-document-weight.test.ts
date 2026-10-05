@@ -27,7 +27,7 @@ vi.mock("@/modules/organizations/service/organizations.service", () => ({
 import { getOrderRemittanceData } from "./order-remittance-pdf-document.service";
 
 describe("getOrderRemittanceData", () => {
-  it("uses the sales item unit quantity as remittance weight", async () => {
+  it("uses assigned split quantities without changing the sales item weight", async () => {
     const from = vi.fn((table: string) => {
       if (table === "orders") {
         return {
@@ -56,9 +56,24 @@ describe("getOrderRemittanceData", () => {
                 {
                   id: "quote-item-1",
                   description: "Carne",
-                  quantity: 2,
+                  quantity: 3,
                   unit_price: 100,
-                  subtotal: 200,
+                  subtotal: 300,
+                  discount_percentage: null,
+                  quote_item_extras: [],
+                  products: {
+                    name: "Carne",
+                    sku: "CAR-001",
+                    brand: null,
+                    unit_of_measure: "KG",
+                  },
+                },
+                {
+                  id: "quote-item-split",
+                  description: "Carne",
+                  quantity: 1,
+                  unit_price: 100,
+                  subtotal: 100,
                   discount_percentage: null,
                   quote_item_extras: [],
                   products: {
@@ -82,7 +97,7 @@ describe("getOrderRemittanceData", () => {
                 {
                   quote_item_id: "quote-item-1",
                   description: "Carne",
-                  quantity: 2,
+                  quantity: 4,
                   unit_quantity: 4.5,
                   unit_price: 100,
                   discount_percentage: null,
@@ -142,6 +157,9 @@ describe("getOrderRemittanceData", () => {
     });
 
     expect(remittance.items[0]?.weightQuantity).toBe(4.5);
+    expect(remittance.items.map((item) => item.quantity)).toEqual([3, 1]);
+    expect(remittance.items.map((item) => item.subtotal)).toEqual([300, 100]);
+    expect(remittance.total).toBe(400);
     expect(remittance.finalRemittanceVisibility?.showWeight).toBe(true);
     expect(generateRemittanceHTML(remittance)).toContain("Peso</th>");
   });
