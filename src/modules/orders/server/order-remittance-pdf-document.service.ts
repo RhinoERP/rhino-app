@@ -133,7 +133,9 @@ async function fetchOrderItems(
   return (quoteItems ?? []).map((item: QuoteItemWithProduct) => {
     const saleItem = saleByQuoteId.get(item.id);
     const unitPrice = saleItem?.unit_price ?? item.unit_price;
-    const quantity = saleItem?.quantity ?? item.quantity;
+    // The sale keeps the original commercial quantity; a quote item may have
+    // been split across child orders, so only its assigned quantity is shipped.
+    const quantity = item.quantity;
     const description = saleItem?.description ?? item.description;
     const extras = (item.quote_item_extras ?? []).map((extra) => ({
       description: extra.description,
