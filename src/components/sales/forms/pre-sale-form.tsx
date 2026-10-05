@@ -510,7 +510,6 @@ function buildProductPriceMap({
   }
   return priceMap;
 }
-
 function buildSellerLabel(member: OrganizationMember): string {
   if (member.user?.name) {
     return member.user.name;

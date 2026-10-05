@@ -8,6 +8,10 @@ import {
   hasActiveBrowserSession,
   openLoginForCurrentPage,
 } from "@/lib/supabase/session-client";
+import {
+  maintainOfflineDataForOwner,
+  purgeAllOfflineData,
+} from "@/modules/offline/storage/offline-db";
 
 export const sessionExpiredToastId = "session-expired";
 const sessionCheckIntervalMs = 5 * 60 * 1000;
@@ -75,12 +79,19 @@ export function SessionMonitor() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT" || !session) {
+      if (event === "SIGNED_OUT") {
+        purgeAllOfflineData().catch(() => null);
+        showExpiredSessionWarning();
+        return;
+      }
+
+      if (!session) {
         showExpiredSessionWarning();
         return;
       }
 
       if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+        maintainOfflineDataForOwner(session.user.id).catch(() => null);
         hasWarnedRef.current = false;
         toast.dismiss(sessionExpiredToastId);
       }
