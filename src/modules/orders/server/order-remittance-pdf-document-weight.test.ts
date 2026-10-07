@@ -24,7 +24,80 @@ vi.mock("@/modules/organizations/service/organizations.service", () => ({
   getOrganizationBySlug: mocks.getOrganizationBySlug,
 }));
 
-import { getOrderRemittanceData } from "./order-remittance-pdf-document.service";
+import {
+  getOrderRemittanceData,
+  groupOrderRemittanceItems,
+} from "./order-remittance-pdf-document.service";
+
+describe("groupOrderRemittanceItems", () => {
+  const line = {
+    sku: "CAMPERA",
+    name: "Campera Softshell",
+    variantName: "XL · Negro",
+    unitOfMeasure: "UN",
+    unitPrice: 100,
+    discountPercentage: 10,
+    extras: [{ description: "Bordado", unitPrice: 20 }],
+  };
+  const source = {
+    id: "original",
+    product_id: "campera",
+    product_variant_id: "xl-negro",
+  };
+
+  it("combines split quantities and their line amounts", () => {
+    const items = groupOrderRemittanceItems([
+      { source, item: { ...line, quantity: 3, subtotal: 360 } },
+      {
+        source: { ...source, id: "split" },
+        item: { ...line, quantity: 1, subtotal: 120 },
+      },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ quantity: 4, subtotal: 480 });
+  });
+
+  it("keeps other variants, prices and extras separate", () => {
+    const items = groupOrderRemittanceItems([
+      { source, item: { ...line, quantity: 3, subtotal: 360 } },
+      {
+        source: { ...source, id: "other-variant", product_variant_id: "2xl" },
+        item: {
+          ...line,
+          variantName: "2XL · Negro",
+          quantity: 1,
+          subtotal: 120,
+        },
+      },
+      {
+        source: { ...source, id: "other-price" },
+        item: { ...line, unitPrice: 110, quantity: 1, subtotal: 130 },
+      },
+      {
+        source: { ...source, id: "other-extra" },
+        item: { ...line, extras: [], quantity: 1, subtotal: 100 },
+      },
+    ]);
+
+    expect(items).toHaveLength(4);
+  });
+
+  it("does not combine weighted items without a reliable split weight", () => {
+    const items = groupOrderRemittanceItems([
+      {
+        source,
+        item: { ...line, quantity: 3, subtotal: 360, weightQuantity: 4.5 },
+      },
+      {
+        source: { ...source, id: "split" },
+        item: { ...line, quantity: 1, subtotal: 120 },
+      },
+    ]);
+
+    expect(items).toHaveLength(2);
+  });
+});
 
 describe("getOrderRemittanceData", () => {
   it("uses assigned split quantities without changing the sales item weight", async () => {
