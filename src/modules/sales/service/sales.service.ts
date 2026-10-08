@@ -4000,6 +4000,89 @@ async function restockFromSale(
   }
 }
 
+export async function validateStockBeforeSaleConfirmation(
+  input: ConfirmSaleOrderInput
+): Promise<void> {
+  const org = await getOrganizationBySlug(input.orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(
+    supabase,
+    input.orgSlug
+  );
+  const { data: sale, error } = await supabase
+    .from("sales_orders")
+    .select("id, status, arca_status, user_id")
+    .eq("id", input.saleId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !sale) {
+    throw new Error("Venta no encontrada");
+  }
+  assertCanManageSale(accessContext, sale.user_id ?? null);
+  if (sale.status !== "DRAFT" && sale.status !== "INCOMPLETE") {
+    throw new Error(
+      "Solo las preventas en borrador o incompletas pueden confirmarse"
+    );
+  }
+
+  // An incomplete sale has already had its stock deducted. An ARCA-authorized
+  // preventa uses its persisted lines rather than the editable form payload.
+  if (sale.status === "INCOMPLETE") {
+    return;
+  }
+
+  let items = normalizeConfirmItems(input.items);
+  if (sale.arca_status === "authorized") {
+    const { data: persisted, error: itemsError } = await supabase
+      .from("sales_order_items")
+      .select(
+        "id, product_id, product_variant_id, quantity, unit_price, unit_quantity, is_adjustment, quote_item_id"
+      )
+      .eq("sales_order_id", input.saleId)
+      .eq("organization_id", org.id);
+    if (itemsError || !persisted?.length) {
+      throw new Error("La venta no tiene items para descontar stock");
+    }
+    const quoteItemIds = persisted
+      .map((item) => item.quote_item_id)
+      .filter((id): id is string => id !== null);
+    const alreadyReservedIds = await findAlreadyDeductedItemIds(
+      supabase,
+      quoteItemIds
+    );
+    items = normalizeConfirmItems(
+      persisted
+        .filter(
+          (item) =>
+            !(item.quote_item_id && alreadyReservedIds.has(item.quote_item_id))
+        )
+        .map((item) => ({
+          id: item.id,
+          type: item.is_adjustment
+            ? ("adjustment" as const)
+            : ("product" as const),
+          productId: item.product_id,
+          productVariantId: item.product_variant_id,
+          quantity: item.quantity,
+          weightQuantity: item.unit_quantity,
+          unitPrice: item.unit_price,
+        }))
+    );
+  }
+
+  await buildStockAdjustmentContext({
+    supabase,
+    orgId: org.id,
+    items,
+    movementReason: "Validación de stock antes de confirmar venta",
+  });
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: confirmation flow validates and persists several related records
 export async function confirmSaleOrder(
   input: ConfirmSaleOrderInput
