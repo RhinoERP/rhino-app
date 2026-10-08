@@ -94,6 +94,7 @@ import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-in
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
+import { validateConfirmSaleStockAction } from "@/modules/sales/actions/validate-confirm-sale-stock.action";
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
@@ -1054,6 +1055,7 @@ export function SaleDetail({
   ]);
   const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
+  const [isCheckingConfirmStock, setIsCheckingConfirmStock] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
   // Track the initial customerId so we only auto-fill when the user explicitly
@@ -1799,7 +1801,7 @@ export function SaleDetail({
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
-  const isSaving = confirmSale.isPending;
+  const isSaving = confirmSale.isPending || isCheckingConfirmStock;
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
@@ -1962,6 +1964,26 @@ export function SaleDetail({
         );
       }
       return;
+    }
+
+    setIsCheckingConfirmStock(true);
+    try {
+      const stockCheck = await validateConfirmSaleStockAction(
+        buildFiscalSaleMutationPayload()
+      );
+      if (!stockCheck.success) {
+        setError(stockCheck.error);
+        return;
+      }
+    } catch (stockError) {
+      setError(
+        stockError instanceof Error
+          ? stockError.message
+          : "No se pudo validar el stock de la venta."
+      );
+      return;
+    } finally {
+      setIsCheckingConfirmStock(false);
     }
 
     const payload = buildFacturaVentaManual(
