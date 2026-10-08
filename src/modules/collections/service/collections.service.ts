@@ -2477,14 +2477,8 @@ function filterAndSortLightRows(
   if (params.sort && params.sort.length > 0) {
     sortReceivables(visible, params.sort, sellersByUserId, lastPaymentDatesMap);
   } else {
-    const statusRank = (row: LightReceivableRow) => {
-      if (Number(row.pending_balance ?? 0) <= 0) {
-        return 2;
-      }
-      return Number(row.pending_balance ?? 0) < Number(row.total_amount ?? 0)
-        ? 1
-        : 0;
-    };
+    const statusRank = (row: LightReceivableRow) =>
+      Number(row.pending_balance ?? 0) <= 0 ? 1 : 0;
     visible.sort(
       (a, b) =>
         statusRank(a) - statusRank(b) ||
