@@ -2,8 +2,10 @@ packages:
   - services/accounting
   - services/whatsapp-agent
 allowBuilds:
+  '@sentry/cli': true
+  '@swc/core': true
   core-js: false
-  esbuild: false
+  esbuild: true
   msw: true
   node: set this to true or false
-  sharp: false
+  sharp: true

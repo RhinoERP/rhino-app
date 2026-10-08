@@ -2477,7 +2477,14 @@ function filterAndSortLightRows(
   if (params.sort && params.sort.length > 0) {
     sortReceivables(visible, params.sort, sellersByUserId, lastPaymentDatesMap);
   } else {
-    visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
+    const statusRank = (row: LightReceivableRow) =>
+      Number(row.pending_balance ?? 0) <= 0 ? 1 : 0;
+    visible.sort(
+      (a, b) =>
+        statusRank(a) - statusRank(b) ||
+        (a.due_date ?? "").localeCompare(b.due_date ?? "") ||
+        a.id.localeCompare(b.id)
+    );
   }
 
   return visible;

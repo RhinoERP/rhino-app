@@ -7,7 +7,6 @@ import {
   SignOutIcon,
   SunIcon,
 } from "@phosphor-icons/react/ssr";
-import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/use-theme";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -27,7 +26,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { createClient } from "@/lib/supabase/client";
+import { secureLogout } from "@/lib/auth/secure-logout";
 
 type UserMenuProps = {
   user: {
@@ -38,7 +37,6 @@ type UserMenuProps = {
 };
 
 export function UserMenu({ user }: UserMenuProps) {
-  const router = useRouter();
   const { isMobile } = useSidebar();
   const { theme, setTheme, mounted } = useTheme();
 
@@ -53,12 +51,6 @@ export function UserMenu({ user }: UserMenuProps) {
       return <MoonIcon className="mr-2 h-4 w-4" weight="duotone" />;
     }
     return <MonitorIcon className="mr-2 h-4 w-4" weight="duotone" />;
-  };
-
-  const logout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/auth/login");
   };
 
   const initials =
@@ -155,7 +147,7 @@ export function UserMenu({ user }: UserMenuProps) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive"
-              onClick={logout}
+              onClick={secureLogout}
             >
               <SignOutIcon className="mr-2 h-4 w-4" weight="duotone" />
               <span>Cerrar sesión</span>
