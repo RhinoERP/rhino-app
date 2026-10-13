@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useVariantLoader } from "@/hooks/use-variant-loader";
 import type { Category } from "@/modules/categories/types";
 import { confirmDraftPurchaseAction } from "@/modules/purchases/actions/confirm-draft-purchase.action";
 import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
@@ -14,6 +15,10 @@ import type {
   PurchaseOrder,
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
+import {
+  purchaseVariantAllocationChanged,
+  sumPurchaseVariantStocks,
+} from "@/modules/purchases/utils/purchase-item-variants";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import type {
   ItemTaxInput,
@@ -223,6 +228,7 @@ export function PurchaseDetail({
       )
     )
   );
+  const { variantMetaMap } = useVariantLoader(orgSlug, items);
   useEffect(() => {
     if (!isEditingDetails) {
       setItems(
@@ -337,6 +343,28 @@ export function PurchaseDetail({
     convertLegacyTaxes,
   });
 
+  const findIncompleteVariantItem = (checkAll: boolean) =>
+    items.find((item) => {
+      if (
+        !(
+          item.has_variants ||
+          products.some((p) => p.id === item.product_id && p.has_variants)
+        )
+      ) {
+        return false;
+      }
+      const saved = purchaseOrder.items.find(
+        (original) => original.id === item.id
+      );
+      const changed = purchaseVariantAllocationChanged(item, saved);
+      return (
+        (checkAll || changed) &&
+        (sumPurchaseVariantStocks(item.variant_stocks) !== item.quantity ||
+          !Number.isSafeInteger(item.quantity) ||
+          item.quantity <= 0)
+      );
+    });
+
   const handleSave = async () => {
     const validationError = validatePurchaseSave({
       fiscalDataInvalid: purchaseOrder.fiscal_data_invalid ?? false,
@@ -345,6 +373,14 @@ export function PurchaseDetail({
     });
     if (validationError) {
       setError(validationError);
+      return;
+    }
+
+    const incompleteVariant = findIncompleteVariantItem(false);
+    if (incompleteVariant) {
+      setError(
+        `Asigná todas las unidades de ${incompleteVariant.product_name} por talle y color antes de guardar`
+      );
       return;
     }
 
@@ -417,6 +453,14 @@ export function PurchaseDetail({
 
     if (!supplierId) {
       setError("Seleccioná un proveedor antes de confirmar la pre-compra");
+      return;
+    }
+
+    const incompleteVariant = findIncompleteVariantItem(true);
+    if (incompleteVariant) {
+      setError(
+        `Asigná todas las unidades de ${incompleteVariant.product_name} por talle y color antes de confirmar`
+      );
       return;
     }
 
@@ -564,6 +608,7 @@ export function PurchaseDetail({
             productTaxes={productTaxes}
             supplierId={supplierId}
             taxes={taxes}
+            variantMetaMap={variantMetaMap}
           />
         </div>
 

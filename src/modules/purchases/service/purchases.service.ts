@@ -27,6 +27,7 @@ import {
   toPurchaseItemTaxInput,
   tryParsePurchaseTaxInputs,
 } from "./purchase-tax-snapshots.service";
+import { assertPurchaseVariantAllocations } from "./purchase-variant-validation.service";
 import { applyFilters } from "./purchases-filters";
 
 type AccessContext = {
@@ -714,6 +715,12 @@ export async function confirmDraftPurchaseOrder(params: {
   if (!items || items.length === 0) {
     throw new Error("La pre-compra no tiene items");
   }
+
+  await assertPurchaseVariantAllocations({
+    supabase,
+    orgId: org.id,
+    items,
+  });
 
   const updatedItems = await calculateDraftItemCosts(items, org.id, supabase);
 
@@ -1786,6 +1793,24 @@ export async function updatePurchaseOrder(
         "La conversión requiere revisar los impuestos de cada producto"
       );
     }
+  }
+  if (input.items?.length) {
+    const { data: savedItems, error: savedItemsError } = await supabase
+      .from("purchase_order_items")
+      .select("id, product_id, quantity, variant_stocks")
+      .eq("purchase_order_id", input.purchaseOrderId)
+      .eq("organization_id", org.id);
+    if (savedItemsError) {
+      throw new Error(
+        `No se pudieron validar los ítems: ${savedItemsError.message}`
+      );
+    }
+    await assertPurchaseVariantAllocations({
+      supabase,
+      orgId: org.id,
+      items: input.items,
+      savedItems: savedItems ?? [],
+    });
   }
   const savedFallbackTaxes = parsePurchaseTaxInputs(
     existingOrder.fallback_taxes

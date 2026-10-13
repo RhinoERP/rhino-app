@@ -20,6 +20,7 @@ export type VariantStockMatrixProps = {
   errorMessage?: string | null;
 
   onChange?: (color: string, talle: string, value: number) => void;
+  isCellAvailable?: (color: string, talle: string) => boolean;
   className?: string;
 };
 
@@ -92,6 +93,7 @@ export function VariantStockMatrix({
   isLoading = false,
   errorMessage = null,
   onChange,
+  isCellAvailable,
   className,
 }: VariantStockMatrixProps) {
   if (isLoading) {
@@ -162,6 +164,16 @@ export function VariantStockMatrix({
                   {color}
                 </td>
                 {orderedTalles.map((talle) => {
+                  if (isCellAvailable && !isCellAvailable(color, talle)) {
+                    return (
+                      <td
+                        className="px-3 py-2 text-center text-muted-foreground"
+                        key={talle}
+                      >
+                        —
+                      </td>
+                    );
+                  }
                   const value = getStockValue(stocks, color, talle);
                   const isLow =
                     showStockWarning && value > 0 && value <= minStock;
