@@ -39,6 +39,7 @@ type DirectSaleDetailProps = {
   company: TicketCompanyData;
   posArcaInvoiceType: PosArcaInvoiceType | null;
   directSaleDefaultInvoiceType: InvoiceType | null;
+  viewOnly?: boolean;
 };
 
 function resolveCustomerName(sale: DirectSaleDetailData): string {
@@ -174,12 +175,66 @@ function resolveDiscountPercent(params: {
   return Math.min(Math.max((params.discountAmount / gross) * 100, 0), 100);
 }
 
+function renderReturnActions(params: {
+  viewOnly: boolean;
+  company: TicketCompanyData;
+  sale: DirectSaleDetailData;
+  orgSlug: string;
+}) {
+  if (params.viewOnly) {
+    return null;
+  }
+
+  return (
+    <CardFooter className="flex flex-col gap-2">
+      <DirectSaleReprintButton company={params.company} sale={params.sale} />
+      <PosSaleReturnDialog
+        orgSlug={params.orgSlug}
+        sale={params.sale}
+        trigger={
+          <Button className="w-full justify-between" variant="outline">
+            <div className="flex items-center">
+              <ArrowsClockwiseIcon className="mr-2 size-4" weight="bold" />
+              Registrar devolución
+            </div>
+          </Button>
+        }
+      />
+    </CardFooter>
+  );
+}
+
+function renderArcaAction(params: {
+  viewOnly: boolean;
+  isArcaAuthorized: boolean;
+  disabledReason: string | null;
+  invoiceType: PosArcaInvoiceType | null;
+  orgSlug: string;
+  saleId: string;
+}) {
+  if (params.viewOnly || params.isArcaAuthorized) {
+    return null;
+  }
+
+  return (
+    <CardFooter>
+      <DirectSaleArcaInvoiceButton
+        disabledReason={params.disabledReason}
+        invoiceType={params.invoiceType}
+        orgSlug={params.orgSlug}
+        posSaleId={params.saleId}
+      />
+    </CardFooter>
+  );
+}
+
 export function DirectSaleDetail({
   orgSlug,
   sale,
   company,
   posArcaInvoiceType,
   directSaleDefaultInvoiceType,
+  viewOnly = false,
 }: DirectSaleDetailProps) {
   const summary = sale.returnSummary ?? {
     returnsCount: 0,
@@ -450,27 +505,7 @@ export function DirectSaleDetail({
                   <span>{formatCurrency(summary.pendingReturnableAmount)}</span>
                 </div>
               </CardContent>
-              <CardFooter className="flex flex-col gap-2">
-                <DirectSaleReprintButton company={company} sale={sale} />
-                <PosSaleReturnDialog
-                  orgSlug={orgSlug}
-                  sale={sale}
-                  trigger={
-                    <Button
-                      className="w-full justify-between"
-                      variant="outline"
-                    >
-                      <div className="flex items-center">
-                        <ArrowsClockwiseIcon
-                          className="mr-2 size-4"
-                          weight="bold"
-                        />
-                        Registrar devolución
-                      </div>
-                    </Button>
-                  }
-                />
-              </CardFooter>
+              {renderReturnActions({ viewOnly, company, sale, orgSlug })}
             </Card>
 
             <Card>
@@ -527,16 +562,14 @@ export function DirectSaleDetail({
                   </>
                 ) : null}
               </CardContent>
-              {isArcaAuthorized ? null : (
-                <CardFooter>
-                  <DirectSaleArcaInvoiceButton
-                    disabledReason={arcaDisabledReason}
-                    invoiceType={posArcaInvoiceType}
-                    orgSlug={orgSlug}
-                    posSaleId={sale.id}
-                  />
-                </CardFooter>
-              )}
+              {renderArcaAction({
+                viewOnly,
+                isArcaAuthorized,
+                disabledReason: arcaDisabledReason,
+                invoiceType: posArcaInvoiceType,
+                orgSlug,
+                saleId: sale.id,
+              })}
             </Card>
           </div>
         </div>

@@ -968,6 +968,10 @@ export async function getStockPaginated(
     .select("*", { count: "exact" })
     .eq("organization_id", org.id);
 
+  if (params.skuPrefix) {
+    query = query.ilike("sku", `${params.skuPrefix}%`);
+  }
+
   if (params.search) {
     query = query.or(
       `sku.ilike.%${params.search}%,product_name.ilike.%${params.search}%`
@@ -978,10 +982,11 @@ export async function getStockPaginated(
     query = query.eq("category_name", params.category);
   }
 
-  if (params.status === "active") {
-    query = query.eq("is_active", true);
-  } else if (params.status === "inactive") {
-    query = query.eq("is_active", false);
+  const activeStatus = { active: true, inactive: false }[
+    params.status as "active" | "inactive"
+  ];
+  if (activeStatus !== undefined) {
+    query = query.eq("is_active", activeStatus);
   }
 
   if (sort && sort.length > 0) {
@@ -1039,7 +1044,12 @@ export async function getStockPaginated(
 
 export async function getAllStockForExport(
   orgSlug: string,
-  filters?: { search?: string; category?: string; status?: string }
+  filters?: {
+    search?: string;
+    category?: string;
+    status?: string;
+    skuPrefix?: string;
+  }
 ): Promise<StockItem[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1057,6 +1067,10 @@ export async function getAllStockForExport(
     .eq("organization_id", org.id)
     .order("product_name")
     .limit(10_000);
+
+  if (filters?.skuPrefix) {
+    query = query.ilike("sku", `${filters.skuPrefix}%`);
+  }
 
   if (filters?.search) {
     query = query.or(

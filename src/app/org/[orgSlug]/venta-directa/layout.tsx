@@ -17,7 +17,10 @@ export default async function PosModuleLayout({
 }: PosModuleLayoutProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "pos");
-  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.pos);
+  await guardOrganizationPermissionAccess(orgSlug, [
+    ...READ_PERMISSIONS.pos,
+    ...READ_PERMISSIONS.mercadolibre,
+  ]);
 
   return children;
 }

@@ -1,5 +1,6 @@
 import { PosTerminal } from "@/components/pos-sales/pos-terminal";
 import { getOrganizationArcaSettingsByOrganizationId } from "@/modules/arca/server/repository";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import {
   getDirectSaleConfigByOrgSlug,
   getOrganizationBySlug,
@@ -17,6 +18,7 @@ export default async function DirectSaleCreatePage({
   params,
 }: DirectSaleCreatePageProps) {
   const { orgSlug } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, "pos.manage");
   const [taxes, organization, directSaleConfig] = await Promise.all([
     getActiveTaxesByOrgSlug(orgSlug),
     getOrganizationBySlug(orgSlug),

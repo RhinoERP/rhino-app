@@ -47,6 +47,7 @@ type StockDataTableProps = {
   pageCount: number;
   categories: Array<{ id: string; name: string }>;
   suppliers: Array<{ id: string; name: string }>;
+  viewOnly?: boolean;
 };
 
 const STATUS_OPTIONS = [
@@ -60,6 +61,7 @@ export function StockDataTable({
   pageCount,
   categories,
   suppliers,
+  viewOnly = false,
 }: StockDataTableProps) {
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -83,8 +85,8 @@ export function StockDataTable({
   const canViewSupplier = can("columns.view_supplier");
 
   const columns = useMemo(
-    () => createColumns(orgSlug, canViewSupplier),
-    [orgSlug, canViewSupplier]
+    () => createColumns(orgSlug, canViewSupplier, viewOnly),
+    [orgSlug, canViewSupplier, viewOnly]
   );
 
   const { table } = useDataTable<StockItem>({
@@ -353,8 +355,10 @@ export function StockDataTable({
               )}
             </div>
             <div className="flex items-center gap-2">
-              <StockExportButton orgSlug={orgSlug} table={table} />
-              <DataTableViewOptions align="end" table={table} />
+              {!viewOnly && (
+                <StockExportButton orgSlug={orgSlug} table={table} />
+              )}
+              {!viewOnly && <DataTableViewOptions align="end" table={table} />}
             </div>
           </div>
         </DataTable>
@@ -364,11 +368,13 @@ export function StockDataTable({
       <div className="block md:hidden">
         <StockMobileList
           EmptyStateAction={
-            <AddProductDialog
-              categories={categories}
-              orgSlug={orgSlug}
-              suppliers={suppliers}
-            />
+            viewOnly ? undefined : (
+              <AddProductDialog
+                categories={categories}
+                orgSlug={orgSlug}
+                suppliers={suppliers}
+              />
+            )
           }
           items={filteredItems}
           onClearSelection={handleClearSelection}
@@ -380,9 +386,11 @@ export function StockDataTable({
       </div>
 
       {/* Action Bar - Works for both views */}
-      <DataTableActionBar table={table}>
-        <StockBulkActions orgSlug={orgSlug} table={table} />
-      </DataTableActionBar>
+      {!viewOnly && (
+        <DataTableActionBar table={table}>
+          <StockBulkActions orgSlug={orgSlug} table={table} />
+        </DataTableActionBar>
+      )}
     </div>
   );
 }

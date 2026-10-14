@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   adjustVariantStock,
@@ -76,6 +77,7 @@ export async function getProductVariantsAction(
   orgSlug: string,
   productId: string
 ): Promise<ProductVariantRow[]> {
+  await ensure(READ_PERMISSIONS.inventory, orgSlug);
   try {
     return await getProductVariantsByProductId(orgSlug, productId);
   } catch {
@@ -159,6 +161,7 @@ export async function getProductVariantsWithStockAction(
   orgSlug: string,
   productId: string
 ): Promise<ProductVariantWithStock[]> {
+  await ensure(READ_PERMISSIONS.inventory, orgSlug);
   try {
     return await getProductVariantsWithStock(orgSlug, productId);
   } catch {
