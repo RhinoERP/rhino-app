@@ -58,6 +58,7 @@ type NavItem = {
   requiredPermission?: string | string[];
   module?: OrganizationModule;
   requiresSalesAdvances?: boolean;
+  requiresProductionDisabledOrMercadoLibre?: boolean;
   comingSoon?: boolean;
 };
 
@@ -65,6 +66,30 @@ type NavCategory = {
   title: string;
   items: NavItem[];
 };
+
+function isNavItemAvailable(
+  item: NavItem,
+  organization: Organization | undefined,
+  can: (permission: string) => boolean
+): boolean {
+  if (item.module && !isOrganizationModuleEnabled(organization, item.module)) {
+    return false;
+  }
+  if (
+    item.requiresSalesAdvances &&
+    organization?.sales_advances_enabled === false
+  ) {
+    return false;
+  }
+  if (
+    item.requiresProductionDisabledOrMercadoLibre &&
+    isOrganizationModuleEnabled(organization, "production") &&
+    !can("mercadolibre.access")
+  ) {
+    return false;
+  }
+  return true;
+}
 
 export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
   const { can } = usePermissions();
@@ -174,6 +199,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
             "mercadolibre.access",
           ],
           module: "pos",
+          requiresProductionDisabledOrMercadoLibre: true,
         },
       ],
     },
@@ -385,16 +411,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
     if (item.comingSoon) {
       return true;
     }
-    if (
-      item.module &&
-      !isOrganizationModuleEnabled(currentOrganization, item.module)
-    ) {
-      return false;
-    }
-    if (
-      item.requiresSalesAdvances &&
-      currentOrganization?.sales_advances_enabled === false
-    ) {
+    if (!isNavItemAvailable(item, currentOrganization, can)) {
       return false;
     }
     if (isAdmin) {
@@ -414,7 +431,14 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ...category,
       items: category.items
         .filter((item) => canShowItem(item))
-        .map(({ requiredPermission, requiresSalesAdvances, ...item }) => item),
+        .map(
+          ({
+            requiredPermission,
+            requiresSalesAdvances,
+            requiresProductionDisabledOrMercadoLibre,
+            ...item
+          }) => item
+        ),
     }))
     .filter((category) => category.items.length > 0);
 
