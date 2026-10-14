@@ -4,7 +4,10 @@ import { FileText } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
+import {
+  downloadGeneratedPdf,
+  useRemittanceGenerator,
+} from "@/modules/sales/hooks/use-remittance-generator";
 
 type RemittanceButtonProps = {
   orgSlug: string;
@@ -34,12 +37,10 @@ export function RemittanceButton({
   const handleGenerate = async (): Promise<void> => {
     setLocalLoading(true);
     try {
-      await generateRemittance(type);
-      toast.success(
-        type === "PRESUPUESTO"
-          ? "Presupuesto generado correctamente"
-          : "Remito generado correctamente"
-      );
+      const result = await generateRemittance(type);
+      if (result.fallbackPdf) {
+        downloadGeneratedPdf(result.fallbackPdf);
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Error al generar el documento"

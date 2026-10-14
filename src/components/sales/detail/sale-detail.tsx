@@ -97,7 +97,10 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
-import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
+import {
+  downloadGeneratedPdf,
+  useRemittanceGenerator,
+} from "@/modules/sales/hooks/use-remittance-generator";
 import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
 import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
 import {
@@ -1055,6 +1058,13 @@ export function SaleDetail({
   const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [generatedRemittancePdf, setGeneratedRemittancePdf] = useState<{
+    filename: string;
+    pdfBase64: string;
+  } | null>(null);
+  const [remittanceStorageError, setRemittanceStorageError] = useState<
+    string | null
+  >(null);
 
   // Track the initial customerId so we only auto-fill when the user explicitly
   // changes the customer — not on mount or when orgSettings first loads, which
@@ -2246,13 +2256,20 @@ export function SaleDetail({
   const handleConfirmGenerateRemittance = async () => {
     try {
       const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
-      await generateRemittance(type);
+      const result = await generateRemittance(type);
+      setGeneratedRemittancePdf(result.fallbackPdf ?? null);
+      setRemittanceStorageError(result.storageError ?? null);
+      if (result.storageError) {
+        return false;
+      }
       setPreviewHtml(null);
       router.refresh();
+      return true;
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Error al generar el remito"
       );
+      return false;
     }
   };
 
@@ -2318,7 +2335,13 @@ export function SaleDetail({
               isPreviewing={isPreviewingRemittance}
               loadPreview={handlePreviewRemittance}
               onConfirm={handleConfirmGenerateRemittance}
+              onDownloadFallback={
+                generatedRemittancePdf
+                  ? () => downloadGeneratedPdf(generatedRemittancePdf)
+                  : undefined
+              }
               previewHtml={previewHtml}
+              storageError={remittanceStorageError}
               title="Vista previa del presupuesto"
             />
           ) : null}
@@ -2329,9 +2352,26 @@ export function SaleDetail({
               isPreviewing={isPreviewingRemittance}
               loadPreview={handlePreviewRemittance}
               onConfirm={handleConfirmGenerateRemittance}
+              onDownloadFallback={
+                generatedRemittancePdf
+                  ? () => downloadGeneratedPdf(generatedRemittancePdf)
+                  : undefined
+              }
               previewHtml={previewHtml}
+              storageError={remittanceStorageError}
               title="Vista previa del remito"
             />
+          ) : null}
+          {generatedRemittancePdf && !sale.remittance_pdf_url ? (
+            <Button
+              onClick={() => downloadGeneratedPdf(generatedRemittancePdf)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Descargar {isDraftSale ? "Presupuesto" : "Remito"}
+            </Button>
           ) : null}
           {!isOrderFlowWithRemitos &&
           (isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
