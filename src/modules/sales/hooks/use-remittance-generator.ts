@@ -12,6 +12,25 @@ type UseRemittanceGeneratorProps = {
   saleId: string;
 };
 
+export function downloadGeneratedPdf(pdf: {
+  filename: string;
+  pdfBase64: string;
+}): void {
+  const binary = window.atob(pdf.pdfBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const url = URL.createObjectURL(
+    new Blob([bytes], { type: "application/pdf" })
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = pdf.filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function useRemittanceGenerator({
   orgSlug,
   saleId,
@@ -22,7 +41,10 @@ export function useRemittanceGenerator({
 
   const generateRemittance = async (
     type: "PRESUPUESTO" | "REMITO_FINAL"
-  ): Promise<void> => {
+  ): Promise<{
+    fallbackPdf?: { filename: string; pdfBase64: string };
+    storageError?: string;
+  }> => {
     setIsGenerating(true);
 
     try {
@@ -32,7 +54,17 @@ export function useRemittanceGenerator({
         throw new Error(result.error ?? "Error al generar el remito");
       }
 
-      toast.success("Remito generado correctamente");
+      if (result.storageError) {
+        toast.warning(
+          `El PDF se generó pero no quedó guardado: ${result.storageError}. Descargalo antes de salir de esta pantalla.`
+        );
+      } else {
+        toast.success("Remito generado correctamente");
+      }
+      return {
+        fallbackPdf: result.fallbackPdf,
+        storageError: result.storageError,
+      };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Error al generar el remito";
@@ -55,20 +87,7 @@ export function useRemittanceGenerator({
         throw new Error(result.error ?? "Error al descargar el remito");
       }
 
-      // Download the PDF
-      const binary = window.atob(result.pdfBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-      }
-
-      const blob = new Blob([bytes], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = result.filename;
-      link.click();
-      URL.revokeObjectURL(url);
+      downloadGeneratedPdf(result);
 
       toast.success("Remito descargado correctamente");
     } catch (error) {
