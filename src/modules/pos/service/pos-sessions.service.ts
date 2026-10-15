@@ -26,7 +26,8 @@ export function canViewAllPos(permissions: string[]): boolean {
   return (
     permissions.includes("organization.admin") ||
     permissions.includes("pos.read.all") ||
-    permissions.includes("pos.manage")
+    permissions.includes("pos.manage") ||
+    permissions.includes("mercadolibre.access")
   );
 }
 

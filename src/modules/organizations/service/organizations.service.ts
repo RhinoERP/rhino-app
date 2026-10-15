@@ -582,10 +582,20 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const userPermissions = (permissions ?? []) as string[];
 
-  const routes = [
+  const routes: {
+    path: string;
+    permission: string;
+    alternatePermissions?: string[];
+    module?: "wholesale" | "pos";
+  }[] = [
     { path: "", permission: "dashboard.read" },
     { path: "/ventas", permission: "sales.read", module: "wholesale" as const },
-    { path: "/venta-directa", permission: "pos.read", module: "pos" as const },
+    {
+      path: "/venta-directa",
+      permission: "pos.read",
+      alternatePermissions: ["mercadolibre.access"],
+      module: "pos" as const,
+    },
     {
       path: "/cobranzas",
       permission: "collections.read",
@@ -600,13 +610,20 @@ export async function resolveUserRedirect(): Promise<string> {
     { path: "/notas-de-debito", permission: "debitnotes.read" },
     { path: "/compras", permission: "purchases.read" },
     { path: "/proveedores", permission: "suppliers.read" },
-    { path: "/stock", permission: "inventory.read" },
+    {
+      path: "/stock",
+      permission: "inventory.read",
+      alternatePermissions: ["mercadolibre.access"],
+    },
     { path: "/precios/listas-de-precios", permission: "pricelists.read" },
   ];
 
   for (const route of routes) {
     if (
-      userPermissions.includes(route.permission) &&
+      (userPermissions.includes(route.permission) ||
+        route.alternatePermissions?.some((permission) =>
+          userPermissions.includes(permission)
+        )) &&
       (!route.module || isOrganizationModuleEnabled(firstOrg, route.module))
     ) {
       return `/org/${firstOrgSlug}${route.path}`;
