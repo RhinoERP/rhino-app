@@ -9,6 +9,7 @@ import {
   HandshakeIcon,
   LightningIcon,
   ListBulletsIcon,
+  MapPinIcon,
   PackageIcon,
   ReceiptIcon,
   ScissorsIcon,
@@ -58,6 +59,7 @@ type NavItem = {
   requiredPermission?: string | string[];
   module?: OrganizationModule;
   requiresSalesAdvances?: boolean;
+  requiresProductionDisabledOrMercadoLibre?: boolean;
   comingSoon?: boolean;
 };
 
@@ -65,6 +67,30 @@ type NavCategory = {
   title: string;
   items: NavItem[];
 };
+
+function isNavItemAvailable(
+  item: NavItem,
+  organization: Organization | undefined,
+  can: (permission: string) => boolean
+): boolean {
+  if (item.module && !isOrganizationModuleEnabled(organization, item.module)) {
+    return false;
+  }
+  if (
+    item.requiresSalesAdvances &&
+    organization?.sales_advances_enabled === false
+  ) {
+    return false;
+  }
+  if (
+    item.requiresProductionDisabledOrMercadoLibre &&
+    isOrganizationModuleEnabled(organization, "production") &&
+    !can("mercadolibre.access")
+  ) {
+    return false;
+  }
+  return true;
+}
 
 export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
   const { can } = usePermissions();
@@ -142,6 +168,18 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiresSalesAdvances: true,
         },
         {
+          title: "Hoja de Ruta",
+          url: `/org/${orgSlug}/hoja-de-ruta`,
+          icon: <MapPinIcon weight="duotone" />,
+          requiredPermission: [
+            "sales.read",
+            "sales.read.all",
+            "sales.manage",
+            "sales.manage.all",
+          ],
+          module: "route_sheets",
+        },
+        {
           title: "Clientes",
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
@@ -168,8 +206,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Venta directa",
           url: `/org/${orgSlug}/venta-directa`,
           icon: <ReceiptIcon weight="duotone" />,
-          requiredPermission: ["pos.read", "pos.read.all"],
+          requiredPermission: [
+            "pos.read",
+            "pos.read.all",
+            "mercadolibre.access",
+          ],
           module: "pos",
+          requiresProductionDisabledOrMercadoLibre: true,
         },
       ],
     },
@@ -249,7 +292,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Productos y Stock",
           url: `/org/${orgSlug}/stock`,
           icon: <PackageIcon weight="duotone" />,
-          requiredPermission: ["inventory.read", "inventory.read.all"],
+          requiredPermission: [
+            "inventory.read",
+            "inventory.read.all",
+            "mercadolibre.access",
+          ],
         },
       ],
     },
@@ -377,16 +424,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
     if (item.comingSoon) {
       return true;
     }
-    if (
-      item.module &&
-      !isOrganizationModuleEnabled(currentOrganization, item.module)
-    ) {
-      return false;
-    }
-    if (
-      item.requiresSalesAdvances &&
-      currentOrganization?.sales_advances_enabled === false
-    ) {
+    if (!isNavItemAvailable(item, currentOrganization, can)) {
       return false;
     }
     if (isAdmin) {
@@ -406,7 +444,14 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ...category,
       items: category.items
         .filter((item) => canShowItem(item))
-        .map(({ requiredPermission, requiresSalesAdvances, ...item }) => item),
+        .map(
+          ({
+            requiredPermission,
+            requiresSalesAdvances,
+            requiresProductionDisabledOrMercadoLibre,
+            ...item
+          }) => item
+        ),
     }))
     .filter((category) => category.items.length > 0);
 

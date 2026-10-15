@@ -8,7 +8,10 @@ import {
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  getOrganizationBySlug,
+  getOrganizationLayoutData,
+} from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
@@ -35,7 +38,18 @@ export default async function StockPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.inventory);
+  await guardOrganizationPermissionAccess(orgSlug, [
+    ...READ_PERMISSIONS.inventory,
+    ...READ_PERMISSIONS.mercadolibre,
+  ]);
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+  const isMercadoLibreOnly = Boolean(
+    layoutData?.permissions.includes("mercadolibre.access") &&
+      !layoutData.permissions.includes("organization.admin") &&
+      !layoutData.permissions.some((permission) =>
+        READ_PERMISSIONS.inventory.includes(permission)
+      )
+  );
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const category = sp.categoria || undefined;
@@ -50,11 +64,16 @@ export default async function StockPage({
         search,
         category,
         status,
+        skuPrefix: isMercadoLibreOnly ? "MELI-" : undefined,
       }),
-      getStockMetrics(orgSlug),
-      getSuppliers(orgSlug),
-      getCategoriesByOrgSlug(orgSlug),
-      getActiveTaxesByOrgSlug(orgSlug),
+      isMercadoLibreOnly ? Promise.resolve(null) : getStockMetrics(orgSlug),
+      isMercadoLibreOnly ? Promise.resolve([]) : getSuppliers(orgSlug),
+      isMercadoLibreOnly
+        ? Promise.resolve([])
+        : getCategoriesByOrgSlug(orgSlug),
+      isMercadoLibreOnly
+        ? Promise.resolve([])
+        : getActiveTaxesByOrgSlug(orgSlug),
       getOrganizationBySlug(orgSlug),
     ]);
 
@@ -81,22 +100,28 @@ export default async function StockPage({
         <div>
           <h1 className="font-heading text-2xl">Stock</h1>
           <p className="text-muted-foreground text-sm">
-            Consulta el inventario disponible de todos los productos.
+            {isMercadoLibreOnly
+              ? "Consulta los productos del catálogo MercadoLibre."
+              : "Consulta el inventario disponible de todos los productos."}
           </p>
         </div>
-        <div className="w-full md:w-auto">
-          <AddProductDialog
-            categories={categories}
-            isAccountingEnabled={isAccountingEnabled}
-            isProductionEnabled={isProductionEnabled}
-            orgSlug={orgSlug}
-            suppliers={suppliers}
-            taxes={taxes}
-          />
-        </div>
+        {!isMercadoLibreOnly && (
+          <div className="w-full md:w-auto">
+            <AddProductDialog
+              categories={categories}
+              isAccountingEnabled={isAccountingEnabled}
+              isProductionEnabled={isProductionEnabled}
+              orgSlug={orgSlug}
+              suppliers={suppliers}
+              taxes={taxes}
+            />
+          </div>
+        )}
       </div>
 
-      <StockMetricsCards metrics={metrics} />
+      {!isMercadoLibreOnly && metrics && (
+        <StockMetricsCards metrics={metrics} />
+      )}
 
       <StockDataTable
         categories={categories}
@@ -105,6 +130,7 @@ export default async function StockPage({
         orgSlug={orgSlug}
         pageCount={pageCount}
         suppliers={suppliers}
+        viewOnly={isMercadoLibreOnly}
       />
     </div>
   );

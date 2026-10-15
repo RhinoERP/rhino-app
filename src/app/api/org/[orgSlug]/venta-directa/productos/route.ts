@@ -18,7 +18,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   try {
     const { orgSlug } = await context.params;
-    await guardOrganizationPermissionAccess(orgSlug, "pos.manage");
+    await guardOrganizationPermissionAccess(orgSlug, [
+      "pos.manage",
+      "mercadolibre.access",
+    ]);
 
     const q = request.nextUrl.searchParams.get("q") ?? "";
     const barcode = request.nextUrl.searchParams.get("barcode") ?? "";

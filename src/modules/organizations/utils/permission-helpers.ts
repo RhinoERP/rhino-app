@@ -214,6 +214,7 @@ function humanizeResource(resource: string): string {
     accounting: "Contabilidad",
     quotes: "Presupuestos",
     distributor: "Distribuidores",
+    mercadolibre: "MercadoLibre",
   };
 
   return map[resource] ?? resource;
@@ -287,6 +288,7 @@ function humanizeAction(
       "pricing.view_cost": "Ver columna Costo (Precios)",
       "pricing.view_margin": "Ver columna Margen (Precios)",
       "distributor.catalog": "Ver catálogo",
+      "mercadolibre.access": "Acceso MercadoLibre",
     };
 
     if (specialLabels[key]) {
