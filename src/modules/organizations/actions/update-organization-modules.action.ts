@@ -13,6 +13,7 @@ const organizationModulesSchema = z.object({
   accountingEnabled: z.boolean(),
   salesAdvancesEnabled: z.boolean(),
   commissionsEnabled: z.boolean(),
+  routeSheetsEnabled: z.boolean(),
   supplierDifferentiatedCredits: z.boolean(),
   remittanceMaskPrintingEnabled: z.boolean(),
 });
@@ -64,6 +65,7 @@ export async function updateOrganizationModulesAction(
       // sales advances migration.
       sales_advances_enabled: parsedInput.data.salesAdvancesEnabled,
       commissions_enabled: parsedInput.data.commissionsEnabled,
+      route_sheets_enabled: parsedInput.data.routeSheetsEnabled,
       supplier_differentiated_credits:
         parsedInput.data.supplierDifferentiatedCredits,
     } as never)
@@ -125,6 +127,7 @@ export async function updateOrganizationModulesAction(
     revalidatePath(`/org/${orgSlug}/contabilidad`);
     revalidatePath(`/org/${orgSlug}/comisiones`);
     revalidatePath(`/org/${orgSlug}/cobranzas`);
+    revalidatePath(`/org/${orgSlug}/hoja-de-ruta`);
   }
 
   return {
