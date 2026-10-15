@@ -3,6 +3,7 @@
 import { CaretUpDownIcon } from "@phosphor-icons/react";
 import { Check, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { VariantMeta } from "@/hooks/use-variant-loader";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -51,6 +53,10 @@ import {
   getUnitLabel,
   type InputUnit,
 } from "@/modules/purchases/utils/purchase-calculations";
+import {
+  quantityAfterVariantChange,
+  sumPurchaseVariantStocks,
+} from "@/modules/purchases/utils/purchase-item-variants";
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
@@ -116,6 +122,7 @@ type PurchaseDetailItemsProps = {
   productTaxes: Map<string, ItemTaxInput[]>;
   fallbackTaxes: ItemTaxInput[];
   globalDiscountPercent: number;
+  variantMetaMap: Record<string, VariantMeta>;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Component handles multiple unit types, conversions, and complex state management
@@ -133,6 +140,7 @@ export function PurchaseDetailItems({
   productTaxes,
   fallbackTaxes,
   globalDiscountPercent,
+  variantMetaMap,
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
@@ -293,6 +301,37 @@ export function PurchaseDetailItems({
     );
   };
 
+  const handleVariantStockChange = (
+    id: string | undefined,
+    color: string,
+    talle: string,
+    value: number
+  ) => {
+    if (!id) {
+      return;
+    }
+    onItemsChange(
+      items.map((item) => {
+        if (item.id !== id) {
+          return item;
+        }
+        const nextStocks = {
+          ...item.variant_stocks,
+          [color]: { ...item.variant_stocks?.[color], [talle]: value },
+        };
+        const nextQuantity = quantityAfterVariantChange(
+          item.quantity,
+          item.variant_stocks,
+          nextStocks
+        );
+        return {
+          ...updateItemQuantity(item, nextQuantity),
+          variant_stocks: nextStocks,
+        };
+      })
+    );
+  };
+
   const handleUnitCostChange = (id: string | undefined, value: string) => {
     if (!id) {
       return;
@@ -447,6 +486,8 @@ export function PurchaseDetailItems({
       total_weight_kg: itemTotalWeight ?? undefined,
       price_per_kg: pricePerKg,
       discount_percent: 0,
+      has_variants: product.has_variants,
+      variant_stocks: product.has_variants ? {} : null,
     };
   };
 
@@ -864,6 +905,11 @@ export function PurchaseDetailItems({
                   const product = products.find(
                     (p) => p.id === item.product_id
                   );
+                  const isVariantItem =
+                    item.has_variants || product?.has_variants;
+                  const assignedVariants = isVariantItem
+                    ? sumPurchaseVariantStocks(item.variant_stocks)
+                    : 0;
                   const unitOfMeasure = item.unit_of_measure || "UN";
                   const unitOfMeasureLabels: Record<string, string> = {
                     UN: "unidad",
@@ -916,7 +962,9 @@ export function PurchaseDetailItems({
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
                         </p>
-                        {item.has_variants && item.variant_stocks
+                        {!isEditingDetails &&
+                        isVariantItem &&
+                        item.variant_stocks
                           ? renderVariantBreakdown(item.variant_stocks)
                           : null}
                       </div>
@@ -925,7 +973,7 @@ export function PurchaseDetailItems({
                         <span className="text-muted-foreground text-xs">
                           Cantidad
                         </span>
-                        {isEditingDetails ? (
+                        {isEditingDetails && !isVariantItem ? (
                           <Input
                             className="h-8 w-full"
                             inputMode={
@@ -1118,6 +1166,46 @@ export function PurchaseDetailItems({
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                        </div>
+                      )}
+                      {isEditingDetails && isVariantItem && (
+                        <div className="space-y-2 sm:col-span-full">
+                          <p className="font-medium text-sm">
+                            Talles y colores
+                          </p>
+                          {variantMetaMap[item.product_id] ? (
+                            <VariantStockMatrix
+                              colores={variantMetaMap[item.product_id].colores}
+                              editable
+                              isCellAvailable={(color, talle) =>
+                                variantMetaMap[
+                                  item.product_id
+                                ].availableSizesByColor[color]?.includes(
+                                  talle
+                                ) ?? false
+                              }
+                              onChange={(color, talle, value) =>
+                                handleVariantStockChange(
+                                  item.id,
+                                  color,
+                                  talle,
+                                  value
+                                )
+                              }
+                              stocks={item.variant_stocks ?? {}}
+                              talles={variantMetaMap[item.product_id].talles}
+                            />
+                          ) : (
+                            <p className="text-muted-foreground text-sm">
+                              Cargando variantes...
+                            </p>
+                          )}
+                          {assignedVariants !== item.quantity && (
+                            <output className="text-amber-700 text-sm">
+                              Asignadas por talle y color: {assignedVariants} de{" "}
+                              {item.quantity} unidades.
+                            </output>
+                          )}
                         </div>
                       )}
                       {(isEditingDetails || hasItemTaxSnapshots) && (
