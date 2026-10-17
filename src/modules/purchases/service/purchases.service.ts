@@ -7,8 +7,6 @@ import {
   NO_PAYABLE_INVOICE_RATE_MESSAGE,
   resolvePayableExchangeRate,
 } from "@/modules/collections/utils/payment-rate";
-import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
-import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
@@ -517,67 +515,6 @@ export async function createPurchaseOrder(
   }
 
   return purchaseOrder;
-}
-
-export async function advanceLinkedChildOrderToGoodsReceived(
-  purchaseOrderId: string,
-  orgId: string,
-  orgSlug: string
-): Promise<void> {
-  const supabase = await createClient();
-
-  const { data: linkedOrder } = await supabase
-    .from("orders")
-    .select("id, status, parent_order_id, order_number")
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", orgId)
-    .maybeSingle();
-
-  if (!linkedOrder || linkedOrder.status !== "PURCHASING") {
-    return;
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return;
-  }
-
-  await supabase
-    .from("orders")
-    .update({ status: "GOODS_RECEIVED" })
-    .eq("id", linkedOrder.id);
-
-  await supabase.from("order_status_history").insert({
-    order_id: linkedOrder.id,
-    to_status: "GOODS_RECEIVED",
-    from_status: "PURCHASING",
-    notes: "Compra recibida - Mercadería disponible",
-    changed_by: user?.id ?? null,
-    changed_at: new Date().toISOString(),
-  });
-
-  if (linkedOrder.parent_order_id) {
-    await recalcParentOrderStatus(linkedOrder.parent_order_id, orgId);
-  }
-
-  const changedByName =
-    (user.user_metadata?.full_name as string | undefined) ??
-    user.email ??
-    "Usuario";
-
-  createOrderNotifications({
-    orgSlug,
-    orgId,
-    orderId: linkedOrder.id,
-    orderNumber: linkedOrder.order_number,
-    status: "GOODS_RECEIVED",
-    isChild: true,
-    changedByUserId: user.id,
-    changedByName,
-  }).catch(console.error);
 }
 
 async function buildCostMap(
@@ -1441,6 +1378,8 @@ export type UpdateReceivedItemInput = {
   unitQuantity?: number;
   quantity?: number;
   unitCost?: number;
+  variantStocks?: Record<string, Record<string, number>>;
+  subtotal?: number;
 };
 
 export async function processPurchaseReceipt(
@@ -1508,7 +1447,7 @@ async function preparePurchaseReceiptFiscalState(
     .eq("id", purchaseOrderId)
     .eq("organization_id", org.id)
     .single();
-  if (!order || order.status !== "IN_TRANSIT") {
+  if (!(order && ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(order.status))) {
     throw new Error("Solo se puede recibir una compra en tránsito");
   }
   const { data: storedItems, error } = await supabase
@@ -1547,6 +1486,20 @@ async function preparePurchaseReceiptFiscalState(
     org.id,
     purchaseOrderId
   );
+  const { data: extraReceipts, error: extrasError } = await supabase
+    .from("purchase_receipt_items")
+    .select("purchase_order_item_id")
+    .eq("organization_id", org.id)
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("is_extra", true);
+  if (extrasError) {
+    throw new Error(
+      `Error al consultar productos agregados: ${extrasError.message}`
+    );
+  }
+  const extraIds = new Set(
+    (extraReceipts ?? []).map((receipt) => receipt.purchase_order_item_id)
+  );
   const byItem = new Map<string, ItemTaxInput[]>();
   for (const tax of snapshots) {
     if (tax.source === "fallback" || tax.source === "legacy_prorated") {
@@ -1557,6 +1510,7 @@ async function preparePurchaseReceiptFiscalState(
       toPurchaseItemTaxInput(tax),
     ]);
   }
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: receipt row maps saved fiscal selections for both legacy and itemized purchases.
   const items = itemUpdates.map((update) => {
     const stored = byId.get(update.itemId);
     if (!stored) {
@@ -1571,18 +1525,20 @@ async function preparePurchaseReceiptFiscalState(
       quantity,
       unit_quantity: unitQuantity,
       unit_cost: cost,
-      variant_stocks: stored.variant_stocks,
+      variant_stocks: update.variantStocks ?? stored.variant_stocks,
       tax_override:
         stored.tax_override === null
           ? null
           : parsePurchaseTaxInputs(stored.tax_override),
       subtotal: truncateMoney(
-        (unitQuantity > 0 ? unitQuantity : quantity) * cost
+        update.subtotal ?? (unitQuantity > 0 ? unitQuantity : quantity) * cost
       ),
       taxes:
         stored.tax_override === null
           ? (byItem.get(stored.id) ??
-            (order.tax_snapshot_initialized ? [] : undefined))
+            (order.tax_snapshot_initialized && !extraIds.has(stored.id)
+              ? []
+              : undefined))
           : parsePurchaseTaxInputs(stored.tax_override),
     };
   });

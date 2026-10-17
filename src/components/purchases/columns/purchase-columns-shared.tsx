@@ -56,7 +56,9 @@ export function PurchaseActionsCell({
 
   const canConfirm = purchase.status === "DRAFT" && purchase.supplier_id;
   const canMoveToInTransit = purchase.status === "ORDERED";
-  const canMoveToReceived = purchase.status === "IN_TRANSIT";
+  const canMoveToReceived = ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(
+    purchase.status
+  );
   const canCancel =
     purchase.status !== "CANCELLED" && purchase.status !== "RECEIVED";
 

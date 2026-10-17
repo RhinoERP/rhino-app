@@ -5,6 +5,12 @@ import { getOrderIdByPurchaseOrderId } from "@/modules/orders/service/orders.ser
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import {
+  getPurchaseReceiptHistory,
+  getPurchaseReceiptMismatch,
+  getPurchaseReceiptProgress,
+  hasRegisteredPurchaseInvoice,
+} from "@/modules/purchases/service/purchase-receipts.service";
+import {
   getAllProductsByOrg,
   getPurchaseOrderWithItems,
 } from "@/modules/purchases/service/purchases.service";
@@ -27,21 +33,37 @@ export default async function PurchaseOrderPage({
   try {
     const purchaseOrder = await getPurchaseOrderWithItems(orgSlug, id);
 
-    const [suppliers, products, categories, relatedOrder, taxes] =
-      await Promise.all([
-        getSuppliersByOrgSlug(orgSlug),
-        getAllProductsByOrg(orgSlug),
-        getCategoriesByOrgSlug(orgSlug),
-        getOrderIdByPurchaseOrderId(orgSlug, id),
-        getActiveTaxesByOrgSlug(orgSlug),
-      ]);
+    const [
+      suppliers,
+      products,
+      categories,
+      relatedOrder,
+      taxes,
+      progress,
+      receiptHistory,
+      hasSupplierInvoice,
+      receiptMismatch,
+    ] = await Promise.all([
+      getSuppliersByOrgSlug(orgSlug),
+      getAllProductsByOrg(orgSlug),
+      getCategoriesByOrgSlug(orgSlug),
+      getOrderIdByPurchaseOrderId(orgSlug, id),
+      getActiveTaxesByOrgSlug(orgSlug),
+      getPurchaseReceiptProgress(orgSlug, id),
+      getPurchaseReceiptHistory(orgSlug, id),
+      hasRegisteredPurchaseInvoice(orgSlug, id),
+      getPurchaseReceiptMismatch(orgSlug, id),
+    ]);
 
     return (
       <PurchaseDetail
         categories={categories}
+        invoiceMismatch={hasSupplierInvoice && receiptMismatch}
         orgSlug={orgSlug}
         products={products}
         purchaseOrder={purchaseOrder}
+        receiptHistory={receiptHistory}
+        receivedProgress={Object.fromEntries(progress)}
         relatedOrder={relatedOrder}
         suppliers={suppliers}
         taxes={taxes}

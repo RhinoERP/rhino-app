@@ -1,6 +1,14 @@
 import { notFound } from "next/navigation";
 import { PurchaseReceipt } from "@/components/purchases/shared/purchase-receipt";
-import { getPurchaseOrderWithItems } from "@/modules/purchases/service/purchases.service";
+import {
+  getPendingPurchaseReceipt,
+  getPurchaseReceiptProgress,
+  hasRegisteredPurchaseInvoice,
+} from "@/modules/purchases/service/purchase-receipts.service";
+import {
+  getAllProductsByOrg,
+  getPurchaseOrderWithItems,
+} from "@/modules/purchases/service/purchases.service";
 import { getAllTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type PurchaseReceiptPageProps = {
@@ -16,20 +24,34 @@ export default async function PurchaseReceiptPage({
   const { orgSlug, id } = await params;
 
   try {
-    const [purchaseOrder, allTaxes] = await Promise.all([
-      getPurchaseOrderWithItems(orgSlug, id),
-      getAllTaxesByOrgSlug(orgSlug),
-    ]);
+    const [purchaseOrder, allTaxes, progress, products, hasSupplierInvoice] =
+      await Promise.all([
+        getPurchaseOrderWithItems(orgSlug, id),
+        getAllTaxesByOrgSlug(orgSlug),
+        getPurchaseReceiptProgress(orgSlug, id),
+        getAllProductsByOrg(orgSlug),
+        hasRegisteredPurchaseInvoice(orgSlug, id),
+      ]);
 
-    if (purchaseOrder.status === "CANCELLED") {
+    const pendingReceipt = await getPendingPurchaseReceipt(orgSlug, id);
+    if (
+      !(
+        pendingReceipt ||
+        ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(purchaseOrder.status)
+      )
+    ) {
       notFound();
     }
 
     return (
       <PurchaseReceipt
         allTaxes={allTaxes}
+        hasSupplierInvoice={hasSupplierInvoice}
         orgSlug={orgSlug}
+        pendingReceipt={pendingReceipt}
+        products={products}
         purchaseOrder={purchaseOrder}
+        receivedProgress={Object.fromEntries(progress)}
       />
     );
   } catch (error) {

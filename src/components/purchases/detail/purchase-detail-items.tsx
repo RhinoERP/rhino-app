@@ -122,6 +122,7 @@ type PurchaseDetailItemsProps = {
   productTaxes: Map<string, ItemTaxInput[]>;
   fallbackTaxes: ItemTaxInput[];
   globalDiscountPercent: number;
+  receivedProgress: Record<string, { quantity: number }>;
   variantMetaMap: Record<string, VariantMeta>;
 };
 
@@ -140,6 +141,7 @@ export function PurchaseDetailItems({
   productTaxes,
   fallbackTaxes,
   globalDiscountPercent,
+  receivedProgress,
   variantMetaMap,
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
@@ -962,6 +964,19 @@ export function PurchaseDetailItems({
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
                         </p>
+                        {(receivedProgress[item.id ?? ""]?.quantity ?? 0) >
+                          0 && (
+                          <p className="text-teal-700 text-xs">
+                            Recibidas:{" "}
+                            {receivedProgress[item.id ?? ""]?.quantity ?? 0} ·
+                            Pendientes:{" "}
+                            {Math.max(
+                              0,
+                              item.quantity -
+                                (receivedProgress[item.id ?? ""]?.quantity ?? 0)
+                            )}
+                          </p>
+                        )}
                         {!isEditingDetails &&
                         isVariantItem &&
                         item.variant_stocks

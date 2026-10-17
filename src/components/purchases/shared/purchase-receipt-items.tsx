@@ -345,14 +345,9 @@ function ProductVariantMatrixSection({
         <span className="font-medium text-muted-foreground text-xs">
           Stock por variante
         </span>
-        <Badge
-          className="text-xs"
-          variant={
-            totalReceived > orderedQuantity ? "destructive" : "secondary"
-          }
-        >
+        <Badge className="text-xs" variant="secondary">
           {totalReceived > orderedQuantity
-            ? `Excede: ${totalReceived} / ${orderedQuantity} un`
+            ? `Excedente: ${totalReceived} / ${orderedQuantity} un`
             : `Recibido: ${totalReceived} / ${orderedQuantity} un`}
         </Badge>
       </div>

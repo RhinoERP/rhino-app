@@ -72,6 +72,14 @@ type PurchaseDetailProps = {
   products: ProductWithPrice[];
   categories?: Category[];
   taxes: Tax[];
+  receivedProgress: Record<string, { quantity: number }>;
+  receiptHistory: Array<{
+    id: string;
+    receivedAt: string;
+    closePurchase: boolean;
+    itemCount: number;
+  }>;
+  invoiceMismatch: boolean;
 };
 
 function toDateOnlyString(date: Date): string {
@@ -175,6 +183,9 @@ export function PurchaseDetail({
   products,
   categories = [],
   taxes,
+  receivedProgress,
+  receiptHistory,
+  invoiceMismatch,
 }: PurchaseDetailProps) {
   const router = useRouter();
   const updatePurchase = useUpdatePurchaseOrder(orgSlug);
@@ -546,6 +557,28 @@ export function PurchaseDetail({
         </div>
       ) : null}
 
+      {invoiceMismatch && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm">
+          Pedido ya facturado: las cantidades no coinciden. La factura prevalece
+          para la cuenta por pagar.
+        </p>
+      )}
+      {receiptHistory.length > 0 && (
+        <div className="rounded-lg border px-4 py-3">
+          <p className="font-medium">Entregas recibidas</p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {receiptHistory.map((receipt) => (
+              <li key={receipt.id}>
+                {new Date(receipt.receivedAt).toLocaleDateString("es-AR")}:{" "}
+                {receipt.itemCount}{" "}
+                {receipt.itemCount === 1 ? "producto" : "productos"} ·{" "}
+                {receipt.closePurchase ? "Cierre de compra" : "Compra abierta"}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex flex-col gap-6 lg:flex-row">
         <div
           className={`flex-1 space-y-6 ${awaitingSavedAt ? "pointer-events-none opacity-70" : ""}`}
@@ -606,6 +639,7 @@ export function PurchaseDetail({
             onItemsChange={setItems}
             products={products}
             productTaxes={productTaxes}
+            receivedProgress={receivedProgress}
             supplierId={supplierId}
             taxes={taxes}
             variantMetaMap={variantMetaMap}

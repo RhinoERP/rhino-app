@@ -430,31 +430,28 @@ function StockOrderCard({
 
   const availableRoutes = useMemo(() => {
     if (hasAssignedItemSelected) {
+      const hasReservedItem = selectableItems.some(
+        (item) =>
+          selectedQuantities.has(item.id) &&
+          item.assigned_order_id != null &&
+          childMap.get(item.assigned_order_id)?.status === "STOCK_RESERVED"
+      );
       return ROUTE_OPTIONS.filter(
-        (r) => r.value !== "purchase" && r.value !== "reserve"
+        (r) =>
+          r.value !== "purchase" && !(hasReservedItem && r.value === "reserve")
       );
     }
     return ROUTE_OPTIONS;
-  }, [hasAssignedItemSelected]);
-
-  const _sourceChildOrderId = useMemo(() => {
-    if (!hasAssignedItemSelected) {
-      return;
-    }
-    const item = selectableItems.find(
-      (i) => selectedQuantities.has(i.id) && i.assigned_order_id != null
-    );
-    return item?.assigned_order_id ?? undefined;
-  }, [hasAssignedItemSelected, selectableItems, selectedQuantities]);
+  }, [hasAssignedItemSelected, selectableItems, selectedQuantities, childMap]);
 
   useEffect(() => {
     if (
       hasAssignedItemSelected &&
-      (selectedRoute === "purchase" || selectedRoute === "reserve")
+      !availableRoutes.some((route) => route.value === selectedRoute)
     ) {
       setSelectedRoute("direct");
     }
-  }, [hasAssignedItemSelected, selectedRoute]);
+  }, [hasAssignedItemSelected, selectedRoute, availableRoutes]);
 
   const setItemQuantity = useCallback((itemId: string, quantity: number) => {
     setSelectedQuantities((prev) => {
