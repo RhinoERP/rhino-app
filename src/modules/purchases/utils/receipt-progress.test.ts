@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendReceiptProgress,
   calculateReceiptProgress,
   hasUnreceivedPurchaseQuantities,
   hasUnreceivedVariantQuantities,
@@ -7,6 +8,29 @@ import {
 } from "./receipt-progress";
 
 describe("entregas acumuladas de una OC", () => {
+  it("previsualiza una entrega adicional sin alterar las entregas ya registradas", () => {
+    const progress = calculateReceiptProgress([
+      {
+        purchase_order_item_id: "remeras",
+        quantity: 8,
+        unit_quantity: 0,
+        unit_cost: 10,
+        variant_stocks: { Negro: { XL: 8 } },
+      },
+    ]);
+    appendReceiptProgress(progress, {
+      purchase_order_item_id: "remeras",
+      quantity: 4,
+      unit_quantity: 0,
+      unit_cost: 20,
+      variant_stocks: { Negro: { XL: 2, XXL: 2 } },
+    });
+    expect(progress.get("remeras")).toMatchObject({
+      quantity: 12,
+      subtotal: 160,
+      variantStocks: { Negro: { XL: 10, XXL: 2 } },
+    });
+  });
   it("mantiene el pendiente de ítems no seleccionados y acumula entregas sucesivas", () => {
     const first = calculateReceiptProgress([
       {

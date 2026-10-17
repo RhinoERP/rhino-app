@@ -259,40 +259,48 @@ export async function getPurchaseReceiptHistory(
   }));
 }
 
-export async function recordPurchaseReceipt(params: {
+export async function applyAtomicPurchaseReceipt(params: {
   orgSlug: string;
   purchaseOrderId: string;
   receiptId: string;
   lines: ReceiptLine[];
   closePurchase: boolean;
   actorId: string;
+  fiscal: Record<string, unknown> | null;
 }): Promise<boolean> {
   const org = await getOrganizationBySlug(params.orgSlug);
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
   const supabase = createAdminClient();
-  const { data, error } = await supabase.rpc("record_purchase_receipt", {
-    p_org_id: org.id,
-    p_purchase_order_id: params.purchaseOrderId,
-    p_receipt_id: params.receiptId,
-    p_close: params.closePurchase,
-    p_items: params.lines.map((line) => ({
-      item_id: line.itemId,
-      new_item: line.newItem ?? false,
-      actor_id: params.actorId,
-      product_id: line.productId,
-      quantity: line.quantity,
-      unit_quantity: line.unitQuantity,
-      unit_cost: line.unitCost,
-      variant_stocks: line.variantStocks,
-      lots: line.lots,
-    })),
-  });
+  // The RPC becomes typed after applying the new migration in dev.
+  const { data, error } = await supabase.rpc(
+    "apply_atomic_purchase_receipt" as never,
+    {
+      p_org_id: org.id,
+      p_purchase_order_id: params.purchaseOrderId,
+      p_receipt_id: params.receiptId,
+      p_close: params.closePurchase,
+      p_fiscal: params.fiscal,
+      p_items: params.lines.map((line) => ({
+        item_id: line.itemId,
+        new_item: line.newItem ?? false,
+        actor_id: params.actorId,
+        product_id: line.productId,
+        quantity: line.quantity,
+        unit_quantity: line.unitQuantity,
+        unit_cost: line.unitCost,
+        variant_stocks: line.variantStocks,
+        lots: line.lots,
+      })),
+    } as never
+  );
   if (error) {
-    throw new Error(`No se pudo registrar la entrega: ${error.message}`);
+    throw new Error(
+      `No se pudo confirmar la entrega atómica: ${error.message}`
+    );
   }
-  return data;
+  return data as boolean;
 }
 
 export async function completePurchaseReceipt(

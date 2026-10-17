@@ -10,6 +10,14 @@ export type ReceivedProgress = {
   subtotal: number;
 };
 
+type ReceiptProgressRow = {
+  purchase_order_item_id: string;
+  quantity: number;
+  unit_quantity: number;
+  unit_cost: number;
+  variant_stocks: VariantQuantities;
+};
+
 export function mergeVariantStocks(
   first: VariantQuantities,
   second: VariantQuantities
@@ -24,37 +32,38 @@ export function mergeVariantStocks(
   return merged;
 }
 
+export function appendReceiptProgress(
+  progress: Map<string, ReceivedProgress>,
+  row: ReceiptProgressRow
+): void {
+  const previous = progress.get(row.purchase_order_item_id);
+  const quantity = (previous?.quantity ?? 0) + row.quantity;
+  const unitQuantity = (previous?.unitQuantity ?? 0) + row.unit_quantity;
+  const subtotal = truncateMoney(
+    (previous?.subtotal ?? 0) +
+      truncateMoney(
+        (row.unit_quantity > 0 ? row.unit_quantity : row.quantity) *
+          row.unit_cost
+      )
+  );
+  progress.set(row.purchase_order_item_id, {
+    quantity,
+    unitQuantity,
+    variantStocks: mergeVariantStocks(
+      previous?.variantStocks ?? {},
+      row.variant_stocks ?? {}
+    ),
+    unitCost: subtotal / (unitQuantity > 0 ? unitQuantity : quantity),
+    subtotal,
+  });
+}
+
 export function calculateReceiptProgress(
-  rows: Array<{
-    purchase_order_item_id: string;
-    quantity: number;
-    unit_quantity: number;
-    unit_cost: number;
-    variant_stocks: VariantQuantities;
-  }>
+  rows: ReceiptProgressRow[]
 ): Map<string, ReceivedProgress> {
   const progress = new Map<string, ReceivedProgress>();
   for (const row of rows) {
-    const previous = progress.get(row.purchase_order_item_id);
-    const quantity = (previous?.quantity ?? 0) + row.quantity;
-    const unitQuantity = (previous?.unitQuantity ?? 0) + row.unit_quantity;
-    const subtotal = truncateMoney(
-      (previous?.subtotal ?? 0) +
-        truncateMoney(
-          (row.unit_quantity > 0 ? row.unit_quantity : row.quantity) *
-            row.unit_cost
-        )
-    );
-    progress.set(row.purchase_order_item_id, {
-      quantity,
-      unitQuantity,
-      variantStocks: mergeVariantStocks(
-        previous?.variantStocks ?? {},
-        row.variant_stocks ?? {}
-      ),
-      unitCost: subtotal / (unitQuantity > 0 ? unitQuantity : quantity),
-      subtotal,
-    });
+    appendReceiptProgress(progress, row);
   }
   return progress;
 }

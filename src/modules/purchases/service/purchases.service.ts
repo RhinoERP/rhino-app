@@ -16,7 +16,13 @@ import type {
   PurchaseMetrics,
 } from "../types";
 import { legacyPurchaseFiscalFieldsChanged } from "../utils/purchase-legacy";
+import { appendReceiptProgress } from "../utils/receipt-progress";
 import {
+  getPurchaseReceiptProgress,
+  type ReceiptLine,
+} from "./purchase-receipts.service";
+import {
+  buildPurchaseFiscalPayload,
   buildPurchaseTaxPlan,
   getPurchaseItemTaxRows,
   parsePurchaseTaxInputs,
@@ -1392,7 +1398,7 @@ export async function processPurchaseReceipt(
     orgSlug,
     purchaseOrderId,
     receivedItemIds,
-    itemUpdates
+    { itemUpdates }
   );
   await persistPurchaseFiscalState({
     supabase: prepared.supabase,
@@ -1425,8 +1431,58 @@ export async function prevalidatePurchaseReceiptFiscalState(
     orgSlug,
     purchaseOrderId,
     receivedItemIds,
-    itemUpdates
+    { itemUpdates }
   );
+}
+
+/** Preview the cumulative fiscal result before the atomic receipt transaction. */
+export async function previewAtomicReceiptFiscalState(
+  orgSlug: string,
+  purchaseOrderId: string,
+  receiptLines: ReceiptLine[]
+) {
+  const progress = await getPurchaseReceiptProgress(orgSlug, purchaseOrderId);
+  for (const line of receiptLines) {
+    appendReceiptProgress(progress, {
+      purchase_order_item_id: line.itemId,
+      quantity: line.quantity,
+      unit_quantity: line.unitQuantity,
+      unit_cost: line.unitCost,
+      variant_stocks: line.variantStocks,
+    });
+  }
+  const updates = Array.from(progress, ([itemId, received]) => ({
+    itemId,
+    quantity: received.quantity,
+    unitQuantity: received.unitQuantity,
+    unitCost: received.unitCost,
+    subtotal: received.subtotal,
+    variantStocks: received.variantStocks,
+  }));
+  const virtualItems = receiptLines
+    .filter((line) => line.newItem)
+    .map((line) => ({ itemId: line.itemId, productId: line.productId }));
+  const prepared = await preparePurchaseReceiptFiscalState(
+    orgSlug,
+    purchaseOrderId,
+    updates.map((item) => item.itemId),
+    { itemUpdates: updates, virtualItems }
+  );
+  return buildPurchaseFiscalPayload({
+    mode: prepared.order.tax_snapshot_initialized
+      ? "receipt"
+      : "receipt_legacy",
+    items: prepared.items,
+    plan: prepared.plan,
+    subtotal: prepared.subtotal,
+    discountPercentage: prepared.discountPercentage,
+    discountAmount: prepared.discountAmount,
+    fallbackTaxes: prepared.fallbackTaxes,
+    supplierId: prepared.order.supplier_id,
+    purchaseDate: prepared.order.purchase_date,
+    expirationDate: prepared.order.expiration_date,
+    remittanceNumber: prepared.order.remittance_number,
+  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates the receipt and prepares the fiscal state without modifying stock.
@@ -1434,8 +1490,12 @@ async function preparePurchaseReceiptFiscalState(
   orgSlug: string,
   purchaseOrderId: string,
   receivedItemIds: string[],
-  itemUpdates: UpdateReceivedItemInput[]
+  params: {
+    itemUpdates: UpdateReceivedItemInput[];
+    virtualItems?: Array<{ itemId: string; productId: string }>;
+  }
 ) {
+  const { itemUpdates, virtualItems = [] } = params;
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     throw new Error("Organización no encontrada");
@@ -1459,10 +1519,11 @@ async function preparePurchaseReceiptFiscalState(
     throw new Error(`Error al validar ítems de recepción: ${error.message}`);
   }
   const byId = new Map((storedItems ?? []).map((item) => [item.id, item]));
+  const virtualById = new Map(virtualItems.map((item) => [item.itemId, item]));
   if (
     receivedItemIds.length === 0 ||
     new Set(receivedItemIds).size !== receivedItemIds.length ||
-    receivedItemIds.some((id) => !byId.has(id)) ||
+    receivedItemIds.some((id) => !(byId.has(id) || virtualById.has(id))) ||
     itemUpdates.length !== receivedItemIds.length ||
     new Set(itemUpdates.map((item) => item.itemId)).size !==
       itemUpdates.length ||
@@ -1500,6 +1561,9 @@ async function preparePurchaseReceiptFiscalState(
   const extraIds = new Set(
     (extraReceipts ?? []).map((receipt) => receipt.purchase_order_item_id)
   );
+  for (const virtual of virtualItems) {
+    extraIds.add(virtual.itemId);
+  }
   const byItem = new Map<string, ItemTaxInput[]>();
   for (const tax of snapshots) {
     if (tax.source === "fallback" || tax.source === "legacy_prorated") {
@@ -1513,33 +1577,33 @@ async function preparePurchaseReceiptFiscalState(
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: receipt row maps saved fiscal selections for both legacy and itemized purchases.
   const items = itemUpdates.map((update) => {
     const stored = byId.get(update.itemId);
-    if (!stored) {
+    const virtual = virtualById.get(update.itemId);
+    if (!(stored || virtual)) {
       throw new Error("El ítem no pertenece a la compra");
     }
-    const unitQuantity = update.unitQuantity ?? stored.unit_quantity ?? 0;
-    const quantity = update.quantity ?? stored.quantity;
-    const cost = update.unitCost ?? stored.unit_cost ?? 0;
+    const unitQuantity = update.unitQuantity ?? stored?.unit_quantity ?? 0;
+    const quantity = update.quantity ?? stored?.quantity ?? 0;
+    const cost = update.unitCost ?? stored?.unit_cost ?? 0;
+    const taxOverride = stored?.tax_override ?? null;
     return {
-      id: stored.id,
-      product_id: stored.product_id,
+      id: stored?.id ?? virtual?.itemId ?? update.itemId,
+      product_id: stored?.product_id ?? virtual?.productId ?? "",
       quantity,
       unit_quantity: unitQuantity,
       unit_cost: cost,
-      variant_stocks: update.variantStocks ?? stored.variant_stocks,
+      variant_stocks: update.variantStocks ?? stored?.variant_stocks,
       tax_override:
-        stored.tax_override === null
-          ? null
-          : parsePurchaseTaxInputs(stored.tax_override),
+        taxOverride === null ? null : parsePurchaseTaxInputs(taxOverride),
       subtotal: truncateMoney(
         update.subtotal ?? (unitQuantity > 0 ? unitQuantity : quantity) * cost
       ),
       taxes:
-        stored.tax_override === null
-          ? (byItem.get(stored.id) ??
-            (order.tax_snapshot_initialized && !extraIds.has(stored.id)
+        taxOverride === null
+          ? (byItem.get(update.itemId) ??
+            (order.tax_snapshot_initialized && !extraIds.has(update.itemId)
               ? []
               : undefined))
-          : parsePurchaseTaxInputs(stored.tax_override),
+          : parsePurchaseTaxInputs(taxOverride),
     };
   });
   const subtotal = items.reduce(

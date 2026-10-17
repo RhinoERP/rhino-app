@@ -2,91 +2,24 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import {
-  adjustVariantStock,
-  createProductLotForOrg,
-  createStockMovementForOrg,
-} from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
+  applyAtomicPurchaseReceipt,
   completePurchaseReceipt,
   finalizeReceivedOrderItems,
   getPurchaseReceiptById,
   getPurchaseReceiptProgress,
   type ReceiptLine,
-  recordPurchaseReceipt,
   releaseReceivedOrderItems,
 } from "../service/purchase-receipts.service";
 import {
   prevalidatePurchaseReceiptFiscalState,
+  previewAtomicReceiptFiscalState,
   processPurchaseReceipt,
   updatePurchaseOrderStatus,
 } from "../service/purchases.service";
-import type { LotInput, ReceivePurchaseActionInput } from "../types";
-
-type ProductInfo = {
-  unit_of_measure: string | null;
-  tracks_stock_units: boolean | null;
-  has_variants: boolean;
-} | null;
-
-async function processLotEntry(params: {
-  orgSlug: string;
-  productId: string;
-  lotEntry: LotInput;
-  product: ProductInfo;
-  receiptId: string;
-}) {
-  const { orgSlug, productId, lotEntry, product, receiptId } = params;
-  if (!lotEntry.lotNumber?.trim()) {
-    throw new Error(
-      `Un lote del producto ${productId} requiere un número de lote`
-    );
-  }
-  if (!lotEntry.expirationDate) {
-    throw new Error(
-      `Un lote del producto ${productId} requiere una fecha de vencimiento`
-    );
-  }
-  if (lotEntry.quantity <= 0 && lotEntry.unitQuantity <= 0) {
-    throw new Error(
-      `Un lote del producto ${productId} debe tener una cantidad mayor a 0`
-    );
-  }
-
-  const isWeightBased =
-    product?.unit_of_measure === "KG" ||
-    product?.unit_of_measure === "LT" ||
-    product?.unit_of_measure === "MT";
-  const movementQuantity = isWeightBased
-    ? lotEntry.unitQuantity
-    : lotEntry.quantity;
-  const movementUnitQuantity =
-    product?.tracks_stock_units && lotEntry.quantity > 0
-      ? lotEntry.quantity
-      : undefined;
-
-  const lot = await createProductLotForOrg({
-    orgSlug,
-    productId,
-    lotNumber: lotEntry.lotNumber,
-    expirationDate: lotEntry.expirationDate,
-    quantity: 0,
-  });
-
-  await createStockMovementForOrg({
-    orgSlug,
-    productId,
-    lotId: lot.id,
-    type: "INBOUND",
-    quantity: movementQuantity,
-    unitQuantity: movementUnitQuantity,
-    reason: `Recepción de compra ${receiptId} - Lote: ${lotEntry.lotNumber}`,
-  });
-
-  return lot;
-}
+import type { ReceivePurchaseActionInput } from "../types";
 
 type IncomingItem = ReceivePurchaseActionInput["receivedItems"][number];
 
@@ -252,67 +185,6 @@ async function validatePendingReceipt(params: {
   }
 }
 
-async function processIncomingStock(params: {
-  orgSlug: string;
-  orgId: string;
-  purchaseOrderId: string;
-  receiptId: string;
-  items: IncomingItem[];
-}) {
-  const { orgSlug, orgId, purchaseOrderId, receiptId, items } = params;
-  const supabase = await createClient();
-  const { data: po, error: poError } = await supabase
-    .from("purchase_orders")
-    .select("purchase_number")
-    .eq("id", purchaseOrderId)
-    .eq("organization_id", orgId)
-    .single();
-  if (poError || !po) {
-    throw new Error("Compra no encontrada");
-  }
-  await Promise.all(
-    items.map(async (item) => {
-      const { data: product, error } = await supabase
-        .from("products")
-        .select("unit_of_measure, tracks_stock_units, has_variants")
-        .eq("id", item.productId)
-        .eq("organization_id", orgId)
-        .single();
-      if (error || !product) {
-        throw new Error("Producto no encontrado para esta compra");
-      }
-      if (product.has_variants) {
-        if (!item.variantStocks?.length) {
-          throw new Error("Seleccioná al menos una variante para recibir");
-        }
-        await Promise.all(
-          item.variantStocks.map((variant) =>
-            adjustVariantStock({
-              orgSlug,
-              variantId: variant.variantId,
-              type: "INBOUND",
-              quantity: variant.quantity,
-              reason: `Recepción de compra - Orden N${po.purchase_number} - ${receiptId}`,
-            })
-          )
-        );
-        return;
-      }
-      await Promise.all(
-        item.lots.map((lotEntry) =>
-          processLotEntry({
-            orgSlug,
-            productId: item.productId,
-            lotEntry,
-            product,
-            receiptId,
-          })
-        )
-      );
-    })
-  );
-}
-
 async function finalizePurchaseReceipt(
   orgSlug: string,
   orgId: string,
@@ -371,6 +243,7 @@ function assertValidReceiptLots(items: IncomingItem[]) {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: routes legacy retries and new transactional receipts through one guarded entry point.
 export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
   await ensure("purchases.manage", input.orgSlug);
   try {
@@ -423,31 +296,36 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
         items: itemsToProcess,
       });
       assertValidReceiptLots(itemsToProcess);
-      await processIncomingStock({
+      const lines = buildReceiptLines(itemsToProcess);
+      const fiscal = closePurchase
+        ? await previewAtomicReceiptFiscalState(orgSlug, purchaseOrderId, lines)
+        : null;
+      await applyAtomicPurchaseReceipt({
         orgSlug,
-        orgId: org.id,
         purchaseOrderId,
         receiptId,
-        items: itemsToProcess,
+        lines,
+        closePurchase,
+        actorId: auth.user.id,
+        fiscal,
       });
-      await recordPurchaseReceipt({
+    } else if (
+      existingReceipt.order_released_at === null ||
+      (closePurchase && existingReceipt.finalized_at === null)
+    ) {
+      throw new Error(
+        "Entrega anterior pendiente: finalizala antes de reintentar"
+      );
+    } else {
+      await applyAtomicPurchaseReceipt({
         orgSlug,
         purchaseOrderId,
         receiptId,
         lines: buildReceiptLines(itemsToProcess),
         closePurchase,
         actorId: auth.user.id,
+        fiscal: null,
       });
-    }
-    await releaseReceivedOrderItems(orgSlug, receiptId);
-    if (closePurchase) {
-      await finalizePurchaseReceipt(
-        orgSlug,
-        org.id,
-        purchaseOrderId,
-        receiptId
-      );
-      await completePurchaseReceipt(orgSlug, receiptId);
     }
 
     revalidatePath(`/org/${orgSlug}/compras`);
@@ -490,6 +368,12 @@ export async function resumePurchaseReceiptAction(input: {
     );
     if (!receipt) {
       throw new Error("Entrega no encontrada");
+    }
+    if (
+      receipt.order_released_at &&
+      (!receipt.close_purchase || receipt.finalized_at)
+    ) {
+      return { success: true as const };
     }
     const org = await getOrganizationBySlug(input.orgSlug);
     if (!org?.id) {
