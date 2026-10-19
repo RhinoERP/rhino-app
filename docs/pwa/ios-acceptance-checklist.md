@@ -10,6 +10,14 @@ Usar un iPhone fisico, HTTPS y un build de produccion (`pnpm build && pnpm start
 - [ ] Vendedor con `sales.read` y `sales.manage`.
 - [ ] Service Worker actualizado despues del ultimo despliegue.
 
+## Instalacion y tutorial del navegador
+
+- [ ] Safari iOS muestra pasos para Compartir > Añadir a pantalla de inicio.
+- [ ] Chrome iOS muestra sus pasos de menú Compartir > Añadir a pantalla de inicio.
+- [ ] Chrome Android muestra el prompt nativo cuando está disponible y ofrece
+  pasos alternativos desde el menú ⋮.
+- [ ] Al instalar y abrir en modo standalone, el banner de instalación se oculta.
+
 ## Snapshot y cold start
 
 - [ ] Descargar clientes, productos, precios, impuestos y configuracion.
@@ -49,6 +57,8 @@ Usar un iPhone fisico, HTTPS y un build de produccion (`pnpm build && pnpm start
 - [ ] Probar dos contextos abiertos y confirmar una sola venta por comando.
 - [ ] Cerrar sesion con cuenta A e iniciar con cuenta B; no deben aparecer datos cruzados.
 - [ ] Revocar membresia o permisos antes del replay; el servidor debe rechazarlo.
+- [ ] Con la PWA abierta, revocar permiso o deshabilitar el flag; al reconectar
+  se deben purgar snapshot, borradores y comandos solo de esa organización.
 
 ## Criterio de aprobacion
 

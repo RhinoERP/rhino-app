@@ -246,7 +246,8 @@ export function PreSaleSettings({ orgSlug }: PreSaleSettingsProps) {
                       <FormLabel>Habilitar snapshot offline</FormLabel>
                       <FormDescription>
                         La descarga sigue requiriendo sesion y permisos de
-                        ventas. No habilita todavia preventas offline.
+                        ventas. Las preventas se sincronizan como borradores y
+                        se revalidan en el servidor cuando vuelve la conexion.
                       </FormDescription>
                     </div>
                     <FormControl>

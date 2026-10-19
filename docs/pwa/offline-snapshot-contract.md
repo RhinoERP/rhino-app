@@ -1,6 +1,6 @@
 # Snapshot offline del vendedor
 
-> **Estado:** Fase 1 implementada e integrada con borradores y sincronizacion; validaciones manuales indicadas al final siguen pendientes.
+> **Estado al 2026-10-01:** snapshot, persistencia, borradores y sincronizacion implementados. El flujo basico fue probado en iOS con Supabase real; la descarga/refresco automaticos recientes aun requieren aceptacion manual en dispositivos y pruebas de aislamiento multi-organizacion.
 >
 > **Fecha:** 2026-09-14.
 
@@ -21,7 +21,9 @@
 
 ## Alcance
 
-El snapshot permite descargar explicitamente los datos minimos para consultar clientes y productos y, en etapas posteriores, preparar una preventa para una organizacion sin produccion. No cachea paginas protegidas ni respuestas RSC.
+El snapshot permite consultar clientes y productos, preparar borradores de
+preventa y sincronizarlos para organizaciones sin produccion. No cachea paginas
+protegidas ni respuestas RSC.
 
 ## Decisiones iniciales
 
@@ -118,7 +120,7 @@ deshabilitado no se ocultan detras del validador condicional.
 - Safari iOS puede suspender timers; los 20 minutos son una frecuencia minima
   en foreground, no una garantia de ejecucion en background.
 
-La funcionalidad queda deshabilitada por defecto. La configuracion de la organizacion piloto debe incluir:
+La funcionalidad queda deshabilitada por defecto para cada organizacion. Se configura desde los ajustes de preventa de la organizacion, no mediante un slug especial. Para habilitarla, la organizacion debe tener ventas mayoristas activas y produccion deshabilitada. La configuracion del piloto tiene esta forma:
 
 ```json
 {
@@ -171,10 +173,10 @@ Guardar un snapshot nuevo reemplaza el registro de la particion. Al abrir un bor
 
 ## Pendientes actuales
 
-- Validar manualmente descarga, cierre y reapertura en Safari iOS.
+- Validar en Safari iOS y Chrome Android la nueva preparacion automatica, refresco cada 20 minutos, respuestas 304 y expiracion renovada.
 - Confirmar purga al cerrar sesion y al ingresar con otra cuenta.
 - Probar vencimiento e inactividad con plazos reducidos en un entorno controlado.
-- Completar la matriz manual de aislamiento entre usuario y organizacion en dispositivos reales.
+- Completar la matriz manual de aislamiento entre usuario y organizacion en dispositivos reales y con mas de una organizacion habilitada.
 
 ## Repositorio local
 

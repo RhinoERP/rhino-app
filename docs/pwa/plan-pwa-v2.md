@@ -2,7 +2,7 @@
 
 > **Proposito:** ofrecer una experiencia movil instalable y resistente a conectividad intermitente para vendedores en campo, sin comprometer aislamiento de datos, consistencia comercial ni seguridad.
 >
-> **Estado:** plan canonico actualizado contra la implementacion. Fases 0 a 3 implementadas tecnicamente; quedan integracion con base real, aceptacion Android y validacion mobile del flujo completo.
+> **Estado al 2026-10-01:** Fases 0 a 3 implementadas tecnicamente. El vertical basico de snapshot y sincronizacion fue probado en Supabase real con una organizacion piloto; quedan pruebas adversariales de base de datos, aceptacion Android y validacion mobile completa. La descarga inicial automatica y el refresco condicional cada 20 minutos estan implementados, pendientes de aceptacion en dispositivos.
 >
 > **Decision arquitectonica:** comenzar con una PWA enfocada en vendedores. Expo/React Native queda como alternativa futura si el piloto demuestra limitaciones operativas concretas. El snapshot, los contratos y la API de comandos se disenaran independientes del cliente para que puedan reutilizarse en una app nativa.
 
@@ -129,7 +129,7 @@ Se reconsiderara Expo solamente con evidencia del piloto, segun los criterios de
 | Productos con variantes | Excluidos del MVP inicial |
 | Habilitacion | Feature flag por organizacion, independiente de `NEXT_PUBLIC_PWA_ENABLED` |
 
-La vigencia y la purga son controles diferentes. Un snapshot no puede utilizarse despues de 12 horas, aunque su eliminacion fisica por inactividad ocurra posteriormente. Al recuperar conexion tambien se debe purgar si la organizacion deshabilito la funcionalidad o el usuario perdio acceso.
+La vigencia y la purga son controles diferentes. Un snapshot no puede utilizarse despues de 12 horas, aunque su eliminacion fisica por inactividad ocurra posteriormente. Al recibir 401/403/404 del endpoint de snapshot, el cliente elimina en una transaccion snapshots, borradores y comandos de esa organizacion. Sin conectividad no puede detectar la revocacion; la copia local permanece hasta que venza o se restablezca conexion.
 
 ---
 
@@ -493,11 +493,14 @@ pnpm start
 
 ## 7. Fase 1 - Snapshot offline del vendedor
 
-**Estado:** implementada e integrada con IndexedDB, borradores y revalidacion de comandos.
+**Estado:** implementada e integrada con IndexedDB, borradores y revalidacion de comandos. Descarga inicial automatica y refresco ETag implementados el 2026-10-01; falta verificar ese ciclo en iOS/Android reales.
 
 ### Objetivo
 
-Descargar de forma explicita el conjunto minimo de datos necesario para trabajar. No depende de haber visitado previamente cada pantalla.
+Mantener disponible el conjunto minimo de datos necesario para trabajar. La PWA
+instalada lo descarga al abrir por primera vez con conexion y lo valida cada 20
+minutos en foreground; el vendedor tambien puede iniciar una descarga manual.
+No depende de haber visitado previamente cada pantalla.
 
 ### Discovery previo
 
@@ -571,7 +574,7 @@ El repositorio local debe guardar la ultima actividad. Debe purgar datos inmedia
 
 ### UX
 
-- Accion explicita: "Preparar datos sin conexion".
+- Preparacion automatica al abrir la PWA instalada; accion manual para preparar o actualizar los datos cuando sea necesario.
 - Estado y progreso de descarga.
 - "Datos actualizados hace X" siempre visible offline.
 - Boton "Actualizar datos".
@@ -657,7 +660,7 @@ type OfflineDraft<T> = {
 
 ## 9. Fase 3 - Comandos offline y sincronizacion
 
-**Estado:** implementada tecnicamente. No se han ejecutado integraciones contra una base Supabase real ni la aceptacion mobile completa.
+**Estado:** implementada tecnicamente. Se ejecuto el flujo basico contra Supabase real en el piloto y se creo una preventa `DRAFT`; siguen pendientes respuesta perdida tras commit, rollback forzado, grants directos, revocacion, concurrencia y aceptacion mobile completa.
 
 ### Objetivo
 
@@ -994,7 +997,9 @@ Si estos limites no son operativamente relevantes, se mantiene una sola aplicaci
 
 ## 15. Vertical slice del MVP
 
-Despues de Fase 0 no se construiran todas las capacidades horizontales por separado. Se implementara un flujo completo y reducido:
+**Estado:** flujo implementado tecnicamente y validado de forma basica en iOS con Supabase real. No equivale a aceptacion de produccion; ver `test-matrix.md` y `pilot-results.md`.
+
+El vertical slice se limita a:
 
 1. Descargar datos minimos del vendedor.
 2. Consultar antiguedad del snapshot.
@@ -1006,7 +1011,7 @@ Despues de Fase 0 no se construiran todas las capacidades horizontales por separ
 8. Sincronizar mediante la Command API.
 9. Mostrar exito, retry o diferencias comerciales.
 
-Este vertical slice debe probarse en Android e iOS antes de ampliar el snapshot, agregar clientes offline o soportar presupuestos de produccion.
+El flujo completo debe superar la aceptacion en Android e iOS antes de ampliar el snapshot, agregar clientes offline o soportar presupuestos de produccion.
 
 ---
 
@@ -1045,6 +1050,10 @@ No incluye presupuestos de produccion ni alta de clientes offline.
 ---
 
 ## 18. Orden recomendado de implementacion
+
+> La secuencia siguiente es el plan historico de construccion. Para el estado y
+> las tareas vigentes, consultar `test-matrix.md`, `pilot-results.md` y el
+> runbook.
 
 1. Crear/configurar el proyecto Sentry.
 2. Implementar Fase 0 sin caching autenticado.

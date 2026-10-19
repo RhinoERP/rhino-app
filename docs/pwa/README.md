@@ -18,7 +18,11 @@ Expo/React Native queda condicionado a resultados del piloto. El backend offline
 - Service Worker global y promocion de instalacion solo para usuarios con `sales.manage` o `sales.manage.all` y modulo `wholesale`.
 - Preventas offline para organizaciones sin produccion.
 - Clientes existentes incluidos en el snapshot.
-- Sincronizacion foreground.
+- Soporte multi-organizacion: cada snapshot y comando se resuelve desde la
+  organizacion activa y su flag independiente.
+- Preparacion automatica del snapshot al abrir la PWA instalada y refresco
+  condicional cada 20 minutos en foreground.
+- Sincronizacion foreground de comandos.
 - Revalidacion comercial en servidor.
 - Diferencias visibles como `requires-review`.
 - Alta de clientes offline, presupuestos de produccion y push diferidos.
@@ -60,6 +64,7 @@ Los documentos se crean cuando exista informacion real. No deben anticiparse con
 | 2026-09-21 | RPC atomica restringida a service role; actor verificado por servidor | Aprobada |
 | 2026-09-21 | Replay foreground multi-organizacion y refresh durable de Ventas | Implementada |
 | 2026-09-22 | Migracion de hardening aplicada y sincronizacion de preventa validada en iOS | Validada para piloto |
+| 2026-10-01 | Descarga inicial automatica y refresco condicional de snapshots | Implementada; falta aceptacion manual del nuevo ciclo en dispositivos |
 
 ## Regla de mantenimiento
 

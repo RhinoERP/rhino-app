@@ -2,6 +2,7 @@ import { captureMessage } from "@sentry/nextjs";
 
 export type PwaEvent =
   | "pwa.app_installed"
+  | "pwa.browser_install_guide_shown"
   | "pwa.install_banner_dismissed"
   | "pwa.install_banner_shown"
   | "pwa.install_prompt_accepted"

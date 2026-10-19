@@ -7,6 +7,7 @@ import {
   deleteOfflinePreSaleDraft,
   finalizeOfflineCommandClaim,
   listOfflineCommands,
+  purgeOfflineDataForOrganization,
 } from "../storage/offline-db";
 import {
   publishOfflineCommandStatus,
@@ -125,6 +126,13 @@ async function replayRecord(
     }
 
     const failure = parsed.data;
+    if (failure.code === "FORBIDDEN") {
+      await purgeOfflineDataForOrganization(
+        syncing.ownerUserId,
+        syncing.organizationId
+      );
+      return null;
+    }
     const retry = failure.retryable;
     const next = await finalizeOfflineCommandClaim(
       record.commandId,

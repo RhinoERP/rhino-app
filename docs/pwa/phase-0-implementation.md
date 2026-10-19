@@ -170,7 +170,7 @@ pnpm start
 | Verificacion | Estado |
 |---|---|
 | TypeScript `tsc --noEmit` | OK |
-| `pnpm lint` (Biome) | OK, 1195 archivos |
+| `pnpm lint` (Biome) | OK; la verificacion mas reciente del repositorio integrado reviso 1281 archivos |
 | Build Turbopack | OK |
 | Manifest generado | OK |
 | `/~offline` estatico | OK |
