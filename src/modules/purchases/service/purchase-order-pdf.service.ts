@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { getPurchaseUnitShortLabel } from "@/modules/purchases/utils/purchase-units";
 
 export type PurchaseOrderPDFItem = {
   productName: string;
@@ -402,7 +403,9 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
     .map((item) => {
       const quantity = item.unitQuantity ?? item.quantity;
       const unitLabel =
-        item.unitOfMeasure && item.unitQuantity ? ` ${item.unitOfMeasure}` : "";
+        item.unitOfMeasure && item.unitQuantity
+          ? ` ${getPurchaseUnitShortLabel(item.unitOfMeasure)}`
+          : "";
       const variantHtml = item.variantStocks
         ? renderVariantBreakdownText(item.variantStocks)
         : "";

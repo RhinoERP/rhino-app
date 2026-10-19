@@ -36,6 +36,7 @@ import {
   type PurchasingOrder,
   type StockInfo,
 } from "../types";
+import { splitQuoteItemAmounts } from "../utils/split-quote-item-amounts";
 import { buildSplitQuoteItemExtras } from "../utils/split-quote-item-extras";
 
 type OrdersScope = "all" | "own";
@@ -266,6 +267,7 @@ export async function getParentOrdersPendingStock(
         ),
         quote_items(
           id,
+          parent_quote_item_id,
           description,
           quantity,
           unit_price,
@@ -292,7 +294,13 @@ export async function getParentOrdersPendingStock(
     `
     )
     .eq("organization_id", org.id)
-    .in("status", ["PENDING_STOCK", "GOODS_RECEIVED", "STOCK_RESERVED"])
+    .in("status", [
+      "PENDING_STOCK",
+      "GOODS_RECEIVED",
+      "STOCK_RESERVED",
+      "PURCHASING",
+      "PURCHASE_REQUIRED",
+    ])
     .is("parent_order_id", null);
 
   const filtered = applyScopeFilter(query, accessContext);
@@ -307,7 +315,24 @@ export async function getParentOrdersPendingStock(
     throw new Error(`Error al obtener pedidos padre: ${error.message}`);
   }
 
-  return (data ?? []) as unknown as OrderWithChildren[];
+  return (data ?? []).filter((order) => {
+    if (!["PURCHASING", "PURCHASE_REQUIRED"].includes(order.status)) {
+      return true;
+    }
+    if (
+      Array.isArray(order.children) &&
+      order.children.some((child) => child.status === "GOODS_RECEIVED")
+    ) {
+      return true;
+    }
+    const quote = order.quotes as {
+      quote_items?: Array<{ assigned_order_id: string | null }>;
+    } | null;
+    return (
+      quote?.quote_items?.some((item) => item.assigned_order_id === null) ??
+      false
+    );
+  }) as unknown as OrderWithChildren[];
 }
 
 export async function getPurchasingOrders(
@@ -3049,11 +3074,16 @@ export async function groupQuoteItemsBySupplier(
 async function updateOriginalItemQuantity(
   supabase: SupabaseClient<Database>,
   itemId: string,
-  remainingQty: number
+  remainingQty: number,
+  amounts: ReturnType<typeof splitQuoteItemAmounts>
 ): Promise<void> {
   const { error } = await supabase
     .from("quote_items")
-    .update({ quantity: remainingQty })
+    .update({
+      quantity: remainingQty,
+      subtotal: amounts.remainingSubtotal,
+      discount_amount: amounts.remainingDiscountAmount,
+    })
     .eq("id", itemId);
   if (error) {
     throw new Error(`Error al actualizar cantidad original: ${error.message}`);
@@ -3065,6 +3095,7 @@ async function insertSplitQuoteItem(
   item: {
     quote_id: string | null;
     description: string | null;
+    currency: string;
     unit_price: number;
     discount_amount: number | null;
     discount_percentage: number | null;
@@ -3076,19 +3107,22 @@ async function insertSplitQuoteItem(
       price: number;
     }>;
   },
-  assignedQty: number,
+  assigned: {
+    quantity: number;
+    amounts: ReturnType<typeof splitQuoteItemAmounts>;
+  },
   quoteId: string
 ): Promise<string> {
-  const assignedSubtotal = truncateMoney(item.unit_price * assignedQty);
   const { data, error } = await supabase
     .from("quote_items")
     .insert({
       quote_id: item.quote_id ?? quoteId,
       description: item.description,
-      quantity: assignedQty,
+      currency: item.currency,
+      quantity: assigned.quantity,
       unit_price: item.unit_price,
-      subtotal: assignedSubtotal,
-      discount_amount: item.discount_amount,
+      subtotal: assigned.amounts.assignedSubtotal,
+      discount_amount: assigned.amounts.assignedDiscountAmount,
       discount_percentage: item.discount_percentage,
       product_id: item.product_id,
       product_variant_id: item.product_variant_id,
@@ -3118,6 +3152,58 @@ async function insertSplitQuoteItem(
   return data.id;
 }
 
+async function splitQuoteItemTaxes(
+  supabase: SupabaseClient<Database>,
+  originalItemId: string,
+  newItemId: string,
+  share: number
+) {
+  const { data: taxes, error } = await supabase
+    .from("quote_item_taxes")
+    .select("*")
+    .eq("quote_item_id", originalItemId);
+  if (error) {
+    throw new Error(`Error al consultar impuestos del ítem: ${error.message}`);
+  }
+  for (const tax of taxes ?? []) {
+    const assignedBase = truncateMoney(tax.base_amount * share);
+    const assignedTax = truncateMoney(tax.tax_amount * share);
+    const { error: updateError } = await supabase
+      .from("quote_item_taxes")
+      .update({
+        base_amount: truncateMoney(tax.base_amount - assignedBase),
+        tax_amount: truncateMoney(tax.tax_amount - assignedTax),
+      })
+      .eq("id", tax.id)
+      .eq("organization_id", tax.organization_id);
+    if (updateError) {
+      throw new Error(
+        `Error al dividir impuestos del ítem: ${updateError.message}`
+      );
+    }
+    const { error: insertError } = await supabase
+      .from("quote_item_taxes")
+      .insert({
+        organization_id: tax.organization_id,
+        quote_id: tax.quote_id,
+        quote_item_id: newItemId,
+        product_id: tax.product_id,
+        tax_id: tax.tax_id,
+        name: tax.name,
+        rate: tax.rate,
+        base_amount: assignedBase,
+        tax_amount: assignedTax,
+        tax_code_snapshot: tax.tax_code_snapshot,
+        source: tax.source,
+      });
+    if (insertError) {
+      throw new Error(
+        `Error al guardar impuestos divididos: ${insertError.message}`
+      );
+    }
+  }
+}
+
 async function processItemSplits(
   supabase: SupabaseClient<Database>,
   quoteItemIds: string[],
@@ -3144,7 +3230,7 @@ async function processItemSplits(
   const { data: originalItems, error } = await supabase
     .from("quote_items")
     .select(
-      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id, quote_item_extras(description, price)"
+      "id, quote_id, description, currency, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id, quote_item_extras(description, price)"
     )
     .in("id", splitIds);
 
@@ -3176,12 +3262,24 @@ async function processItemSplits(
       continue;
     }
 
-    await updateOriginalItemQuantity(supabase, item.id, remainingQty);
+    const amounts = splitQuoteItemAmounts({
+      quantity: item.quantity,
+      assignedQuantity: assignedQty,
+      subtotal: item.subtotal,
+      discountAmount: item.discount_amount,
+    });
+    await updateOriginalItemQuantity(supabase, item.id, remainingQty, amounts);
     const newRowId = await insertSplitQuoteItem(
       supabase,
       item,
-      assignedQty,
+      { quantity: assignedQty, amounts },
       quoteId
+    );
+    await splitQuoteItemTaxes(
+      supabase,
+      item.id,
+      newRowId,
+      assignedQty / item.quantity
     );
     newIds.push(newRowId);
     idMap.set(newRowId, item.id);

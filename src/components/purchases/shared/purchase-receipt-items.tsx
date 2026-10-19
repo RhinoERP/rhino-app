@@ -29,6 +29,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  getPurchaseUnitShortLabel,
+  isMeasuredUnit,
+} from "@/modules/purchases/utils/purchase-units";
 import type {
   ReceiptFormValues,
   ReceivedItemForm,
@@ -59,35 +63,6 @@ type PurchaseReceiptItemsProps = {
   ) => void;
 };
 
-function getUnitLabel(unitOfMeasure?: string | null): string {
-  if (!unitOfMeasure) {
-    return "un";
-  }
-  const normalized = unitOfMeasure.toUpperCase();
-  switch (normalized) {
-    case "KG": {
-      return "kg";
-    }
-    case "LT": {
-      return "lt";
-    }
-    case "MT": {
-      return "t";
-    }
-    default: {
-      return "un";
-    }
-  }
-}
-
-function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
-  if (!unitOfMeasure) {
-    return false;
-  }
-  const normalized = unitOfMeasure.toUpperCase();
-  return normalized === "KG" || normalized === "LT" || normalized === "MT";
-}
-
 /** Sub-component that renders the lots section for one item row. */
 function ItemLotRows({
   itemIndex,
@@ -110,8 +85,8 @@ function ItemLotRows({
     name: `items.${itemIndex}.lots`,
   });
 
-  const isWeightBased = hasWeightOrVolumeMeasure(item.unit_of_measure);
-  const unitLabel = getUnitLabel(item.unit_of_measure);
+  const isWeightBased = isMeasuredUnit(item.unit_of_measure);
+  const unitLabel = getPurchaseUnitShortLabel(item.unit_of_measure);
 
   const assignedQuantity =
     lots?.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0) ?? 0;
@@ -345,14 +320,9 @@ function ProductVariantMatrixSection({
         <span className="font-medium text-muted-foreground text-xs">
           Stock por variante
         </span>
-        <Badge
-          className="text-xs"
-          variant={
-            totalReceived > orderedQuantity ? "destructive" : "secondary"
-          }
-        >
+        <Badge className="text-xs" variant="secondary">
           {totalReceived > orderedQuantity
-            ? `Excede: ${totalReceived} / ${orderedQuantity} un`
+            ? `Excedente: ${totalReceived} / ${orderedQuantity} un`
             : `Recibido: ${totalReceived} / ${orderedQuantity} un`}
         </Badge>
       </div>
@@ -441,8 +411,8 @@ export function PurchaseReceiptItems({
       return null;
     }
 
-    const isWeightBased = hasWeightOrVolumeMeasure(item.unit_of_measure);
-    const unitLabel = getUnitLabel(item.unit_of_measure);
+    const isWeightBased = isMeasuredUnit(item.unit_of_measure);
+    const unitLabel = getPurchaseUnitShortLabel(item.unit_of_measure);
     const lots = item.lots ?? [];
     const unitCost = item.unitCost ?? 0;
     const productDisplay = item.product_name || item.productId;

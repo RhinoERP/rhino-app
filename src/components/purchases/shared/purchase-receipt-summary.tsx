@@ -13,32 +13,12 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { getPurchaseUnitShortLabel } from "@/modules/purchases/utils/purchase-units";
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
 } from "@/modules/taxes/item-tax-calculations";
 import type { ReceivedItemForm } from "./purchase-receipt";
-
-function getUnitLabel(unitOfMeasure?: string | null): string {
-  if (!unitOfMeasure) {
-    return "un";
-  }
-  const normalized = unitOfMeasure.toUpperCase();
-  switch (normalized) {
-    case "KG": {
-      return "kg";
-    }
-    case "LT": {
-      return "lt";
-    }
-    case "MT": {
-      return "t";
-    }
-    default: {
-      return "un";
-    }
-  }
-}
 
 type PurchaseReceiptSummaryProps = {
   items: ReceivedItemForm[];
@@ -156,7 +136,7 @@ export function PurchaseReceiptSummary({
     receivedItemsForUnit.length > 0
       ? receivedItemsForUnit[0].unit_of_measure
       : null;
-  const unitLabel = getUnitLabel(primaryUnitOfMeasure);
+  const unitLabel = getPurchaseUnitShortLabel(primaryUnitOfMeasure);
 
   // Aggregated across lots and variant stocks
   const totalUnits = receivedItems.reduce(

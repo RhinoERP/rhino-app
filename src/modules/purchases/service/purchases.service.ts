@@ -7,8 +7,6 @@ import {
   NO_PAYABLE_INVOICE_RATE_MESSAGE,
   resolvePayableExchangeRate,
 } from "@/modules/collections/utils/payment-rate";
-import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
-import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
@@ -18,7 +16,13 @@ import type {
   PurchaseMetrics,
 } from "../types";
 import { legacyPurchaseFiscalFieldsChanged } from "../utils/purchase-legacy";
+import { appendReceiptProgress } from "../utils/receipt-progress";
 import {
+  getPurchaseReceiptProgress,
+  type ReceiptLine,
+} from "./purchase-receipts.service";
+import {
+  buildPurchaseFiscalPayload,
   buildPurchaseTaxPlan,
   getPurchaseItemTaxRows,
   parsePurchaseTaxInputs,
@@ -517,67 +521,6 @@ export async function createPurchaseOrder(
   }
 
   return purchaseOrder;
-}
-
-export async function advanceLinkedChildOrderToGoodsReceived(
-  purchaseOrderId: string,
-  orgId: string,
-  orgSlug: string
-): Promise<void> {
-  const supabase = await createClient();
-
-  const { data: linkedOrder } = await supabase
-    .from("orders")
-    .select("id, status, parent_order_id, order_number")
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", orgId)
-    .maybeSingle();
-
-  if (!linkedOrder || linkedOrder.status !== "PURCHASING") {
-    return;
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return;
-  }
-
-  await supabase
-    .from("orders")
-    .update({ status: "GOODS_RECEIVED" })
-    .eq("id", linkedOrder.id);
-
-  await supabase.from("order_status_history").insert({
-    order_id: linkedOrder.id,
-    to_status: "GOODS_RECEIVED",
-    from_status: "PURCHASING",
-    notes: "Compra recibida - Mercadería disponible",
-    changed_by: user?.id ?? null,
-    changed_at: new Date().toISOString(),
-  });
-
-  if (linkedOrder.parent_order_id) {
-    await recalcParentOrderStatus(linkedOrder.parent_order_id, orgId);
-  }
-
-  const changedByName =
-    (user.user_metadata?.full_name as string | undefined) ??
-    user.email ??
-    "Usuario";
-
-  createOrderNotifications({
-    orgSlug,
-    orgId,
-    orderId: linkedOrder.id,
-    orderNumber: linkedOrder.order_number,
-    status: "GOODS_RECEIVED",
-    isChild: true,
-    changedByUserId: user.id,
-    changedByName,
-  }).catch(console.error);
 }
 
 async function buildCostMap(
@@ -1441,24 +1384,59 @@ export type UpdateReceivedItemInput = {
   unitQuantity?: number;
   quantity?: number;
   unitCost?: number;
+  variantStocks?: Record<string, Record<string, number>>;
+  subtotal?: number;
 };
 
-export async function processPurchaseReceipt(
+/** Validate fiscal inputs before the receipt starts creating lots or moving stock. */
+export async function prevalidatePurchaseReceiptFiscalState(
   orgSlug: string,
   purchaseOrderId: string,
   receivedItemIds: string[],
   itemUpdates: UpdateReceivedItemInput[]
 ): Promise<void> {
-  const prepared = await preparePurchaseReceiptFiscalState(
+  await preparePurchaseReceiptFiscalState(
     orgSlug,
     purchaseOrderId,
     receivedItemIds,
-    itemUpdates
+    { itemUpdates }
   );
-  await persistPurchaseFiscalState({
-    supabase: prepared.supabase,
-    orgId: prepared.orgId,
-    orderId: purchaseOrderId,
+}
+
+/** Preview the cumulative fiscal result before the atomic receipt transaction. */
+export async function previewAtomicReceiptFiscalState(
+  orgSlug: string,
+  purchaseOrderId: string,
+  receiptLines: ReceiptLine[]
+) {
+  const progress = await getPurchaseReceiptProgress(orgSlug, purchaseOrderId);
+  for (const line of receiptLines) {
+    appendReceiptProgress(progress, {
+      purchase_order_item_id: line.itemId,
+      quantity: line.quantity,
+      unit_quantity: line.unitQuantity,
+      unit_cost: line.unitCost,
+      variant_stocks: line.variantStocks,
+    });
+  }
+  const updates = Array.from(progress, ([itemId, received]) => ({
+    itemId,
+    quantity: received.quantity,
+    unitQuantity: received.unitQuantity,
+    unitCost: received.unitCost,
+    subtotal: received.subtotal,
+    variantStocks: received.variantStocks,
+  }));
+  const virtualItems = receiptLines
+    .filter((line) => line.newItem)
+    .map((line) => ({ itemId: line.itemId, productId: line.productId }));
+  const prepared = await preparePurchaseReceiptFiscalState(
+    orgSlug,
+    purchaseOrderId,
+    updates.map((item) => item.itemId),
+    { itemUpdates: updates, virtualItems }
+  );
+  return buildPurchaseFiscalPayload({
     mode: prepared.order.tax_snapshot_initialized
       ? "receipt"
       : "receipt_legacy",
@@ -1475,28 +1453,17 @@ export async function processPurchaseReceipt(
   });
 }
 
-/** Validate fiscal inputs before the receipt starts creating lots or moving stock. */
-export async function prevalidatePurchaseReceiptFiscalState(
-  orgSlug: string,
-  purchaseOrderId: string,
-  receivedItemIds: string[],
-  itemUpdates: UpdateReceivedItemInput[]
-): Promise<void> {
-  await preparePurchaseReceiptFiscalState(
-    orgSlug,
-    purchaseOrderId,
-    receivedItemIds,
-    itemUpdates
-  );
-}
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates the receipt and prepares the fiscal state without modifying stock.
 async function preparePurchaseReceiptFiscalState(
   orgSlug: string,
   purchaseOrderId: string,
   receivedItemIds: string[],
-  itemUpdates: UpdateReceivedItemInput[]
+  params: {
+    itemUpdates: UpdateReceivedItemInput[];
+    virtualItems?: Array<{ itemId: string; productId: string }>;
+  }
 ) {
+  const { itemUpdates, virtualItems = [] } = params;
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     throw new Error("Organización no encontrada");
@@ -1508,7 +1475,7 @@ async function preparePurchaseReceiptFiscalState(
     .eq("id", purchaseOrderId)
     .eq("organization_id", org.id)
     .single();
-  if (!order || order.status !== "IN_TRANSIT") {
+  if (!(order && ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(order.status))) {
     throw new Error("Solo se puede recibir una compra en tránsito");
   }
   const { data: storedItems, error } = await supabase
@@ -1520,10 +1487,11 @@ async function preparePurchaseReceiptFiscalState(
     throw new Error(`Error al validar ítems de recepción: ${error.message}`);
   }
   const byId = new Map((storedItems ?? []).map((item) => [item.id, item]));
+  const virtualById = new Map(virtualItems.map((item) => [item.itemId, item]));
   if (
     receivedItemIds.length === 0 ||
     new Set(receivedItemIds).size !== receivedItemIds.length ||
-    receivedItemIds.some((id) => !byId.has(id)) ||
+    receivedItemIds.some((id) => !(byId.has(id) || virtualById.has(id))) ||
     itemUpdates.length !== receivedItemIds.length ||
     new Set(itemUpdates.map((item) => item.itemId)).size !==
       itemUpdates.length ||
@@ -1547,6 +1515,23 @@ async function preparePurchaseReceiptFiscalState(
     org.id,
     purchaseOrderId
   );
+  const { data: extraReceipts, error: extrasError } = await supabase
+    .from("purchase_receipt_items")
+    .select("purchase_order_item_id")
+    .eq("organization_id", org.id)
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("is_extra", true);
+  if (extrasError) {
+    throw new Error(
+      `Error al consultar productos agregados: ${extrasError.message}`
+    );
+  }
+  const extraIds = new Set(
+    (extraReceipts ?? []).map((receipt) => receipt.purchase_order_item_id)
+  );
+  for (const virtual of virtualItems) {
+    extraIds.add(virtual.itemId);
+  }
   const byItem = new Map<string, ItemTaxInput[]>();
   for (const tax of snapshots) {
     if (tax.source === "fallback" || tax.source === "legacy_prorated") {
@@ -1557,33 +1542,36 @@ async function preparePurchaseReceiptFiscalState(
       toPurchaseItemTaxInput(tax),
     ]);
   }
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: receipt row maps saved fiscal selections for both legacy and itemized purchases.
   const items = itemUpdates.map((update) => {
     const stored = byId.get(update.itemId);
-    if (!stored) {
+    const virtual = virtualById.get(update.itemId);
+    if (!(stored || virtual)) {
       throw new Error("El ítem no pertenece a la compra");
     }
-    const unitQuantity = update.unitQuantity ?? stored.unit_quantity ?? 0;
-    const quantity = update.quantity ?? stored.quantity;
-    const cost = update.unitCost ?? stored.unit_cost ?? 0;
+    const unitQuantity = update.unitQuantity ?? stored?.unit_quantity ?? 0;
+    const quantity = update.quantity ?? stored?.quantity ?? 0;
+    const cost = update.unitCost ?? stored?.unit_cost ?? 0;
+    const taxOverride = stored?.tax_override ?? null;
     return {
-      id: stored.id,
-      product_id: stored.product_id,
+      id: stored?.id ?? virtual?.itemId ?? update.itemId,
+      product_id: stored?.product_id ?? virtual?.productId ?? "",
       quantity,
       unit_quantity: unitQuantity,
       unit_cost: cost,
-      variant_stocks: stored.variant_stocks,
+      variant_stocks: update.variantStocks ?? stored?.variant_stocks,
       tax_override:
-        stored.tax_override === null
-          ? null
-          : parsePurchaseTaxInputs(stored.tax_override),
+        taxOverride === null ? null : parsePurchaseTaxInputs(taxOverride),
       subtotal: truncateMoney(
-        (unitQuantity > 0 ? unitQuantity : quantity) * cost
+        update.subtotal ?? (unitQuantity > 0 ? unitQuantity : quantity) * cost
       ),
       taxes:
-        stored.tax_override === null
-          ? (byItem.get(stored.id) ??
-            (order.tax_snapshot_initialized ? [] : undefined))
-          : parsePurchaseTaxInputs(stored.tax_override),
+        taxOverride === null
+          ? (byItem.get(update.itemId) ??
+            (order.tax_snapshot_initialized && !extraIds.has(update.itemId)
+              ? []
+              : undefined))
+          : parsePurchaseTaxInputs(taxOverride),
     };
   });
   const subtotal = items.reduce(
