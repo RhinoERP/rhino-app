@@ -29,7 +29,14 @@ export function PwaProvider({ children }: { children: ReactNode }) {
   const [isInstalled, setIsInstalled] = useState(false);
 
   useEffect(() => {
-    setIsInstalled(window.matchMedia("(display-mode: standalone)").matches);
+    const displayMode = window.matchMedia("(display-mode: standalone)");
+    const updateInstalledState = () => {
+      const iosStandalone = Boolean(
+        (navigator as Navigator & { standalone?: boolean }).standalone
+      );
+      setIsInstalled(displayMode.matches || iosStandalone);
+    };
+    updateInstalledState();
 
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -44,12 +51,14 @@ export function PwaProvider({ children }: { children: ReactNode }) {
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     window.addEventListener("appinstalled", handleInstalled);
+    displayMode.addEventListener("change", updateInstalledState);
     return () => {
       window.removeEventListener(
         "beforeinstallprompt",
         handleBeforeInstallPrompt
       );
       window.removeEventListener("appinstalled", handleInstalled);
+      displayMode.removeEventListener("change", updateInstalledState);
     };
   }, []);
 

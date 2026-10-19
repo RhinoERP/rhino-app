@@ -2,6 +2,10 @@
 
 ## Estado al 2026-09-22
 
+> Este registro describe la prueba inicial; las tareas pendientes se mantienen
+> historicas. El estado del refresco automatico implementado despues se resume
+> en la seccion de actualizacion del 2026-10-01.
+
 Entorno piloto:
 
 - organizacion: LuchoBet (`luchobet`);
@@ -40,4 +44,22 @@ Estado: corregido en codigo; pendiente de confirmar en iPhone despues de despleg
 - Completar aceptacion en Chrome Android.
 - Medir tiempos de descarga, tasa de sincronizacion y errores durante un periodo sostenido.
 
-La prueba actual valida el vertical basico, pero no constituye aun la aceptacion completa del piloto.
+La prueba inicial valida el vertical basico, pero no constituye la aceptacion completa del piloto.
+
+## Actualizacion del 2026-10-01
+
+- Se confirmo en codigo que el flujo no contiene un slug hardcodeado: la
+  organizacion se resuelve a partir de la ruta actual y se valida contra la
+  membresia y permisos de la sesion.
+- Se implemento la preparacion automatica del snapshot al abrir la PWA
+  instalada y su comprobacion condicional mediante ETag cada 20 minutos en
+  foreground.
+- Esta nueva ruta de actualizacion fue cubierta con tests automatizados y build
+  de produccion, pero aun no tiene aceptacion manual en Safari iOS/Chrome
+  Android.
+- La habilitacion continua siendo gradual por organizacion mediante
+  `seller_offline_snapshot_enabled`; no se considera aprobado un rollout
+  general hasta completar los casos pendientes de `test-matrix.md`.
+- Ante 401/403/404/422 de autorizacion/elegibilidad, el cliente ahora purga
+  snapshot, borradores y comandos de la organizacion afectada; falta validar
+  este caso en dispositivos.

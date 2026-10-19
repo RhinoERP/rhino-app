@@ -115,13 +115,19 @@ function showRefreshError(error: unknown, showFeedback: boolean) {
 }
 
 function handleRefreshSuccess(
-  status: "skipped" | "unchanged" | "updated",
+  status: "revoked" | "skipped" | "unchanged" | "updated",
   showFeedback: boolean
 ) {
   if (status === "updated") {
     navigator.storage?.persist?.().catch(() => false);
     if (showFeedback) {
       toast.success("Datos offline actualizados");
+    }
+  } else if (status === "revoked") {
+    if (showFeedback) {
+      toast.error(
+        "Se eliminaron los datos offline porque el acceso fue revocado"
+      );
     }
   } else if (status === "unchanged" && showFeedback) {
     toast.success("Los datos offline ya estan actualizados");
@@ -139,6 +145,26 @@ function canStartRefresh(inFlight: boolean, showFeedback: boolean) {
     toast.error("No hay conexion para actualizar los datos offline");
   }
   return false;
+}
+
+function applyRefreshResult(
+  result: Awaited<ReturnType<typeof refreshSellerOfflineSnapshot>>,
+  setRecord: (record: StoredSellerSnapshot | null) => void,
+  setRefreshError: (message: string | null) => void,
+  showFeedback: boolean
+) {
+  setRecord(result.record);
+  if (result.status !== "revoked") {
+    handleRefreshSuccess(result.status, showFeedback);
+    return;
+  }
+
+  const message =
+    `Se eliminaron los datos offline porque ya no hay acceso a esta organizacion. ${result.message ?? ""}`.trim();
+  setRefreshError(message);
+  if (showFeedback) {
+    toast.error(message);
+  }
 }
 
 export function OfflineDataManager({
@@ -180,8 +206,7 @@ export function OfflineDataManager({
           ownerUserId,
           signal: controller.signal,
         });
-        setRecord(result.record);
-        handleRefreshSuccess(result.status, showFeedback);
+        applyRefreshResult(result, setRecord, setRefreshError, showFeedback);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;

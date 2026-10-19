@@ -26,4 +26,4 @@ Aplicar migraciones con el proceso normal del entorno. Despues verificar en una 
 4. Repetir el mismo comando devuelve el mismo `sales_order_id`; cambiar el payload para igual ID falla.
 5. Un error de items o impuestos revierte orden y reclamo.
 
-La aplicacion de la migracion y una creacion completa mediante el endpoint estan confirmadas. Todavia faltan verificaciones directas de grants, rollback forzado y concurrencia contra PostgreSQL real.
+La migracion y una creacion completa mediante el endpoint estan confirmadas en el entorno piloto. Todavia faltan verificaciones directas de grants, rollback forzado, respuesta perdida y concurrencia contra PostgreSQL real.

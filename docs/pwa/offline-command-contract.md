@@ -2,7 +2,7 @@
 
 ## Estado
 
-Contrato V1, persistencia idempotente, endpoint, RPC transaccional, replay foreground y UX de revision/eliminacion implementados. Pendientes las validaciones manuales mobile y las pruebas contra una base Supabase real.
+Contrato V1, persistencia idempotente, endpoint, RPC transaccional, replay foreground y UX de revision/eliminacion implementados. El flujo basico se probo contra Supabase real en el piloto. Pendientes las pruebas directas de grants, rollback, respuesta perdida y concurrencia, ademas de la aceptacion mobile completa.
 
 ## Comando V1
 
@@ -79,5 +79,5 @@ Los comandos sincronizados se retienen siete dias; el mantenimiento elimina desp
 
 ## Pendientes
 
-- Ejecutar integracion contra una base Supabase real, incluida respuesta perdida despues del commit.
+- Probar contra Supabase real la respuesta perdida despues del commit, rollback atomico, grants y concurrencia.
 - Completar aceptacion instalada en Chrome Android y Safari iOS para el flujo de Fase 3.

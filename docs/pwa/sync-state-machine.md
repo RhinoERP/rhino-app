@@ -1,6 +1,6 @@
 # Maquina de estados de sincronizacion
 
-> **Estado:** implementada; pruebas unitarias disponibles. Integracion DB real y aceptacion mobile pendientes.
+> **Estado al 2026-10-01:** implementada y cubierta por pruebas unitarias. El replay basico se valido contra Supabase real en el piloto; pruebas de integracion adversariales y aceptacion mobile completa pendientes.
 
 ## Persistencia local
 

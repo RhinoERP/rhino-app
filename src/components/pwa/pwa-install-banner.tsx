@@ -9,17 +9,12 @@ import { useEffect, useState } from "react";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { getPwaInstallGuide } from "@/lib/pwa-install-guide";
 import { trackPwaEvent } from "@/lib/pwa-telemetry";
 import { usePwa } from "./pwa-provider";
 
 const DISMISS_KEY = "rhinos:pwa-install-dismissed-at";
 const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
-const IOS_USER_AGENT = /iPad|iPhone|iPod/;
-
-function isIos() {
-  return IOS_USER_AGENT.test(navigator.userAgent);
-}
-
 function wasRecentlyDismissed() {
   const value = window.localStorage.getItem(DISMISS_KEY);
   if (!value) {
@@ -37,11 +32,18 @@ export function PwaInstallBanner({
   const isMobile = useIsMobile();
   const { installPrompt, isInstalled, promptInstall } = usePwa();
   const [dismissed, setDismissed] = useState(true);
-  const [showIosInstructions, setShowIosInstructions] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   const canManageSales = can("sales.manage") || can("sales.manage.all");
-  const ios = typeof navigator !== "undefined" && isIos();
-  const canOfferInstall = Boolean(installPrompt) || ios;
+  const installGuide =
+    typeof navigator === "undefined"
+      ? null
+      : getPwaInstallGuide(
+          navigator.userAgent,
+          navigator.platform,
+          navigator.maxTouchPoints
+        );
+  const canOfferInstall = Boolean(installPrompt) || Boolean(installGuide);
   const shouldShow =
     isMobile &&
     wholesaleEnabled &&
@@ -71,12 +73,22 @@ export function PwaInstallBanner({
   };
 
   const install = async () => {
-    if (ios) {
-      setShowIosInstructions(true);
-      trackPwaEvent("pwa.ios_instructions_shown");
+    if (installPrompt) {
+      const result = await promptInstall();
+      if (result === "unavailable" && installGuide) {
+        setShowInstallGuide(true);
+      }
       return;
     }
-    await promptInstall();
+
+    if (installGuide) {
+      setShowInstallGuide(true);
+      trackPwaEvent(
+        installGuide.browser === "safari-ios"
+          ? "pwa.ios_instructions_shown"
+          : "pwa.browser_install_guide_shown"
+      );
+    }
   };
 
   return (
@@ -91,21 +103,40 @@ export function PwaInstallBanner({
       </button>
       <div className="pr-6">
         <p className="font-semibold">Instala Rhinos</p>
-        {showIosInstructions ? (
-          <p className="mt-1 text-muted-foreground text-sm">
-            Toca Compartir en Safari y luego “Agregar a inicio”.
-          </p>
+        {showInstallGuide && installGuide ? (
+          <div className="mt-1 text-muted-foreground text-sm">
+            <p>Pasos para {installGuide.label}:</p>
+            <ol className="mt-2 list-inside list-decimal space-y-1">
+              {installGuide.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
         ) : (
           <p className="mt-1 text-muted-foreground text-sm">
             Accede mas rapido desde la pantalla de inicio de tu telefono.
           </p>
         )}
       </div>
-      {!showIosInstructions && (
-        <Button className="mt-3 w-full" onClick={install} size="sm">
-          {ios ? <ShareNetworkIcon /> : <DownloadSimpleIcon />}
-          {ios ? "Ver como instalar" : "Instalar aplicacion"}
-        </Button>
+      {!showInstallGuide && (
+        <div className="mt-3 flex flex-col gap-2">
+          <Button className="w-full" onClick={install} size="sm">
+            {installPrompt ? <DownloadSimpleIcon /> : <ShareNetworkIcon />}
+            {installPrompt
+              ? "Instalar aplicacion"
+              : "Ver tutorial de instalacion"}
+          </Button>
+          {installPrompt && installGuide && (
+            <Button
+              className="w-full"
+              onClick={() => setShowInstallGuide(true)}
+              size="sm"
+              variant="outline"
+            >
+              Ver pasos en {installGuide.label}
+            </Button>
+          )}
+        </div>
       )}
     </aside>
   );

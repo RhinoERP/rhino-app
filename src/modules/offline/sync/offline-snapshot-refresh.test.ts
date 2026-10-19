@@ -144,4 +144,39 @@ describe("offline snapshot refresh", () => {
       snapshot: { snapshotId: snapshot.snapshotId },
     });
   });
+
+  it.each([
+    401, 403, 404, 422,
+  ])("purges local organization data when the server returns %i", async (status) => {
+    fetchMock.mockResolvedValueOnce(responseForSnapshot());
+    await refreshSellerOfflineSnapshot({
+      organizationId,
+      orgSlug: "acme",
+      ownerUserId,
+      now: initialTime,
+    });
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: "OFFLINE_DISABLED", error: "Offline deshabilitado" },
+        { status }
+      )
+    );
+
+    const result = await refreshSellerOfflineSnapshot({
+      force: true,
+      organizationId,
+      orgSlug: "acme",
+      ownerUserId,
+      now: initialTime + 60_000,
+    });
+
+    expect(result).toMatchObject({
+      status: "revoked",
+      record: null,
+      message: "Offline deshabilitado",
+    });
+    await expect(
+      getSellerSnapshot(ownerUserId, organizationId)
+    ).resolves.toBeNull();
+  });
 });

@@ -4,6 +4,7 @@ import { sellerOfflineSnapshotV1Schema } from "../contracts/seller-offline-snaps
 import {
   getSellerSnapshot,
   markSellerSnapshotChecked,
+  purgeOfflineDataForOrganization,
   type StoredSellerSnapshot,
   saveSellerSnapshot,
 } from "../storage/offline-db";
@@ -16,8 +17,9 @@ const inFlightByPartition = new Map<
 >();
 
 export type OfflineSnapshotRefreshResult = {
-  status: "skipped" | "unchanged" | "updated";
+  status: "revoked" | "skipped" | "unchanged" | "updated";
   record: StoredSellerSnapshot | null;
+  message?: string;
 };
 
 type RefreshOptions = {
@@ -99,7 +101,20 @@ async function refreshUnlocked(
   }
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    const message = await readError(response);
+    if (
+      response.status === 401 ||
+      response.status === 403 ||
+      response.status === 404 ||
+      response.status === 422
+    ) {
+      await purgeOfflineDataForOrganization(
+        options.ownerUserId,
+        options.organizationId
+      );
+      return { status: "revoked", record: null, message };
+    }
+    throw new Error(message);
   }
 
   const body = await response.text();

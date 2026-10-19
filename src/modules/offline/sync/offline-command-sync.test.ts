@@ -6,6 +6,7 @@ const storage = vi.hoisted(() => ({
   deleteOfflinePreSaleDraft: vi.fn(),
   finalizeOfflineCommandClaim: vi.fn(),
   listOfflineCommands: vi.fn(),
+  purgeOfflineDataForOrganization: vi.fn(),
 }));
 const events = vi.hoisted(() => ({
   publishOfflineCommandStatus: vi.fn(),
@@ -101,6 +102,9 @@ describe("offline command replay", () => {
       .mockReset()
       .mockImplementation(async (_id, _lease, update) => update(record));
     storage.deleteOfflinePreSaleDraft.mockReset().mockResolvedValue(undefined);
+    storage.purgeOfflineDataForOrganization
+      .mockReset()
+      .mockResolvedValue(undefined);
     events.publishOfflineCommandStatus.mockReset();
     events.publishOfflinePreSaleSynced.mockReset();
     vi.stubGlobal(
@@ -133,6 +137,25 @@ describe("offline command replay", () => {
     await replayOfflineCommands(ids.owner);
 
     expect(storage.listOfflineCommands).toHaveBeenCalledWith(ids.owner);
+  });
+
+  it("purges local organization data after a forbidden replay", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      json: async () => ({
+        ok: false,
+        code: "FORBIDDEN",
+        message: "No autorizado",
+        retryable: false,
+      }),
+    } as Response);
+
+    await expect(replayOfflineCommands(ids.owner)).resolves.toEqual([]);
+
+    expect(storage.purgeOfflineDataForOrganization).toHaveBeenCalledWith(
+      ids.owner,
+      ids.organization
+    );
+    expect(storage.finalizeOfflineCommandClaim).not.toHaveBeenCalled();
   });
 
   it("does not claim syncing records before their lease expires", async () => {

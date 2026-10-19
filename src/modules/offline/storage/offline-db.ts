@@ -18,6 +18,7 @@ import {
   type SellerOfflineSnapshotV1,
   sellerOfflineSnapshotV1Schema,
 } from "../contracts/seller-offline-snapshot";
+import { publishOfflineOrganizationPurged } from "../sync/offline-data-events";
 
 const DATABASE_NAME = "rhinos-offline";
 const DATABASE_VERSION = 3;
@@ -252,6 +253,60 @@ export async function getSellerSnapshot(
   return readAndValidateSnapshot(await database.get("snapshots", key));
 }
 
+export async function purgeOfflineDataForOrganization(
+  ownerUserId: string,
+  organizationId: string
+): Promise<void> {
+  const database = await getDatabase();
+  const transaction = database.transaction(
+    ["snapshots", "state", "drafts", "commands"],
+    "readwrite"
+  );
+
+  const snapshots = await transaction
+    .objectStore("snapshots")
+    .index("byOrganization")
+    .getAll(organizationId);
+  for (const snapshot of snapshots) {
+    if (snapshot.ownerUserId === ownerUserId) {
+      await transaction.objectStore("snapshots").delete(snapshot.key);
+    }
+  }
+
+  for (const key of [ACTIVE_SNAPSHOT_KEY, ACTIVE_DRAFT_KEY]) {
+    const state = await transaction.objectStore("state").get(key);
+    if (
+      state?.ownerUserId === ownerUserId &&
+      state.organizationId === organizationId
+    ) {
+      await transaction.objectStore("state").delete(key);
+    }
+  }
+
+  const drafts = await transaction
+    .objectStore("drafts")
+    .index("byOrganization")
+    .getAll(organizationId);
+  for (const draft of drafts) {
+    if (draft.ownerUserId === ownerUserId) {
+      await transaction.objectStore("drafts").delete(draft.draftId);
+    }
+  }
+
+  const commands = await transaction
+    .objectStore("commands")
+    .index("byOrganization")
+    .getAll(organizationId);
+  for (const command of commands) {
+    if (command.ownerUserId === ownerUserId) {
+      await transaction.objectStore("commands").delete(command.commandId);
+    }
+  }
+
+  await transaction.done;
+  publishOfflineOrganizationPurged({ ownerUserId, organizationId });
+}
+
 export async function getActiveSellerSnapshot(): Promise<StoredSellerSnapshot | null> {
   const database = await getDatabase();
   const active = await database.get("state", ACTIVE_SNAPSHOT_KEY);
@@ -274,6 +329,15 @@ export async function purgeOfflineDataForOwner(ownerUserId: string) {
     ["snapshots", "state", "drafts", "commands"],
     "readwrite"
   );
+  const purgedOrganizations = new Set<string>();
+  const snapshots = await transaction.objectStore("snapshots").getAll();
+  const drafts = await transaction.objectStore("drafts").getAll();
+  const commands = await transaction.objectStore("commands").getAll();
+  for (const record of [...snapshots, ...drafts, ...commands]) {
+    if (record.ownerUserId === ownerUserId) {
+      purgedOrganizations.add(record.organizationId);
+    }
+  }
   const keys = await transaction
     .objectStore("snapshots")
     .index("byOwner")
@@ -308,6 +372,9 @@ export async function purgeOfflineDataForOwner(ownerUserId: string) {
     await transaction.objectStore("commands").delete(key);
   }
   await transaction.done;
+  for (const organizationId of purgedOrganizations) {
+    publishOfflineOrganizationPurged({ ownerUserId, organizationId });
+  }
 }
 
 export async function purgeAllOfflineData() {
@@ -316,11 +383,27 @@ export async function purgeAllOfflineData() {
     ["snapshots", "state", "drafts", "commands"],
     "readwrite"
   );
+  const purgedPartitions = new Map<string, Set<string>>();
+  const [snapshots, drafts, commands] = await Promise.all([
+    transaction.objectStore("snapshots").getAll(),
+    transaction.objectStore("drafts").getAll(),
+    transaction.objectStore("commands").getAll(),
+  ]);
+  for (const record of [...snapshots, ...drafts, ...commands]) {
+    const organizations = purgedPartitions.get(record.ownerUserId) ?? new Set();
+    organizations.add(record.organizationId);
+    purgedPartitions.set(record.ownerUserId, organizations);
+  }
   await transaction.objectStore("snapshots").clear();
   await transaction.objectStore("state").clear();
   await transaction.objectStore("drafts").clear();
   await transaction.objectStore("commands").clear();
   await transaction.done;
+  for (const [ownerUserId, organizations] of purgedPartitions) {
+    for (const organizationId of organizations) {
+      publishOfflineOrganizationPurged({ ownerUserId, organizationId });
+    }
+  }
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one transaction keeps related purge rules atomic

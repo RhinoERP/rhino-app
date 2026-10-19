@@ -1,6 +1,6 @@
 # Fase 3 - Implementacion de comandos y sincronizacion
 
-> **Estado:** implementacion tecnica completa; integracion con Supabase real y aceptacion mobile pendientes.
+> **Estado al 2026-10-01:** implementacion tecnica completa. El camino basico se ejecuto contra Supabase real en el piloto iOS; pruebas de grants, rollback, respuesta perdida, concurrencia, revocacion y aceptacion mobile completa siguen pendientes.
 
 ## Flujo implementado
 

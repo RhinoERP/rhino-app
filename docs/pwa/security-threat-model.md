@@ -4,6 +4,7 @@
 |---|---|---|
 | Datos de otra cuenta u organizacion | Particion por usuario/organizacion, validacion Zod y purga en logout/cambio de cuenta | Un dispositivo comprometido puede inspeccionar IndexedDB |
 | Membresia revocada mientras no hay red | Snapshot con vencimiento y revalidacion fresca obligatoria al sincronizar | Datos ya descargados no se revocan remotamente sin conectividad |
+| Permiso, flag o elegibilidad revocados mientras la sesion sigue abierta | Al recibir 401/403/404/422 del endpoint de snapshot, se purgan transaccionalmente los datos offline del usuario y organizacion | Sin conexion no puede detectarse ni revocarse una copia ya descargada; el dato permanece hasta que venza o el dispositivo recupere conexion |
 | Identidad manipulada en el comando | Sesion autenticada, snapshot fresco y comparacion de actor/organizacion | Depende de proteger cookies y service role en servidor |
 | Acceso directo a RPC privilegiada | Firma atomica solo para `service_role`; replay lookup usa `auth.uid()` | Grants deben verificarse despues de migrar |
 | Replay o doble envio | UUID, hash, unique `(organization_id, command_id)`, transaccion y resultado durable | Clientes concurrentes aun llegan al servidor; la DB es la defensa final |
