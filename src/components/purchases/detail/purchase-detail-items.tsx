@@ -64,6 +64,7 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
 import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
+import { VariantBreakdown } from "../shared/variant-breakdown";
 
 export type PurchaseDetailItem = {
   id?: string;
@@ -84,30 +85,6 @@ export type PurchaseDetailItem = {
   persistedTaxes?: ItemTaxSnapshot[];
 };
 
-function renderVariantBreakdown(
-  variantStocks: Record<string, Record<string, number>>
-) {
-  const parts: string[] = [];
-
-  for (const [attribute, values] of Object.entries(variantStocks)) {
-    const detailParts = Object.entries(values)
-      .filter(([, qty]) => qty > 0)
-      .map(([variantName, qty]) => `${variantName}: ${qty}`);
-
-    if (detailParts.length > 0) {
-      parts.push(`${attribute} ${detailParts.join(", ")}`);
-    }
-  }
-
-  if (parts.length === 0) {
-    return null;
-  }
-
-  return (
-    <p className="mt-1 text-muted-foreground text-xs">{parts.join(" — ")}</p>
-  );
-}
-
 type PurchaseDetailItemsProps = {
   items: PurchaseDetailItem[];
   products: ProductWithPrice[];
@@ -122,6 +99,7 @@ type PurchaseDetailItemsProps = {
   productTaxes: Map<string, ItemTaxInput[]>;
   fallbackTaxes: ItemTaxInput[];
   globalDiscountPercent: number;
+  receivedProgress: Record<string, { quantity: number }>;
   variantMetaMap: Record<string, VariantMeta>;
 };
 
@@ -140,6 +118,7 @@ export function PurchaseDetailItems({
   productTaxes,
   fallbackTaxes,
   globalDiscountPercent,
+  receivedProgress,
   variantMetaMap,
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
@@ -962,11 +941,27 @@ export function PurchaseDetailItems({
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
                         </p>
+                        {(receivedProgress[item.id ?? ""]?.quantity ?? 0) >
+                          0 && (
+                          <p className="text-teal-700 text-xs">
+                            Recibidas:{" "}
+                            {receivedProgress[item.id ?? ""]?.quantity ?? 0} ·
+                            Pendientes:{" "}
+                            {Math.max(
+                              0,
+                              item.quantity -
+                                (receivedProgress[item.id ?? ""]?.quantity ?? 0)
+                            )}
+                          </p>
+                        )}
                         {!isEditingDetails &&
                         isVariantItem &&
-                        item.variant_stocks
-                          ? renderVariantBreakdown(item.variant_stocks)
-                          : null}
+                        item.variant_stocks ? (
+                          <VariantBreakdown
+                            className="mt-1"
+                            variantStocks={item.variant_stocks}
+                          />
+                        ) : null}
                       </div>
 
                       <div className="flex flex-col gap-1">

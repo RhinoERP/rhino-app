@@ -68,6 +68,7 @@ export type OrderWithDetails = OrderRow & {
     } | null;
     quote_items: Array<{
       id: string;
+      parent_quote_item_id?: string | null;
       description: string;
       quantity: number;
       unit_price: number;

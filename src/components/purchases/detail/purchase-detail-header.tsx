@@ -38,6 +38,11 @@ const statusLabels: Record<
     icon: TruckIcon,
     iconColor: "text-orange-500",
   },
+  PARTIALLY_RECEIVED: {
+    label: "Parcialmente recibida",
+    icon: TruckIcon,
+    iconColor: "text-amber-600",
+  },
   RECEIVED: {
     label: "Recibida",
     icon: CheckCircleIcon,
@@ -60,6 +65,12 @@ function getStatusInfo(status: PurchaseOrder["status"] | null) {
     icon: ClipboardTextIcon,
     iconColor: "text-muted-foreground",
   };
+}
+
+function getReceiveButtonLabel(status: string) {
+  return status === "PARTIALLY_RECEIVED"
+    ? "Continuar recepción"
+    : "Recibir compra";
 }
 
 export function PurchaseStatusBadge({
@@ -146,14 +157,16 @@ export function PurchaseDetailHeader({
   onInTransitDialogChange,
 }: PurchaseDetailHeaderProps) {
   const isOrdered = purchaseOrder.status === "ORDERED";
-  const isInTransit = purchaseOrder.status === "IN_TRANSIT";
   const isReceived = purchaseOrder.status === "RECEIVED";
   const isCancelled = purchaseOrder.status === "CANCELLED";
   const isDraft = purchaseOrder.status === "DRAFT";
 
   const canEdit = (isOrdered || isDraft) && !isCancelled;
   const canMoveToInTransit = isOrdered;
-  const canMoveToReceived = isInTransit;
+  const canMoveToReceived = ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(
+    purchaseOrder.status
+  );
+  const receiveButtonLabel = getReceiveButtonLabel(purchaseOrder.status);
   const canDownloadPdf = !(isCancelled || isDraft);
 
   return (
@@ -183,7 +196,7 @@ export function PurchaseDetailHeader({
               type="button"
             >
               <CheckCircleIcon className="mr-2 h-4 w-4" weight="duotone" />
-              {isUpdatingStatus ? "Marcando..." : "Marcar como recibida"}
+              {isUpdatingStatus ? "Marcando..." : receiveButtonLabel}
             </Button>
           )}
           {canMoveToInTransit && (

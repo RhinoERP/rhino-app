@@ -16,7 +16,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 
 type SalesMobileCardProps = {
@@ -70,10 +70,7 @@ function SalesMobileCard({ sale, orgSlug }: SalesMobileCardProps) {
 
   const config = statusConfig[sale.status];
   const saleDate = sale.sale_date
-    ? new Date(sale.sale_date).toLocaleDateString("es-AR", {
-        day: "2-digit",
-        month: "short",
-      })
+    ? formatDateOnly(sale.sale_date)
     : "Sin fecha";
 
   return (

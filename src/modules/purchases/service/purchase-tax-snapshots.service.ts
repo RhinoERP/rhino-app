@@ -268,12 +268,7 @@ export async function persistPurchaseFiscalState(params: {
   nextStatus?: "ORDERED";
   payableDueDate?: string | null;
 }): Promise<Database["public"]["Tables"]["purchase_orders"]["Row"]> {
-  const total = truncateMoney(
-    Math.max(
-      0,
-      params.subtotal - params.discountAmount + params.plan.totalTaxAmount
-    )
-  );
+  const fiscal = buildPurchaseFiscalPayload(params);
   // The RPC becomes part of the generated Supabase types after its migration is applied.
   const client = params.supabase as unknown as {
     rpc: (
@@ -288,12 +283,61 @@ export async function persistPurchaseFiscalState(params: {
     p_org_id: params.orgId,
     p_purchase_order_id: params.orderId,
     p_mode: params.mode,
-    p_items: params.items.map((item) => ({
+    p_items: fiscal.items,
+    p_item_taxes: fiscal.item_taxes,
+    p_order_taxes: fiscal.order_taxes,
+    p_subtotal: fiscal.subtotal,
+    p_tax_amount: fiscal.tax_amount,
+    p_discount_percentage: fiscal.discount_percentage,
+    p_discount_amount: fiscal.discount_amount,
+    p_total_amount: fiscal.total_amount,
+    p_fallback_taxes: fiscal.fallback_taxes,
+    p_supplier_id: fiscal.supplier_id,
+    p_purchase_date: fiscal.purchase_date,
+    p_expiration_date: fiscal.expiration_date,
+    p_remittance_number: fiscal.remittance_number,
+    p_next_status: params.nextStatus ?? null,
+    p_payable_due_date: params.payableDueDate ?? null,
+  });
+  if (error || !data) {
+    throw new Error(
+      `No se pudo guardar la compra de forma atómica: ${error?.message ?? "No encontrada"}`
+    );
+  }
+  return data;
+}
+
+/** Serialize one fiscal plan for either the existing RPC or an atomic receipt. */
+export function buildPurchaseFiscalPayload(params: {
+  mode: "replace" | "confirm" | "receipt" | "receipt_legacy";
+  items: Array<{
+    id: string;
+    product_id: string;
+    quantity: number;
+    unit_quantity: number | null;
+    unit_cost: number;
+    subtotal: number;
+    variant_stocks?: unknown;
+    tax_override?: ItemTaxInput[] | null;
+  }>;
+  plan: ItemizedTaxPlan;
+  subtotal: number;
+  discountPercentage: number;
+  discountAmount: number;
+  fallbackTaxes: ItemTaxInput[];
+  supplierId: string | null;
+  purchaseDate: string;
+  expirationDate: string | null;
+  remittanceNumber: string | null;
+}) {
+  return {
+    mode: params.mode,
+    items: params.items.map((item) => ({
       ...item,
       variant_stocks: item.variant_stocks ?? null,
       tax_override: item.tax_override ?? null,
     })),
-    p_item_taxes: params.plan.itemTaxes.map((tax) => ({
+    item_taxes: params.plan.itemTaxes.map((tax) => ({
       line_id: tax.lineId,
       product_id: tax.productId,
       tax_id: tax.taxId,
@@ -304,7 +348,7 @@ export async function persistPurchaseFiscalState(params: {
       tax_code_snapshot: tax.taxCodeSnapshot,
       source: tax.source,
     })),
-    p_order_taxes: params.plan.aggregateTaxes.map((tax) => ({
+    order_taxes: params.plan.aggregateTaxes.map((tax) => ({
       tax_id: tax.taxId,
       name: tax.name,
       rate: tax.rate,
@@ -312,23 +356,20 @@ export async function persistPurchaseFiscalState(params: {
       tax_amount: truncateMoney(tax.taxAmount),
       tax_code_snapshot: tax.taxCodeSnapshot,
     })),
-    p_subtotal: params.subtotal,
-    p_tax_amount: params.plan.totalTaxAmount,
-    p_discount_percentage: params.discountPercentage,
-    p_discount_amount: params.discountAmount,
-    p_total_amount: total,
-    p_fallback_taxes: params.fallbackTaxes,
-    p_supplier_id: params.supplierId,
-    p_purchase_date: params.purchaseDate,
-    p_expiration_date: params.expirationDate,
-    p_remittance_number: params.remittanceNumber,
-    p_next_status: params.nextStatus ?? null,
-    p_payable_due_date: params.payableDueDate ?? null,
-  });
-  if (error || !data) {
-    throw new Error(
-      `No se pudo guardar la compra de forma atómica: ${error?.message ?? "No encontrada"}`
-    );
-  }
-  return data;
+    subtotal: params.subtotal,
+    tax_amount: params.plan.totalTaxAmount,
+    discount_percentage: params.discountPercentage,
+    discount_amount: params.discountAmount,
+    total_amount: truncateMoney(
+      Math.max(
+        0,
+        params.subtotal - params.discountAmount + params.plan.totalTaxAmount
+      )
+    ),
+    fallback_taxes: params.fallbackTaxes,
+    supplier_id: params.supplierId,
+    purchase_date: params.purchaseDate,
+    expiration_date: params.expirationDate,
+    remittance_number: params.remittanceNumber,
+  };
 }
