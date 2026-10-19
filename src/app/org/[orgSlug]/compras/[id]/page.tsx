@@ -55,6 +55,27 @@ export default async function PurchaseOrderPage({
       getPurchaseReceiptMismatch(orgSlug, id),
     ]);
 
+    const purchaseItemsById = new Map(
+      purchaseOrder.items.map((item) => [item.id, item])
+    );
+    const productsById = new Map(
+      products.map((product) => [product.id, product])
+    );
+    const receiptHistoryWithItems = receiptHistory.map((receipt) => ({
+      ...receipt,
+      items: receipt.items.map((line) => {
+        const purchaseItem = purchaseItemsById.get(line.purchaseOrderItemId);
+        const product = productsById.get(line.productId);
+        return {
+          ...line,
+          productName:
+            purchaseItem?.product_name ?? product?.name ?? "Producto",
+          unitOfMeasure:
+            purchaseItem?.unit_of_measure ?? product?.unit_of_measure ?? null,
+        };
+      }),
+    }));
+
     return (
       <PurchaseDetail
         categories={categories}
@@ -62,7 +83,7 @@ export default async function PurchaseOrderPage({
         orgSlug={orgSlug}
         products={products}
         purchaseOrder={purchaseOrder}
-        receiptHistory={receiptHistory}
+        receiptHistory={receiptHistoryWithItems}
         receivedProgress={Object.fromEntries(progress)}
         relatedOrder={relatedOrder}
         suppliers={suppliers}

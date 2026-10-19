@@ -1388,38 +1388,6 @@ export type UpdateReceivedItemInput = {
   subtotal?: number;
 };
 
-export async function processPurchaseReceipt(
-  orgSlug: string,
-  purchaseOrderId: string,
-  receivedItemIds: string[],
-  itemUpdates: UpdateReceivedItemInput[]
-): Promise<void> {
-  const prepared = await preparePurchaseReceiptFiscalState(
-    orgSlug,
-    purchaseOrderId,
-    receivedItemIds,
-    { itemUpdates }
-  );
-  await persistPurchaseFiscalState({
-    supabase: prepared.supabase,
-    orgId: prepared.orgId,
-    orderId: purchaseOrderId,
-    mode: prepared.order.tax_snapshot_initialized
-      ? "receipt"
-      : "receipt_legacy",
-    items: prepared.items,
-    plan: prepared.plan,
-    subtotal: prepared.subtotal,
-    discountPercentage: prepared.discountPercentage,
-    discountAmount: prepared.discountAmount,
-    fallbackTaxes: prepared.fallbackTaxes,
-    supplierId: prepared.order.supplier_id,
-    purchaseDate: prepared.order.purchase_date,
-    expirationDate: prepared.order.expiration_date,
-    remittanceNumber: prepared.order.remittance_number,
-  });
-}
-
 /** Validate fiscal inputs before the receipt starts creating lots or moving stock. */
 export async function prevalidatePurchaseReceiptFiscalState(
   orgSlug: string,

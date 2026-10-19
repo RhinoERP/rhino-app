@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -19,6 +20,7 @@ import {
   purchaseVariantAllocationChanged,
   sumPurchaseVariantStocks,
 } from "@/modules/purchases/utils/purchase-item-variants";
+import { getPurchaseUnitShortLabel } from "@/modules/purchases/utils/purchase-units";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import type {
   ItemTaxInput,
@@ -27,6 +29,7 @@ import type {
 } from "@/modules/taxes/item-tax-calculations";
 import { toFallbackItemTaxes } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
+import { VariantBreakdown } from "../shared/variant-breakdown";
 import { PurchaseDetailForm } from "./purchase-detail-form";
 import {
   PurchaseDetailHeader,
@@ -78,12 +81,31 @@ type PurchaseDetailProps = {
     receivedAt: string;
     closePurchase: boolean;
     itemCount: number;
+    items: Array<{
+      purchaseOrderItemId: string;
+      productId: string;
+      productName: string;
+      unitOfMeasure: string | null;
+      isExtra: boolean;
+      quantity: number;
+      unitQuantity: number;
+      variantStocks: Record<string, Record<string, number>>;
+    }>;
   }>;
   invoiceMismatch: boolean;
 };
 
 function toDateOnlyString(date: Date): string {
   return date.toISOString().split("T")[0] ?? "";
+}
+
+function formatReceiptQuantity(line: {
+  quantity: number;
+  unitQuantity: number;
+  unitOfMeasure: string | null;
+}): string {
+  const value = line.unitQuantity > 0 ? line.unitQuantity : line.quantity;
+  return `${value.toLocaleString("es-AR", { maximumFractionDigits: 2 })} ${getPurchaseUnitShortLabel(line.unitOfMeasure)}`;
 }
 
 function validatePurchaseSave(params: {
@@ -569,10 +591,74 @@ export function PurchaseDetail({
           <ul className="mt-2 space-y-1 text-sm">
             {receiptHistory.map((receipt) => (
               <li key={receipt.id}>
-                {new Date(receipt.receivedAt).toLocaleDateString("es-AR")}:{" "}
-                {receipt.itemCount}{" "}
-                {receipt.itemCount === 1 ? "producto" : "productos"} ·{" "}
-                {receipt.closePurchase ? "Cierre de compra" : "Compra abierta"}
+                <details className="group">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-muted [&::-webkit-details-marker]:hidden">
+                    <span>
+                      {new Date(receipt.receivedAt).toLocaleDateString("es-AR")}
+                      : {receipt.itemCount}{" "}
+                      {receipt.itemCount === 1 ? "producto" : "productos"} ·{" "}
+                      {receipt.closePurchase
+                        ? "Cierre de compra"
+                        : "Compra abierta"}
+                    </span>
+                    <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                  </summary>
+                  {receipt.items.length > 0 ? (
+                    <div className="mt-1 overflow-x-auto rounded-md border">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/50 text-muted-foreground">
+                          <tr>
+                            <th className="px-2 py-1 text-left font-medium">
+                              Producto
+                            </th>
+                            <th className="px-2 py-1 text-left font-medium">
+                              Variantes
+                            </th>
+                            <th className="px-2 py-1 text-right font-medium">
+                              Cantidad
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {receipt.items.map((line) => (
+                            <tr
+                              className="border-t"
+                              key={line.purchaseOrderItemId}
+                            >
+                              <td className="px-2 py-1">
+                                <span>{line.productName}</span>
+                                {line.isExtra ? (
+                                  <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 font-medium text-[10px] text-amber-800">
+                                    No pedido
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-1">
+                                {sumPurchaseVariantStocks(line.variantStocks) >
+                                0 ? (
+                                  <VariantBreakdown
+                                    variantStocks={line.variantStocks}
+                                  />
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-2 py-1 text-right">
+                                {formatReceiptQuantity(line)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="px-2 py-1 text-muted-foreground text-xs">
+                      Sin detalle de productos
+                    </p>
+                  )}
+                </details>
               </li>
             ))}
           </ul>

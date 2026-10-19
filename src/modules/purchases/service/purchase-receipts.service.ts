@@ -6,6 +6,7 @@ import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { LotInput } from "../types";
 import {
   calculateReceiptProgress,
+  groupReceiptItems,
   type ReceivedProgress,
   type VariantQuantities,
 } from "../utils/receipt-progress";
@@ -175,7 +176,7 @@ export async function getPurchaseReceiptById(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("purchase_receipts")
-    .select("id, close_purchase, order_released_at, finalized_at")
+    .select("id, close_purchase")
     .eq("id", receiptId)
     .eq("organization_id", org.id)
     .eq("purchase_order_id", purchaseOrderId)
@@ -186,46 +187,27 @@ export async function getPurchaseReceiptById(
   return data;
 }
 
-export async function getPendingPurchaseReceipt(
-  orgSlug: string,
-  purchaseOrderId: string
-): Promise<{ id: string; closePurchase: boolean } | null> {
-  const org = await getOrganizationBySlug(orgSlug);
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("purchase_receipts")
-    .select("id, close_purchase, order_released_at, finalized_at")
-    .eq("organization_id", org.id)
-    .eq("purchase_order_id", purchaseOrderId)
-    .order("received_at", { ascending: true });
-  if (error) {
-    throw new Error(`No se pudieron consultar las entregas: ${error.message}`);
-  }
-  const receipts = data ?? [];
-  const pending = receipts.find(
-    (receipt) =>
-      !receipt.order_released_at ||
-      (receipt.close_purchase && !receipt.finalized_at)
-  );
-  return pending
-    ? { id: pending.id, closePurchase: pending.close_purchase }
-    : null;
-}
+export type PurchaseReceiptHistoryItem = {
+  purchaseOrderItemId: string;
+  productId: string;
+  isExtra: boolean;
+  quantity: number;
+  unitQuantity: number;
+  variantStocks: VariantQuantities;
+};
+
+export type PurchaseReceiptHistoryEntry = {
+  id: string;
+  receivedAt: string;
+  closePurchase: boolean;
+  itemCount: number;
+  items: PurchaseReceiptHistoryItem[];
+};
 
 export async function getPurchaseReceiptHistory(
   orgSlug: string,
   purchaseOrderId: string
-): Promise<
-  Array<{
-    id: string;
-    receivedAt: string;
-    closePurchase: boolean;
-    itemCount: number;
-  }>
-> {
+): Promise<PurchaseReceiptHistoryEntry[]> {
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     throw new Error("Organización no encontrada");
@@ -240,23 +222,33 @@ export async function getPurchaseReceiptHistory(
       .order("received_at", { ascending: true }),
     supabase
       .from("purchase_receipt_items")
-      .select("receipt_id")
+      .select(
+        "receipt_id, purchase_order_item_id, product_id, is_extra, quantity, unit_quantity, variant_stocks"
+      )
       .eq("organization_id", org.id)
       .eq("purchase_order_id", purchaseOrderId),
   ]);
   if (receiptsResult.error || linesResult.error) {
     throw new Error("No se pudo consultar el historial de entregas");
   }
-  const counts = new Map<string, number>();
-  for (const line of linesResult.data ?? []) {
-    counts.set(line.receipt_id, (counts.get(line.receipt_id) ?? 0) + 1);
-  }
-  return (receiptsResult.data ?? []).map((receipt) => ({
-    id: receipt.id,
-    receivedAt: receipt.received_at,
-    closePurchase: receipt.close_purchase,
-    itemCount: counts.get(receipt.id) ?? 0,
-  }));
+  const grouped = groupReceiptItems(linesResult.data ?? []);
+  return (receiptsResult.data ?? []).map((receipt) => {
+    const items = (grouped.get(receipt.id) ?? []).map((line) => ({
+      purchaseOrderItemId: line.purchase_order_item_id,
+      productId: line.product_id,
+      isExtra: line.is_extra,
+      quantity: line.quantity,
+      unitQuantity: line.unit_quantity,
+      variantStocks: readVariantQuantities(line.variant_stocks),
+    }));
+    return {
+      id: receipt.id,
+      receivedAt: receipt.received_at,
+      closePurchase: receipt.close_purchase,
+      itemCount: items.length,
+      items,
+    };
+  });
 }
 
 export async function applyAtomicPurchaseReceipt(params: {
@@ -273,88 +265,28 @@ export async function applyAtomicPurchaseReceipt(params: {
     throw new Error("Organización no encontrada");
   }
   const supabase = createAdminClient();
-  // The RPC becomes typed after applying the new migration in dev.
-  const { data, error } = await supabase.rpc(
-    "apply_atomic_purchase_receipt" as never,
-    {
-      p_org_id: org.id,
-      p_purchase_order_id: params.purchaseOrderId,
-      p_receipt_id: params.receiptId,
-      p_close: params.closePurchase,
-      p_fiscal: params.fiscal,
-      p_items: params.lines.map((line) => ({
-        item_id: line.itemId,
-        new_item: line.newItem ?? false,
-        actor_id: params.actorId,
-        product_id: line.productId,
-        quantity: line.quantity,
-        unit_quantity: line.unitQuantity,
-        unit_cost: line.unitCost,
-        variant_stocks: line.variantStocks,
-        lots: line.lots,
-      })),
-    } as never
-  );
+  const { data, error } = await supabase.rpc("apply_atomic_purchase_receipt", {
+    p_org_id: org.id,
+    p_purchase_order_id: params.purchaseOrderId,
+    p_receipt_id: params.receiptId,
+    p_close: params.closePurchase,
+    p_fiscal: params.fiscal,
+    p_items: params.lines.map((line) => ({
+      item_id: line.itemId,
+      new_item: line.newItem ?? false,
+      actor_id: params.actorId,
+      product_id: line.productId,
+      quantity: line.quantity,
+      unit_quantity: line.unitQuantity,
+      unit_cost: line.unitCost,
+      variant_stocks: line.variantStocks,
+      lots: line.lots,
+    })),
+  });
   if (error) {
     throw new Error(
       `No se pudo confirmar la entrega atómica: ${error.message}`
     );
   }
   return data as boolean;
-}
-
-export async function completePurchaseReceipt(
-  orgSlug: string,
-  receiptId: string
-): Promise<void> {
-  const org = await getOrganizationBySlug(orgSlug);
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-  const supabase = createAdminClient();
-  const { error } = await supabase.rpc("complete_purchase_receipt", {
-    p_org_id: org.id,
-    p_receipt_id: receiptId,
-  });
-  if (error) {
-    throw new Error(`No se pudo finalizar la entrega: ${error.message}`);
-  }
-}
-
-export async function releaseReceivedOrderItems(
-  orgSlug: string,
-  receiptId: string
-) {
-  const org = await getOrganizationBySlug(orgSlug);
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-  const supabase = createAdminClient();
-  const { error } = await supabase.rpc("release_purchase_receipt_to_order", {
-    p_org_id: org.id,
-    p_receipt_id: receiptId,
-  });
-  if (error) {
-    throw new Error(`No se pudo liberar el pedido recibido: ${error.message}`);
-  }
-}
-
-export async function finalizeReceivedOrderItems(
-  orgSlug: string,
-  receiptId: string
-): Promise<void> {
-  const org = await getOrganizationBySlug(orgSlug);
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-  const supabase = createAdminClient();
-  const { error } = await supabase.rpc("finalize_purchase_receipt_order", {
-    p_org_id: org.id,
-    p_receipt_id: receiptId,
-  });
-  if (error) {
-    throw new Error(
-      `No se pudo finalizar el pedido de compra: ${error.message}`
-    );
-  }
 }

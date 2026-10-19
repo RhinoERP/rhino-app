@@ -6,18 +6,12 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   applyAtomicPurchaseReceipt,
-  completePurchaseReceipt,
-  finalizeReceivedOrderItems,
   getPurchaseReceiptById,
-  getPurchaseReceiptProgress,
   type ReceiptLine,
-  releaseReceivedOrderItems,
 } from "../service/purchase-receipts.service";
 import {
   prevalidatePurchaseReceiptFiscalState,
   previewAtomicReceiptFiscalState,
-  processPurchaseReceipt,
-  updatePurchaseOrderStatus,
 } from "../service/purchases.service";
 import type { ReceivePurchaseActionInput } from "../types";
 
@@ -185,48 +179,6 @@ async function validatePendingReceipt(params: {
   }
 }
 
-async function finalizePurchaseReceipt(
-  orgSlug: string,
-  orgId: string,
-  purchaseOrderId: string,
-  receiptId: string
-) {
-  const supabase = await createClient();
-  const { data: purchase, error } = await supabase
-    .from("purchase_orders")
-    .select("status")
-    .eq("id", purchaseOrderId)
-    .eq("organization_id", orgId)
-    .single();
-  if (error || !purchase) {
-    throw new Error("No se encontró la compra al finalizar la recepción");
-  }
-  if (purchase.status !== "RECEIVED") {
-    const cumulative = await getPurchaseReceiptProgress(
-      orgSlug,
-      purchaseOrderId
-    );
-    const updates = [...cumulative]
-      .filter(([, value]) => value.quantity > 0 || value.unitQuantity > 0)
-      .map(([itemId, value]) => ({
-        itemId,
-        quantity: value.quantity,
-        unitQuantity: value.unitQuantity,
-        unitCost: value.unitCost,
-        subtotal: value.subtotal,
-        variantStocks: value.variantStocks,
-      }));
-    await processPurchaseReceipt(
-      orgSlug,
-      purchaseOrderId,
-      updates.map((row) => row.itemId),
-      updates
-    );
-    await updatePurchaseOrderStatus(orgSlug, purchaseOrderId, "RECEIVED");
-  }
-  await finalizeReceivedOrderItems(orgSlug, receiptId);
-}
-
 function assertValidReceiptLots(items: IncomingItem[]) {
   for (const item of items) {
     if (
@@ -243,7 +195,7 @@ function assertValidReceiptLots(items: IncomingItem[]) {
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: routes legacy retries and new transactional receipts through one guarded entry point.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates and routes new receipts and idempotent retries through the atomic RPC.
 export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
   await ensure("purchases.manage", input.orgSlug);
   try {
@@ -288,7 +240,17 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
     if (existingReceipt && existingReceipt.close_purchase !== closePurchase) {
       throw new Error("El cierre de esta recepción ya fue decidido");
     }
-    if (!existingReceipt) {
+    if (existingReceipt) {
+      await applyAtomicPurchaseReceipt({
+        orgSlug,
+        purchaseOrderId,
+        receiptId,
+        lines: buildReceiptLines(itemsToProcess),
+        closePurchase,
+        actorId: auth.user.id,
+        fiscal: null,
+      });
+    } else {
       await validatePendingReceipt({
         orgSlug,
         orgId: org.id,
@@ -308,23 +270,6 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
         closePurchase,
         actorId: auth.user.id,
         fiscal,
-      });
-    } else if (
-      existingReceipt.order_released_at === null ||
-      (closePurchase && existingReceipt.finalized_at === null)
-    ) {
-      throw new Error(
-        "Entrega anterior pendiente: finalizala antes de reintentar"
-      );
-    } else {
-      await applyAtomicPurchaseReceipt({
-        orgSlug,
-        purchaseOrderId,
-        receiptId,
-        lines: buildReceiptLines(itemsToProcess),
-        closePurchase,
-        actorId: auth.user.id,
-        fiscal: null,
       });
     }
 
@@ -349,60 +294,6 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
       success: false,
       error:
         error instanceof Error ? error.message : "Error al recibir el pedido",
-    };
-  }
-}
-
-/** Finish an already recorded delivery without touching inventory again. */
-export async function resumePurchaseReceiptAction(input: {
-  orgSlug: string;
-  purchaseOrderId: string;
-  receiptId: string;
-}) {
-  await ensure("purchases.manage", input.orgSlug);
-  try {
-    const receipt = await getPurchaseReceiptById(
-      input.orgSlug,
-      input.purchaseOrderId,
-      input.receiptId
-    );
-    if (!receipt) {
-      throw new Error("Entrega no encontrada");
-    }
-    if (
-      receipt.order_released_at &&
-      (!receipt.close_purchase || receipt.finalized_at)
-    ) {
-      return { success: true as const };
-    }
-    const org = await getOrganizationBySlug(input.orgSlug);
-    if (!org?.id) {
-      throw new Error("Organización no encontrada");
-    }
-    await releaseReceivedOrderItems(input.orgSlug, input.receiptId);
-    if (receipt.close_purchase) {
-      await finalizePurchaseReceipt(
-        input.orgSlug,
-        org.id,
-        input.purchaseOrderId,
-        input.receiptId
-      );
-      await completePurchaseReceipt(input.orgSlug, input.receiptId);
-    }
-    revalidatePath(`/org/${input.orgSlug}/compras/${input.purchaseOrderId}`);
-    revalidatePath(
-      `/org/${input.orgSlug}/compras/${input.purchaseOrderId}/recibir`
-    );
-    revalidatePath(`/org/${input.orgSlug}/compras/stock-pedidos`);
-    revalidatePath(`/org/${input.orgSlug}/pedidos`);
-    return { success: true as const };
-  } catch (error) {
-    return {
-      success: false as const,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Error al finalizar la entrega",
     };
   }
 }

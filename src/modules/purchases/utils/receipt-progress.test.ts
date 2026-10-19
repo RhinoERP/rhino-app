@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   appendReceiptProgress,
   calculateReceiptProgress,
+  groupReceiptItems,
   hasUnreceivedPurchaseQuantities,
   hasUnreceivedVariantQuantities,
+  pendingReceiptUnitQuantity,
   remainingVariantStocks,
 } from "./receipt-progress";
 
@@ -201,5 +203,74 @@ describe("entregas acumuladas de una OC", () => {
         { Negro: { XL: 12 } }
       )
     ).toBe(false);
+  });
+});
+
+describe("pendiente de unidades en la recepción", () => {
+  it("usa las unidades pendientes de variantes y no el total histórico de la OC", () => {
+    const pendingUnitQuantity = pendingReceiptUnitQuantity({
+      hasVariants: true,
+      unitQuantity: 10,
+      receivedUnitQuantity: 0,
+      pendingVariantUnits: 4,
+    });
+    expect(pendingUnitQuantity).toBe(4);
+    expect(
+      hasUnreceivedPurchaseQuantities(
+        [{ received: true, orderedQuantity: 4 }],
+        [
+          {
+            orderedQty: 4,
+            modifiedQty: 6,
+            orderedUnitQty: pendingUnitQuantity,
+            modifiedUnitQty: 6,
+          },
+        ]
+      )
+    ).toBe(false);
+  });
+
+  it("descuenta la medida recibida en productos por peso", () => {
+    expect(
+      pendingReceiptUnitQuantity({
+        hasVariants: false,
+        unitQuantity: 8,
+        receivedUnitQuantity: 3.25,
+        pendingVariantUnits: 0,
+      })
+    ).toBeCloseTo(4.75);
+  });
+
+  it("no deja pendientes negativos sin variantes", () => {
+    expect(
+      pendingReceiptUnitQuantity({
+        hasVariants: false,
+        unitQuantity: 2,
+        receivedUnitQuantity: 5,
+        pendingVariantUnits: 0,
+      })
+    ).toBe(0);
+  });
+});
+
+describe("agrupación de líneas por entrega", () => {
+  it("agrupa por recepción y mantiene el orden de las líneas", () => {
+    const grouped = groupReceiptItems([
+      { receipt_id: "primera", product_id: "remera" },
+      { receipt_id: "segunda", product_id: "buzo" },
+      { receipt_id: "primera", product_id: "campera" },
+    ]);
+
+    expect(grouped.get("primera")?.map((line) => line.product_id)).toEqual([
+      "remera",
+      "campera",
+    ]);
+    expect(grouped.get("segunda")?.map((line) => line.product_id)).toEqual([
+      "buzo",
+    ]);
+  });
+
+  it("devuelve un mapa vacío cuando no hay líneas", () => {
+    expect(groupReceiptItems([]).size).toBe(0);
   });
 });

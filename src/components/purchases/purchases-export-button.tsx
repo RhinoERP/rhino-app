@@ -23,6 +23,7 @@ import type {
   PurchaseExportItem,
   PurchaseOrderWithSupplier,
 } from "@/modules/purchases/service/purchases.service";
+import { getPurchaseUnitFullLabel } from "@/modules/purchases/utils/purchase-units";
 
 type PurchasesExportButtonProps = {
   orgSlug: string;
@@ -55,16 +56,6 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   unit_quantity: 12,
   unit_of_measure: 14,
   subtotal: 14,
-};
-
-const unitOfMeasureLabels: Record<
-  NonNullable<PurchaseExportItem["unitOfMeasure"]>,
-  string
-> = {
-  UN: "Unidad",
-  KG: "Kg",
-  LT: "Lt",
-  MT: "Mt",
 };
 
 function formatFallbackValue(rawValue: unknown): string {
@@ -124,7 +115,7 @@ function formatUnitOfMeasure(
   if (!unit) {
     return "—";
   }
-  return unitOfMeasureLabels[unit] ?? unit;
+  return getPurchaseUnitFullLabel(unit);
 }
 
 function calculateExportSubtotal(purchase: PurchaseOrderWithSupplier): number {

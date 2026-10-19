@@ -48,6 +48,11 @@ import {
   type StockInfo,
   stripRouteFromObservations,
 } from "@/modules/orders/types";
+import {
+  originalQuoteQuantities,
+  type ReceivedBadge,
+  receivedBadgesByItem,
+} from "@/modules/orders/utils/original-quote-quantities";
 import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
 
@@ -296,6 +301,10 @@ function StockOrderCard({
   }, [order.children.length]);
 
   const quote = order.quotes;
+  const orderedQuantities = useMemo(
+    () => originalQuoteQuantities(quote?.quote_items ?? []),
+    [quote]
+  );
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
 
@@ -362,6 +371,17 @@ function StockOrderCard({
     }
     return map;
   }, [order.children]);
+
+  const receivedBadges = useMemo(
+    () =>
+      receivedBadgesByItem({
+        portions: quote?.quote_items ?? [],
+        statusByChildId: new Map(
+          order.children.map((child) => [child.id, child.status])
+        ),
+      }),
+    [quote, order.children]
+  );
 
   const { stockInfo, isLoadingStock } = useLoadStockForItems({
     orgSlug,
@@ -661,8 +681,10 @@ function StockOrderCard({
           noAssigned={noAssigned}
           noSelectable={noSelectable}
           order={order}
+          orderedQuantities={orderedQuantities}
           orgSlug={orgSlug}
           pendingDirectTransition={pendingDirectTransition}
+          receivedBadges={receivedBadges}
           revertInfoMap={revertInfoMap}
           routeLabel={routeLabel}
           selectableItems={selectableItems}
@@ -713,8 +735,10 @@ type StockOrderCardBodyProps = {
   noAssigned: boolean;
   noSelectable: boolean;
   order: OrderWithChildren;
+  orderedQuantities: Map<string, number>;
   orgSlug: string;
   pendingDirectTransition: boolean;
+  receivedBadges: Map<string, ReceivedBadge>;
   revertInfoMap: OrdersRevertInfoMap;
   routeLabel: string;
   selectableItems: QuoteItem[];
@@ -747,8 +771,10 @@ function StockOrderCardBody({
   noAssigned,
   noSelectable,
   order,
+  orderedQuantities,
   orgSlug,
   pendingDirectTransition,
+  receivedBadges,
   revertInfoMap,
   routeLabel,
   selectableItems,
@@ -781,6 +807,8 @@ function StockOrderCardBody({
           onRouteChange={setSelectedRoute}
           onSubmit={handleSubmit}
           onToggleAll={toggleAll}
+          orderedQuantities={orderedQuantities}
+          receivedBadges={receivedBadges}
           selectedQuantities={selectedQuantities}
           selectedRoute={selectedRoute}
           supplierCount={supplierCount}
@@ -932,10 +960,18 @@ function useLoadStockForItems({
 }
 
 type ItemBadgeProps = {
-  badge: "goods" | "reserved" | null;
+  badge: ReceivedBadge | "reserved" | null;
 };
 
 function ItemBadge({ badge }: ItemBadgeProps) {
+  if (badge === "partial_goods") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 text-xs dark:bg-amber-900/30 dark:text-amber-400">
+        <PackageIcon className="size-3" weight="fill" />
+        Mercadería recibida parcialmente
+      </span>
+    );
+  }
   if (badge === "goods") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
@@ -957,17 +993,19 @@ function ItemBadge({ badge }: ItemBadgeProps) {
 
 type ItemRowProps = {
   item: QuoteItem;
+  orderedQuantity: number;
   stock: StockInfo | undefined;
   enteredQty: number;
   isPending: boolean;
   isReleasePending: boolean;
-  badge: "goods" | "reserved" | null;
+  badge: ReceivedBadge | "reserved" | null;
   onQuantityChange: (itemId: string, quantity: number) => void;
   onReleaseReservation?: (childId: string) => void;
 };
 
 function ItemRow({
   item,
+  orderedQuantity,
   stock,
   enteredQty,
   isPending,
@@ -1010,7 +1048,7 @@ function ItemRow({
       <td className="px-2 py-1.5">
         <span className="text-sm">{stock?.brand ?? "—"}</span>
       </td>
-      <td className="px-2 py-1.5 text-right tabular-nums">{item.quantity}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums">{orderedQuantity}</td>
       <td className="px-2 py-1.5">
         <div className="flex items-center justify-center gap-2">
           <input
@@ -1083,6 +1121,8 @@ type UnassignedItemsSectionProps = {
   isReleasePending: boolean;
   isLoadingStock: boolean;
   items: readonly QuoteItem[];
+  orderedQuantities: Map<string, number>;
+  receivedBadges: Map<string, ReceivedBadge>;
   selectedQuantities: Map<string, number>;
   selectedRoute: ChildOrderRoute;
   itemStockMap: Map<string, StockInfo | undefined>;
@@ -1105,6 +1145,8 @@ function UnassignedItemsSection({
   isReleasePending,
   isLoadingStock,
   items,
+  orderedQuantities,
+  receivedBadges,
   selectedQuantities,
   selectedRoute,
   itemStockMap,
@@ -1122,7 +1164,7 @@ function UnassignedItemsSection({
     selectedRoute;
 
   const getItemBadge = useCallback(
-    (item: QuoteItem): "goods" | "reserved" | null => {
+    (item: QuoteItem): ReceivedBadge | "reserved" | null => {
       if (!item.assigned_order_id) {
         return null;
       }
@@ -1130,12 +1172,9 @@ function UnassignedItemsSection({
       if (child?.status === "STOCK_RESERVED") {
         return "reserved";
       }
-      if (child?.status === "GOODS_RECEIVED") {
-        return "goods";
-      }
-      return null;
+      return receivedBadges.get(item.id) ?? null;
     },
-    [childMap]
+    [childMap, receivedBadges]
   );
 
   const hasInsufficientStock = useMemo(() => {
@@ -1210,6 +1249,9 @@ function UnassignedItemsSection({
                   key={item.id}
                   onQuantityChange={onItemQuantityChange}
                   onReleaseReservation={handleReleaseReservation}
+                  orderedQuantity={
+                    orderedQuantities.get(item.id) ?? item.quantity
+                  }
                   stock={itemStockMap.get(item.id)}
                 />
               ))}

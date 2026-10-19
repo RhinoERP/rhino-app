@@ -16,10 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getProductVariantsAction } from "@/modules/inventory/actions/product.actions";
-import {
-  receivePurchaseAction,
-  resumePurchaseReceiptAction,
-} from "@/modules/purchases/actions/receive-purchase.action";
+import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
 import {
   purchaseOrderQueryKey,
   purchasesQueryKey,
@@ -31,8 +28,13 @@ import type {
 } from "@/modules/purchases/service/purchases.service";
 import type { LotInput, VariantStockInput } from "@/modules/purchases/types";
 import {
+  getPurchaseUnitShortLabel,
+  isMeasuredUnit,
+} from "@/modules/purchases/utils/purchase-units";
+import {
   hasUnreceivedPurchaseQuantities,
   hasUnreceivedVariantQuantities,
+  pendingReceiptUnitQuantity,
   remainingVariantStocks,
 } from "@/modules/purchases/utils/receipt-progress";
 import type {
@@ -59,7 +61,7 @@ export type ReceivedItemForm = {
   received: boolean;
   /** Total ordered quantity in units */
   orderedQuantity: number;
-  /** Total ordered unit quantity (kg/lt/mt) */
+  /** Total ordered unit quantity (kg/lt/m) */
   orderedUnitQuantity: number;
   unitCost: number;
   unit_of_measure?: string | null;
@@ -107,7 +109,6 @@ type PurchaseReceiptProps = {
       variantStocks: Record<string, Record<string, number>>;
     }
   >;
-  pendingReceipt: { id: string; closePurchase: boolean } | null;
   products: ProductWithPrice[];
   hasSupplierInvoice: boolean;
 };
@@ -131,16 +132,19 @@ function buildInitialItems(
           0
         )
       : Math.max(0, (item.quantity ?? 0) - (progress[item.id]?.quantity ?? 0));
+    const pendingUnitQuantity = pendingReceiptUnitQuantity({
+      hasVariants: Boolean(item.has_variants),
+      unitQuantity: item.unit_quantity,
+      receivedUnitQuantity: progress[item.id]?.unitQuantity ?? 0,
+      pendingVariantUnits: remainingQuantity,
+    });
     return {
       itemId: item.id,
       productId: item.product_id,
       product_name: item.product_name,
       received: false,
       orderedQuantity: remainingQuantity,
-      orderedUnitQuantity: Math.max(
-        0,
-        (item.unit_quantity ?? 0) - (progress[item.id]?.unitQuantity ?? 0)
-      ),
+      orderedUnitQuantity: pendingUnitQuantity,
       unitCost: item.unit_cost ?? 0,
       unit_of_measure: item.unit_of_measure ?? null,
       weight_per_unit: item.weight_per_unit ?? null,
@@ -154,11 +158,7 @@ function buildInitialItems(
               lotNumber: "",
               expirationDate: undefined,
               quantity: remainingQuantity,
-              unitQuantity: Math.max(
-                0,
-                (item.unit_quantity ?? 0) -
-                  (progress[item.id]?.unitQuantity ?? 0)
-              ),
+              unitQuantity: pendingUnitQuantity,
             },
           ],
     };
@@ -308,14 +308,6 @@ export type ModifiedItemDisplay = {
   variantChanges?: VariantChangeDetail[];
 };
 
-function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
-  if (!unitOfMeasure) {
-    return false;
-  }
-  const normalized = unitOfMeasure.toUpperCase();
-  return normalized === "KG" || normalized === "LT" || normalized === "MT";
-}
-
 function computeVariantModifications(
   item: ReceivedItemForm,
   currentStocks: Record<string, Record<string, number>>
@@ -389,17 +381,15 @@ function computeModifications(
         modifiedQty: assignedQty,
         modifiedUnitQty: assignedUnitQty,
         unit_of_measure: item.unit_of_measure,
-        isWeightBased: hasWeightOrVolumeMeasure(item.unit_of_measure),
+        isWeightBased: isMeasuredUnit(item.unit_of_measure),
       };
     });
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: receipt form orchestrates lots, variants, and the additional-product section.
 export function PurchaseReceipt({
   purchaseOrder,
   orgSlug,
   receivedProgress,
-  pendingReceipt,
   products,
   hasSupplierInvoice,
 }: PurchaseReceiptProps) {
@@ -423,7 +413,6 @@ export function PurchaseReceipt({
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [modifiedItems, setModifiedItems] = useState<ModifiedItemDisplay[]>([]);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [isResuming, setIsResuming] = useState(false);
   const [newProductId, setNewProductId] = useState("");
   const [hasPending, setHasPending] = useState(false);
   const receiptIdRef = useRef<string | null>(null);
@@ -594,10 +583,6 @@ export function PurchaseReceipt({
   };
 
   const handleReceive = form.handleSubmit(async (values) => {
-    if (pendingReceipt) {
-      setError("Finalizá la entrega pendiente antes de registrar otra");
-      return;
-    }
     setError(null);
 
     const itemsToReceive = values.items.filter((item) => item.received);
@@ -645,7 +630,7 @@ export function PurchaseReceipt({
           modifiedQty: 0,
           modifiedUnitQty: 0,
           unit_of_measure: item.unit_of_measure,
-          isWeightBased: hasWeightOrVolumeMeasure(item.unit_of_measure),
+          isWeightBased: isMeasuredUnit(item.unit_of_measure),
         })),
       ]);
       setConfirmModalOpen(true);
@@ -670,30 +655,6 @@ export function PurchaseReceipt({
   const receivedCount = items.filter((item) => item.received).length;
   const totalItems = items.length;
   const allSelected = totalItems > 0 && receivedCount === totalItems;
-  const handleResumeReceipt = async () => {
-    if (!pendingReceipt) {
-      return;
-    }
-    setIsResuming(true);
-    setError(null);
-    try {
-      const result = await resumePurchaseReceiptAction({
-        orgSlug,
-        purchaseOrderId: purchaseOrder.id,
-        receiptId: pendingReceipt.id,
-      });
-      if (!result.success) {
-        setError(result.error);
-        return;
-      }
-      router.refresh();
-      if (pendingReceipt.closePurchase) {
-        router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}`);
-      }
-    } finally {
-      setIsResuming(false);
-    }
-  };
   let confirmLabel = "Confirmar recepción";
   if (isConfirming) {
     confirmLabel = "Procesando...";
@@ -727,56 +688,38 @@ export function PurchaseReceipt({
           <p className="text-red-900 text-sm">{error}</p>
         </div>
       )}
-      {pendingReceipt && (
-        <div className="flex items-center justify-between gap-4 rounded-md border border-amber-300 bg-amber-50 p-4">
-          <p className="text-amber-900 text-sm">
-            Hay una entrega registrada pendiente de sincronizar. No vuelvas a
-            ingresarla al stock.
-          </p>
-          <Button
-            disabled={isResuming}
-            onClick={handleResumeReceipt}
-            type="button"
-          >
-            {isResuming ? "Finalizando..." : "Finalizar entrega pendiente"}
-          </Button>
-        </div>
-      )}
-
-      {!pendingReceipt && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
-          <label htmlFor="extra-received-product">
-            Producto adicional recibido
-          </label>
-          <select
-            className="min-w-48 rounded-md border bg-background px-3 py-2 text-sm"
-            id="extra-received-product"
-            onChange={(event) => setNewProductId(event.target.value)}
-            value={newProductId}
-          >
-            <option value="">Seleccionar producto</option>
-            {products
-              .filter(
-                (product) =>
-                  product.id &&
-                  !items.some((item) => item.productId === product.id)
-              )
-              .map((product) => (
-                <option key={product.id} value={product.id ?? ""}>
-                  {product.name}
-                </option>
-              ))}
-          </select>
-          <Button
-            disabled={!newProductId}
-            onClick={addReceivedProduct}
-            type="button"
-            variant="outline"
-          >
-            Agregar a recepción
-          </Button>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
+        <label htmlFor="extra-received-product">
+          Producto adicional recibido
+        </label>
+        <select
+          className="min-w-48 rounded-md border bg-background px-3 py-2 text-sm"
+          id="extra-received-product"
+          onChange={(event) => setNewProductId(event.target.value)}
+          value={newProductId}
+        >
+          <option value="">Seleccionar producto</option>
+          {products
+            .filter(
+              (product) =>
+                product.id &&
+                !items.some((item) => item.productId === product.id)
+            )
+            .map((product) => (
+              <option key={product.id} value={product.id ?? ""}>
+                {product.name}
+              </option>
+            ))}
+        </select>
+        <Button
+          disabled={!newProductId}
+          onClick={addReceivedProduct}
+          type="button"
+          variant="outline"
+        >
+          Agregar a recepción
+        </Button>
+      </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
@@ -879,22 +822,9 @@ export function PurchaseReceipt({
                         })
                       : qty.toLocaleString("es-AR");
 
-                  const unitLabel = (() => {
-                    if (!item.unit_of_measure) {
-                      return "un";
-                    }
-                    const n = item.unit_of_measure.toUpperCase();
-                    if (n === "KG") {
-                      return "kg";
-                    }
-                    if (n === "LT") {
-                      return "lt";
-                    }
-                    if (n === "MT") {
-                      return "t";
-                    }
-                    return "un";
-                  })();
+                  const unitLabel = getPurchaseUnitShortLabel(
+                    item.unit_of_measure
+                  );
 
                   return (
                     <Fragment key={item.productName}>

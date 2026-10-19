@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { PurchaseReceipt } from "@/components/purchases/shared/purchase-receipt";
 import {
-  getPendingPurchaseReceipt,
   getPurchaseReceiptProgress,
   hasRegisteredPurchaseInvoice,
 } from "@/modules/purchases/service/purchase-receipts.service";
@@ -33,13 +32,7 @@ export default async function PurchaseReceiptPage({
         hasRegisteredPurchaseInvoice(orgSlug, id),
       ]);
 
-    const pendingReceipt = await getPendingPurchaseReceipt(orgSlug, id);
-    if (
-      !(
-        pendingReceipt ||
-        ["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(purchaseOrder.status)
-      )
-    ) {
+    if (!["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(purchaseOrder.status)) {
       notFound();
     }
 
@@ -48,7 +41,6 @@ export default async function PurchaseReceiptPage({
         allTaxes={allTaxes}
         hasSupplierInvoice={hasSupplierInvoice}
         orgSlug={orgSlug}
-        pendingReceipt={pendingReceipt}
         products={products}
         purchaseOrder={purchaseOrder}
         receivedProgress={Object.fromEntries(progress)}

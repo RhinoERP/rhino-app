@@ -267,6 +267,7 @@ export async function getParentOrdersPendingStock(
         ),
         quote_items(
           id,
+          parent_quote_item_id,
           description,
           quantity,
           unit_price,
@@ -3094,6 +3095,7 @@ async function insertSplitQuoteItem(
   item: {
     quote_id: string | null;
     description: string | null;
+    currency: string;
     unit_price: number;
     discount_amount: number | null;
     discount_percentage: number | null;
@@ -3116,6 +3118,7 @@ async function insertSplitQuoteItem(
     .insert({
       quote_id: item.quote_id ?? quoteId,
       description: item.description,
+      currency: item.currency,
       quantity: assigned.quantity,
       unit_price: item.unit_price,
       subtotal: assigned.amounts.assignedSubtotal,
@@ -3227,7 +3230,7 @@ async function processItemSplits(
   const { data: originalItems, error } = await supabase
     .from("quote_items")
     .select(
-      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id, quote_item_extras(description, price)"
+      "id, quote_id, description, currency, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id, quote_item_extras(description, price)"
     )
     .in("id", splitIds);
 

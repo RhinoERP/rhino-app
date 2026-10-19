@@ -85,6 +85,34 @@ export function remainingVariantStocks(
   );
 }
 
+export function groupReceiptItems<T extends { receipt_id: string }>(
+  lines: T[]
+): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const line of lines) {
+    const group = grouped.get(line.receipt_id);
+    if (group) {
+      group.push(line);
+    } else {
+      grouped.set(line.receipt_id, [line]);
+    }
+  }
+  return grouped;
+}
+
+/** Units still to receive; variant products use their pending variant units. */
+export function pendingReceiptUnitQuantity(params: {
+  hasVariants: boolean;
+  unitQuantity: number | null | undefined;
+  receivedUnitQuantity: number;
+  pendingVariantUnits: number;
+}): number {
+  if (params.hasVariants) {
+    return params.pendingVariantUnits;
+  }
+  return Math.max(0, (params.unitQuantity ?? 0) - params.receivedUnitQuantity);
+}
+
 export function hasUnreceivedVariantQuantities(
   ordered: VariantQuantities | null,
   selected: VariantQuantities
