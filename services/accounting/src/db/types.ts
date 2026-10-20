@@ -257,6 +257,7 @@ export type ReceivedChecksTable = {
   id: Generated<string>;
   org_id: string;
   operation_id: string;
+  receivable_payment_id: string | null;
   numero_cheque: string;
   banco_emisor: string;
   importe: ColumnType<string, string, string>; // NUMERIC(15,4)
@@ -313,6 +314,33 @@ export type PublicAccountsPayableTable = {
 export type PublicAccountsPayable = Selectable<PublicAccountsPayableTable>;
 export type UpdatePublicAccountsPayable =
   Updateable<PublicAccountsPayableTable>;
+
+export type PublicAccountsReceivableTable = {
+  id: Generated<string>;
+  organization_id: string;
+  total_amount: ColumnType<string, string, string>;
+  pending_balance: ColumnType<string, string, string>;
+  status: string;
+  updated_at: ColumnType<Date | null, string | null | undefined, string | null>;
+};
+
+export type PublicAccountsReceivable =
+  Selectable<PublicAccountsReceivableTable>;
+
+export type PublicReceivablePaymentsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  account_receivable_id: string;
+  amount: ColumnType<string, string, string>;
+};
+
+export type PublicReceivablePayment = Selectable<PublicReceivablePaymentsTable>;
+
+export type PublicCommissionsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  receivable_payment_id: string | null;
+};
 
 export type PublicPayablePaymentsTable = {
   id: Generated<string>;
@@ -462,6 +490,9 @@ export type Database = {
   "accounting.treasury_deposit_slip_checks": TreasuryDepositSlipChecksTable;
   "public.accounts_payable": PublicAccountsPayableTable;
   "public.payable_payments": PublicPayablePaymentsTable;
+  "public.accounts_receivable": PublicAccountsReceivableTable;
+  "public.receivable_payments": PublicReceivablePaymentsTable;
+  "public.commissions": PublicCommissionsTable;
   "public.supplier_credits": PublicSupplierCreditsTable;
   "public.supplier_credit_applications": PublicSupplierCreditApplicationsTable;
 };

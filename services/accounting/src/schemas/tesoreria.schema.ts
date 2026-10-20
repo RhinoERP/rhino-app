@@ -81,20 +81,26 @@ export const MovementsQuerySchema = z.object({
 
 // ── Received Checks ───────────────────────────────────────────────────────────
 
-export const CreateReceivedCheckSchema = z.object({
-  orgId: uuidStr,
-  operationId: uuidStr.optional(),
-  numeroCheque: z.string().min(1).max(50),
-  bancoEmisor: z.string().min(1).max(100),
-  importe: montoStr,
-  fechaEmision: fechaStr,
-  fechaVencimiento: fechaStr,
-  tipo: z.enum(["CDF", "ECH"]).default("CDF"),
-  librador: z.string().max(200).optional(),
-  libradorId: uuidStr.optional(),
-  notas: z.string().max(500).optional(),
-  creadoPor: uuidStr.optional(),
-});
+export const CreateReceivedCheckSchema = z
+  .object({
+    orgId: uuidStr,
+    operationId: uuidStr.optional(),
+    numeroCheque: z.string().min(1).max(50),
+    bancoEmisor: z.string().min(1).max(100),
+    importe: montoStr,
+    fechaEmision: fechaStr,
+    fechaVencimiento: fechaStr,
+    tipo: z.enum(["CDF", "ECH"]).default("CDF"),
+    librador: z.string().max(200).optional(),
+    libradorId: uuidStr.optional(),
+    notas: z.string().max(500).optional(),
+    receivablePaymentId: uuidStr.optional(),
+    creadoPor: uuidStr.optional(),
+  })
+  .refine((v) => v.fechaVencimiento >= v.fechaEmision, {
+    message: "La fecha de vencimiento no puede ser anterior a la emisión",
+    path: ["fechaVencimiento"],
+  });
 
 export const ReceivedChecksQuerySchema = z.object({
   org_id: uuidStr,
@@ -122,29 +128,33 @@ export const EndorseReceivedChecksForPayableSchema = z.object({
 });
 
 export const RejectReceivedCheckSchema = z.object({
-  cuentaBancariaId: uuidStr,
   cuentaContrapartidaCode: z.string().min(1).optional(),
   creadoPor: uuidStr.optional(),
 });
 
 // ── Issued Checks ─────────────────────────────────────────────────────────────
 
-export const CreateIssuedCheckSchema = z.object({
-  orgId: uuidStr,
-  operationId: uuidStr.optional(),
-  cuentaBancariaId: uuidStr,
-  numeroCheque: z.string().min(1).max(50),
-  importe: montoStr,
-  fechaEmision: fechaStr,
-  fechaDebito: fechaStr,
-  beneficiario: z.string().min(1).max(200),
-  tipo: z.enum(["CDF", "ECH"]).default("CDF"),
-  beneficiarioId: uuidStr.optional(),
-  notas: z.string().max(500).optional(),
-  referenciaPagoId: uuidStr.optional(),
-  referenciaPagoTabla: z.string().max(100).optional(),
-  creadoPor: uuidStr.optional(),
-});
+export const CreateIssuedCheckSchema = z
+  .object({
+    orgId: uuidStr,
+    operationId: uuidStr.optional(),
+    cuentaBancariaId: uuidStr,
+    numeroCheque: z.string().min(1).max(50),
+    importe: montoStr,
+    fechaEmision: fechaStr,
+    fechaDebito: fechaStr,
+    beneficiario: z.string().min(1).max(200),
+    tipo: z.enum(["CDF", "ECH"]).default("CDF"),
+    beneficiarioId: uuidStr.optional(),
+    notas: z.string().max(500).optional(),
+    referenciaPagoId: uuidStr.optional(),
+    referenciaPagoTabla: z.string().max(100).optional(),
+    creadoPor: uuidStr.optional(),
+  })
+  .refine((v) => v.fechaDebito >= v.fechaEmision, {
+    message: "La fecha de débito no puede ser anterior a la emisión",
+    path: ["fechaDebito"],
+  });
 
 export const IssuedChecksQuerySchema = z.object({
   org_id: uuidStr,
@@ -169,6 +179,7 @@ export const CreateCheckDepositSlipSchema = z.object({
   fecha: fechaStr,
   descripcion: z.string().min(1).max(500),
   checkIds: z.array(uuidStr).min(1, "Debe incluir al menos un cheque"),
+  permitirAnticipado: z.boolean().optional(),
   creadoPor: uuidStr.optional(),
 });
 

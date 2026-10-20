@@ -65,6 +65,7 @@ import {
   runIdempotentTreasuryOperation,
 } from "./treasury-idempotency";
 import { normalizeTreasuryPayload } from "./treasury-idempotency-payload";
+import { reopenReceivableForRejectedCheck } from "./treasury-receivable-reopen";
 
 type TreasuryLine = {
   accountCode: string;
@@ -214,6 +215,25 @@ const derivePayableStatus = (
 
 const normalizeDecimalAmount = (amount: string): string =>
   new Decimal(amount).toFixed(4);
+
+const toDateOnly = (value: Date | string): string =>
+  typeof value === "string"
+    ? value.slice(0, 10)
+    : value.toISOString().slice(0, 10);
+
+function assertNoAnticipatedChecks(
+  checks: Array<{ numero_cheque: string; fecha_vencimiento: Date | string }>,
+  fechaDeposito: string
+): void {
+  const anticipado = checks.find(
+    (check) => toDateOnly(check.fecha_vencimiento) > fechaDeposito
+  );
+  if (anticipado) {
+    throw AppError.unprocessable(
+      `El cheque ${anticipado.numero_cheque} vence el ${toDateOnly(anticipado.fecha_vencimiento)}, posterior a la fecha de depósito`
+    );
+  }
+}
 
 const buildReceivedCheckEndorsementOperationKey = (
   input: EndorseReceivedChecksForPayableInput
@@ -865,7 +885,9 @@ export function listMovementsService(filters: ListMovementsFilters) {
 }
 
 export function createReceivedCheckService(input: CreateReceivedCheckInput) {
-  const operationKey = buildOperationKey(input.operationId);
+  const operationKey = input.receivablePaymentId
+    ? `received-check:receivable-payment:${input.receivablePaymentId}`
+    : buildOperationKey(input.operationId);
   const normalizedAmount = normalizeAmount(input.importe);
   const payload = normalizeTreasuryPayload({
     ...stripMetadata(input),
@@ -923,7 +945,6 @@ export function rejectReceivedCheckService(
   const today = new Date().toISOString().slice(0, 10);
   const payload = normalizeTreasuryPayload({
     checkId: id,
-    cuentaBancariaId: input.cuentaBancariaId,
     cuentaContrapartidaCode:
       input.cuentaContrapartidaCode ?? TREASURY_ACCOUNT_CHEQUES_RECHAZADOS,
   });
@@ -960,8 +981,24 @@ export function rejectReceivedCheckService(
         );
       }
 
+      if (!check.deposit_slip_id) {
+        throw AppError.unprocessable(
+          "El cheque no tiene boleta de depósito asociada"
+        );
+      }
+      const slip = await trx
+        .selectFrom("accounting.treasury_deposit_slips")
+        .select("cuenta_bancaria_id")
+        .where("id", "=", check.deposit_slip_id)
+        .where("org_id", "=", orgId)
+        .executeTakeFirst();
+      if (!slip) {
+        throw AppError.notFound("Boleta de depósito del cheque no encontrada");
+      }
+      const cuentaBancariaId = slip.cuenta_bancaria_id;
+
       const cuentaBancaria = await loadBankAccountForMutation(
-        input.cuentaBancariaId,
+        cuentaBancariaId,
         orgId,
         trx
       );
@@ -1010,12 +1047,18 @@ export function rejectReceivedCheckService(
         throw new AppError("No se pudo actualizar el cheque rechazado", 500);
       }
 
+      await reopenReceivableForRejectedCheck({
+        trx,
+        orgId,
+        receivablePaymentId: check.receivable_payment_id,
+      });
+
       const movement = await createOperationalMovement({
         trx,
         operationId,
         input: {
           orgId,
-          cuentaBancariaId: input.cuentaBancariaId,
+          cuentaBancariaId,
           tipo: "CHEQUE_RECIBIDO_RECHAZADO",
           fecha: today,
           descripcion: `Rechazo cheque ${check.numero_cheque} — ${check.banco_emisor}`,
@@ -1175,6 +1218,13 @@ export function debitIssuedCheckService(
         );
       }
 
+      const fechaDebito = toDateOnly(check.fecha_debito);
+      if (fechaDebito > today) {
+        throw AppError.unprocessable(
+          `El cheque ${check.numero_cheque} se puede debitar a partir del ${fechaDebito}`
+        );
+      }
+
       const cuentaBancaria = await loadBankAccountForMutation(
         check.cuenta_bancaria_id,
         orgId,
@@ -1191,7 +1241,7 @@ export function debitIssuedCheckService(
         tipoEvento: "DEBITO_CHEQUE_PROPIO",
         referenciaId: id,
         referenciaTabla: "issued_checks",
-        fecha: today,
+        fecha: fechaDebito,
         descripcion: `Débito cheque propio ${check.numero_cheque} — ${check.beneficiario}`,
         idempotencyKey: buildTreasuryJournalKey(
           orgId,
@@ -1230,7 +1280,7 @@ export function debitIssuedCheckService(
           orgId,
           cuentaBancariaId: check.cuenta_bancaria_id,
           tipo: "DEBITO_CHEQUE_PROPIO",
-          fecha: today,
+          fecha: fechaDebito,
           descripcion: `Débito cheque propio ${check.numero_cheque} — ${check.beneficiario}`,
           importe: check.importe,
           lado: "DEBE",
@@ -1443,6 +1493,10 @@ export function createCheckDepositSlipService(
         throw AppError.unprocessable(
           `El cheque ${invalidCheck.numero_cheque} no está EN_CARTERA (estado: ${invalidCheck.estado})`
         );
+      }
+
+      if (!input.permitirAnticipado) {
+        assertNoAnticipatedChecks(checks, input.fecha);
       }
 
       const slip = await createCheckDepositSlip(
