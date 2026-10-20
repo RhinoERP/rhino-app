@@ -96,12 +96,15 @@ begin
     where purchase_order_id = p_purchase_order_id and organization_id = p_org_id;
     insert into public.purchase_order_items (
       id, organization_id, purchase_order_id, product_id, quantity,
-      unit_quantity, unit_cost, subtotal, variant_stocks, tax_override
+      unit_quantity, unit_cost, subtotal, variant_stocks, tax_override,
+      discount_percentage
     ) select x.id, p_org_id, p_purchase_order_id, x.product_id, x.quantity,
-        x.unit_quantity, x.unit_cost, x.subtotal, x.variant_stocks, x.tax_override
+        x.unit_quantity, x.unit_cost, x.subtotal, x.variant_stocks, x.tax_override,
+        coalesce(x.discount_percentage, 0)
       from jsonb_to_recordset(p_items) as x(
         id uuid, product_id uuid, quantity numeric, unit_quantity numeric,
-        unit_cost numeric, subtotal numeric, variant_stocks jsonb, tax_override jsonb
+        unit_cost numeric, subtotal numeric, variant_stocks jsonb, tax_override jsonb,
+        discount_percentage numeric
       );
   else
     if exists (
@@ -116,10 +119,12 @@ begin
     update public.purchase_order_items poi
       set quantity = x.quantity, unit_quantity = x.unit_quantity,
           unit_cost = x.unit_cost, subtotal = x.subtotal,
-          variant_stocks = x.variant_stocks, tax_override = x.tax_override
+          variant_stocks = x.variant_stocks, tax_override = x.tax_override,
+          discount_percentage = coalesce(x.discount_percentage, 0)
       from jsonb_to_recordset(p_items) as x(
         id uuid, quantity numeric, unit_quantity numeric, unit_cost numeric,
-        subtotal numeric, variant_stocks jsonb, tax_override jsonb
+        subtotal numeric, variant_stocks jsonb, tax_override jsonb,
+        discount_percentage numeric
       )
       where poi.id = x.id and poi.organization_id = p_org_id
         and poi.purchase_order_id = p_purchase_order_id;

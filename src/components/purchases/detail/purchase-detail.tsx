@@ -41,6 +41,7 @@ import { PurchaseDetailSummary } from "./purchase-detail-summary";
 
 type PurchaseOrderWithItems = Omit<PurchaseOrder, "fallback_taxes"> & {
   items: (PurchaseOrderItem & {
+    discount_percentage?: number | null;
     product_name?: string;
     weight_per_unit?: number | null;
     unit_of_measure?: string | null;
@@ -176,7 +177,7 @@ function mapPurchaseOrderItemToDetailItem(
     weight_per_unit: weightPerUnit ?? undefined,
     total_weight_kg: totalWeightKg,
     price_per_kg: pricePerKg,
-    discount_percent: 0,
+    discount_percent: item.discount_percentage ?? 0,
     has_variants: item.has_variants,
     variant_stocks: variantStocks ?? null,
     taxes: item.tax_override ?? savedTaxes,
@@ -367,6 +368,7 @@ export function PurchaseDetail({
       unit_quantity: item.unit_quantity,
       unit_cost: item.unit_cost,
       subtotal: item.subtotal,
+      discount_percentage: item.discount_percent ?? 0,
       unit_of_measure: item.unit_of_measure,
       variant_stocks: item.variant_stocks ?? null,
       taxes: item.taxes,
