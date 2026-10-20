@@ -249,6 +249,7 @@ describe("impuestos por ítem de compra", () => {
           unit_quantity: 1,
           unit_cost: 100,
           subtotal: 100,
+          discount_percentage: 10,
         },
       ],
       plan,
@@ -266,6 +267,7 @@ describe("impuestos por ítem de compra", () => {
       "persist_purchase_fiscal_state",
       expect.objectContaining({
         p_total_amount: 121,
+        p_items: [expect.objectContaining({ discount_percentage: 10 })],
         p_item_taxes: [
           expect.objectContaining({ line_id: "item-id", tax_amount: 21 }),
         ],
