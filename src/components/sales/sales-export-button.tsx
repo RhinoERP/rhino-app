@@ -46,6 +46,7 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   supplier_name: 24,
   product_name: 26,
   units: 12,
+  boxes: 12,
   kilograms: 10,
   subtotal: 14,
 };
@@ -142,10 +143,13 @@ function getVisibleExportColumns(
 ): ExportColumn[] {
   return table
     .getVisibleLeafColumns()
-    .filter((column) => column.id !== "actions")
+    .filter((column) => column.id !== "actions" && column.id !== "supplier")
     .map((column) => ({
       id: column.id,
-      label: column.columnDef.meta?.label ?? column.id,
+      label:
+        column.id === "status"
+          ? "Estado"
+          : (column.columnDef.meta?.label ?? column.id),
     }));
 }
 
@@ -174,6 +178,27 @@ function getExtraColumns(): ExportColumn[] {
       label: "Unidades",
       valueGetter: (_sale, item) =>
         item?.units !== null && item?.units !== undefined ? item.units : "",
+    },
+    {
+      id: "boxes",
+      label: "Cajas",
+      valueGetter: (_sale, item) => {
+        if (
+          !item ||
+          (item.unitOfMeasure !== "UN" &&
+            !(
+              (item.unitOfMeasure === "KG" || item.unitOfMeasure === "LT") &&
+              item.tracksStockUnits
+            )) ||
+          item.units === null ||
+          item.units === undefined ||
+          !item.unitsPerBox ||
+          item.unitsPerBox <= 0
+        ) {
+          return "";
+        }
+        return Math.ceil(item.units / item.unitsPerBox);
+      },
     },
     {
       id: "kilograms",

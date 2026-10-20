@@ -183,6 +183,9 @@ export type SalesExportItem = {
   supplierName: string | null;
   units: number | null;
   kilograms: number | null;
+  unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  tracksStockUnits: boolean;
+  unitsPerBox: number | null;
   subtotal: number | null;
 };
 

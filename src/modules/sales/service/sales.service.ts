@@ -237,6 +237,7 @@ type SalesOrderItemRaw = Partial<
       | null;
     tracks_stock_units?: boolean | null;
     weight_per_unit?: number | null;
+    units_per_box?: number | null;
     category_id?: string | null;
     accounting_account_code?: string | null;
   } | null;
@@ -1711,6 +1712,8 @@ export async function getSalesOrdersByOrgSlug(
             id,
             name,
             unit_of_measure,
+            tracks_stock_units,
+            units_per_box,
             supplier:suppliers(name)
           )
         ),
@@ -1763,6 +1766,9 @@ export async function getSalesOrdersByOrgSlug(
         supplierName: normalizeSupplierNameFromProduct(product),
         units: quantities.units,
         kilograms: quantities.kilograms,
+        unitOfMeasure: product?.unit_of_measure ?? null,
+        tracksStockUnits: Boolean(product?.tracks_stock_units),
+        unitsPerBox: product?.units_per_box ?? null,
         subtotal: quantities.subtotal,
       };
     });
@@ -1957,6 +1963,8 @@ function buildSalesQuery(
             id,
             name,
             unit_of_measure,
+            tracks_stock_units,
+            units_per_box,
             supplier:suppliers(name)
           )
         ),
@@ -2059,6 +2067,9 @@ function enrichSalesOrders(
         supplierName: normalizeSupplierNameFromProduct(product),
         units: quantities.units,
         kilograms: quantities.kilograms,
+        unitOfMeasure: product?.unit_of_measure ?? null,
+        tracksStockUnits: Boolean(product?.tracks_stock_units),
+        unitsPerBox: product?.units_per_box ?? null,
         subtotal: quantities.subtotal,
       };
     });
@@ -2392,6 +2403,8 @@ export async function getAllSalesForExport(
             id,
             name,
             unit_of_measure,
+            tracks_stock_units,
+            units_per_box,
             supplier:suppliers(name)
           )
         ),
@@ -2443,6 +2456,9 @@ export async function getAllSalesForExport(
         supplierName: normalizeSupplierNameFromProduct(product),
         units: quantities.units,
         kilograms: quantities.kilograms,
+        unitOfMeasure: product?.unit_of_measure ?? null,
+        tracksStockUnits: Boolean(product?.tracks_stock_units),
+        unitsPerBox: product?.units_per_box ?? null,
         subtotal: quantities.subtotal,
       };
     });
