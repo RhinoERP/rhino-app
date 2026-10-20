@@ -51,8 +51,7 @@ export async function createChequeRecibidoAction(
 
 export async function rechazarChequeRecibidoAction(
   orgSlug: string,
-  chequeId: string,
-  cuentaBancariaId: string
+  chequeId: string
 ): Promise<ActionResult<{ id: string }>> {
   await ensure("treasury.checks.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
@@ -61,11 +60,7 @@ export async function rechazarChequeRecibidoAction(
   }
 
   try {
-    const cheque = await rechazarChequeRecibidoServer(
-      chequeId,
-      org.id,
-      cuentaBancariaId
-    );
+    const cheque = await rechazarChequeRecibidoServer(chequeId, org.id);
     revalidatePath(`/org/${orgSlug}/tesoreria`);
     return { success: true, data: { id: cheque.id } };
   } catch (err) {

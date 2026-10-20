@@ -5,6 +5,7 @@ import { buildCobro, buildOrdenPago } from "@/lib/accounting-client";
 import {
   confirmAccountingEvent,
   createChequeEmitidoServer,
+  createChequeRecibidoServer,
   endorseReceivedChecksForPayableServer,
   previewAccountingEvent,
 } from "@/lib/accounting-server";
@@ -576,10 +577,12 @@ async function createReceivablePaymentWithAccounting(params: {
   };
   amount: number;
   currencyFields: PaymentCurrencyFields;
+  paymentMethod: PaymentMethod;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
+  receivedCheckData?: NonNullable<RegisterPaymentInput["receivedCheckData"]>;
   accountingIntegrationEnabled: boolean;
   automaticAccountingEnabled: boolean;
   commissionsEnabled: boolean;
@@ -622,6 +625,20 @@ async function createReceivablePaymentWithAccounting(params: {
   }
 
   const payment = insertedPayment as PaymentInsertRow;
+
+  if (params.receivedCheckData) {
+    const receivedCheckResult = await persistReceivedCheckForPayment({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      payment,
+      amountArs: params.currencyFields.amountArs,
+      paymentMethod: params.paymentMethod,
+      receivedCheckData: params.receivedCheckData,
+    });
+    if (!receivedCheckResult.success) {
+      return receivedCheckResult;
+    }
+  }
 
   if (params.commissionsEnabled && payment.account_receivable_id) {
     await generateCommissions(params.supabase, params.orgId, [
@@ -675,6 +692,56 @@ async function createReceivablePaymentWithAccounting(params: {
     accountingEvent: accountingPersistence.accountingEvent,
     paymentId: accountingPersistence.paymentId ?? payment.id,
   };
+}
+
+async function persistReceivedCheckForPayment(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  payment: PaymentInsertRow;
+  amountArs: number;
+  paymentMethod: PaymentMethod;
+  receivedCheckData: NonNullable<RegisterPaymentInput["receivedCheckData"]>;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  try {
+    await createChequeRecibidoServer({
+      orgId: params.orgId,
+      numeroCheque: params.receivedCheckData.numeroCheque,
+      bancoEmisor: params.receivedCheckData.bancoEmisor,
+      importe: truncateMoney(params.amountArs).toFixed(4),
+      fechaEmision: params.receivedCheckData.fechaEmision,
+      fechaVencimiento: params.receivedCheckData.fechaVencimiento,
+      tipo: params.paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      librador: sanitize(params.receivedCheckData.librador) ?? undefined,
+      notas: sanitize(params.receivedCheckData.notas) ?? undefined,
+      receivablePaymentId: params.payment.id,
+    });
+    return { success: true };
+  } catch (error) {
+    const { data: rolledBackPayment, error: rollbackError } =
+      await params.supabase
+        .from("receivable_payments")
+        .delete()
+        .eq("id", params.payment.id)
+        .eq("organization_id", params.orgId)
+        .select("id")
+        .maybeSingle();
+
+    if (rollbackError || !rolledBackPayment) {
+      return {
+        success: false,
+        error:
+          "El cheque no se registró y la cobranza requiere revisión manual. No vuelvas a intentarlo.",
+      };
+    }
+
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? `No se pudo registrar el cheque recibido: ${error.message}`
+          : "No se pudo registrar el cheque recibido",
+    };
+  }
 }
 
 async function persistIssuedCheckForPayment(params: {
@@ -986,10 +1053,15 @@ async function applyReceivablePayment({
       receivable,
       amount,
       currencyFields,
+      paymentMethod: input.paymentMethod,
       paymentMethodValue,
       paymentDate,
       referenceNumber,
       notes,
+      receivedCheckData:
+        input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq"
+          ? input.receivedCheckData
+          : undefined,
       accountingIntegrationEnabled,
       automaticAccountingEnabled,
       commissionsEnabled,
@@ -1440,6 +1512,34 @@ function validateIssuedCheck(input: RegisterPaymentInput): string | null {
   return null;
 }
 
+function validateReceivedCheck(input: RegisterPaymentInput): string | null {
+  const isReceivedCheckPayment =
+    input.type === "receivable" &&
+    (input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq");
+
+  if (!isReceivedCheckPayment) {
+    return null;
+  }
+
+  const check = input.receivedCheckData;
+  const hasAllFields = Boolean(
+    check?.numeroCheque.trim() &&
+      check.bancoEmisor.trim() &&
+      check.fechaEmision &&
+      check.fechaVencimiento
+  );
+
+  if (!(check && hasAllFields)) {
+    return "Completa todos los datos del cheque recibido";
+  }
+
+  if (check.fechaVencimiento < check.fechaEmision) {
+    return "La fecha de vencimiento no puede ser anterior a la fecha de emisión";
+  }
+
+  return null;
+}
+
 function validateEndorsedChecks(input: RegisterPaymentInput): string | null {
   if (
     !(input.type === "payable" && input.paymentMethod === "cheque_endosado")
@@ -1602,12 +1702,21 @@ async function createEndorsedCheckPayablePaymentWithAccounting(params: {
   }
 }
 
+function requiresTreasuryChecksPermission(
+  input: RegisterPaymentInput
+): boolean {
+  if (input.type === "payable") {
+    return input.paymentMethod === "cheque_endosado";
+  }
+  return input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq";
+}
+
 export async function registerPaymentAction(
   input: RegisterPaymentInput
 ): Promise<RegisterPaymentResult> {
   await guardOrganizationPermissionAccess(input.orgSlug, "collections.manage");
 
-  if (input.type === "payable" && input.paymentMethod === "cheque_endosado") {
+  if (requiresTreasuryChecksPermission(input)) {
     await guardOrganizationPermissionAccess(
       input.orgSlug,
       "treasury.checks.manage"
@@ -1646,6 +1755,15 @@ export async function registerPaymentAction(
     return {
       success: false,
       error: endorsedChecksError,
+      code: "invalid_check_data",
+    };
+  }
+
+  const receivedCheckError = validateReceivedCheck(input);
+  if (receivedCheckError) {
+    return {
+      success: false,
+      error: receivedCheckError,
       code: "invalid_check_data",
     };
   }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
+import { BankSelect } from "@/components/treasury/bank-select";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -570,7 +571,7 @@ export function RegisterPaymentDialog({
   );
   const [chequeBeneficiario, setChequeBeneficiario] =
     useState(counterpartyName);
-
+  const [chequeBancoEmisor, setChequeBancoEmisor] = useState("");
   const warningMessage = useMemo(
     () => getWarningMessage(isEditMode, amount, creditAmount, pendingBalance),
     [amount, creditAmount, isEditMode, pendingBalance]
@@ -753,6 +754,7 @@ export function RegisterPaymentDialog({
     setChequeFechaEmision(new Date().toISOString().split("T")[0]);
     setChequeFechaDebito(new Date().toISOString().split("T")[0]);
     setChequeBeneficiario(counterpartyName);
+    setChequeBancoEmisor("");
     setSelectedReceivedCheckIds([]);
     resetOperationId();
   };
@@ -924,6 +926,25 @@ export function RegisterPaymentDialog({
     return null;
   };
 
+  const validateReceivedCheckFields = () => {
+    const hasAllFields = Boolean(
+      chequeNumero.trim() &&
+        chequeBancoEmisor.trim() &&
+        chequeFechaEmision &&
+        chequeFechaDebito
+    );
+
+    if (!hasAllFields) {
+      return "Completa todos los datos del cheque recibido.";
+    }
+
+    if (chequeFechaDebito < chequeFechaEmision) {
+      return "La fecha de vencimiento no puede ser anterior a la fecha de emisión.";
+    }
+
+    return null;
+  };
+
   const validateEndorsedCheckFields = ({
     parsedAmount,
     parsedCredit,
@@ -991,6 +1012,9 @@ export function RegisterPaymentDialog({
       !isEditMode && type === "payable" && isCheckMethod
         ? validateIssuedCheckFields()
         : null,
+      !isEditMode && type === "receivable" && isCheckMethod
+        ? validateReceivedCheckFields()
+        : null,
       validateEndorsedCheckFields({ parsedAmount, parsedCredit }),
       validateExchangeRate({ parsedAmount }),
     ];
@@ -1034,6 +1058,17 @@ export function RegisterPaymentDialog({
           }
         : undefined;
 
+    const receivedCheckData =
+      type === "receivable" && isCheckMethod
+        ? {
+            bancoEmisor: chequeBancoEmisor,
+            numeroCheque: chequeNumero,
+            fechaEmision: chequeFechaEmision,
+            fechaVencimiento: chequeFechaDebito,
+            librador: chequeBeneficiario,
+          }
+        : undefined;
+
     return registerPaymentAction({
       orgSlug,
       accountId,
@@ -1050,6 +1085,7 @@ export function RegisterPaymentDialog({
         ? selectedReceivedCheckIds
         : undefined,
       issuedCheckData,
+      receivedCheckData,
     });
   };
 
@@ -1770,6 +1806,68 @@ export function RegisterPaymentDialog({
                           Tesorería antes de emitir el cheque.
                         </p>
                       )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {!isEditMode && type === "receivable" && isCheckMethod ? (
+                  <div className="space-y-3 rounded-md border border-dashed p-3">
+                    <p className="font-medium text-sm">
+                      Datos del cheque recibido
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeNumero">N° de cheque *</Label>
+                        <Input
+                          id="chequeNumero"
+                          onChange={(e) => setChequeNumero(e.target.value)}
+                          placeholder="000001"
+                          value={chequeNumero}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeBancoEmisor">
+                          Banco emisor *
+                        </Label>
+                        <BankSelect
+                          id="chequeBancoEmisor"
+                          onChange={setChequeBancoEmisor}
+                          value={chequeBancoEmisor}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeFechaEmision">
+                          Fecha emisión *
+                        </Label>
+                        <Input
+                          id="chequeFechaEmision"
+                          onChange={(e) =>
+                            setChequeFechaEmision(e.target.value)
+                          }
+                          type="date"
+                          value={chequeFechaEmision}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeFechaVencimiento">
+                          Fecha de cobro/vencimiento *
+                        </Label>
+                        <Input
+                          id="chequeFechaVencimiento"
+                          onChange={(e) => setChequeFechaDebito(e.target.value)}
+                          type="date"
+                          value={chequeFechaDebito}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="chequeLibrador">Librador</Label>
+                      <Input
+                        id="chequeLibrador"
+                        onChange={(e) => setChequeBeneficiario(e.target.value)}
+                        placeholder={counterpartyName}
+                        value={chequeBeneficiario}
+                      />
                     </div>
                   </div>
                 ) : null}

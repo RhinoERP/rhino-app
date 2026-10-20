@@ -71,6 +71,7 @@ export function CheckDepositSlipDialog({
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [permitirAnticipado, setPermitirAnticipado] = useState(false);
   const { getOperationId, resetOperationId } = useTreasuryOperationId();
 
   const form = useForm<FormValues>({
@@ -97,6 +98,7 @@ export function CheckDepositSlipDialog({
     if (!open) {
       reset();
       setSelectedIds(new Set());
+      setPermitirAnticipado(false);
       resetOperationId();
     }
   }, [open, reset, resetOperationId]);
@@ -139,6 +141,12 @@ export function CheckDepositSlipDialog({
     .filter((c) => selectedIds.has(c.id))
     .reduce((sum, c) => sum + Number(c.importe), 0);
 
+  const fechaDeposito = form.watch("fecha");
+  const anticipados = cheques.filter(
+    (c) =>
+      selectedIds.has(c.id) && c.fecha_vencimiento.slice(0, 10) > fechaDeposito
+  );
+  const requiereConfirmacion = anticipados.length > 0 && !permitirAnticipado;
   function onSubmit(values: FormValues) {
     if (selectedIds.size === 0) {
       toast.error("Seleccioná al menos un cheque para depositar");
@@ -152,6 +160,7 @@ export function CheckDepositSlipDialog({
         fecha: values.fecha,
         descripcion: values.descripcion,
         checkIds: Array.from(selectedIds),
+        permitirAnticipado: anticipados.length > 0 ? true : undefined,
       });
 
       if (!result.success) {
@@ -265,7 +274,13 @@ export function CheckDepositSlipDialog({
                         <TableRow
                           className="cursor-pointer"
                           key={c.id}
-                          onClick={() => toggleCheck(c.id)}
+                          onClick={(event) => {
+                            // El input oculto de Radix burbuja un click que reentra en el toggle
+                            if (event.target instanceof HTMLInputElement) {
+                              return;
+                            }
+                            toggleCheck(c.id);
+                          }}
                         >
                           <TableCell>
                             <Checkbox
@@ -310,6 +325,25 @@ export function CheckDepositSlipDialog({
                   </span>
                 </div>
               )}
+
+              {anticipados.length > 0 && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-900/20 dark:text-amber-300">
+                  <Checkbox
+                    checked={permitirAnticipado}
+                    id="permitir-anticipado"
+                    onCheckedChange={(checked) => {
+                      setPermitirAnticipado(checked === true);
+                      resetOperationId();
+                    }}
+                  />
+                  <label htmlFor="permitir-anticipado">
+                    {anticipados.length} cheque
+                    {anticipados.length !== 1 ? "s" : ""} vence
+                    {anticipados.length !== 1 ? "n" : ""} después de la fecha de
+                    depósito. Confirmo depositar antes del vencimiento.
+                  </label>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -321,7 +355,9 @@ export function CheckDepositSlipDialog({
                 Cancelar
               </Button>
               <Button
-                disabled={isPending || selectedIds.size === 0}
+                disabled={
+                  isPending || selectedIds.size === 0 || requiereConfirmacion
+                }
                 type="submit"
               >
                 {isPending ? "Depositando..." : "Confirmar depósito"}
