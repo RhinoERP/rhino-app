@@ -36,6 +36,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import type { DirectSale } from "@/modules/sales/types";
 import { usePosSaleReturnableItems } from "@/modules/sales-returns/hooks/use-pos-sale-returnable-items";
 import { useProcessPosSaleReturnMutation } from "@/modules/sales-returns/hooks/use-process-pos-sale-return-mutation";
@@ -208,6 +209,7 @@ export function PosSaleReturnDialog({
       string,
       {
         productName: string;
+        productVariantId: string | null;
         productSku: string;
         availableToReturn: number;
         soldQuantity: number;
@@ -288,6 +290,16 @@ export function PosSaleReturnDialog({
     }
 
     for (const line of selectedLines) {
+      if (
+        hasFractionalVariantReturn({
+          variantId: line.itemData.productVariantId,
+          quantity: line.quantity,
+          unitQuantity: line.unitQuantity,
+        })
+      ) {
+        setSubmitError("Las variantes deben devolverse en unidades enteras.");
+        return;
+      }
       if (line.quantity - line.itemData.availableToReturn > STOCK_EPSILON) {
         setSubmitError(
           `La cantidad para ${line.itemData.productName} excede lo disponible (${line.itemData.availableToReturn.toFixed(2)}).`
@@ -579,7 +591,7 @@ export function PosSaleReturnDialog({
                                     : 0;
                                   field.onChange(normalizedValue);
                                 }}
-                                step="0.000001"
+                                step={item.productVariantId ? "1" : "0.000001"}
                                 type="number"
                                 value={field.value ?? ""}
                               />

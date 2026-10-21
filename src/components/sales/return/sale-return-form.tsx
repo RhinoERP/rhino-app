@@ -257,6 +257,7 @@ function ReturnInputs({
         min={0}
         onChange={(e) => onQuantityChange(item.id, e.target.value)}
         placeholder="0"
+        step={item.productVariantId ? 1 : "any"}
         type="number"
         value={state.returnQuantity === 0 ? "" : state.returnQuantity}
       />

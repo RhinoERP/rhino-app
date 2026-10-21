@@ -60,6 +60,44 @@ function buildSale(): SaleReturnSourceSale {
 }
 
 describe("sale return credit-note helpers", () => {
+  it("permite fracciones para productos simples y solo enteros para variantes", () => {
+    const sale = buildSale();
+    const request = {
+      salesOrderItemId: "sale-item-1",
+      productId: "product-1",
+      quantity: 0.5,
+      unitPrice: 100,
+    };
+    expect(
+      resolveReturnLines({
+        sale,
+        returnItems: [request],
+        previouslyReturnedByItemId: new Map(),
+      })[0]?.quantity
+    ).toBe(0.5);
+
+    const soldItem = sale.items?.[0];
+    if (!soldItem) {
+      throw new Error("Falta ítem de prueba");
+    }
+    soldItem.product_variant_id = "variant-1";
+    expect(() =>
+      resolveReturnLines({
+        sale,
+        returnItems: [request],
+        previouslyReturnedByItemId: new Map(),
+      })
+    ).toThrow("unidades enteras");
+
+    expect(
+      resolveReturnLines({
+        sale,
+        returnItems: [{ ...request, quantity: 1 }],
+        previouslyReturnedByItemId: new Map(),
+      })[0]?.quantity
+    ).toBe(1);
+  });
+
   it("calcula líneas devueltas con descuentos, neto, impuestos y total", () => {
     const lines = resolveReturnLines({
       sale: buildSale(),

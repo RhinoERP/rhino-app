@@ -1,6 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -55,6 +56,7 @@ import {
   useDirectSaleTerminals,
 } from "@/modules/sales/hooks/use-direct-sale-terminals";
 import { usePrintTicket } from "@/modules/sales/hooks/use-print-ticket";
+import { directSaleProductsQueryKey } from "@/modules/sales/queries/query-keys";
 import {
   type CreateDirectSaleInput,
   type DirectSaleFormValues,
@@ -69,6 +71,7 @@ import {
 } from "@/modules/sales/types";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/types";
+import { PosVariantSelector } from "./pos-variant-selector";
 
 type PosTerminalProps = {
   orgSlug: string;
@@ -80,6 +83,7 @@ type PosTerminalProps = {
 type CartItem = {
   lineId: string;
   product: DirectSaleProduct;
+  variant: DirectSaleProduct["variants"][number] | null;
   quantity: number;
   weightQuantity: number | null;
   baseUnitPrice: number;
@@ -91,6 +95,7 @@ type CartItem = {
 };
 
 type PrintTicketFn = ReturnType<typeof usePrintTicket>["printTicket"];
+const STOCK_ERROR_REGEX = /stock|variante|lotes|unidades insuficientes/i;
 
 const paymentMethodOptions: {
   value: DirectSalePaymentMethod;
@@ -142,6 +147,13 @@ function getProductStockLabel(product: DirectSaleProduct) {
   }
 
   return `${product.totalQuantity.toFixed(2)} ${product.unitOfMeasure}`;
+}
+
+function getCartStockLabel(item: CartItem): string {
+  if (item.variant) {
+    return `${item.variant.stock} un (${item.variant.color} / ${item.variant.talle})`;
+  }
+  return getProductStockLabel(item.product);
 }
 
 function getTerminalLabel(terminal: DirectSaleTerminal) {
@@ -292,12 +304,9 @@ function mapPayloadToTicketSaleData(
   cartItems: CartItem[],
   saleNumber?: string
 ): TicketSaleData {
-  const productsById = new Map(
-    cartItems.map((item) => [item.product.id, item.product])
-  );
-
-  const items = payload.items.map((item) => {
-    const product = productsById.get(item.productId);
+  const items = payload.items.map((item, index) => {
+    const cartItem = cartItems[index];
+    const product = cartItem?.product;
     const quantity = Number(item.weightQuantity ?? item.quantity ?? 0);
     const gross = quantity * Number(item.unitPrice ?? 0);
     const discountAmount = Number(item.discountAmount ?? 0);
@@ -311,7 +320,9 @@ function mapPayloadToTicketSaleData(
 
     return {
       quantity,
-      product: product?.name ?? "Producto",
+      product: cartItem?.variant
+        ? `${product?.name ?? "Producto"} — ${cartItem.variant.color} / ${cartItem.variant.talle}`
+        : (product?.name ?? "Producto"),
       unitPrice: toMoney(Number(item.unitPrice ?? 0)),
       subtotal: toMoney(subtotal),
       quantityKind: resolveTicketQuantityKind(product),
@@ -568,8 +579,21 @@ export function PosTerminal({
   directSaleConfig,
 }: PosTerminalProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [variantProduct, setVariantProduct] =
+    useState<DirectSaleProduct | null>(null);
+  const reservedByVariant = useMemo(() => {
+    const reserved: Record<string, number> = {};
+    for (const item of cartItems) {
+      if (item.variant) {
+        reserved[item.variant.id] =
+          (reserved[item.variant.id] ?? 0) + item.quantity;
+      }
+    }
+    return reserved;
+  }, [cartItems]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [didInitializeDefaultTax, setDidInitializeDefaultTax] = useState(false);
@@ -787,14 +811,18 @@ export function PosTerminal({
 
   const addProductToCart = useCallback(
     (product: DirectSaleProduct) => {
+      if (product.hasVariants) {
+        setVariantProduct(product);
+        return;
+      }
       setCartItems((previous) => {
         const existing = previous.find(
-          (item) => item.product.id === product.id
+          (item) => item.product.id === product.id && !item.variant
         );
 
         if (existing) {
           return previous.map((item) => {
-            if (item.product.id !== product.id) {
+            if (item.product.id !== product.id || item.variant) {
               return item;
             }
 
@@ -820,6 +848,7 @@ export function PosTerminal({
           {
             lineId: `${product.id}-${Date.now()}`,
             product,
+            variant: null,
             quantity,
             weightQuantity: null,
             baseUnitPrice: product.price,
@@ -836,6 +865,38 @@ export function PosTerminal({
     },
     [directSaleMarkupPercentage, isConsumerFinalSale]
   );
+
+  const addVariantToCart = (
+    variant: DirectSaleProduct["variants"][number],
+    quantity: number
+  ) => {
+    if (!variantProduct) {
+      return;
+    }
+    const product = variantProduct;
+    const unitPrice = resolveDirectSaleUnitPrice(
+      product,
+      directSaleMarkupPercentage,
+      isConsumerFinalSale
+    );
+    setCartItems((previous) => [
+      ...previous,
+      {
+        lineId: `${variant.id}-${crypto.randomUUID()}`,
+        product,
+        variant,
+        quantity,
+        weightQuantity: null,
+        baseUnitPrice: product.price,
+        unitPrice,
+        isUnitPriceEdited: false,
+        discountPercentage: 0,
+        isWholeWheel: false,
+        wholeWheelCount: 0,
+      },
+    ]);
+    setErrorMessage(null);
+  };
 
   const playScanErrorBeep = useCallback(() => {
     if (typeof window === "undefined") {
@@ -984,7 +1045,9 @@ export function PosTerminal({
           return {
             ...item,
             quantity: safeQuantity,
-            weightQuantity: resolveWeightQuantity(item.product, safeQuantity),
+            weightQuantity: item.variant
+              ? null
+              : resolveWeightQuantity(item.product, safeQuantity),
           };
         })
         .filter((item) => item.quantity > 0)
@@ -1060,6 +1123,73 @@ export function PosTerminal({
     );
   };
 
+  const refreshVariantAvailability = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: directSaleProductsQueryKey(orgSlug, "", 30).slice(0, 2),
+    });
+
+    const variantProducts = Array.from(
+      new Map(
+        cartItems
+          .filter((item) => item.variant)
+          .map((item) => [item.product.id, item.product])
+      ).values()
+    );
+    const results = await Promise.allSettled(
+      variantProducts.map(async (product) => {
+        const params = new URLSearchParams({
+          barcode: product.barcode ?? product.sku,
+          limit: "1",
+        });
+        const response = await fetch(
+          `/api/org/${orgSlug}/venta-directa/productos?${params.toString()}`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) {
+          throw new Error("No se pudo actualizar el stock del producto.");
+        }
+        const refreshedProducts =
+          (await response.json()) as DirectSaleProduct[];
+        return refreshedProducts.find((row) => row.id === product.id) ?? null;
+      })
+    );
+    const updatedProducts = new Map(
+      results.flatMap((result) =>
+        result.status === "fulfilled" && result.value
+          ? [[result.value.id, result.value] as const]
+          : []
+      )
+    );
+
+    setCartItems((previous) =>
+      previous.map((item) => {
+        const latest = updatedProducts.get(item.product.id);
+        if (!(latest && item.variant)) {
+          return item;
+        }
+        const variant = latest.variants.find(
+          (row) => row.id === item.variant?.id
+        );
+        return {
+          ...item,
+          product: latest,
+          variant: variant ?? { ...item.variant, stock: 0 },
+        };
+      })
+    );
+  };
+
+  const handleSaleError = async (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "No se pudo registrar la venta directa.";
+    setErrorMessage(message);
+    if (STOCK_ERROR_REGEX.test(message)) {
+      await refreshVariantAvailability();
+    }
+  };
+
   const onSubmit = form.handleSubmit(async (values) => {
     const validationError = getSaleSubmissionError(
       activeTerminals.length,
@@ -1094,6 +1224,7 @@ export function PosTerminal({
         globalDiscountPercentage: values.globalDiscountPercentage,
         items: cartItems.map((item) => ({
           productId: item.product.id,
+          productVariantId: item.variant?.id ?? null,
           quantity: item.isWholeWheel ? item.wholeWheelCount : item.quantity,
           weightQuantity: item.weightQuantity,
           isWholeUnit: item.isWholeWheel,
@@ -1105,11 +1236,7 @@ export function PosTerminal({
 
       router.push(`/org/${orgSlug}/venta-directa`);
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo registrar la venta directa."
-      );
+      await handleSaleError(error);
     }
   });
 
@@ -1117,6 +1244,12 @@ export function PosTerminal({
 
   return (
     <div className="space-y-6">
+      <PosVariantSelector
+        onAdd={addVariantToCart}
+        onClose={() => setVariantProduct(null)}
+        product={variantProduct}
+        reservedByVariant={reservedByVariant}
+      />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link href={`/org/${orgSlug}/venta-directa`}>
           <Button size="sm" variant="ghost">
@@ -1186,9 +1319,15 @@ export function PosTerminal({
                     {shouldSearchProducts ? (
                       <>
                         {products.map((product) => {
-                          const hasStock = product.tracksStockUnits
-                            ? (product.totalUnitQuantity ?? 0) > 0
-                            : product.totalQuantity > 0;
+                          let hasStock = product.totalQuantity > 0;
+                          if (product.tracksStockUnits) {
+                            hasStock = (product.totalUnitQuantity ?? 0) > 0;
+                          }
+                          if (product.hasVariants) {
+                            hasStock = product.variants.some(
+                              (variant) => variant.stock > 0
+                            );
+                          }
 
                           return (
                             <div
@@ -1248,181 +1387,192 @@ export function PosTerminal({
                     </p>
                   )}
 
-                  {cartItems.map((item) => {
-                    const effectiveQuantity =
-                      item.weightQuantity ?? item.quantity;
-                    const gross = effectiveQuantity * item.unitPrice;
-                    const discount = Math.min(
-                      Math.max(0, (item.discountPercentage / 100) * gross),
-                      Math.max(0, gross)
-                    );
-                    const subtotal = Math.max(0, gross - discount);
+                  {cartItems.map(
+                    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: existing POS cart branches on quantity, weight and price per product
+                    (item) => {
+                      const effectiveQuantity =
+                        item.weightQuantity ?? item.quantity;
+                      const gross = effectiveQuantity * item.unitPrice;
+                      const discount = Math.min(
+                        Math.max(0, (item.discountPercentage / 100) * gross),
+                        Math.max(0, gross)
+                      );
+                      const subtotal = Math.max(0, gross - discount);
 
-                    return (
-                      <div className="rounded-md border p-3" key={item.lineId}>
-                        <div className="mb-2 flex items-start justify-between gap-4">
-                          <div className="flex items-start gap-3">
-                            <div>
-                              <p className="font-medium text-sm">
-                                {item.product.name}
-                              </p>
-                              <p className="text-muted-foreground text-xs">
-                                SKU {item.product.sku} · Stock{" "}
-                                {getProductStockLabel(item.product)}
-                              </p>
-                            </div>
-                            {isWeightOrVolumeProduct(item.product) &&
-                              item.product.tracksStockUnits && (
-                                <div className="flex items-center gap-1.5 pt-1">
-                                  <Checkbox
-                                    checked={item.isWholeWheel}
-                                    id={`ww-${item.lineId}`}
-                                    onCheckedChange={() =>
-                                      toggleWholeWheel(item.lineId)
-                                    }
-                                  />
-                                  <label
-                                    className="cursor-pointer text-xs"
-                                    htmlFor={`ww-${item.lineId}`}
-                                  >
-                                    Unidad cerrada
-                                  </label>
-                                  <div className="h-6 w-14 shrink-0">
-                                    {item.isWholeWheel && (
-                                      <Input
-                                        className="h-6 w-14 text-xs"
-                                        inputMode="numeric"
-                                        min={1}
-                                        onChange={(e) =>
-                                          updateWholeWheelCount(
-                                            item.lineId,
-                                            Number(e.target.value)
-                                          )
-                                        }
-                                        step="1"
-                                        type="number"
-                                        value={item.wholeWheelCount}
-                                      />
-                                    )}
-                                  </div>{" "}
-                                </div>
-                              )}
-                          </div>
-                          <Button
-                            onClick={() => removeCartItem(item.lineId)}
-                            size="icon"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-4">
-                          {isWeightOrVolumeProduct(item.product) &&
-                          item.product.tracksStockUnits ? (
-                            <div>
-                              <p className="mb-1 text-muted-foreground text-xs">
-                                Peso (gramos)
-                              </p>
-                              <Input
-                                inputMode="decimal"
-                                min={0}
-                                onChange={(e) => {
-                                  const grams = Number(e.target.value);
-                                  const kg = grams / 1000;
-                                  const wpu = item.product.weightPerUnit ?? 0;
-                                  setCartItems((prev) =>
-                                    prev.map((i) => {
-                                      if (i.lineId !== item.lineId) {
-                                        return i;
+                      return (
+                        <div
+                          className="rounded-md border p-3"
+                          key={item.lineId}
+                        >
+                          <div className="mb-2 flex items-start justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <div>
+                                <p className="font-medium text-sm">
+                                  {item.product.name}
+                                  {item.variant &&
+                                    ` — ${item.variant.color} / ${item.variant.talle}`}
+                                </p>
+                                <p className="text-muted-foreground text-xs">
+                                  SKU {item.product.sku} · Stock{" "}
+                                  {getCartStockLabel(item)}
+                                </p>
+                              </div>
+                              {isWeightOrVolumeProduct(item.product) &&
+                                item.product.tracksStockUnits && (
+                                  <div className="flex items-center gap-1.5 pt-1">
+                                    <Checkbox
+                                      checked={item.isWholeWheel}
+                                      id={`ww-${item.lineId}`}
+                                      onCheckedChange={() =>
+                                        toggleWholeWheel(item.lineId)
                                       }
-                                      return {
-                                        ...i,
-                                        quantity: wpu > 0 ? kg / wpu : kg,
-                                        weightQuantity: kg,
-                                      };
-                                    })
-                                  );
-                                }}
-                                placeholder="Ej: 300"
-                                step="1"
-                                type="number"
-                                value={
-                                  item.weightQuantity
-                                    ? Math.round(item.weightQuantity * 1000)
-                                    : ""
-                                }
-                              />
+                                    />
+                                    <label
+                                      className="cursor-pointer text-xs"
+                                      htmlFor={`ww-${item.lineId}`}
+                                    >
+                                      Unidad cerrada
+                                    </label>
+                                    <div className="h-6 w-14 shrink-0">
+                                      {item.isWholeWheel && (
+                                        <Input
+                                          className="h-6 w-14 text-xs"
+                                          inputMode="numeric"
+                                          min={1}
+                                          onChange={(e) =>
+                                            updateWholeWheelCount(
+                                              item.lineId,
+                                              Number(e.target.value)
+                                            )
+                                          }
+                                          step="1"
+                                          type="number"
+                                          value={item.wholeWheelCount}
+                                        />
+                                      )}
+                                    </div>{" "}
+                                  </div>
+                                )}
                             </div>
-                          ) : (
+                            <Button
+                              onClick={() => removeCartItem(item.lineId)}
+                              size="icon"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-4">
+                            {isWeightOrVolumeProduct(item.product) &&
+                            item.product.tracksStockUnits ? (
+                              <div>
+                                <p className="mb-1 text-muted-foreground text-xs">
+                                  Peso (gramos)
+                                </p>
+                                <Input
+                                  inputMode={
+                                    item.variant ? "numeric" : "decimal"
+                                  }
+                                  max={item.variant?.stock}
+                                  min={item.variant ? 1 : 0}
+                                  onChange={(e) => {
+                                    const grams = Number(e.target.value);
+                                    const kg = grams / 1000;
+                                    const wpu = item.product.weightPerUnit ?? 0;
+                                    setCartItems((prev) =>
+                                      prev.map((i) => {
+                                        if (i.lineId !== item.lineId) {
+                                          return i;
+                                        }
+                                        return {
+                                          ...i,
+                                          quantity: wpu > 0 ? kg / wpu : kg,
+                                          weightQuantity: kg,
+                                        };
+                                      })
+                                    );
+                                  }}
+                                  placeholder="Ej: 300"
+                                  step="1"
+                                  type="number"
+                                  value={
+                                    item.weightQuantity
+                                      ? Math.round(item.weightQuantity * 1000)
+                                      : ""
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <div>
+                                <p className="mb-1 text-muted-foreground text-xs">
+                                  Cantidad
+                                </p>
+                                <Input
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(e) =>
+                                    updateCartQuantity(
+                                      item.lineId,
+                                      Number(e.target.value)
+                                    )
+                                  }
+                                  step={item.variant ? "1" : "0.01"}
+                                  type="number"
+                                  value={item.quantity}
+                                />
+                              </div>
+                            )}
                             <div>
                               <p className="mb-1 text-muted-foreground text-xs">
-                                Cantidad
+                                Precio por kilo
                               </p>
                               <Input
                                 inputMode="decimal"
                                 min={0}
-                                onChange={(e) =>
-                                  updateCartQuantity(
+                                onChange={(event) =>
+                                  updateCartUnitPrice(
                                     item.lineId,
-                                    Number(e.target.value)
+                                    Number(event.target.value)
                                   )
                                 }
                                 step="0.01"
                                 type="number"
-                                value={item.quantity}
+                                value={item.unitPrice}
                               />
                             </div>
-                          )}
-                          <div>
-                            <p className="mb-1 text-muted-foreground text-xs">
-                              Precio por kilo
-                            </p>
-                            <Input
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                updateCartUnitPrice(
-                                  item.lineId,
-                                  Number(event.target.value)
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={item.unitPrice}
-                            />
-                          </div>
-                          <div>
-                            <p className="mb-1 text-muted-foreground text-xs">
-                              Descuento %
-                            </p>
-                            <Input
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                updateCartDiscount(
-                                  item.lineId,
-                                  Number(event.target.value)
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={item.discountPercentage}
-                            />
-                          </div>
-                          <div className="flex flex-col justify-end">
-                            <p className="text-muted-foreground text-xs">
-                              Subtotal
-                            </p>
-                            <p className="font-semibold text-sm">
-                              {formatCurrency(subtotal)}
-                            </p>
+                            <div>
+                              <p className="mb-1 text-muted-foreground text-xs">
+                                Descuento %
+                              </p>
+                              <Input
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  updateCartDiscount(
+                                    item.lineId,
+                                    Number(event.target.value)
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={item.discountPercentage}
+                              />
+                            </div>
+                            <div className="flex flex-col justify-end">
+                              <p className="text-muted-foreground text-xs">
+                                Subtotal
+                              </p>
+                              <p className="font-semibold text-sm">
+                                {formatCurrency(subtotal)}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    }
+                  )}
                 </div>
               </CardContent>
             </Card>
