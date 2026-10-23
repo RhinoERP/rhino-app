@@ -8,6 +8,7 @@ import type {
   CreateCreditNoteSourceDocumentInput,
   CreateCreditNoteTaxInput,
 } from "@/modules/credit-notes/types";
+import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
@@ -59,6 +60,7 @@ export type CreateSaleReturnResult = {
 export type SaleReturnSourceItem = {
   id: string;
   product_id: string | null;
+  product_variant_id?: string | null;
   description: string | null;
   quantity: number | null;
   unit_quantity: number | null;
@@ -269,6 +271,16 @@ export function resolveReturnLines(params: {
       soldUnitQuantity - alreadyReturnedUnits
     );
     const requestedQuantity = Number(input.quantity ?? 0);
+
+    if (
+      hasFractionalVariantReturn({
+        variantId: saleItem.product_variant_id,
+        quantity: requestedQuantity,
+        unitQuantity: input.unitQuantity,
+      })
+    ) {
+      throw new Error("Las variantes deben devolverse en unidades enteras.");
+    }
 
     if (requestedQuantity <= 0) {
       throw new Error("Debe indicar una cantidad mayor a cero para devolver.");
@@ -1211,6 +1223,7 @@ export async function createSaleReturn(
       items:sales_order_items(
         id,
         product_id,
+        product_variant_id,
         description,
         quantity,
         unit_quantity,

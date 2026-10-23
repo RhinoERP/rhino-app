@@ -30,6 +30,7 @@ export const posSaleTaxSchema = z.object({
 
 export const posSaleItemSchema = z.object({
   productId: idSchema,
+  productVariantId: optionalIdSchema,
   quantity: z.coerce.number().finite().min(0),
   weightQuantity: z.coerce.number().finite().positive().optional().nullable(),
   isWholeUnit: z.boolean().optional(),
@@ -145,6 +146,7 @@ export type PosSaleTerminal = {
 export type PosSaleItem =
   Database["public"]["Tables"]["pos_sale_items"]["Row"] & {
     product: PosSaleProduct | null;
+    variant?: { talle: string; color: string } | null;
   };
 
 export type PosSalePayment =
@@ -205,6 +207,13 @@ export type PosTerminalProduct = {
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   weightPerUnit: number | null;
+  hasVariants: boolean;
+  variants: Array<{
+    id: string;
+    talle: string;
+    color: string;
+    stock: number;
+  }>;
   totalQuantity: number;
   totalUnitQuantity: number | null;
 };
