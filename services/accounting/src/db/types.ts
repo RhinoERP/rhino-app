@@ -318,6 +318,7 @@ export type UpdatePublicAccountsPayable =
 export type PublicAccountsReceivableTable = {
   id: Generated<string>;
   organization_id: string;
+  customer_id: string;
   total_amount: ColumnType<string, string, string>;
   pending_balance: ColumnType<string, string, string>;
   status: string;
@@ -332,9 +333,26 @@ export type PublicReceivablePaymentsTable = {
   organization_id: string;
   account_receivable_id: string;
   amount: ColumnType<string, string, string>;
+  payment_method: string;
+  currency: string;
+  accounting_journal_entry_id: string | null;
 };
 
 export type PublicReceivablePayment = Selectable<PublicReceivablePaymentsTable>;
+
+export type PublicCustomerCreditsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  source_payment_id: string | null;
+  amount: ColumnType<string, string, string>;
+  remaining_amount: ColumnType<string, string, string>;
+};
+
+export type PublicCustomerCreditApplicationsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  customer_credit_id: string | null;
+};
 
 export type PublicCommissionsTable = {
   id: Generated<string>;
@@ -492,6 +510,8 @@ export type Database = {
   "public.payable_payments": PublicPayablePaymentsTable;
   "public.accounts_receivable": PublicAccountsReceivableTable;
   "public.receivable_payments": PublicReceivablePaymentsTable;
+  "public.customer_credits": PublicCustomerCreditsTable;
+  "public.customer_credit_applications": PublicCustomerCreditApplicationsTable;
   "public.commissions": PublicCommissionsTable;
   "public.supplier_credits": PublicSupplierCreditsTable;
   "public.supplier_credit_applications": PublicSupplierCreditApplicationsTable;

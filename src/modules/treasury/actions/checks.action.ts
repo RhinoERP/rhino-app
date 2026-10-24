@@ -23,7 +23,7 @@ type ActionResult<T = void> =
 
 export async function createChequeRecibidoAction(
   orgSlug: string,
-  input: Omit<CreateReceivedCheckInput, "orgId">
+  input: Omit<CreateReceivedCheckInput, "orgId" | "receivablePaymentId">
 ): Promise<ActionResult<{ id: string }>> {
   await ensure("treasury.checks.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
@@ -34,6 +34,7 @@ export async function createChequeRecibidoAction(
   try {
     const cheque = await createChequeRecibidoServer({
       ...input,
+      receivablePaymentId: undefined,
       orgId: org.id,
     });
     revalidatePath(`/org/${orgSlug}/tesoreria`);

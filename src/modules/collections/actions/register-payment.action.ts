@@ -401,6 +401,7 @@ const createCustomerOverpaymentCredit = async (params: {
   orgId: string;
   customerId: string;
   supplierId: string | null;
+  paymentId?: string;
   creditGenerated: number;
   notes: string | null;
   currency: string;
@@ -416,7 +417,7 @@ const createCustomerOverpaymentCredit = async (params: {
     amount: params.creditGenerated,
     remaining_amount: params.creditGenerated,
     currency: params.currency,
-    source_payment_id: null,
+    source_payment_id: params.paymentId ?? null,
     notes: params.notes
       ? `Saldo a favor por sobrepago — ${params.notes}`
       : "Saldo a favor por sobrepago",
@@ -631,7 +632,7 @@ async function createReceivablePaymentWithAccounting(params: {
       supabase: params.supabase,
       orgId: params.orgId,
       payment,
-      amountArs: params.currencyFields.amountArs,
+      customerId: params.receivable.customer_id,
       paymentMethod: params.paymentMethod,
       receivedCheckData: params.receivedCheckData,
     });
@@ -698,7 +699,7 @@ async function persistReceivedCheckForPayment(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   payment: PaymentInsertRow;
-  amountArs: number;
+  customerId: string;
   paymentMethod: PaymentMethod;
   receivedCheckData: NonNullable<RegisterPaymentInput["receivedCheckData"]>;
 }): Promise<{ success: true } | { success: false; error: string }> {
@@ -707,11 +708,12 @@ async function persistReceivedCheckForPayment(params: {
       orgId: params.orgId,
       numeroCheque: params.receivedCheckData.numeroCheque,
       bancoEmisor: params.receivedCheckData.bancoEmisor,
-      importe: truncateMoney(params.amountArs).toFixed(4),
+      importe: truncateMoney(params.payment.amount).toFixed(4),
       fechaEmision: params.receivedCheckData.fechaEmision,
       fechaVencimiento: params.receivedCheckData.fechaVencimiento,
       tipo: params.paymentMethod === "e-cheq" ? "ECH" : "CDF",
       librador: sanitize(params.receivedCheckData.librador) ?? undefined,
+      libradorId: params.customerId,
       notas: sanitize(params.receivedCheckData.notas) ?? undefined,
       receivablePaymentId: params.payment.id,
     });
@@ -1100,6 +1102,7 @@ async function applyReceivablePayment({
     orgId,
     customerId: receivable.customer_id,
     supplierId: creditSupplierId,
+    paymentId,
     creditGenerated,
     notes,
     currency: receivable.currency ?? "ARS",
