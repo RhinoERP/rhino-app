@@ -238,6 +238,14 @@ export type RegisterPaymentInput = {
     beneficiario: string;
     notas?: string;
   };
+  receivedCheckData?: {
+    bancoEmisor: string;
+    numeroCheque: string;
+    fechaEmision: string;
+    fechaVencimiento: string;
+    librador?: string;
+    notas?: string;
+  };
 };
 
 export type RegisterPaymentResult =

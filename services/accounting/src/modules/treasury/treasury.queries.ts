@@ -344,6 +344,7 @@ export function createReceivedCheck(
       librador: input.librador ?? null,
       librador_id: input.libradorId ?? null,
       notas: input.notas ?? null,
+      receivable_payment_id: input.receivablePaymentId ?? null,
       creado_por: input.creadoPor ?? null,
     })
     .returningAll()
