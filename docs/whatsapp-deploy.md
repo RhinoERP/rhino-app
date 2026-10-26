@@ -89,55 +89,112 @@ entorno **Production**, además de las variables existentes de Rhinos:
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Clave pública del mismo proyecto. |
 | `SUPABASE_SECRET_KEY` | Clave privada de servidor para las operaciones del módulo. |
 | `OPENAI_API_KEY` | Obligatoria para el sandbox. |
-| `WHATSAPP_AGENT_OPENAI_MODEL` | Opcional; por defecto `gpt-5-mini`. Usar el mismo modelo en Railway. |
+| `WHATSAPP_AGENT_OPENAI_MODEL` | Opcional; por defecto `gpt-5-mini`. Usar el mismo modelo en el worker. |
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Secreto elegido para verificar la suscripción de Meta. |
 | `WHATSAPP_META_APP_SECRET` | App Secret de la aplicación Meta; valida las firmas de POST. |
-| `WHATSAPP_AGENT_SERVICE_TOKEN` | Secreto largo compartido exactamente con Railway. |
+| `WHATSAPP_AGENT_SERVICE_TOKEN` | Secreto largo para autenticar el worker contra la API interna. |
 | `WHATSAPP_META_ACCESS_TOKEN` | Token de Meta para responder manualmente desde el inbox. |
-| `WHATSAPP_META_GRAPH_VERSION` | Opcional; el código usa `v23.0` por defecto. Configurar la misma versión en Railway. |
+| `WHATSAPP_META_GRAPH_VERSION` | Opcional; el código usa `v23.0` por defecto. Configurar la misma versión en el worker. |
 
 Los secretos no llevan prefijo `NEXT_PUBLIC_`. Para usar sólo sandbox alcanzan las
 credenciales existentes de Supabase y OpenAI en Vercel. No necesita Meta ni
 Railway. El endpoint del sandbox tiene `maxDuration = 60`; verificar que la
 configuración del proyecto Vercel permita ese tiempo.
 
-## 3. Railway: worker persistente para WhatsApp real
+## 3. Vercel Daemons: worker en el proyecto Pro de Rhinos
 
-Crear o actualizar un servicio independiente del servicio contable y del frontend.
-Configurar el repositorio, rama `main`, Node 22 y raíz **`/`**. Es un workspace
-compartido: el lockfile está en la raíz, no en el directorio del worker.
+Vercel Daemons ejecuta el proceso permanente del worker junto al frontend. Es
+beta pública, funciona sólo en Production y cobra CPU activa y memoria
+provisionada en Pro; tener Pro no implica consumo ilimitado ni gratuito.
 
-| Ajuste | Valor |
-| --- | --- |
-| Instalación | `pnpm install --frozen-lockfile` |
-| Build | `pnpm --filter @rhinos/whatsapp-agent build` |
-| Start | `pnpm --filter @rhinos/whatsapp-agent start` |
-| Healthcheck | `/health` |
-| Watch paths | `/services/whatsapp-agent/**`, `/pnpm-lock.yaml`, `/pnpm-workspace.yaml`, `/package.json` |
+El repositorio incluye `vercel.json` y
+`services/whatsapp-agent/Dockerfile`, con una imagen Node 22 para Linux amd64,
+dependencias fijadas en un lockfile independiente y ejecución como usuario sin
+privilegios. El contexto Docker excluye los archivos `.env`, el `node_modules`
+local y cualquier archivo ajeno al worker. No agregar secretos al Dockerfile.
 
-Variables del servicio:
+**El daemon se publica con cero instancias** (`iad1: 0`). Así el deploy registra
+la configuración, pero no arranca el proceso ni consume jobs hasta activarlo.
+Se configura un tamaño de 1 GiB y 120 segundos para finalizar trabajos al recibir
+SIGTERM. El sandbox funciona con el daemon detenido.
+
+### Preparación y publicación
+
+1. En el proyecto **productivo** de Rhinos, comprobar que Root Directory sea la
+   raíz del repositorio, sin subcarpeta. La beta de Daemons no admite proyectos
+   con Root Directory configurado en una subcarpeta.
+2. Aplicar primero la base del paso 1. Después configurar las variables de
+   Production del paso 2 y las del worker indicadas abajo. Usar un secreto nuevo
+   para `WHATSAPP_AGENT_SERVICE_TOKEN` y guardar el mismo valor para la API interna.
+3. Mergear el PR y dejar que Vercel despliegue `main`. No hace falta crear un
+   segundo proyecto Vercel ni contratar Railway. Conservar los comandos actuales
+   de build de Next; Vercel construye el Dockerfile del daemon por separado.
+4. En **Daemons → whatsapp-agent → Scale**, habilitar **1 instancia en iad1**
+   (o ajustar primero la región a la de la base). Este override persiste entre
+   despliegues, aunque `vercel.json` conserve cero instancias. Mantener detenida
+   cualquier copia del worker en Railway u otro proyecto si se está migrando.
+5. En los logs del daemon, comprobar
+   `[whatsapp-agent] worker configurado; iniciando polling`. Si aparece el aviso
+   de variables comerciales faltantes, corregirlas y hacer un nuevo deploy de
+   Production. Cambiar variables en Settings sin redesplegar no actualiza un
+   proceso ya iniciado. La prueba de punta a punta sigue siendo necesaria.
+6. Habilitar únicamente la empresa piloto y su integración según el paso 4.
+
+Variables del worker en **Settings → Environment Variables → Production**:
 
 ```dotenv
-SUPABASE_URL=https://<mismo-proyecto-que-vercel>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<clave-privada-del-mismo-proyecto>
+# El worker reutiliza NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SECRET_KEY
+# que ya tiene el proyecto de Rhinos. No necesita repetirlas con otros nombres.
 WHATSAPP_AGENT_RHINOS_URL=https://<dominio-productivo-de-rhinos>
-WHATSAPP_AGENT_SERVICE_TOKEN=<mismo-secreto-que-vercel>
+WHATSAPP_AGENT_SERVICE_TOKEN=<secreto-largo-para-la-api-interna>
 WHATSAPP_META_ACCESS_TOKEN=<token-de-meta-con-acceso-a-los-numeros-habilitados>
 WHATSAPP_META_GRAPH_VERSION=v23.0
 OPENAI_API_KEY=<clave-de-openai>
 WHATSAPP_AGENT_OPENAI_MODEL=gpt-5-mini
-WHATSAPP_AGENT_POLL_INTERVAL_MS=1000
+WHATSAPP_AGENT_POLL_INTERVAL_MS=5000
 ```
 
-`PORT` lo provee Railway. `WHATSAPP_AGENT_WORKER_ID` es opcional. La URL de Rhinos
-debe ser accesible desde Railway, sin login o protección de preview delante de
-`/api/internal/whatsapp-agent/tools/*`. Esas rutas autentican el secreto compartido;
-el webhook autentica a Meta y no depende de cookies de navegador.
+`WHATSAPP_AGENT_WORKER_ID` es opcional; cada proceso recibe un identificador
+propio por defecto. El intervalo recomendado revisa la cola cada cinco segundos,
+conservando los horarios y demoras configurados por empresa. La URL de Rhinos
+debe permitir acceso del worker a `/api/internal/whatsapp-agent/tools/*`, sin
+login o protección de preview delante. La API autentica el secreto compartido.
+El webhook de Meta sigue apuntando al dominio de Rhinos en Vercel.
 
-Consultar `/health`: debe devolver `ok: true` **y `configured: true`**. Un HTTP 200
-con `configured: false` indica que el proceso está vivo, pero no reclama jobs.
-La salud no certifica que Meta, OpenAI o la API interna acepten las credenciales;
-para eso hace falta la prueba real del paso 5.
+Daemons no recibe tráfico HTTP entrante durante la beta. El `/health` del worker
+sirve para pruebas locales y Railway; en Vercel usar el estado del daemon, sus
+logs y las tablas `agent_jobs` y `agent_runs`. Nunca cambiar el callback de Meta
+para apuntarlo al daemon.
+
+Para detenerlo: **Daemons → whatsapp-agent → Scale → 0 instancias** en todas las
+regiones. Desactivar los flags de una empresa sólo detiene su operación; el
+proceso global sigue consultando la cola mientras haya una instancia.
+
+### Prueba local de la imagen
+
+```sh
+docker build --platform linux/amd64 -t rhino-whatsapp-daemon services/whatsapp-agent
+# Usar un archivo privado con credenciales de prueba, fuera del contexto Docker:
+docker run --rm --env-file /ruta/privada/worker.env rhino-whatsapp-daemon
+```
+
+La imagen usa `services/whatsapp-agent/pnpm-lock.yaml`; el desarrollo del monorepo
+sigue usando el lockfile de la raíz. Al actualizar dependencias del worker,
+actualizar también el lockfile independiente y repetir la construcción Docker.
+
+### Alternativa: Railway
+
+El mismo worker puede ejecutarse en Railway si se prefiere otra plataforma. Crear
+un servicio independiente con raíz `/`, Node 22, instalación
+`pnpm install --frozen-lockfile`, build
+`pnpm --filter @rhinos/whatsapp-agent build`, inicio
+`pnpm --filter @rhinos/whatsapp-agent start` y healthcheck `/health`.
+Configurar `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` del mismo proyecto que
+Vercel, además de las variables del worker anteriores. El secreto compartido debe
+coincidir en ambos servicios. Watch paths: `/services/whatsapp-agent/**`,
+`/pnpm-lock.yaml`, `/pnpm-workspace.yaml`, `/package.json`.
+Consultar `/health`: debe devolver `ok: true` **y `configured: true`**. Esto
+comprueba la presencia de variables, no que los proveedores las acepten.
 
 ## 4. Activación por empresa desde superadmin
 
@@ -199,7 +256,8 @@ errores de Meta y OpenAI quedan en la auditoría/reintentos. No se ejecutó una
 prueba contra proveedores reales durante esta revisión.
 
 Para apagar una empresa, desactivar ambos switches en superadmin. Para detener
-todo el canal real, detener el servicio Railway y dejar las integraciones en
+todo el canal real, escalar el daemon a cero (o detener Railway si se usa esa
+alternativa) y dejar las integraciones en
 `PAUSED` o `DRAFT`. Los mensajes recibidos con el módulo apagado se reconocen pero
 se descartan; no se recuperan automáticamente al habilitarlo. Los jobs que ya
 estaban pendientes se conservan y pueden continuar al reactivarlo. Un envío ya
@@ -214,6 +272,7 @@ pnpm exec vitest run
 pnpm --filter @rhinos/whatsapp-agent build
 pnpm build
 bash scripts/test-whatsapp-db.sh
+docker build --platform linux/amd64 -t rhino-whatsapp-daemon services/whatsapp-agent
 ```
 
 La última prueba requiere Docker y crea un PostgreSQL 16 descartable con las
@@ -221,7 +280,11 @@ dependencias mínimas del módulo. Valida migraciones, defaults, RLS, protecció
 flags, sandbox independiente, ingesta, deduplicación, cola y demoras. No inicia
 Supabase ni conecta a producción.
 
-Referencias oficiales: [Railway monorepos](https://docs.railway.com/deployments/monorepo),
+Referencias oficiales: [Vercel Daemons](https://vercel.com/docs/daemons),
+[Configuración](https://vercel.com/docs/daemons/config-reference),
+[Escalado y activación](https://vercel.com/docs/daemons/managing-daemons),
+[Límites y facturación](https://vercel.com/docs/daemons/limits),
+[Railway monorepos](https://docs.railway.com/deployments/monorepo),
 [Supabase migrations](https://supabase.com/docs/guides/deployment/database-migrations),
 [Supabase db push](https://supabase.com/docs/reference/cli/supabase-db-push),
 [Meta Webhooks](https://www.postman.com/meta/whatsapp-business-platform/folder/lboq68h/webhooks).

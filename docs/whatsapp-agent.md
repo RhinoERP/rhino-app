@@ -17,7 +17,7 @@ El MVP incluye consultas comerciales, carrito, cotización, preventa y derivaci�
 | Repositorio | Un único repositorio: este. Los servicios se despliegan de manera independiente. |
 | Canal | Meta Cloud API. Cada `phone_number_id` corresponde a una organización activa. |
 | Rhinos | Next desplegado en Vercel: panel, APIs internas y webhook. |
-| Worker | `services/whatsapp-agent`, servicio Node persistente desplegado en Railway. |
+| Worker | `services/whatsapp-agent`, servicio Node persistente desplegado en Vercel Daemons (Railway como alternativa). |
 | Datos | El proyecto Supabase actual es la fuente de verdad comercial y conversacional. |
 | Aislamiento | El número receptor resuelve la organización; el modelo nunca elige ni recibe un `organization_id` arbitrario. |
 | Operaciones | El agente usa herramientas comerciales de Rhinos; no tiene SQL libre ni acceso administrativo general a Supabase. |
@@ -28,7 +28,7 @@ flowchart LR
   M --> W[Webhook Rhinos / Next]
   W --> S[(Supabase)]
   W --> J[agent_jobs]
-  J --> A[Worker whatsapp-agent\nRailway]
+  J --> A[Worker whatsapp-agent\nVercel Daemons]
   A --> T[API/MCP interna de Rhinos]
   T --> S
   A -->|respuesta saliente| M
@@ -163,7 +163,7 @@ Los permisos del módulo distinguen lectura de inbox, atención de conversacione
 | Fase | Estado | Alcance disponible en código |
 | --- | --- | --- |
 | 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable, horarios semanales, zona horaria, demora aleatoria y derivación. Flags de disponibilidad configurables desde superadmin. Las credenciales de Meta todavía son variables globales del servicio; no hay provisionamiento de secretos por integración. |
-| 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta/Railway. |
+| 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta y el daemon de Vercel. |
 | 3 — Asistente comercial | En curso | Worker con Responses API, herramientas comerciales acotadas, carrito persistente, cotización, confirmación explícita, preventa idempotente y auditoría. Falta una prueba end-to-end contra Meta y el proveedor de modelo. |
 | 4 — Operación humana | En curso | Inbox inicial, respuesta manual, derivación y pausa/reactivación explícita. Faltan asignación, alertas y vista detallada de historial. |
 | 5 — Métricas y tesis | Pendiente | Sin dashboard ni protocolo comparativo implementados. |
@@ -183,7 +183,7 @@ credenciales de producción y se complete una prueba real de punta a punta.
 
 - Implementar verificación y recepción del webhook de Meta Cloud API.
 - Persistir mensajes de forma idempotente y crear trabajos durables.
-- Crear el worker Railway con reclamación, reintentos y registro de errores.
+- Crear el worker en Vercel Daemons con reclamación, reintentos y registro de errores.
 - Implementar mensajes salientes y estado de entrega.
 
 **Salida:** cada mensaje queda trazado y se procesa una sola vez aunque Meta lo reintente.

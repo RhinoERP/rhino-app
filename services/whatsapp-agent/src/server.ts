@@ -66,6 +66,7 @@ const server = createServer((request, response) => {
 }).listen(port, () => {
   console.log(`[whatsapp-agent] escuchando en ${port}`);
   if (isConfigured) {
+    console.log("[whatsapp-agent] worker configurado; iniciando polling");
     poll().catch((error: unknown) => {
       console.error("[whatsapp-agent] no se pudo iniciar el polling", error);
     });
