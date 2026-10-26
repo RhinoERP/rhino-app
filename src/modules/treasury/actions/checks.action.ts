@@ -23,7 +23,7 @@ type ActionResult<T = void> =
 
 export async function createChequeRecibidoAction(
   orgSlug: string,
-  input: Omit<CreateReceivedCheckInput, "orgId">
+  input: Omit<CreateReceivedCheckInput, "orgId" | "receivablePaymentId">
 ): Promise<ActionResult<{ id: string }>> {
   await ensure("treasury.checks.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
@@ -34,6 +34,7 @@ export async function createChequeRecibidoAction(
   try {
     const cheque = await createChequeRecibidoServer({
       ...input,
+      receivablePaymentId: undefined,
       orgId: org.id,
     });
     revalidatePath(`/org/${orgSlug}/tesoreria`);
@@ -51,8 +52,7 @@ export async function createChequeRecibidoAction(
 
 export async function rechazarChequeRecibidoAction(
   orgSlug: string,
-  chequeId: string,
-  cuentaBancariaId: string
+  chequeId: string
 ): Promise<ActionResult<{ id: string }>> {
   await ensure("treasury.checks.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
@@ -61,11 +61,7 @@ export async function rechazarChequeRecibidoAction(
   }
 
   try {
-    const cheque = await rechazarChequeRecibidoServer(
-      chequeId,
-      org.id,
-      cuentaBancariaId
-    );
+    const cheque = await rechazarChequeRecibidoServer(chequeId, org.id);
     revalidatePath(`/org/${orgSlug}/tesoreria`);
     return { success: true, data: { id: cheque.id } };
   } catch (err) {
