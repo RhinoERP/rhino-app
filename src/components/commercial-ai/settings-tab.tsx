@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { saveConfigAction } from "@/modules/commercial-ai/actions/commercial-ai.actions";
 import { OPPORTUNITY_TYPES } from "@/modules/commercial-ai/constants";
 import {
   type CommercialAiConfig,
   DEFAULT_COMMERCIAL_AI_CONFIG,
 } from "@/modules/commercial-ai/types";
+import { IcpSection, RouteSettingsSection } from "./settings-prospecting";
 import { TypeBadge, useCommercialAi } from "./shared";
 
 type NumberKey = {
@@ -27,6 +29,33 @@ type BooleanKey = {
 }[keyof CommercialAiConfig];
 
 export function SettingsTab() {
+  const [section, setSection] = useState<"cartera" | "rutas" | "prospeccion">(
+    "cartera"
+  );
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-heading text-xl">Configuración</h2>
+        <Tabs
+          className="ml-auto"
+          onValueChange={(v) => setSection(v as typeof section)}
+          value={section}
+        >
+          <TabsList>
+            <TabsTrigger value="cartera">Análisis de cartera</TabsTrigger>
+            <TabsTrigger value="rutas">Rutas</TabsTrigger>
+            <TabsTrigger value="prospeccion">Prospección</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      {section === "cartera" ? <AnalysisSettings /> : null}
+      {section === "rutas" ? <RouteSettingsSection /> : null}
+      {section === "prospeccion" ? <IcpSection /> : null}
+    </div>
+  );
+}
+
+function AnalysisSettings() {
   const { snapshot } = useCommercialAi();
   const [config, setConfig] = useState<CommercialAiConfig>(snapshot.config);
   const [pending, startTransition] = useTransition();

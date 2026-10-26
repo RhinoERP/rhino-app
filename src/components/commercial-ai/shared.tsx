@@ -34,6 +34,7 @@ type CommercialAiContextValue = {
   isManager: boolean;
   openOpportunity: (key: string, queue?: string[]) => void;
   openCustomer: (customerId: string) => void;
+  openProspect: (prospectId: string) => void;
   goToTab: (tab: string) => void;
 };
 

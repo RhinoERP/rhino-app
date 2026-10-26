@@ -1,6 +1,5 @@
 import "server-only";
 
-import Anthropic from "@anthropic-ai/sdk";
 import {
   OPEN_STAGES,
   OPPORTUNITY_TYPES,
@@ -9,11 +8,12 @@ import {
 } from "../constants";
 import { formatMoneyShort } from "../engine/analysis";
 import type { CommercialAiSnapshot } from "../types";
+import { createAiMessage } from "./ai-client";
 
-const DEFAULT_MODEL = "claude-opus-5-5";
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_CONTEXT_OPPORTUNITIES = 40;
 const MAX_CONTEXT_CUSTOMERS = 60;
+const MAX_CONTEXT_PROSPECTS = 25;
 
 export type AssistantMessage = { role: "user" | "assistant"; content: string };
 
@@ -91,7 +91,63 @@ export function buildAssistantContext(snapshot: CommercialAiSnapshot) {
         ),
       }))[0];
 
+  const { prospecting } = snapshot;
+  const todayRoutes = prospecting.routes
+    .filter((r) => r.date === snapshot.today)
+    .map((r) => ({
+      ...(isManager ? { vendedor: sellerName(r.sellerId) } : {}),
+      paradas: r.stops.map((s) => ({
+        n: s.position,
+        cuenta: s.name,
+        tipo: s.kind,
+        resultado: s.result ?? "pendiente",
+        motivo: s.reason,
+      })),
+    }));
+  const openProspects = prospecting.prospects
+    .filter((p) =>
+      [
+        "sin_contactar",
+        "contactado",
+        "en_conversacion",
+        "esperando_pedido",
+      ].includes(p.stage)
+    )
+    .slice(0, MAX_CONTEXT_PROSPECTS)
+    .map((p) => ({
+      id: p.id,
+      nombre: p.name,
+      zona: p.city,
+      encaje: p.fitScore,
+      etapa: p.stage,
+      ...(isManager ? { vendedor: sellerName(p.sellerId) } : {}),
+    }));
+  const campaigns = prospecting.campaigns
+    .filter((c) => c.status === "activa")
+    .map((c) => {
+      const mine = prospecting.prospects.filter((p) => p.campaignId === c.id);
+      return {
+        nombre: c.name,
+        objetivo:
+          c.goalCount && c.goalKind ? `${c.goalCount} ${c.goalKind}` : null,
+        prospectos: mine.length,
+        contactados: mine.filter(
+          (p) => p.stage !== "sin_contactar" && p.stage !== "descartado"
+        ).length,
+        en_conversacion: mine.filter(
+          (p) => p.stage === "en_conversacion" || p.stage === "esperando_pedido"
+        ).length,
+      };
+    });
+
   return {
+    ruta_de_hoy: todayRoutes,
+    prospectos_abiertos: openProspects,
+    campanas_activas: campaigns,
+    aprendizajes_del_equipo: prospecting.learnings
+      .filter((l) => l.status !== "descartada")
+      .slice(0, 10)
+      .map((l) => l.title),
     hoy: snapshot.today,
     datos_al: snapshot.dataAsOf,
     dia_del_mes: `${snapshot.plan.dayOfMonth} de ${snapshot.plan.daysInMonth}`,
@@ -107,7 +163,7 @@ function systemPrompt(snapshot: CommercialAiSnapshot): string {
   return `Sos el asistente comercial de ${snapshot.orgName} dentro de Rhinos, el sistema de gestión de la distribuidora. Ayudás a ${snapshot.role === "gerente" ? "un gerente comercial a seguir al equipo" : "un vendedor a decidir a quién llamar, qué ofrecer y qué escribir"}.
 Respondés en español rioplatense, con voseo, directo y breve: hasta unas 120 palabras salvo que pidan más detalle.
 Usá solo los datos del JSON de abajo. Si algo no está, decilo y sugerí dónde mirarlo en Rhinos. No inventes números ni clientes.
-Cuando nombres un cliente escribilo así: [[cli:CID|Nombre]]; una oportunidad: [[opp:ID|Nombre del cliente]]. Así el usuario lo abre con un toque.
+Cuando nombres un cliente escribilo así: [[cli:CID|Nombre]]; una oportunidad: [[opp:ID|Nombre del cliente]]; un prospecto: [[pro:ID|Nombre]]. Así el usuario lo abre con un toque.
 Montos en pesos argentinos abreviados ($1,2M, $350k). Podés usar viñetas con "- " y **negrita** para lo clave. Si te piden un mensaje para un cliente, escribilo listo para WhatsApp.`;
 }
 
@@ -115,43 +171,25 @@ export async function askAssistant(
   snapshot: CommercialAiSnapshot,
   history: AssistantMessage[]
 ): Promise<string> {
-  const client = new Anthropic();
   const trimmed = history.slice(-MAX_HISTORY_MESSAGES);
   // La conversación tiene que arrancar con el usuario.
   while (trimmed.length && trimmed[0].role !== "user") {
     trimmed.shift();
   }
 
-  const response = await client.beta.messages.create({
-    model: process.env.COMMERCIAL_AI_MODEL || DEFAULT_MODEL,
-    max_tokens: 4000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    output_config: { effort: "low" },
-    system: [
-      {
-        type: "text",
-        text: `${systemPrompt(snapshot)}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
+  const result = await createAiMessage({
+    system: `${systemPrompt(snapshot)}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`,
     messages: trimmed,
+    maxTokens: 4000,
   });
 
-  if (response.stop_reason === "refusal") {
+  if (!result.ok) {
     return "No puedo ayudarte con eso. Probá preguntarme por tus clientes, oportunidades o la meta del mes.";
   }
-  const text = response.content
-    .filter(
-      (block): block is Anthropic.Beta.BetaTextBlock => block.type === "text"
-    )
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
-  if (response.stop_reason === "max_tokens") {
-    return `${text}\n\n(La respuesta quedó cortada: pedime menos a la vez.)`;
+  if (result.truncated) {
+    return `${result.text}\n\n(La respuesta quedó cortada: pedime menos a la vez.)`;
   }
-  return text || "No tengo una respuesta para eso.";
+  return result.text || "No tengo una respuesta para eso.";
 }
 
 /* ============ Respuestas con reglas (sin IA) ============ */

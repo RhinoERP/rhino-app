@@ -127,3 +127,98 @@ export const SUGGESTED_QUESTIONS = {
     "¿Qué oportunidades valen más?",
   ],
 } as const;
+
+export const PROSPECT_STAGES: Record<
+  import("./types").ProspectStage,
+  { label: string; className: string }
+> = {
+  sin_contactar: {
+    label: "Sin contactar",
+    className: "bg-muted text-muted-foreground",
+  },
+  contactado: {
+    label: "Contactado",
+    className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+  },
+  en_conversacion: {
+    label: "En conversación",
+    className:
+      "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
+  },
+  esperando_pedido: {
+    label: "Esperando primer pedido",
+    className:
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  },
+  perdido: {
+    label: "Perdido",
+    className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
+  },
+  descartado: {
+    label: "Descartado",
+    className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
+  },
+};
+
+export const VISIT_RESULTS: Record<
+  import("./types").VisitResult,
+  { label: string; className: string }
+> = {
+  pedido: {
+    label: "Pedido",
+    className:
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  },
+  interesado: {
+    label: "Interesado",
+    className:
+      "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
+  },
+  noestaba: {
+    label: "No estaba",
+    className:
+      "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  },
+  seguimiento: {
+    label: "Seguimiento",
+    className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+  },
+  nofue: {
+    label: "No fue",
+    className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
+  },
+};
+
+export const ROUTE_FACTORS: Record<import("./types").RouteFactor, string> = {
+  valor: "Valor de la oportunidad",
+  riesgo: "Riesgo / dormido",
+  seguimiento: "Seguimiento que vence",
+  dias: "Días sin visita",
+};
+
+export const CAMPAIGN_STATUS: Record<
+  import("./types").CampaignStatus,
+  { label: string; className: string }
+> = {
+  borrador: { label: "Borrador", className: "bg-muted text-muted-foreground" },
+  activa: {
+    label: "Activa",
+    className:
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  },
+  pausada: {
+    label: "Pausada",
+    className:
+      "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  },
+  archivada: {
+    label: "Archivada",
+    className: "bg-muted text-muted-foreground",
+  },
+};
+
+export const GOAL_KINDS = {
+  contactadas: "cuentas contactadas",
+  reuniones: "reuniones agendadas",
+  respuestas: "respuestas recibidas",
+} as const;

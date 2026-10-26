@@ -50,9 +50,18 @@ function order(
 }
 
 const products = new Map<string, EngineProduct>([
-  ["queso", { id: "queso", name: "Queso cremoso", categoryId: "quesos", unit: "kg" }],
-  ["muzza", { id: "muzza", name: "Mozzarella", categoryId: "quesos", unit: "kg" }],
-  ["jamon", { id: "jamon", name: "Jamón cocido", categoryId: "fiambres", unit: "kg" }],
+  [
+    "queso",
+    { id: "queso", name: "Queso cremoso", categoryId: "quesos", unit: "kg" },
+  ],
+  [
+    "muzza",
+    { id: "muzza", name: "Mozzarella", categoryId: "quesos", unit: "kg" },
+  ],
+  [
+    "jamon",
+    { id: "jamon", name: "Jamón cocido", categoryId: "fiambres", unit: "kg" },
+  ],
 ]);
 const categories = new Map([
   ["quesos", "Quesos"],
@@ -74,13 +83,19 @@ function run(customers: EngineCustomer[], orders: EngineOrder[]) {
 }
 
 /** Cliente que compra cada `every` días durante `span` días. */
-function regular(
-  customerId: string,
-  every: number,
-  span: number,
-  lines: [string, number][],
-  from = 0
-) {
+function regular({
+  customerId,
+  every,
+  span,
+  lines,
+  from = 0,
+}: {
+  customerId: string;
+  every: number;
+  span: number;
+  lines: [string, number][];
+  from?: number;
+}) {
   const orders: EngineOrder[] = [];
   for (let d = from; d < span; d += every) {
     orders.push(order(customerId, d, lines));
@@ -90,7 +105,13 @@ function regular(
 
 describe("analyzePortfolio", () => {
   it("marca dormido al que no compra hace más de 60 días y sugiere reactivarlo", () => {
-    const orders = regular("a", 7, 200, [["queso", 10_000]], 80);
+    const orders = regular({
+      customerId: "a",
+      every: 7,
+      span: 200,
+      lines: [["queso", 10_000]],
+      from: 80,
+    });
     const result = run([customer("a")], orders);
     expect(result.metrics.get("a")?.status).toBe("dormido");
     const opp = result.opportunities.find((o) => o.customerId === "a");
@@ -99,7 +120,13 @@ describe("analyzePortfolio", () => {
   });
 
   it("marca en riesgo al que cayó más de 40 % frente a su base", () => {
-    const base = regular("b", 5, 165, [["queso", 10_000]], 45);
+    const base = regular({
+      customerId: "b",
+      every: 5,
+      span: 165,
+      lines: [["queso", 10_000]],
+      from: 45,
+    });
     const recent = [order("b", 20, [["queso", 10_000]])];
     const result = run([customer("b")], [...base, ...recent]);
     expect(result.metrics.get("b")?.status).toBe("riesgo");
@@ -110,12 +137,22 @@ describe("analyzePortfolio", () => {
   it("detecta producto faltante cuando la mayoría de los pares lo compra", () => {
     const peers = ["p1", "p2", "p3", "p4", "p5", "p6"];
     const orders = [
-      ...regular("c", 10, 200, [["queso", 8000]]),
+      ...regular({
+        customerId: "c",
+        every: 10,
+        span: 200,
+        lines: [["queso", 8000]],
+      }),
       ...peers.flatMap((id) =>
-        regular(id, 10, 200, [
-          ["queso", 8000],
-          ["muzza", 6000],
-        ])
+        regular({
+          customerId: id,
+          every: 10,
+          span: 200,
+          lines: [
+            ["queso", 8000],
+            ["muzza", 6000],
+          ],
+        })
       ),
     ];
     const result = run(
@@ -132,12 +169,22 @@ describe("analyzePortfolio", () => {
   it("sugiere cross-sell de una categoría que no compra", () => {
     const peers = ["p1", "p2", "p3", "p4", "p5", "p6"];
     const orders = [
-      ...regular("d", 10, 200, [["queso", 8000]]),
+      ...regular({
+        customerId: "d",
+        every: 10,
+        span: 200,
+        lines: [["queso", 8000]],
+      }),
       ...peers.flatMap((id) =>
-        regular(id, 10, 200, [
-          ["queso", 8000],
-          ["jamon", 9000],
-        ])
+        regular({
+          customerId: id,
+          every: 10,
+          span: 200,
+          lines: [
+            ["queso", 8000],
+            ["jamon", 9000],
+          ],
+        })
       ),
     ];
     const result = run(
@@ -153,7 +200,12 @@ describe("analyzePortfolio", () => {
   it("no genera nada para un cliente estable sin pares", () => {
     const result = run(
       [customer("e")],
-      regular("e", 7, 200, [["queso", 10_000]])
+      regular({
+        customerId: "e",
+        every: 7,
+        span: 200,
+        lines: [["queso", 10_000]],
+      })
     );
     expect(result.metrics.get("e")?.status).toBe("activo");
     expect(result.opportunities).toHaveLength(0);

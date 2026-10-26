@@ -402,10 +402,16 @@ export async function saveConfigAction(
     });
     const access = await requireCommercialAiAccess(orgSlug, "manage");
     const admin = createAdminClient();
+    // Conservar lo que guardan otras pantallas (rutas, memoria) en la misma fila.
+    const { data: current } = await admin
+      .from("commercial_ai_settings")
+      .select("config")
+      .eq("organization_id", access.organizationId)
+      .maybeSingle();
     const { error } = await admin.from("commercial_ai_settings").upsert(
       {
         organization_id: access.organizationId,
-        config,
+        config: { ...((current?.config as object) ?? {}), ...config },
         updated_by: access.userId,
         updated_at: new Date().toISOString(),
       },

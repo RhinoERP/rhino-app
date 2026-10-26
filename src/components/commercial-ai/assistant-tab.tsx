@@ -200,12 +200,12 @@ export function AssistantTab() {
 
 /* ============ Render del texto del asistente (sin HTML crudo) ============ */
 
-const LINK_PATTERN = /\[\[(cli|opp):([^|\]]+)\|([^\]]+)\]\]/g;
+const LINK_PATTERN = /\[\[(cli|opp|pro):([^|\]]+)\|([^\]]+)\]\]/g;
 const BOLD_PATTERN = /\*\*([^*]+)\*\*/g;
 const BULLET_PATTERN = /^\s*[-•]\s+(.*)/;
 
 function InlineText({ text }: { text: string }) {
-  const { openCustomer, openOpportunity } = useCommercialAi();
+  const { openCustomer, openOpportunity, openProspect } = useCommercialAi();
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(LINK_PATTERN)) {
@@ -218,9 +218,15 @@ function InlineText({ text }: { text: string }) {
       <button
         className="font-medium text-primary underline underline-offset-2"
         key={`l${start}`}
-        onClick={() =>
-          kind === "cli" ? openCustomer(id) : openOpportunity(id)
-        }
+        onClick={() => {
+          if (kind === "cli") {
+            openCustomer(id);
+          } else if (kind === "pro") {
+            openProspect(id);
+          } else {
+            openOpportunity(id);
+          }
+        }}
         type="button"
       >
         {label}

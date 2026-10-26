@@ -255,5 +255,192 @@ export type CommercialAiSnapshot = {
   tasks: CommercialAiTask[];
   plan: MonthPlanView;
   aiEnabled: boolean;
+  aiModel: string;
   stats: { analyzedCustomers: number; analyzedOrders: number };
+  prospecting: ProspectingSnapshot;
+};
+
+/* ============ Fase 2: rutas, prospección y aprendizajes ============ */
+
+export type VisitResult =
+  | "pedido"
+  | "interesado"
+  | "noestaba"
+  | "seguimiento"
+  | "nofue";
+
+export type ProspectStage =
+  | "sin_contactar"
+  | "contactado"
+  | "en_conversacion"
+  | "esperando_pedido"
+  | "perdido"
+  | "descartado";
+
+export type CampaignStatus = "borrador" | "activa" | "pausada" | "archivada";
+
+export type RouteFactor = "valor" | "riesgo" | "seguimiento" | "dias";
+
+export type RouteSettings = {
+  /** Máximo de paradas que recomendamos por ruta. */
+  tope: number;
+  /** Orden de prioridad al recomendar a quién visitar. */
+  orden: RouteFactor[];
+};
+
+export const DEFAULT_ROUTE_SETTINGS: RouteSettings = {
+  tope: 12,
+  orden: ["valor", "riesgo", "seguimiento", "dias"],
+};
+
+export type TerritoryView = {
+  id: string;
+  name: string;
+  places: string[];
+  sellerIds: string[];
+};
+
+export type RouteStartView = {
+  id: string;
+  name: string;
+  address: string;
+  isDefault: boolean;
+};
+
+export type RouteStopView = {
+  id: string;
+  position: number;
+  kind: "cliente" | "prospecto";
+  accountId: string;
+  name: string;
+  city: string | null;
+  address: string | null;
+  reason: string;
+  result: VisitResult | null;
+  note: string;
+  resultAt: string | null;
+};
+
+export type RouteView = {
+  id: string;
+  sellerId: string | null;
+  date: string;
+  territoryId: string | null;
+  places: string[];
+  startLabel: string | null;
+  createdByName: string | null;
+  stops: RouteStopView[];
+};
+
+export type IcpView = {
+  id: string;
+  name: string;
+  description: string;
+  keywords: string[];
+  personas: string[];
+  valueProposition: string;
+};
+
+export type CampaignView = {
+  id: string;
+  name: string;
+  sellerId: string | null;
+  status: CampaignStatus;
+  goalCount: number | null;
+  goalKind: "contactadas" | "reuniones" | "respuestas" | null;
+  startDate: string;
+  endDate: string | null;
+  affinityMin: number;
+  maxPerRun: number;
+  icpId: string | null;
+  persona: string | null;
+  source: "lista" | "google_places";
+  country: string;
+  zones: string[];
+  exclusions: string[];
+  entryStrategy: "catalogo" | "ia";
+  catalogUrl: string | null;
+  ask: "responder" | "diagnostico" | "reunion" | "visita";
+  channels: ("whatsapp" | "email")[];
+  notes: string;
+};
+
+export type CampaignRunView = {
+  id: string;
+  campaignId: string;
+  status: "corriendo" | "terminada" | "fallida";
+  found: number;
+  discarded: number;
+  createdCount: number;
+  usedAi: boolean;
+  log: string[];
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type ProspectView = {
+  id: string;
+  campaignId: string | null;
+  sellerId: string | null;
+  name: string;
+  category: string | null;
+  address: string | null;
+  city: string | null;
+  province: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  source: string;
+  fitScore: number;
+  fitReasons: string;
+  stage: ProspectStage;
+  message: string;
+  nextStep: string | null;
+  nextStepDate: string | null;
+  customerId: string | null;
+  createdAt: string;
+};
+
+export type ProspectEventView = {
+  id: string;
+  prospectId: string;
+  kind: "note" | "stage" | "visit" | "system";
+  body: string;
+  actorName: string | null;
+  createdAt: string;
+};
+
+export type LearningView = {
+  id: string;
+  kind: "nota" | "patron";
+  title: string;
+  body: string;
+  status: "activa" | "propuesta" | "descartada";
+  actorName: string | null;
+  createdAt: string;
+};
+
+/** Patrón calculado al vuelo sobre lo que el equipo ya decidió. */
+export type LearnedPattern = {
+  key: string;
+  title: string;
+  detail: string;
+  sample: number;
+};
+
+export type ProspectingSnapshot = {
+  routeSettings: RouteSettings;
+  memoryOn: boolean;
+  territories: TerritoryView[];
+  routeStarts: RouteStartView[];
+  routes: RouteView[];
+  icps: IcpView[];
+  campaigns: CampaignView[];
+  runs: CampaignRunView[];
+  prospects: ProspectView[];
+  prospectEvents: ProspectEventView[];
+  learnings: LearningView[];
+  patterns: LearnedPattern[];
+  googlePlacesEnabled: boolean;
 };

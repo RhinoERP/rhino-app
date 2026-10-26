@@ -31,6 +31,8 @@ import {
   type OpportunityView,
   type SellerMonthProgress,
 } from "../types";
+import { commercialAiModel, isAiEnabled } from "./ai-client";
+import { loadProspectingSnapshot } from "./prospecting.service";
 
 /** Estados de venta que cuentan como venta real (no preventa ni cancelada). */
 const SOLD_STATUSES = ["CONFIRMED", "DISPATCH", "DELIVERED", "INCOMPLETE"];
@@ -796,6 +798,17 @@ export async function getCommercialAiSnapshot(
       doneAt: task.done_at,
     }));
 
+  const prospecting = await loadProspectingSnapshot({
+    admin,
+    access,
+    rawConfig: moduleState.settings as Record<string, unknown>,
+    today,
+    customerNames: new Map(
+      allCustomers.map((c) => [c.id, { name: c.name, city: c.city }])
+    ),
+    opportunities,
+  });
+
   return {
     orgSlug,
     orgName: access.organizationName,
@@ -822,10 +835,12 @@ export async function getCommercialAiSnapshot(
       sellers: planSellers,
       suggestedNext,
     },
-    aiEnabled: Boolean(process.env.ANTHROPIC_API_KEY),
+    aiEnabled: isAiEnabled(),
+    aiModel: commercialAiModel(),
     stats: {
       analyzedCustomers: allCustomers.length,
       analyzedOrders: orders.length,
     },
+    prospecting,
   };
 }
