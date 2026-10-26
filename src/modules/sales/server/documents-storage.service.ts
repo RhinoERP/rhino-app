@@ -79,13 +79,9 @@ async function uploadDocument(
       };
     }
 
-    const { data: urlData } = await supabase.storage
-      .from(BUCKET)
-      .getPublicUrl(filePath);
-
     return {
       success: true,
-      url: `${urlData.publicUrl}?v=${Date.now()}`,
+      url: filePath,
     };
   } catch (error) {
     return {

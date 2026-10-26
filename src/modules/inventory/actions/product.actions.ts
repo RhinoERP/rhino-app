@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   adjustVariantStock,
@@ -75,6 +77,7 @@ export async function getProductVariantsAction(
   orgSlug: string,
   productId: string
 ): Promise<ProductVariantRow[]> {
+  await ensure(READ_PERMISSIONS.inventory, orgSlug);
   try {
     return await getProductVariantsByProductId(orgSlug, productId);
   } catch {
@@ -88,6 +91,12 @@ export async function adjustMultipleVariantsStockAction(
 ): Promise<ProductActionResult> {
   await ensure("inventory.manage", orgSlug);
   try {
+    const supabase = await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      throw new Error("Usuario no autenticado");
+    }
+
     const productIds = new Set<string>();
 
     for (const adj of adjustments) {
@@ -106,6 +115,8 @@ export async function adjustMultipleVariantsStockAction(
           type: "ADJUSTMENT",
           quantity: delta,
           reason: "Ajuste manual de stock por variante",
+          createdBy: authData.user.id,
+          source: "MANUAL",
         });
       }
     }
@@ -150,6 +161,7 @@ export async function getProductVariantsWithStockAction(
   orgSlug: string,
   productId: string
 ): Promise<ProductVariantWithStock[]> {
+  await ensure(READ_PERMISSIONS.inventory, orgSlug);
   try {
     return await getProductVariantsWithStock(orgSlug, productId);
   } catch {

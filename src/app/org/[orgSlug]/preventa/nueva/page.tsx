@@ -3,6 +3,8 @@ import { PreSaleForm } from "@/components/sales/forms/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import {
   getSaleProducts,
   getSalesAccessContext,
@@ -23,17 +25,21 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
     notFound();
   }
 
-  const [organization, customers, sellers, products, taxes] = await Promise.all(
-    [
+  const [organization, customers, sellers, products, taxes, priceLevels] =
+    await Promise.all([
       getOrganizationBySlug(orgSlug),
       getCustomersByOrgSlug(orgSlug),
       getOrganizationSalesMembersBySlug(orgSlug),
       getSaleProducts(orgSlug),
       getActiveTaxesByOrgSlug(orgSlug),
-    ]
-  );
+      getPriceLevelsByOrgSlug(orgSlug),
+    ]);
 
   if (!organization) {
+    notFound();
+  }
+
+  if (isOrganizationModuleEnabled(organization, "production")) {
     notFound();
   }
 
@@ -51,6 +57,7 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
       initialSellerId={accessContext.userId ?? undefined}
       organization={{ name: organization.name, cuit: organization.cuit }}
       orgSlug={orgSlug}
+      priceLevels={priceLevels}
       products={products}
       sellers={sellers}
       taxes={taxes}

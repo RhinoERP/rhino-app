@@ -37,6 +37,7 @@ type DirectSalesTableProps = {
   orgSlug: string;
   sales: DirectSale[];
   pageCount: number;
+  viewOnly?: boolean;
 };
 
 function resolveCustomerName(sale: DirectSale): string {
@@ -134,8 +135,11 @@ function getSaleStatusLabel(status: string | null): {
   };
 }
 
-function createDirectSalesColumns(orgSlug: string): ColumnDef<DirectSale>[] {
-  return [
+function createDirectSalesColumns(
+  orgSlug: string,
+  viewOnly: boolean
+): ColumnDef<DirectSale>[] {
+  const columns: ColumnDef<DirectSale>[] = [
     {
       id: "sale_date",
       accessorKey: "sale_date",
@@ -361,14 +365,21 @@ function createDirectSalesColumns(orgSlug: string): ColumnDef<DirectSale>[] {
       enableHiding: false,
     },
   ];
+  return viewOnly
+    ? columns.filter((column) => column.id !== "actions")
+    : columns;
 }
 
 export function DirectSalesTable({
   orgSlug,
   sales,
   pageCount,
+  viewOnly = false,
 }: DirectSalesTableProps) {
-  const columns = useMemo(() => createDirectSalesColumns(orgSlug), [orgSlug]);
+  const columns = useMemo(
+    () => createDirectSalesColumns(orgSlug, viewOnly),
+    [orgSlug, viewOnly]
+  );
   const [search, setSearch] = useQueryState(
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
@@ -416,13 +427,15 @@ export function DirectSalesTable({
               Crea la primera venta directa para empezar a cobrar en el momento.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <Button asChild>
-              <Link href={`/org/${orgSlug}/venta-directa/nueva`}>
-                Nueva venta directa
-              </Link>
-            </Button>
-          </EmptyContent>
+          {!viewOnly && (
+            <EmptyContent>
+              <Button asChild>
+                <Link href={`/org/${orgSlug}/venta-directa/nueva`}>
+                  Nueva venta directa
+                </Link>
+              </Button>
+            </EmptyContent>
+          )}
         </Empty>
       </div>
     );

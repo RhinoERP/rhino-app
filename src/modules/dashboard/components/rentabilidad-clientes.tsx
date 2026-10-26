@@ -182,6 +182,11 @@ function DetailRow({
         <span className="font-medium">
           {formatCurrency(customer.totalSales)}
         </span>
+        {customer.totalSalesUSD > 0 && (
+          <span className="text-muted-foreground text-xs">
+            {formatCurrency(customer.totalSalesUSD, "USD")}
+          </span>
+        )}
       </div>
       <div className="flex items-center justify-between gap-3 md:block">
         <span className="text-muted-foreground text-xs md:hidden">
@@ -190,6 +195,11 @@ function DetailRow({
         <span className="font-medium">
           {formatCurrency(customer.totalProfit)}
         </span>
+        {customer.totalProfitUSD > 0 && (
+          <span className="text-muted-foreground text-xs">
+            {formatCurrency(customer.totalProfitUSD, "USD")}
+          </span>
+        )}
       </div>
       <div className="flex items-center justify-between gap-3 md:block">
         <span className="text-muted-foreground text-xs md:hidden">Margen</span>
@@ -289,14 +299,22 @@ export function RentabilidadClientes({
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <KpiCard
-          description="Importe total vendido"
+          description={
+            data?.kpis.totalSalesUSD
+              ? `ARS + ${formatCurrency(data.kpis.totalSalesUSD, "USD")} USD`
+              : "Importe total vendido"
+          }
           icon={DollarSign}
           iconClassName="text-emerald-600"
           title="Ventas totales"
           value={formatCurrency(data?.kpis.totalSales ?? 0)}
         />
         <KpiCard
-          description="Resultado bruto del periodo"
+          description={
+            data?.kpis.totalProfitUSD
+              ? `ARS + ${formatCurrency(data.kpis.totalProfitUSD, "USD")} USD`
+              : "Resultado bruto del periodo"
+          }
           icon={TrendingUp}
           iconClassName="text-sky-600"
           title="Ganancia total"

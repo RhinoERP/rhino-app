@@ -17,6 +17,7 @@ type DirectSalesTabsProps = {
   pageCount: number;
   sessions: PosSessionSummary[];
   terminals: PosCashControlTerminal[];
+  viewOnly?: boolean;
 };
 
 export function DirectSalesTabs({
@@ -25,6 +26,7 @@ export function DirectSalesTabs({
   pageCount,
   sessions,
   terminals,
+  viewOnly = false,
 }: DirectSalesTabsProps) {
   const [activeTab, setActiveTab] = useState<"sales" | "cash-control">("sales");
 
@@ -39,10 +41,12 @@ export function DirectSalesTabs({
           <Receipt className="h-4 w-4" />
           Ventas directas
         </TabsTrigger>
-        <TabsTrigger value="cash-control">
-          <Banknote className="h-4 w-4" />
-          Sesiones de caja
-        </TabsTrigger>
+        {!viewOnly && (
+          <TabsTrigger value="cash-control">
+            <Banknote className="h-4 w-4" />
+            Sesiones de caja
+          </TabsTrigger>
+        )}
       </TabsList>
 
       <TabsContent className="mt-2" value="sales">
@@ -50,16 +54,19 @@ export function DirectSalesTabs({
           orgSlug={orgSlug}
           pageCount={pageCount}
           sales={sales}
+          viewOnly={viewOnly}
         />
       </TabsContent>
 
-      <TabsContent className="mt-2" value="cash-control">
-        <CashControlSessionsTab
-          orgSlug={orgSlug}
-          sessions={sessions}
-          terminals={terminals}
-        />
-      </TabsContent>
+      {!viewOnly && (
+        <TabsContent className="mt-2" value="cash-control">
+          <CashControlSessionsTab
+            orgSlug={orgSlug}
+            sessions={sessions}
+            terminals={terminals}
+          />
+        </TabsContent>
+      )}
     </Tabs>
   );
 }

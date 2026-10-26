@@ -29,16 +29,24 @@ export async function renderRemittancePdfDocument(params: {
     logoUrl?: string | null;
   };
   singlePageDuplicate: boolean;
+  showProductBrand: boolean;
   finalRemittanceVisibility?: RemittanceFinalVisibility;
 }): Promise<SaleRemittancePdfDocument> {
-  const { sale, type, issuer, singlePageDuplicate, finalRemittanceVisibility } =
-    params;
+  const {
+    sale,
+    type,
+    issuer,
+    singlePageDuplicate,
+    showProductBrand,
+    finalRemittanceVisibility,
+  } = params;
 
   const remittanceData = buildRemittanceFromSale(sale, type, {
     businessName: issuer.businessName,
     cuit: issuer.cuit,
     logoUrl: issuer.logoUrl,
     singlePageDuplicate,
+    showProductBrand,
     finalRemittanceVisibility,
   });
 

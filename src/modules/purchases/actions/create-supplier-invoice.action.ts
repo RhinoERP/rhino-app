@@ -8,6 +8,7 @@ import {
   createSupplierInvoice,
   createSupplierInvoiceSchema,
   deleteSupplierInvoice,
+  getPurchasePayableOrigin,
 } from "../service/supplier-invoices.service";
 import type { SupplierInvoice } from "../supplier-invoices.types";
 
@@ -43,6 +44,7 @@ function parseInvoiceForm(formData: FormData, orgSlug: string) {
     subtotalAmount: formData.get("subtotalAmount"),
     taxAmount: formData.get("taxAmount"),
     totalAmount: formData.get("totalAmount"),
+    exchangeRate: formData.get("exchangeRate"),
     notes: nullableValue(formData.get("notes")),
   });
 }
@@ -67,7 +69,6 @@ async function uploadPdfIfPresent(params: {
 }): Promise<{
   filename: string;
   path: string;
-  url: string;
 } | null> {
   const { file, invoiceId, orgSlug } = params;
   if (!(file instanceof File) || file.size === 0) {
@@ -84,13 +85,9 @@ async function uploadPdfIfPresent(params: {
     throw new Error(`No se pudo adjuntar el PDF: ${uploadError.message}`);
   }
 
-  const { data: urlData } = supabase.storage
-    .from("documents")
-    .getPublicUrl(path);
   return {
     filename,
     path,
-    url: `${urlData.publicUrl}?v=${Date.now()}`,
   };
 }
 
@@ -133,7 +130,12 @@ export async function createSupplierInvoiceAction(
 
   let createdInvoiceId: string | null = null;
   let uploadedPdfPath: string | null = null;
+  let previousPayableOrigin: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null = null;
   try {
+    previousPayableOrigin = await getPurchasePayableOrigin({
+      orgSlug,
+      purchaseOrderId: parsed.data.purchaseOrderId,
+    });
     const invoice = await createSupplierInvoice(parsed.data);
     createdInvoiceId = invoice.id;
     const uploadedPdf = await uploadPdfIfPresent({
@@ -147,18 +149,27 @@ export async function createSupplierInvoiceAction(
         invoiceId: invoice.id,
         orgSlug,
         filename: uploadedPdf.filename,
-        url: uploadedPdf.url,
+        url: uploadedPdf.path,
       });
     }
 
     revalidatePath(`/org/${orgSlug}/compras/facturas-proveedor`);
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
+    if (parsed.data.purchaseOrderId) {
+      revalidatePath(`/org/${orgSlug}/compras`);
+      revalidatePath(`/org/${orgSlug}/compras/${parsed.data.purchaseOrderId}`);
+    }
     return { success: true, invoice };
   } catch (error) {
     if (uploadedPdfPath) {
       await removeUploadedPdf(uploadedPdfPath);
     }
     if (createdInvoiceId) {
-      await deleteSupplierInvoice({ invoiceId: createdInvoiceId, orgSlug });
+      await deleteSupplierInvoice({
+        invoiceId: createdInvoiceId,
+        orgSlug,
+        previousPayableOrigin,
+      });
     }
     return {
       success: false,

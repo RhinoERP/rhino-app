@@ -50,6 +50,51 @@ describe("createSupplierInvoiceSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("acepta exchangeRate válido", () => {
+    const result = createSupplierInvoiceSchema.safeParse({
+      ...validInvoice,
+      exchangeRate: "1240.50",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.exchangeRate).toBe(1240.5);
+    }
+  });
+
+  it("interpreta exchangeRate vacío/ausente como undefined", () => {
+    const empty = createSupplierInvoiceSchema.safeParse({
+      ...validInvoice,
+      exchangeRate: "",
+    });
+    expect(empty.success).toBe(true);
+    if (empty.success) {
+      expect(empty.data.exchangeRate).toBeUndefined();
+    }
+
+    const missing = createSupplierInvoiceSchema.safeParse({
+      ...validInvoice,
+    });
+    expect(missing.success).toBe(true);
+    if (missing.success) {
+      expect(missing.data.exchangeRate).toBeUndefined();
+    }
+  });
+
+  it("rechaza exchangeRate no positivo", () => {
+    const zero = createSupplierInvoiceSchema.safeParse({
+      ...validInvoice,
+      exchangeRate: "0",
+    });
+    expect(zero.success).toBe(false);
+
+    const negative = createSupplierInvoiceSchema.safeParse({
+      ...validInvoice,
+      exchangeRate: "-5",
+    });
+    expect(negative.success).toBe(false);
+  });
 });
 
 describe("formatSupplierInvoiceReference", () => {

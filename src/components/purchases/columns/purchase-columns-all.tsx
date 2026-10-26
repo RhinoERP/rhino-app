@@ -42,6 +42,11 @@ const statusLabels: Record<
     icon: TruckIcon,
     iconColor: "text-orange-500",
   },
+  PARTIALLY_RECEIVED: {
+    label: "Parcialmente recibida",
+    icon: TruckIcon,
+    iconColor: "text-amber-600",
+  },
   RECEIVED: {
     label: "Recibida",
     icon: CheckCircleIcon,

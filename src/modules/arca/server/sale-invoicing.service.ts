@@ -4,7 +4,6 @@ import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
-import { sendSaleInvoiceEmail } from "@/modules/email/service/send-sale-invoice-email";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
@@ -14,6 +13,7 @@ import {
 import {
   canIssueArcaInvoiceForPreventa,
   isArcaInvoiceEligibleSaleStatus,
+  isEarlyBillablePreventaStatus,
 } from "@/modules/sales/preventa-invoicing";
 import { regenerateAuthorizedSaleRemittances } from "@/modules/sales/remittance-regeneration";
 import {
@@ -22,6 +22,7 @@ import {
 } from "@/modules/sales/service/sales.service";
 import type { Database, Json } from "@/types/supabase";
 import { formatDateToArcaDateNumber } from "../arca-qr";
+import { requireCommercialExchangeRateForUsdInvoice } from "../commercial-exchange-rate";
 import {
   ArcaConnectionError,
   ArcaValidationError,
@@ -105,6 +106,7 @@ type LoadedSale = {
   subTotal: number | null;
   totalAmount: number;
   currency: string;
+  commercialExchangeRate: number | null;
   totalTaxAmount: number | null;
   globalDiscountAmount: number | null;
   arcaStatus: string;
@@ -132,6 +134,8 @@ type LoadedSaleQueryRecord = {
   id: string;
   organization_id: string;
   status: OrderStatus;
+  document_type: string | null;
+  parent_sales_order_id: string | null;
   sale_date: string;
   expiration_date: string | null;
   credit_days: number | null;
@@ -140,6 +144,7 @@ type LoadedSaleQueryRecord = {
   sub_total: number | null;
   total_amount: number;
   currency: string | null;
+  commercial_exchange_rate: number | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
   arca_status: string;
@@ -692,6 +697,7 @@ function normalizeLoadedSale(data: {
   sub_total: number | null;
   total_amount: number;
   currency: string | null;
+  commercial_exchange_rate: number | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
   arca_status: string | null;
@@ -762,6 +768,7 @@ function normalizeLoadedSale(data: {
     subTotal: toNullableMoney(data.sub_total),
     totalAmount: truncateMoney(Number(data.total_amount ?? 0)),
     currency: data.currency ?? "ARS",
+    commercialExchangeRate: data.commercial_exchange_rate ?? null,
     totalTaxAmount: toNullableMoney(data.total_tax_amount),
     globalDiscountAmount: toNullableMoney(data.global_discount_amount),
     ...normalizeLoadedSaleArcaState(data),
@@ -771,9 +778,72 @@ function normalizeLoadedSale(data: {
   };
 }
 
+export async function assertInvoiceDocumentType(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  sale: Pick<
+    LoadedSaleQueryRecord,
+    "id" | "document_type" | "parent_sales_order_id" | "invoice_type"
+  >;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
+}): Promise<void> {
+  const { supabase, orgId, sale, formalAdvanceDocument } = params;
+  if (sale.document_type === "STANDARD") {
+    return;
+  }
+
+  let allowed = false;
+  if (
+    formalAdvanceDocument === "ADVANCE" &&
+    sale.document_type === "ADVANCE" &&
+    sale.invoice_type !== "NOTA_DE_VENTA"
+  ) {
+    const { data: advance, error } = await supabase
+      .from("sales_advances")
+      .select("id, final_sales_order_id, origin_type")
+      .eq("organization_id", orgId)
+      .eq("advance_sales_order_id", sale.id)
+      .maybeSingle();
+    if (error) {
+      throw new ArcaValidationError(error.message);
+    }
+    allowed = Boolean(
+      advance &&
+        (advance.origin_type === "PREVENTA"
+          ? advance.final_sales_order_id === sale.parent_sales_order_id
+          : advance.origin_type === "SALE" &&
+            sale.parent_sales_order_id === null)
+    );
+  } else if (
+    formalAdvanceDocument === "BALANCE" &&
+    sale.document_type === "BALANCE" &&
+    sale.parent_sales_order_id
+  ) {
+    const { data: advances, error } = await supabase
+      .from("sales_advances")
+      .select("id")
+      .eq("organization_id", orgId)
+      .eq("final_sales_order_id", sale.parent_sales_order_id)
+      .eq("origin_type", "PREVENTA")
+      .in("status", ["INVOICED", "PAID", "APPLIED"])
+      .limit(1);
+    if (error) {
+      throw new ArcaValidationError(error.message);
+    }
+    allowed = Boolean(advances?.length);
+  }
+
+  if (!allowed) {
+    throw new ArcaValidationError(
+      "Este documento no corresponde a una venta y no puede emitirse en ARCA."
+    );
+  }
+}
+
 async function loadSaleForArcaInvoicing(params: {
   orgSlug: string;
   saleId: string;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
 }): Promise<{
   organizationId: string;
   organizationCuit: string | null;
@@ -789,6 +859,8 @@ async function loadSaleForArcaInvoicing(params: {
         id,
         organization_id,
         status,
+        document_type,
+        parent_sales_order_id,
         sale_date,
         expiration_date,
         credit_days,
@@ -797,6 +869,7 @@ async function loadSaleForArcaInvoicing(params: {
         sub_total,
         total_amount,
         currency,
+        commercial_exchange_rate,
         total_tax_amount,
         global_discount_amount,
         arca_status,
@@ -856,6 +929,13 @@ async function loadSaleForArcaInvoicing(params: {
 
   const saleData = data as LoadedSaleQueryRecord;
 
+  await assertInvoiceDocumentType({
+    supabase,
+    orgId: access.organization.id,
+    sale: saleData,
+    formalAdvanceDocument: params.formalAdvanceDocument,
+  });
+
   return {
     organizationId: access.organization.id,
     organizationCuit: access.organization.cuit ?? null,
@@ -871,6 +951,7 @@ async function loadSaleForArcaInvoicing(params: {
       sub_total: saleData.sub_total,
       total_amount: saleData.total_amount,
       currency: saleData.currency,
+      commercial_exchange_rate: saleData.commercial_exchange_rate,
       total_tax_amount: saleData.total_tax_amount,
       global_discount_amount: saleData.global_discount_amount,
       arca_status: saleData.arca_status,
@@ -964,6 +1045,7 @@ export function mapInvoiceTypeToArcaVoucherType(
 export async function validateSaleForArcaInvoicing(params: {
   orgSlug: string;
   saleId: string;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
 }): Promise<
   ArcaSaleInvoiceValidationResult & { context?: ValidatedSaleContext }
 > {
@@ -971,7 +1053,7 @@ export async function validateSaleForArcaInvoicing(params: {
     await loadSaleForArcaInvoicing(params);
 
   if (sale.arcaStatus === "authorized") {
-    if (sale.status === "DRAFT") {
+    if (isEarlyBillablePreventaStatus(sale.status)) {
       await ensureReceivableForAuthorizedPreventaInvoice({
         supabase: await createClient(),
         orgId: organizationId,
@@ -999,13 +1081,18 @@ export async function validateSaleForArcaInvoicing(params: {
     );
   }
 
+  requireCommercialExchangeRateForUsdInvoice(
+    sale.currency,
+    sale.commercialExchangeRate
+  );
+
   let allowPreventaInvoicing = false;
-  if (sale.status === "DRAFT") {
+  if (isEarlyBillablePreventaStatus(sale.status)) {
     const orgSettings = await getOrgSettings(params.orgSlug);
     allowPreventaInvoicing = orgSettings.allow_preventa_arca_invoicing;
     if (!canIssueArcaInvoiceForPreventa(sale.status, allowPreventaInvoicing)) {
       throw new ArcaValidationError(
-        "No se puede emitir ARCA para una preventa en borrador porque esta organización no habilitó la facturación previa a la confirmación."
+        "No se puede emitir ARCA para una preventa no confirmada porque esta organización no habilitó la facturación previa a la confirmación."
       );
     }
   }
@@ -1308,6 +1395,7 @@ async function persistAuthorizedInvoice(params: {
   pointOfSale: number;
   voucherTypeCode: number;
   voucherNumber: number;
+  exchangeRate: number | null;
   authorization: {
     CAE: string;
     CAEFchVto: string;
@@ -1338,6 +1426,7 @@ async function persistAuthorizedInvoice(params: {
       arca_request_json: params.requestJson,
       arca_response_json: params.responseJson,
       invoice_number: invoiceNumber,
+      exchange_rate: params.exchangeRate,
       updated_at: now,
     })
     .eq("organization_id", params.orgId)
@@ -1446,6 +1535,7 @@ async function persistInvoiceError(params: {
 export async function emitSaleInvoice(params: {
   orgSlug: string;
   saleId: string;
+  formalAdvanceDocument?: "ADVANCE" | "BALANCE";
 }): Promise<ArcaSaleInvoiceResult> {
   await assertCanIssueOrganizationArca(params.orgSlug);
   const validation = await validateSaleForArcaInvoicing(params);
@@ -1587,6 +1677,7 @@ export async function emitSaleInvoice(params: {
     pointOfSale: request.PtoVta,
     voucherTypeCode: request.CbteTipo,
     voucherNumber: authorization.voucherNumber,
+    exchangeRate: context.sale.currency === "USD" ? fiscalCurrency.rate : null,
     authorization,
     requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
@@ -1607,19 +1698,6 @@ export async function emitSaleInvoice(params: {
         regenerateSaleLevelRemito({ supabase, ...regenerationParams }),
     }
   );
-
-  try {
-    const emailResult = await sendSaleInvoiceEmail({
-      orgSlug: params.orgSlug,
-      saleId: context.sale.id,
-    });
-
-    if (!emailResult.sent) {
-      console.warn("Sale invoice email was not sent:", emailResult);
-    }
-  } catch (emailError) {
-    console.error("Error sending sale invoice email:", emailError);
-  }
 
   return result;
 }

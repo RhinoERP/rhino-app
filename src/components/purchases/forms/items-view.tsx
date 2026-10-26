@@ -17,8 +17,16 @@ import {
 } from "@/components/ui/tooltip";
 import type { PurchaseItem } from "@/hooks/use-purchase-form";
 import type { VariantMeta } from "@/hooks/use-variant-loader";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
+import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxSnapshot,
+} from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
 
 function isWeightOrVolumeUnit(unit: string): boolean {
   return unit === "KG" || unit === "LT" || unit === "MT";
@@ -281,111 +289,112 @@ function NonVariantItemRow({
   const discountValue = getEmptyOrValue(item.discount_percent);
 
   return (
-    <div
-      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
-      key={`${item.product_id}-${index}`}
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="font-medium">{item.product_name}</p>
-          {product?.brand ? (
-            <span className="text-muted-foreground text-xs">
-              {product.brand}
-            </span>
-          ) : null}
+    <div className="px-4 py-3" key={`${item.product_id}-${index}`}>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium">{item.product_name}</p>
+            {product?.brand ? (
+              <span className="text-muted-foreground text-xs">
+                {product.brand}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-muted-foreground text-sm">
+            SKU {product?.sku ?? "N/A"}
+          </p>
         </div>
-        <p className="text-muted-foreground text-sm">
-          SKU {product?.sku ?? "N/A"}
-        </p>
-      </div>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-muted-foreground text-xs">Cantidad</span>
-        <Input
-          className="h-8 w-full"
-          inputMode="decimal"
-          min={0}
-          onChange={handleNumericChange("quantity")}
-          placeholder="0"
-          step="0.01"
-          type="number"
-          value={qtyValue}
-        />
-      </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">Cantidad</span>
+          <Input
+            className="h-8 w-full"
+            inputMode="decimal"
+            min={0}
+            onChange={handleNumericChange("quantity")}
+            placeholder="0"
+            step="0.01"
+            type="number"
+            value={qtyValue}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-muted-foreground text-xs">{measureLabel}</span>
-        <span className="text-sm">{measureDisplay}</span>
-      </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">{measureLabel}</span>
+          <span className="text-sm">{measureDisplay}</span>
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-muted-foreground text-xs">Precio</span>
-        {itemIsWeightOrVolume && item.weight_per_unit ? (
-          <div className="flex items-center gap-1">
-            <span className="text-sm">$</span>
-            <Input
-              className="h-8 w-20"
-              min={0}
-              onChange={handleNumericChange("pricePerKg")}
-              placeholder="0.00"
-              step="0.01"
-              type="number"
-              value={item.price_per_kg || ""}
-            />
-          </div>
-        ) : (
-          <div className="flex items-center gap-1">
-            <span className="text-sm">$</span>
-            <Input
-              className="h-8 w-20"
-              min={0}
-              onChange={handleNumericChange("unitCost")}
-              placeholder="0.00"
-              step="0.01"
-              type="number"
-              value={item.unit_cost || ""}
-            />
-          </div>
-        )}
-      </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">Precio</span>
+          {itemIsWeightOrVolume && item.weight_per_unit ? (
+            <div className="flex items-center gap-1">
+              <span className="text-sm">$</span>
+              <Input
+                className="h-8 w-20"
+                min={0}
+                onChange={handleNumericChange("pricePerKg")}
+                placeholder="0.00"
+                step="0.01"
+                type="number"
+                value={item.price_per_kg || ""}
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <span className="text-sm">$</span>
+              <Input
+                className="h-8 w-20"
+                min={0}
+                onChange={handleNumericChange("unitCost")}
+                placeholder="0.00"
+                step="0.01"
+                type="number"
+                value={item.unit_cost || ""}
+              />
+            </div>
+          )}
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-muted-foreground text-xs">Descuento %</span>
-        <Input
-          className="h-8 w-full"
-          inputMode="decimal"
-          max={100}
-          min={0}
-          onChange={handleNumericChange("discount")}
-          step="0.01"
-          type="number"
-          value={discountValue}
-        />
-      </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">Descuento %</span>
+          <Input
+            className="h-8 w-full"
+            inputMode="decimal"
+            max={100}
+            min={0}
+            onChange={handleNumericChange("discount")}
+            step="0.01"
+            type="number"
+            value={discountValue}
+          />
+        </div>
 
-      <div className="flex flex-col items-start gap-1 sm:items-end">
-        <span className="text-muted-foreground text-xs">Subtotal</span>
-        <p className="font-medium">{formatCurrency(item.subtotal, currency)}</p>
-      </div>
+        <div className="flex flex-col items-start gap-1 sm:items-end">
+          <span className="text-muted-foreground text-xs">Subtotal</span>
+          <p className="font-medium">
+            {formatCurrency(item.subtotal, currency)}
+          </p>
+        </div>
 
-      <div className="flex items-center justify-start sm:justify-end">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label="Eliminar producto"
-              className="hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => onRemoveItem(index)}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <TrashIcon className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Eliminar producto</p>
-          </TooltipContent>
-        </Tooltip>
+        <div className="flex items-center justify-start sm:justify-end">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label="Eliminar producto"
+                className="hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onRemoveItem(index)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <TrashIcon className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Eliminar producto</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </div>
   );
@@ -397,6 +406,11 @@ type RenderItemProps = {
   products: ProductWithPrice[];
   currency?: string;
   variantMetaMap: Record<string, VariantMeta>;
+  productTaxes: Map<string, ItemTaxInput[]>;
+  fallbackTaxes: ItemTaxInput[];
+  taxes: Tax[];
+  calculatedTaxes: ItemTaxSnapshot[];
+  onUpdateItem: (index: number, item: PurchaseItem) => void;
   onRemoveItem: (index: number) => void;
   handleUpdateDiscount: (index: number, percent: number) => void;
   handleUpdateUnitCost: (index: number, cost: number) => void;
@@ -417,6 +431,11 @@ function renderPurchaseItem(props: RenderItemProps) {
     products,
     currency = "ARS",
     variantMetaMap,
+    productTaxes,
+    fallbackTaxes,
+    taxes,
+    calculatedTaxes,
+    onUpdateItem,
     onRemoveItem,
     handleUpdateDiscount,
     handleUpdateUnitCost,
@@ -430,34 +449,64 @@ function renderPurchaseItem(props: RenderItemProps) {
 
   if (isVariantItem) {
     return (
-      <VariantItemCard
+      <div key={`${item.product_id}-${index}`}>
+        <VariantItemCard
+          currency={currency}
+          index={index}
+          item={item}
+          key={`${item.product_id}-${index}`}
+          onRemoveItem={onRemoveItem}
+          onUpdateDiscount={handleUpdateDiscount}
+          onUpdateUnitCost={handleUpdateUnitCost}
+          onVariantStockChange={handleVariantStockChange}
+          product={product}
+          variantMeta={variantMetaMap[item.product_id]}
+        />
+        <div className="px-4 pb-3">
+          <PurchaseItemTaxPicker
+            availableTaxes={taxes}
+            calculatedTaxes={calculatedTaxes}
+            currency={currency}
+            editable
+            fallbackTaxes={fallbackTaxes}
+            onChange={(next) => onUpdateItem(index, { ...item, taxes: next })}
+            productName={item.product_name}
+            productTaxes={productTaxes.get(item.product_id)}
+            taxes={item.taxes}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div key={`${item.product_id}-${index}`}>
+      <NonVariantItemRow
         currency={currency}
         index={index}
         item={item}
         key={`${item.product_id}-${index}`}
         onRemoveItem={onRemoveItem}
         onUpdateDiscount={handleUpdateDiscount}
+        onUpdatePricePerKg={handleUpdatePricePerKg}
+        onUpdateQuantity={handleUpdateQuantity}
         onUpdateUnitCost={handleUpdateUnitCost}
-        onVariantStockChange={handleVariantStockChange}
         product={product}
-        variantMeta={variantMetaMap[item.product_id]}
       />
-    );
-  }
-
-  return (
-    <NonVariantItemRow
-      currency={currency}
-      index={index}
-      item={item}
-      key={`${item.product_id}-${index}`}
-      onRemoveItem={onRemoveItem}
-      onUpdateDiscount={handleUpdateDiscount}
-      onUpdatePricePerKg={handleUpdatePricePerKg}
-      onUpdateQuantity={handleUpdateQuantity}
-      onUpdateUnitCost={handleUpdateUnitCost}
-      product={product}
-    />
+      <div className="px-4 pb-3">
+        <PurchaseItemTaxPicker
+          availableTaxes={taxes}
+          calculatedTaxes={calculatedTaxes}
+          currency={currency}
+          editable
+          fallbackTaxes={fallbackTaxes}
+          onChange={(next) => onUpdateItem(index, { ...item, taxes: next })}
+          productName={item.product_name}
+          productTaxes={productTaxes.get(item.product_id)}
+          taxes={item.taxes}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -466,6 +515,11 @@ type ItemsViewProps = {
   products: ProductWithPrice[];
   currency?: string;
   variantMetaMap: Record<string, VariantMeta>;
+  productTaxes: Map<string, ItemTaxInput[]>;
+  fallbackTaxes?: ItemTaxInput[];
+  taxes: Tax[];
+  globalDiscountPercent: number;
+  onUpdateItem: (index: number, item: PurchaseItem) => void;
   onRemoveItem: (index: number) => void;
   handleUpdateDiscount: (index: number, percent: number) => void;
   handleUpdateUnitCost: (index: number, cost: number) => void;
@@ -484,6 +538,11 @@ export function ItemsView({
   products,
   currency = "ARS",
   variantMetaMap,
+  productTaxes,
+  fallbackTaxes = [],
+  taxes,
+  globalDiscountPercent,
+  onUpdateItem,
   onRemoveItem,
   handleUpdateDiscount,
   handleUpdateUnitCost,
@@ -506,6 +565,23 @@ export function ItemsView({
     );
   }
 
+  const subtotal = items.reduce(
+    (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
+    0
+  );
+  const plan = buildItemizedTaxPlan({
+    lines: items.map((item, index) => ({
+      lineId: `item-${index}`,
+      productId: item.product_id,
+      netAmount: item.subtotal,
+      taxes: item.taxes ?? productTaxes.get(item.product_id),
+    })),
+    globalDiscountAmount: truncateMoney(
+      Math.min(subtotal, (subtotal * globalDiscountPercent) / 100)
+    ),
+    fallbackTaxes,
+  });
+
   return (
     <div className="rounded-lg border">
       <div className="divide-y">
@@ -516,6 +592,13 @@ export function ItemsView({
             products,
             currency,
             variantMetaMap,
+            productTaxes,
+            fallbackTaxes,
+            taxes,
+            calculatedTaxes: plan.itemTaxes.filter(
+              (tax) => tax.lineId === `item-${index}`
+            ),
+            onUpdateItem,
             onRemoveItem,
             handleUpdateDiscount,
             handleUpdateUnitCost,

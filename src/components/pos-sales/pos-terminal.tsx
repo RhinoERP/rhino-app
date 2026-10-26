@@ -199,6 +199,21 @@ function resolveDirectSaleUnitPrice(
   );
 }
 
+function getSaleSubmissionError(
+  activeTerminalCount: number,
+  itemCount: number
+): string | null {
+  if (activeTerminalCount === 0) {
+    return "No hay terminales POS activas. Activa una terminal desde Configuración.";
+  }
+
+  if (itemCount === 0) {
+    return "Agrega al menos un producto para registrar la venta directa.";
+  }
+
+  return null;
+}
+
 function buildTicketTaxesFromPayload(params: {
   payload: Omit<CreateDirectSaleInput, "orgSlug">;
   discountedSubtotal: number;
@@ -400,6 +415,152 @@ async function printDirectSaleTicketAfterSuccess({
   }
 }
 
+// El cajero no resuelve asientos: la venta queda en la bandeja contable.
+function notifyPendingAccounting(result: CreateDirectSaleActionResult) {
+  if (
+    result.accountingStatus === "REVIEW_REQUIRED" ||
+    result.accountingStatus === "ERROR"
+  ) {
+    toast.info(
+      "Venta registrada. El asiento contable quedó pendiente de revisión por administración."
+    );
+  }
+}
+
+function useDefaultTerminalSelection(params: {
+  didFetchTerminals: boolean;
+  didFetchDefaultOpenTerminal: boolean;
+  isFetchingTerminals: boolean;
+  isFetchingDefaultOpenTerminal: boolean;
+  terminals: DirectSaleTerminal[];
+  defaultOpenTerminal: { terminalId: string } | null | undefined;
+  selectedTerminalId: string;
+  activeTerminals: DirectSaleTerminal[];
+  form: ReturnType<typeof useForm<DirectSaleFormValues>>;
+}) {
+  const {
+    didFetchTerminals,
+    didFetchDefaultOpenTerminal,
+    isFetchingTerminals,
+    isFetchingDefaultOpenTerminal,
+    terminals,
+    defaultOpenTerminal,
+    selectedTerminalId,
+    activeTerminals,
+    form,
+  } = params;
+
+  useEffect(() => {
+    if (
+      !(didFetchTerminals && didFetchDefaultOpenTerminal) ||
+      (isFetchingTerminals && terminals.length === 0) ||
+      (isFetchingDefaultOpenTerminal && !defaultOpenTerminal)
+    ) {
+      return;
+    }
+
+    if (!defaultOpenTerminal?.terminalId || selectedTerminalId) {
+      return;
+    }
+
+    const isCurrentTerminalActive = activeTerminals.some(
+      (terminal) => terminal.id === defaultOpenTerminal.terminalId
+    );
+
+    if (isCurrentTerminalActive) {
+      form.setValue("terminalId", defaultOpenTerminal.terminalId, {
+        shouldValidate: true,
+      });
+    }
+  }, [
+    activeTerminals,
+    defaultOpenTerminal,
+    didFetchDefaultOpenTerminal,
+    didFetchTerminals,
+    form,
+    isFetchingDefaultOpenTerminal,
+    isFetchingTerminals,
+    selectedTerminalId,
+    terminals.length,
+  ]);
+}
+
+function useDefaultTaxInitialization(params: {
+  didInitializeDefaultTax: boolean;
+  defaultDirectSalesTaxIds: string[];
+  form: ReturnType<typeof useForm<DirectSaleFormValues>>;
+  setDidInitializeDefaultTax: (value: boolean) => void;
+}) {
+  const {
+    didInitializeDefaultTax,
+    defaultDirectSalesTaxIds,
+    form,
+    setDidInitializeDefaultTax,
+  } = params;
+
+  useEffect(() => {
+    if (didInitializeDefaultTax) {
+      return;
+    }
+
+    const currentSelectedTaxIds = form.getValues("selectedTaxIds");
+    if (currentSelectedTaxIds.length > 0) {
+      setDidInitializeDefaultTax(true);
+      return;
+    }
+
+    form.setValue("selectedTaxIds", defaultDirectSalesTaxIds, {
+      shouldValidate: true,
+    });
+    setDidInitializeDefaultTax(true);
+  }, [
+    defaultDirectSalesTaxIds,
+    didInitializeDefaultTax,
+    form,
+    setDidInitializeDefaultTax,
+  ]);
+}
+
+function useDefaultPaymentMethod(params: {
+  directSaleConfig: DirectSaleConfig | undefined;
+  enabledPaymentMethodOptions: {
+    value: DirectSalePaymentMethod;
+    label: string;
+  }[];
+  form: ReturnType<typeof useForm<DirectSaleFormValues>>;
+}) {
+  const { directSaleConfig, enabledPaymentMethodOptions, form } = params;
+
+  useEffect(() => {
+    if (!directSaleConfig?.sales_default_payment_method) {
+      return;
+    }
+
+    form.setValue(
+      "paymentMethod",
+      directSaleConfig.sales_default_payment_method,
+      {
+        shouldValidate: true,
+      }
+    );
+  }, [directSaleConfig?.sales_default_payment_method, form]);
+
+  useEffect(() => {
+    const current = form.getValues("paymentMethod");
+    if (
+      enabledPaymentMethodOptions.some((option) => option.value === current)
+    ) {
+      return;
+    }
+
+    form.setValue(
+      "paymentMethod",
+      enabledPaymentMethodOptions[0]?.value ?? "efectivo",
+      { shouldValidate: true }
+    );
+  }, [enabledPaymentMethodOptions, form]);
+}
+
 export function PosTerminal({
   orgSlug,
   taxes,
@@ -441,6 +602,8 @@ export function PosTerminal({
       const confirmedAt =
         saleConfirmedAtRef.current ?? new Date().toISOString();
       saleConfirmedAtRef.current = null;
+
+      notifyPendingAccounting(result);
 
       await printDirectSaleTicketAfterSuccess({
         result,
@@ -508,75 +671,24 @@ export function PosTerminal({
     taxes,
   ]);
 
-  useEffect(() => {
-    if (
-      !(didFetchTerminals && didFetchDefaultOpenTerminal) ||
-      (isFetchingTerminals && terminals.length === 0) ||
-      (isFetchingDefaultOpenTerminal && !defaultOpenTerminal)
-    ) {
-      return;
-    }
-
-    if (!defaultOpenTerminal?.terminalId) {
-      return;
-    }
-
-    if (selectedTerminalId) {
-      return;
-    }
-
-    const isCurrentTerminalActive = activeTerminals.some(
-      (terminal) => terminal.id === defaultOpenTerminal.terminalId
-    );
-
-    if (isCurrentTerminalActive) {
-      form.setValue("terminalId", defaultOpenTerminal.terminalId, {
-        shouldValidate: true,
-      });
-    }
-  }, [
-    activeTerminals,
-    defaultOpenTerminal,
-    defaultOpenTerminal?.terminalId,
-    didFetchDefaultOpenTerminal,
+  useDefaultTerminalSelection({
     didFetchTerminals,
-    form,
-    isFetchingDefaultOpenTerminal,
+    didFetchDefaultOpenTerminal,
     isFetchingTerminals,
+    isFetchingDefaultOpenTerminal,
+    terminals,
+    defaultOpenTerminal,
     selectedTerminalId,
-    terminals.length,
-  ]);
+    activeTerminals,
+    form,
+  });
 
-  useEffect(() => {
-    if (didInitializeDefaultTax) {
-      return;
-    }
-
-    const currentSelectedTaxIds = form.getValues("selectedTaxIds");
-    if (currentSelectedTaxIds.length > 0) {
-      setDidInitializeDefaultTax(true);
-      return;
-    }
-
-    form.setValue("selectedTaxIds", defaultDirectSalesTaxIds, {
-      shouldValidate: true,
-    });
-    setDidInitializeDefaultTax(true);
-  }, [defaultDirectSalesTaxIds, didInitializeDefaultTax, form]);
-
-  useEffect(() => {
-    if (!directSaleConfig?.sales_default_payment_method) {
-      return;
-    }
-
-    form.setValue(
-      "paymentMethod",
-      directSaleConfig.sales_default_payment_method,
-      {
-        shouldValidate: true,
-      }
-    );
-  }, [directSaleConfig?.sales_default_payment_method, form]);
+  useDefaultTaxInitialization({
+    didInitializeDefaultTax,
+    defaultDirectSalesTaxIds,
+    form,
+    setDidInitializeDefaultTax,
+  });
 
   const selectedTaxIds = form.watch("selectedTaxIds");
   const globalDiscountPercentage = Number(
@@ -598,19 +710,11 @@ export function PosTerminal({
     );
   }, [directSaleConfig?.sales_enabled_payment_methods]);
 
-  useEffect(() => {
-    const current = form.getValues("paymentMethod");
-    if (
-      enabledPaymentMethodOptions.some((option) => option.value === current)
-    ) {
-      return;
-    }
-    form.setValue(
-      "paymentMethod",
-      enabledPaymentMethodOptions[0]?.value ?? "efectivo",
-      { shouldValidate: true }
-    );
-  }, [enabledPaymentMethodOptions, form]);
+  useDefaultPaymentMethod({
+    directSaleConfig,
+    enabledPaymentMethodOptions,
+    form,
+  });
 
   const cartSummary = useMemo(() => {
     const subtotal = cartItems.reduce((sum, item) => {
@@ -957,17 +1061,12 @@ export function PosTerminal({
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
-    if (activeTerminals.length === 0) {
-      setErrorMessage(
-        "No hay terminales POS activas. Activa una terminal desde Configuración."
-      );
-      return;
-    }
-
-    if (!cartItems.length) {
-      setErrorMessage(
-        "Agrega al menos un producto para registrar la venta directa."
-      );
+    const validationError = getSaleSubmissionError(
+      activeTerminals.length,
+      cartItems.length
+    );
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 

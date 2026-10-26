@@ -154,6 +154,7 @@ export default async function SalesPage({
 
   const org = await getOrganizationBySlug(orgSlug);
   const orgId = org?.id;
+  const isProductionEnabled = org?.production_enabled === true;
 
   let customerOptions: { value: string; label: string }[] = [];
   let sellerOptions: { value: string; label: string }[] = [];
@@ -226,7 +227,7 @@ export default async function SalesPage({
               : "Consulta tus ventas registradas en la organización."}
           </p>
         </div>
-        {accessContext.canManage ? (
+        {accessContext.canManage && !isProductionEnabled ? (
           <Button asChild className="w-full md:w-auto">
             <Link href={`/org/${orgSlug}/preventa/nueva`}>
               <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
@@ -247,6 +248,7 @@ export default async function SalesPage({
           carrierOptions={carrierOptions}
           customerOptions={customerOptions}
           initialData={paginated.data}
+          isProductionEnabled={isProductionEnabled}
           orgSlug={orgSlug}
           pageCount={pageCount}
           sellerOptions={sellerOptions}

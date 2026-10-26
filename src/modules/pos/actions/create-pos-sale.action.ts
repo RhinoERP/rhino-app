@@ -2,11 +2,16 @@
 
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createPosSale } from "../service/pos.service";
-import { type CreatePosSaleInput, createPosSaleSchema } from "../types";
+import {
+  type CreatePosSaleInput,
+  type CreatePosSaleResult,
+  createPosSaleSchema,
+} from "../types";
 
 export type CreatePosSaleActionResult = {
   success: boolean;
   posSaleId?: string;
+  accountingStatus?: CreatePosSaleResult["accountingStatus"];
   error?: string;
 };
 
@@ -31,6 +36,7 @@ export async function createPosSaleAction(
     return {
       success: true,
       posSaleId: result.posSaleId,
+      accountingStatus: result.accountingStatus,
     };
   } catch (error) {
     console.error("Error creating POS sale:", error);

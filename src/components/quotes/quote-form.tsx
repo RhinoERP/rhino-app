@@ -1,7 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { FileImage, FilePdf, Info, PencilSimple } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  FileImage,
+  FilePdf,
+  Info,
+  PencilSimple,
+} from "@phosphor-icons/react";
 import {
   Check,
   ChevronsUpDown,
@@ -20,6 +26,7 @@ import {
   useState,
 } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
+import { toast } from "sonner";
 import { usePermissions } from "@/components/auth/permissions-provider";
 
 import { Badge } from "@/components/ui/badge";
@@ -80,12 +87,21 @@ import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import {
   type QuoteFormValues,
   type QuoteItemFormValues,
   type QuoteItemVariantFormValues,
   quoteFormSchema,
 } from "@/modules/quotes/types";
+import { needsExchangeRate } from "@/modules/quotes/utils/currency-conversion";
+import {
+  computeQuoteItemSubtotal,
+  convertQuoteItemsCurrency,
+  getAdjustedQuoteUnitPrice,
+  type QuotePricing,
+  repriceQuoteItems,
+} from "@/modules/quotes/utils/quote-form-pricing";
 import {
   buildQuoteTaxLines,
   computeQuoteTotals,
@@ -105,6 +121,23 @@ import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
 const NO_PRICE_LIST = "none";
 
+function getCustomerLabel(customer: Customer): string {
+  return (
+    customer.fantasy_name ||
+    customer.business_name ||
+    customer.cuit ||
+    "Cliente sin nombre"
+  );
+}
+
+function normalizeCustomerSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .trim();
+}
+
 function getDisplayName(
   file: File | null | undefined,
   url: string | null | undefined,
@@ -121,50 +154,22 @@ function getDisplayName(
 
 function getEffectivePriceList(
   form: { getValues: (name: string) => string },
-  salesPriceLists: SalesPriceList[]
-): SalesPriceList | undefined {
-  const targetMarginListId = form.getValues("targetMarginListId");
-  if (targetMarginListId && targetMarginListId !== "none") {
-    const targetList = salesPriceLists.find(
-      (pl) => pl.id === targetMarginListId
-    );
-    if (targetList) {
-      return targetList;
-    }
-  }
-  const salesPriceListId = form.getValues("salesPriceListId");
-  return salesPriceLists.find((pl) => pl.id === salesPriceListId);
-}
+  salesPriceLists: SalesPriceList[],
+  priceLevels: PriceLevel[]
+): QuotePricing {
+  const priceLevelId = form.getValues("priceLevelId");
+  const level =
+    priceLevelId && priceLevelId !== "none"
+      ? (priceLevels.find((pl) => pl.id === priceLevelId) ?? null)
+      : null;
 
-function recalcItemPrices(
-  items: QuoteFormValues["items"],
-  products: SaleProduct[],
-  priceList: SalesPriceList | undefined,
-  adjustFn: (
-    basePrice: number,
-    costPrice: number | null | undefined,
-    pl: SalesPriceList | null | undefined
-  ) => number
-): QuoteFormValues["items"] {
-  return items.map((item) => {
-    const product = products.find((p) => p.id === item.productId);
-    const newUnitPrice = adjustFn(
-      product?.price ?? 0,
-      product?.costPrice,
-      priceList
-    );
-    const extrasTotal = (item.extras || []).reduce(
-      (acc, e) => acc + e.price,
-      0
-    );
-    return {
-      ...item,
-      unitPrice: newUnitPrice,
-      subtotal: truncateMoney(
-        (newUnitPrice + extrasTotal) * item.totalQuantity
-      ),
-    };
-  });
+  const salesPriceListId = form.getValues("salesPriceListId");
+  const adjustment =
+    salesPriceListId && salesPriceListId !== "none"
+      ? (salesPriceLists.find((pl) => pl.id === salesPriceListId) ?? null)
+      : null;
+
+  return { level, adjustment };
 }
 
 function hasItemVariants(item: QuoteFormValues["items"][number]): boolean {
@@ -229,10 +234,27 @@ const getItemTaxIndicator = (
 const clampPercentage = (value: number): number =>
   Math.min(Math.max(0, value), 100);
 
-function ProductInfoCell({ item }: { item: QuoteFormValues["items"][number] }) {
+function ProductInfoCell({
+  item,
+  quoteCurrency,
+}: {
+  item: QuoteFormValues["items"][number];
+  quoteCurrency: string;
+}) {
+  const converted =
+    item.productCurrency &&
+    quoteCurrency &&
+    item.productCurrency !== quoteCurrency;
   return (
     <TableCell>
-      <div className="font-medium">{item.productName}</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{item.productName}</span>
+        {converted && (
+          <Badge className="text-[10px]" variant="outline">
+            Convertido de {item.productCurrency}
+          </Badge>
+        )}
+      </div>
       {item.sku && (
         <div className="text-muted-foreground text-xs">
           {item.sku}
@@ -250,21 +272,25 @@ function UnitPriceInput({
   value: number;
   onChange: (raw: string) => void;
 }) {
-  const [draft, setDraft] = useState(value.toString());
+  const displayValue = value.toFixed(2);
+  const [draft, setDraft] = useState(displayValue);
   const isFocusedRef = useRef(false);
 
   useEffect(() => {
     if (!isFocusedRef.current) {
-      setDraft(value.toString());
+      setDraft(value.toFixed(2));
     }
   }, [value]);
 
   const commit = () => {
+    if (draft === displayValue) {
+      return;
+    }
     const parsed = Number.parseFloat(draft);
     if (Number.isFinite(parsed) && parsed >= 0) {
       onChange(draft);
     } else {
-      setDraft(value.toString());
+      setDraft(displayValue);
     }
   };
 
@@ -296,7 +322,7 @@ function UnitPriceInput({
 type TargetMarginListSelectProps = {
   // biome-ignore lint/suspicious/noExplicitAny: react-hook-form control type is opaque
   control: any;
-  targetMarginLists: SalesPriceList[];
+  targetMarginLists: PriceLevel[];
   NO_PRICE_LIST: string;
 };
 
@@ -312,11 +338,11 @@ function TargetMarginListSelect({
   return (
     <FormField
       control={control}
-      name="targetMarginListId"
+      name="priceLevelId"
       render={({ field }) => (
         <FormItem>
           <div className="flex items-center gap-1.5">
-            <FormLabel>Margen objetivo (opcional)</FormLabel>
+            <FormLabel>Nivel de lista (opcional)</FormLabel>
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="cursor-help text-muted-foreground">
@@ -324,8 +350,8 @@ function TargetMarginListSelect({
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top">
-                Solo listas de margen sobre costo. Reemplaza la lista del
-                cliente para este presupuesto.
+                Niveles de margen sobre costo. Reemplaza la lista del cliente
+                para este presupuesto.
               </TooltipContent>
             </Tooltip>
           </div>
@@ -339,7 +365,7 @@ function TargetMarginListSelect({
               <SelectItem value={noneValue}>Ninguna</SelectItem>
               {targetMarginLists.map((pl) => (
                 <SelectItem key={pl.id} value={pl.id}>
-                  {pl.name}
+                  {pl.name} ({pl.margin}%)
                 </SelectItem>
               ))}
             </SelectContent>
@@ -356,6 +382,7 @@ type QuoteFormProps = {
   customers: Customer[];
   products: SaleProduct[];
   salesPriceLists: SalesPriceList[];
+  priceLevels: PriceLevel[];
   onSubmit: (values: QuoteFormValues) => void;
   isSubmitting?: boolean;
   defaultValues?: Partial<QuoteFormValues>;
@@ -371,6 +398,7 @@ type QuoteFormProps = {
 export function QuoteForm({
   orgSlug,
   salesPriceLists,
+  priceLevels,
   customers,
   products,
   onSubmit,
@@ -386,6 +414,8 @@ export function QuoteForm({
   const [selectedProduct, setSelectedProduct] = useState<SaleProduct | null>(
     null
   );
+  const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
   const [isGridOpen, setIsGridOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingInitialQuantities, setEditingInitialQuantities] = useState<
@@ -399,6 +429,8 @@ export function QuoteForm({
   );
   const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
     useState(false);
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [editingRate, setEditingRate] = useState(false);
 
   const { can } = usePermissions();
   const canEditPrices = can("organization.admin");
@@ -411,7 +443,7 @@ export function QuoteForm({
     defaultValues: {
       customerId: "",
       salesPriceListId: NO_PRICE_LIST,
-      targetMarginListId: NO_PRICE_LIST,
+      priceLevelId: NO_PRICE_LIST,
       currency: "ARS",
       invoiceType: "NOTA_DE_VENTA",
       items: [],
@@ -433,6 +465,56 @@ export function QuoteForm({
     defaultValues?.invoiceType,
     form,
   ]);
+
+  const loadExchangeRate = useCallback(async (): Promise<boolean> => {
+    setIsFetchingRate(true);
+    try {
+      const res = await fetch("/api/exchange-rate/usd");
+      if (!res.ok) {
+        return false;
+      }
+      const data = (await res.json()) as { venta?: number };
+      if (typeof data?.venta === "number" && data.venta > 0) {
+        form.setValue("exchangeRate", data.venta, { shouldDirty: true });
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setIsFetchingRate(false);
+    }
+  }, [form]);
+
+  useEffect(() => {
+    // Pre-cargar la cotización BNA solo al crear un presupuesto nuevo.
+    if (defaultValues?.exchangeRate != null) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/usd")
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        const venta = (data as { venta?: number }).venta;
+        if (typeof venta === "number" && venta > 0) {
+          form.setValue("exchangeRate", venta, { shouldDirty: false });
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsFetchingRate(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultValues?.exchangeRate, form]);
 
   const { fields, append, remove, update } = useFieldArray({
     control: form.control,
@@ -563,6 +645,13 @@ export function QuoteForm({
   };
 
   const handleProductSelect = (product: SaleProduct, quantity = 1) => {
+    const productCurrency = product.currency ?? "ARS";
+    if (needsExchangeRate(productCurrency, currency, exchangeRate)) {
+      toast.error(
+        "Ingresá el tipo de cambio para agregar productos de otra moneda"
+      );
+      return;
+    }
     setSelectedProduct(product);
     if (product.hasVariants) {
       setIsGridOpen(true);
@@ -580,17 +669,14 @@ export function QuoteForm({
         ...v,
         quantity: v.quantity + quantity,
       }));
-      const extrasTotal = (existingItem.extras || []).reduce(
-        (acc, e) => acc + e.price,
-        0
-      );
       update(existingIndex, {
         ...existingItem,
         variants: updatedVariants,
         totalQuantity: existingItem.totalQuantity + quantity,
-        subtotal: truncateMoney(
-          (unitPrice + extrasTotal) * (existingItem.totalQuantity + quantity)
-        ),
+        subtotal: computeQuoteItemSubtotal({
+          unitPrice: existingItem.unitPrice,
+          variants: updatedVariants,
+        }),
       });
     } else {
       append({
@@ -598,16 +684,17 @@ export function QuoteForm({
         productName: product.name,
         sku: product.sku,
         brand: product.brand ?? undefined,
+        productCurrency: product.currency ?? "ARS",
         unitPrice,
         variants: [
           {
             talle: "\u00danico",
             color: "\u2014",
             quantity,
+            extras: [],
           },
         ],
         totalQuantity: quantity,
-        extras: [],
         subtotal: truncateMoney(unitPrice * quantity),
         discountPercentage: 0,
         taxes: product.taxes ?? [],
@@ -616,42 +703,32 @@ export function QuoteForm({
     setSelectedProduct(null);
   };
 
-  const getAdjustedPrice = useCallback(
-    (
-      basePrice: number,
-      costPrice: number | null | undefined,
-      priceList: SalesPriceList | null | undefined
-    ): number => {
-      if (!priceList?.is_active) {
-        return basePrice;
-      }
-
-      const today = new Date().toISOString().split("T")[0];
-      if (priceList.valid_from > today) {
-        return basePrice;
-      }
-
-      if (priceList.is_target_margin && costPrice != null) {
-        return truncateMoney(costPrice * (1 + priceList.value / 100));
-      }
-
-      if (priceList.type === "PRICE") {
-        return truncateMoney(Math.max(0, basePrice + priceList.value));
-      }
-
-      return truncateMoney(basePrice * (1 + priceList.value / 100));
-    },
-    []
-  );
-
-  const targetMarginLists = useMemo(
-    () => salesPriceLists.filter((pl) => pl.is_target_margin),
-    [salesPriceLists]
-  );
-
   const getUnitPrice = (product: SaleProduct) => {
-    const priceList = getEffectivePriceList(form, salesPriceLists);
-    return getAdjustedPrice(product.price || 0, product.costPrice, priceList);
+    const pricing = getEffectivePriceList(form, salesPriceLists, priceLevels);
+    return getAdjustedQuoteUnitPrice(product, pricing, currency, exchangeRate);
+  };
+
+  const handleCurrencyChange = (nextCurrency: "ARS" | "USD") => {
+    const previousCurrency = form.getValues("currency");
+    if (previousCurrency === nextCurrency) {
+      return;
+    }
+    const items = form.getValues("items");
+    const rate = form.getValues("exchangeRate");
+    if (items.length > 0) {
+      if (!rate || rate <= 0) {
+        toast.error("Ingresá el tipo de cambio para convertir el presupuesto");
+        return;
+      }
+      const convertedItems = convertQuoteItemsCurrency({
+        items,
+        previousCurrency,
+        currency: nextCurrency,
+        exchangeRate: rate,
+      });
+      form.setValue("items", convertedItems, { shouldDirty: true });
+    }
+    form.setValue("currency", nextCurrency, { shouldDirty: true });
   };
 
   const applyEditVariants = (variants: QuoteItemVariantFormValues[]) => {
@@ -660,17 +737,30 @@ export function QuoteForm({
     }
     const currentItems = form.getValues("items");
     const existingItem = currentItems[editingItemIndex];
-    const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
-    const extrasTotal = (existingItem.extras || []).reduce(
-      (acc, e) => acc + e.price,
+    const unitPrice = existingItem.unitPrice;
+    const mergedVariants = variants.map((newVar) => {
+      const existingVar = existingItem.variants.find(
+        (v) => v.talle === newVar.talle && v.color === newVar.color
+      );
+      return {
+        ...newVar,
+        extras: newVar.extras?.length
+          ? newVar.extras
+          : (existingVar?.extras ?? []),
+      };
+    });
+    const totalQuantity = mergedVariants.reduce(
+      (acc, v) => acc + v.quantity,
       0
     );
-    const unitPrice = getUnitPrice(selectedProduct);
     update(editingItemIndex, {
       ...existingItem,
-      variants,
+      variants: mergedVariants,
       totalQuantity,
-      subtotal: truncateMoney((unitPrice + extrasTotal) * totalQuantity),
+      subtotal: computeQuoteItemSubtotal({
+        unitPrice,
+        variants: mergedVariants,
+      }),
     });
     setEditingItemIndex(null);
     setEditingInitialQuantities({});
@@ -709,15 +799,14 @@ export function QuoteForm({
         (acc, v) => acc + v.quantity,
         0
       );
-      const extrasTotal = (existingItem.extras || []).reduce(
-        (acc, e) => acc + e.price,
-        0
-      );
       update(existingIndex, {
         ...existingItem,
         variants: mergedVariants,
         totalQuantity: newTotalQuantity,
-        subtotal: truncateMoney((unitPrice + extrasTotal) * newTotalQuantity),
+        subtotal: computeQuoteItemSubtotal({
+          unitPrice: existingItem.unitPrice,
+          variants: mergedVariants,
+        }),
       });
     } else {
       append({
@@ -725,11 +814,11 @@ export function QuoteForm({
         productName: product.name,
         sku: product.sku,
         brand: product.brand ?? undefined,
+        productCurrency: product.currency ?? "ARS",
         unitPrice,
         variants,
         totalQuantity,
-        extras: [],
-        subtotal: truncateMoney(totalQuantity * unitPrice),
+        subtotal: computeQuoteItemSubtotal({ unitPrice, variants }),
         discountPercentage: 0,
         taxes: product.taxes ?? [],
       });
@@ -777,18 +866,18 @@ export function QuoteForm({
     }
     const currentItems = form.getValues("items");
     const item = currentItems[index];
-    const extrasTotal = (item.extras || []).reduce(
-      (acc, e) => acc + e.price,
-      0
-    );
+    const updatedVariants = item.variants.map((v) => ({
+      ...v,
+      quantity: newQuantity,
+    }));
     update(index, {
       ...item,
       totalQuantity: newQuantity,
-      variants: item.variants.map((v) => ({
-        ...v,
-        quantity: newQuantity,
-      })),
-      subtotal: truncateMoney((item.unitPrice + extrasTotal) * newQuantity),
+      variants: updatedVariants,
+      subtotal: computeQuoteItemSubtotal({
+        unitPrice: item.unitPrice,
+        variants: updatedVariants,
+      }),
     });
   };
 
@@ -799,14 +888,13 @@ export function QuoteForm({
     }
     const currentItems = form.getValues("items");
     const item = currentItems[index];
-    const extrasTotal = (item.extras || []).reduce(
-      (acc, e) => acc + e.price,
-      0
-    );
     update(index, {
       ...item,
       unitPrice: parsed,
-      subtotal: truncateMoney((parsed + extrasTotal) * item.totalQuantity),
+      subtotal: computeQuoteItemSubtotal({
+        unitPrice: parsed,
+        variants: item.variants,
+      }),
     });
   };
 
@@ -897,6 +985,30 @@ export function QuoteForm({
     name: "globalDiscountPercentage",
   });
 
+  const selectedCustomerId = useWatch({
+    control: form.control,
+    name: "customerId",
+  });
+  const selectedCustomer = customers.find(
+    (customer) => customer.id === selectedCustomerId
+  );
+  const normalizedCustomerSearch = normalizeCustomerSearch(customerSearch);
+  const filteredCustomers = customers.filter((customer) =>
+    normalizeCustomerSearch(getCustomerLabel(customer)).includes(
+      normalizedCustomerSearch
+    )
+  );
+
+  const currency = useWatch({
+    control: form.control,
+    name: "currency",
+  });
+
+  const exchangeRate = useWatch({
+    control: form.control,
+    name: "exchangeRate",
+  });
+
   const totals = useMemo(() => {
     const lines = buildQuoteTaxLines(formItems);
     return computeQuoteTotals({
@@ -923,62 +1035,73 @@ export function QuoteForm({
     name: "salesPriceListId",
   });
 
-  const selectedTargetMarginListId = useWatch({
+  const selectedPriceLevelId = useWatch({
     control: form.control,
-    name: "targetMarginListId",
+    name: "priceLevelId",
   });
 
-  const selectedCustomerId = useWatch({
-    control: form.control,
-    name: "customerId",
+  const previousPricingRef = useRef({
+    customerId: form.getValues("customerId"),
+    priceListId: form.getValues("salesPriceListId"),
+    priceLevelId: form.getValues("priceLevelId"),
+    exchangeRate: form.getValues("exchangeRate"),
   });
+  const initialRate = form.getValues("exchangeRate");
+  const lastValidRateRef = useRef(
+    initialRate && initialRate > 0 ? initialRate : null
+  );
 
-  const currency = useWatch({
-    control: form.control,
-    name: "currency",
-  });
+  const targetMarginLists = useMemo(
+    () => priceLevels.filter((pl) => pl.is_active),
+    [priceLevels]
+  );
 
   useEffect(() => {
-    if (!selectedCustomerId) {
+    const previous = previousPricingRef.current;
+    const previousRate = lastValidRateRef.current;
+    if (exchangeRate && exchangeRate > 0) {
+      lastValidRateRef.current = exchangeRate;
+    }
+    previousPricingRef.current = {
+      customerId: selectedCustomerId,
+      priceListId: selectedPriceListId,
+      priceLevelId: selectedPriceLevelId,
+      exchangeRate,
+    };
+    const pricingChanged =
+      previous.customerId !== selectedCustomerId ||
+      previous.priceListId !== selectedPriceListId ||
+      previous.priceLevelId !== selectedPriceLevelId;
+    if (!pricingChanged && previous.exchangeRate === exchangeRate) {
       return;
     }
-    const customer = customers.find((c) => c.id === selectedCustomerId);
-    const priceListId = customer?.sales_price_list_id ?? NO_PRICE_LIST;
-    form.setValue("salesPriceListId", priceListId);
-  }, [selectedCustomerId, customers, form]);
-
-  useEffect(() => {
-    if (fields.length === 0) {
-      return;
-    }
-
-    if (currency === "USD") {
-      return;
-    }
-
-    const priceList =
-      selectedTargetMarginListId && selectedTargetMarginListId !== NO_PRICE_LIST
-        ? salesPriceLists.find((pl) => pl.id === selectedTargetMarginListId)
-        : salesPriceLists.find((pl) => pl.id === selectedPriceListId);
 
     const currentItems = form.getValues("items");
-    const updatedItems = recalcItemPrices(
-      currentItems,
+    if (currentItems.length === 0) {
+      return;
+    }
+    const updatedItems = repriceQuoteItems({
+      items: currentItems,
       products,
-      priceList,
-      getAdjustedPrice
-    );
+      pricing: getEffectivePriceList(form, salesPriceLists, priceLevels),
+      exchangeRate: form.getValues("exchangeRate"),
+      currency: form.getValues("currency"),
+      rateOnly: !pricingChanged,
+      previousRate,
+    });
 
-    form.setValue("items", updatedItems, { shouldDirty: true });
+    if (updatedItems.some((item, index) => item !== currentItems[index])) {
+      form.setValue("items", updatedItems, { shouldDirty: true });
+    }
   }, [
+    selectedCustomerId,
     selectedPriceListId,
-    selectedTargetMarginListId,
+    selectedPriceLevelId,
     salesPriceLists,
+    priceLevels,
     form,
     products,
-    currency,
-    fields.length,
-    getAdjustedPrice,
+    exchangeRate,
   ]);
 
   return (
@@ -1002,23 +1125,107 @@ export function QuoteForm({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Cliente</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
+                        <Popover
+                          onOpenChange={(open) => {
+                            setIsCustomerPickerOpen(open);
+                            if (!open) {
+                              setCustomerSearch("");
+                            }
+                          }}
+                          open={isCustomerPickerOpen}
                         >
                           <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Seleccione un cliente" />
-                            </SelectTrigger>
+                            <PopoverTrigger asChild>
+                              <Button
+                                aria-expanded={isCustomerPickerOpen}
+                                className="w-full justify-between text-left font-normal"
+                                id="customer"
+                                role="combobox"
+                                variant="outline"
+                              >
+                                <span className="truncate">
+                                  {selectedCustomer
+                                    ? getCustomerLabel(selectedCustomer)
+                                    : "Seleccione un cliente"}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
                           </FormControl>
-                          <SelectContent>
-                            {customers.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {c.business_name || c.fantasy_name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <PopoverContent
+                            align="start"
+                            className="w-xs max-w-[90vw] p-0"
+                            sideOffset={8}
+                          >
+                            <div className="flex flex-col overflow-hidden rounded-md">
+                              <div className="border-b p-2">
+                                <Input
+                                  autoComplete="off"
+                                  onChange={(event) =>
+                                    setCustomerSearch(event.target.value)
+                                  }
+                                  placeholder="Buscar cliente..."
+                                  value={customerSearch}
+                                />
+                              </div>
+                              {filteredCustomers.length === 0 ? (
+                                <p className="py-6 text-center text-muted-foreground text-sm">
+                                  No se encontraron clientes.
+                                </p>
+                              ) : (
+                                <div
+                                  className="max-h-72 overflow-y-auto p-1"
+                                  key={customerSearch}
+                                >
+                                  {filteredCustomers.map((customer) => (
+                                    <button
+                                      aria-selected={
+                                        selectedCustomerId === customer.id
+                                      }
+                                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
+                                      key={customer.id}
+                                      onClick={() => {
+                                        if (
+                                          customer.id !== selectedCustomerId
+                                        ) {
+                                          form.setValue(
+                                            "salesPriceListId",
+                                            customer.sales_price_list_id ??
+                                              NO_PRICE_LIST,
+                                            { shouldDirty: true }
+                                          );
+                                          form.setValue(
+                                            "priceLevelId",
+                                            customer.price_level_id ??
+                                              NO_PRICE_LIST,
+                                            { shouldDirty: true }
+                                          );
+                                          field.onChange(customer.id);
+                                        }
+                                        setIsCustomerPickerOpen(false);
+                                        setCustomerSearch("");
+                                      }}
+                                      role="option"
+                                      type="button"
+                                    >
+                                      <span className="flex-1 truncate">
+                                        {getCustomerLabel(customer)}
+                                      </span>
+                                      <Check
+                                        className={cn(
+                                          "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                          selectedCustomerId === customer.id
+                                            ? "opacity-100"
+                                            : "opacity-0"
+                                        )}
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1066,8 +1273,9 @@ export function QuoteForm({
                       <FormItem>
                         <FormLabel>Moneda</FormLabel>
                         <Select
-                          disabled={fields.length > 0}
-                          onValueChange={field.onChange}
+                          onValueChange={(value: "ARS" | "USD") =>
+                            handleCurrencyChange(value)
+                          }
                           value={field.value}
                         >
                           <FormControl>
@@ -1082,11 +1290,84 @@ export function QuoteForm({
                             <SelectItem value="USD">USD - Dólares</SelectItem>
                           </SelectContent>
                         </Select>
-                        {fields.length > 0 && (
-                          <p className="text-muted-foreground text-xs">
-                            Vacía el presupuesto para cambiar la moneda.
-                          </p>
-                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="exchangeRate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          Tipo de cambio comercial (USD → ARS)
+                        </FormLabel>
+                        <div className="flex items-center gap-2">
+                          {editingRate || field.value == null ? (
+                            <>
+                              <FormControl>
+                                <Input
+                                  inputMode="decimal"
+                                  min="0"
+                                  placeholder="Cotización"
+                                  step="any"
+                                  type="number"
+                                  {...field}
+                                  onBlur={(event) => {
+                                    if (
+                                      !event.currentTarget.parentElement?.contains(
+                                        event.relatedTarget as Node | null
+                                      )
+                                    ) {
+                                      setEditingRate(false);
+                                    }
+                                  }}
+                                  onChange={(e) => {
+                                    const parsed = Number.parseFloat(
+                                      e.target.value
+                                    );
+                                    field.onChange(
+                                      Number.isFinite(parsed) ? parsed : null
+                                    );
+                                  }}
+                                  value={field.value ?? ""}
+                                />
+                              </FormControl>
+                              <Button
+                                aria-label="Actualizar cotización"
+                                disabled={isFetchingRate}
+                                onClick={() => {
+                                  loadExchangeRate();
+                                }}
+                                onMouseDown={(event) => event.preventDefault()}
+                                size="icon"
+                                type="button"
+                                variant="outline"
+                              >
+                                <ArrowClockwise
+                                  className={
+                                    isFetchingRate ? "animate-spin" : ""
+                                  }
+                                  size={16}
+                                />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              aria-label="Editar cotización"
+                              className="h-9 justify-start border-transparent bg-transparent px-0 font-medium text-foreground text-sm hover:bg-transparent"
+                              onClick={() => setEditingRate(true)}
+                              type="button"
+                              variant="ghost"
+                            >
+                              {field.value}
+                              <PencilSimple
+                                className="text-muted-foreground"
+                                size={14}
+                              />
+                            </Button>
+                          )}
+                        </div>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1246,63 +1527,60 @@ export function QuoteForm({
                           />
                           Pago anticipado
                         </label>
-                        {(field.value ?? false) && (
-                          <FormField
-                            control={form.control}
-                            name="advancePaymentPercentage"
-                            render={({ field: pctField }) => (
-                              <FormItem className="pl-6">
-                                <FormControl>
-                                  <div className="flex w-32 items-center gap-2">
-                                    <Input
-                                      className="w-20"
-                                      max={100}
-                                      min={1}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (val === "") {
-                                          pctField.onChange(null);
-                                          return;
-                                        }
-                                        const num = Number(val);
-                                        if (
-                                          Number.isNaN(num) ||
-                                          num < 1 ||
-                                          num > 100
-                                        ) {
-                                          return;
-                                        }
-                                        pctField.onChange(num);
-                                      }}
-                                      placeholder="%"
-                                      type="number"
-                                      value={pctField.value ?? ""}
-                                    />
-                                    <span className="text-muted-foreground text-sm">
-                                      %
-                                    </span>
-                                  </div>
-                                </FormControl>
-                                {advancePaymentPercentage ? (
-                                  <p className="mt-2 text-muted-foreground text-sm">
-                                    Anticipo estimado:{" "}
-                                    {formatCurrency(
-                                      truncateMoney(
-                                        (quoteTotal *
-                                          advancePaymentPercentage) /
-                                          100
-                                      ),
-                                      currency
-                                    )}
-                                    . Se confirmará y podrá editarse al generar
-                                    el anticipo.
-                                  </p>
-                                ) : null}
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        )}
+                        <FormField
+                          control={form.control}
+                          name="advancePaymentPercentage"
+                          render={({ field: pctField }) => (
+                            <FormItem className="pl-6">
+                              <FormControl>
+                                <div className="flex w-32 items-center gap-2">
+                                  <Input
+                                    className="w-20"
+                                    disabled={!(field.value ?? false)}
+                                    max={100}
+                                    min={1}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === "") {
+                                        pctField.onChange(null);
+                                        return;
+                                      }
+                                      const num = Number(val);
+                                      if (
+                                        Number.isNaN(num) ||
+                                        num < 1 ||
+                                        num > 100
+                                      ) {
+                                        return;
+                                      }
+                                      pctField.onChange(num);
+                                    }}
+                                    type="number"
+                                    value={pctField.value ?? ""}
+                                  />
+                                  <span className="text-muted-foreground text-sm">
+                                    %
+                                  </span>
+                                </div>
+                              </FormControl>
+                              {advancePaymentPercentage ? (
+                                <p className="mt-2 text-muted-foreground text-sm">
+                                  Anticipo estimado:{" "}
+                                  {formatCurrency(
+                                    truncateMoney(
+                                      (quoteTotal * advancePaymentPercentage) /
+                                        100
+                                    ),
+                                    currency
+                                  )}
+                                  . Se confirmará y podrá editarse al generar el
+                                  anticipo.
+                                </p>
+                              ) : null}
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
                       </FormItem>
                     )}
                   />
@@ -1359,13 +1637,19 @@ export function QuoteForm({
                 <div className="grid gap-6">
                   {/* Buscador */}
                   <ProductSearch
-                    currency={currency}
-                    onSelectProduct={handleProductSelect}
-                    priceList={
+                    adjustment={
                       salesPriceLists.find(
                         (pl) => pl.id === selectedPriceListId
                       ) ?? null
                     }
+                    currency={currency}
+                    exchangeRate={exchangeRate}
+                    level={
+                      priceLevels.find(
+                        (pl) => pl.id === selectedPriceLevelId
+                      ) ?? null
+                    }
+                    onSelectProduct={handleProductSelect}
                     products={products}
                   />
 
@@ -1380,7 +1664,6 @@ export function QuoteForm({
                             <TableHead className="text-right">
                               Precio Un.
                             </TableHead>
-                            <TableHead className="text-right">Extras</TableHead>
                             <TableHead className="text-right">
                               Cantidad
                             </TableHead>
@@ -1404,16 +1687,46 @@ export function QuoteForm({
                             return (
                               <Fragment key={field.id}>
                                 <TableRow>
-                                  <ProductInfoCell item={item} />
+                                  <ProductInfoCell
+                                    item={item}
+                                    quoteCurrency={currency}
+                                  />
                                   <TableCell>
-                                    <div className="flex flex-wrap gap-1">
-                                      {item.variants.map((v) => (
-                                        <span
-                                          className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs"
+                                    <div className="flex flex-col gap-1">
+                                      {item.variants.map((v, variantIndex) => (
+                                        <div
+                                          className="flex items-center gap-1"
                                           key={`${v.talle}-${v.color}`}
                                         >
-                                          {v.talle} / {v.color}: {v.quantity}
-                                        </span>
+                                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs">
+                                            {v.talle} / {v.color}: {v.quantity}
+                                          </span>
+                                          <QuoteItemExtrasPopover
+                                            currency={currency}
+                                            extras={v.extras ?? []}
+                                            onChange={(newExtras) => {
+                                              const updatedVariants =
+                                                item.variants.map(
+                                                  (existing, vi) =>
+                                                    vi === variantIndex
+                                                      ? {
+                                                          ...existing,
+                                                          extras: newExtras,
+                                                        }
+                                                      : existing
+                                                );
+                                              update(index, {
+                                                ...item,
+                                                variants: updatedVariants,
+                                                subtotal:
+                                                  computeQuoteItemSubtotal({
+                                                    unitPrice: item.unitPrice,
+                                                    variants: updatedVariants,
+                                                  }),
+                                              });
+                                            }}
+                                          />
+                                        </div>
                                       ))}
                                     </div>
                                   </TableCell>
@@ -1421,7 +1734,7 @@ export function QuoteForm({
                                     {canEditPrices ? (
                                       <div className="flex items-center gap-1">
                                         <span className="text-muted-foreground text-sm">
-                                          $
+                                          {currency === "USD" ? "US$" : "$"}
                                         </span>
                                         <UnitPriceInput
                                           onChange={(raw) =>
@@ -1433,26 +1746,6 @@ export function QuoteForm({
                                     ) : (
                                       formatCurrency(item.unitPrice, currency)
                                     )}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <QuoteItemExtrasPopover
-                                      extras={item.extras || []}
-                                      onChange={(newExtras) => {
-                                        const extrasTotal = newExtras.reduce(
-                                          (acc, e) => acc + e.price,
-                                          0
-                                        );
-                                        const newSubtotal = truncateMoney(
-                                          (item.unitPrice + extrasTotal) *
-                                            item.totalQuantity
-                                        );
-                                        update(index, {
-                                          ...item,
-                                          extras: newExtras,
-                                          subtotal: newSubtotal,
-                                        });
-                                      }}
-                                    />
                                   </TableCell>
                                   <TableCell className="text-right">
                                     {hasItemVariants(item) ? (
@@ -1545,7 +1838,7 @@ export function QuoteForm({
                                 <TableRow key={`${field.id}-tax`}>
                                   <TableCell
                                     className="border-t-0 py-1 pt-0"
-                                    colSpan={8}
+                                    colSpan={7}
                                   >
                                     <div className="flex w-full items-start justify-between gap-3">
                                       <p

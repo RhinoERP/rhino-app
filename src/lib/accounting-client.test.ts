@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFacturaCompra,
+  buildFacturaVentaManual,
+  buildNcVenta,
   buildNdVenta,
   buildOrdenPago,
+  buildVentaPos,
 } from "./accounting-client";
 
 describe("buildNdVenta", () => {
@@ -91,6 +94,75 @@ describe("buildOrdenPago", () => {
 
     expect(event.descripcion).toBe("Orden de pago");
     expect(event.descripcion).not.toContain(event.referenciaId);
+  });
+});
+
+describe("buildVentaPos", () => {
+  it("preserves the product or category account code in the sale lines", () => {
+    const event = buildVentaPos(
+      {
+        id: "pos-sale-1",
+        organization_id: "org-1",
+        sale_date: "2026-09-22",
+        receipt_number: "POS-0001",
+      },
+      { total: 1210, totalTaxAmount: 210 },
+      "customer-1",
+      {
+        items: [
+          {
+            accountCode: "VENTAS_MERCADERIAS",
+            montoNeto: 1000,
+            montoImpuestos: 210,
+          },
+        ],
+        metodoPago: "TRANSFERENCIA",
+        bancoAccountCode: "BANCO_BBVA_PESOS",
+      }
+    );
+
+    expect(event).toMatchObject({
+      tipoEvento: "VENTA_POS",
+      referenciaTabla: "pos_sales",
+      referenciaId: "pos-sale-1",
+      idempotencyKey: "VENTA_POS_pos-sale-1",
+      datos: {
+        clienteId: "customer-1",
+        metodoPago: "TRANSFERENCIA",
+        bancoAccountCode: "BANCO_BBVA_PESOS",
+        totalVenta: "1210.0000",
+        lineasDesglosadas: [
+          {
+            accountCode: "VENTAS_MERCADERIAS",
+            montoNeto: "1000.0000",
+            montoImpuestos: "210.0000",
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps a null account code when the POS line has no account", () => {
+    const event = buildVentaPos(
+      {
+        id: "pos-sale-2",
+        organization_id: "org-1",
+        sale_date: "2026-09-22",
+      },
+      { total: 230, totalTaxAmount: 0 },
+      "customer-1",
+      {
+        items: [{ accountCode: null, montoNeto: 230, montoImpuestos: 0 }],
+      }
+    );
+
+    expect(event.datos.lineasDesglosadas).toEqual([
+      {
+        accountCode: null,
+        montoNeto: "230.0000",
+        montoImpuestos: "0.0000",
+      },
+    ]);
   });
 });
 
@@ -261,5 +333,116 @@ describe("buildFacturaCompra", () => {
     expect(event.referenciaTabla).toBe("purchase_orders");
     expect(event.idempotencyKey).toBe("FACTURA_COMPRA_po-id");
     expect(event.datos.facturaNumero).toBe("Compra 42");
+  });
+});
+
+describe("builders emiten moneda/tipoCambio/montoUSD cuando se pasa currency", () => {
+  const CURRENCY = {
+    moneda: "USD" as const,
+    tipoCambio: 1240.5,
+    montoUSD: 1000,
+  };
+
+  it("buildFacturaCompra incluye los campos de moneda", () => {
+    const event = buildFacturaCompra(
+      {
+        id: "po-id",
+        organization_id: "org-id",
+        supplier_id: "sup-id",
+        purchase_date: "2026-01-01",
+        expiration_date: null,
+        subtotal_amount: 500,
+        tax_amount: 105,
+        total_amount: 605,
+        remittance_number: null,
+        purchase_number: 42,
+      },
+      CURRENCY
+    );
+    expect(event.datos).toMatchObject({
+      moneda: "USD",
+      tipoCambio: "1240.5000",
+      montoUSD: "1000.0000",
+    });
+  });
+
+  it("buildFacturaVentaManual incluye los campos de moneda", () => {
+    const event = buildFacturaVentaManual(
+      {
+        id: "sale-id",
+        organization_id: "org-id",
+        customer_id: "cust-id",
+        sale_date: "2026-01-01",
+        expiration_date: null,
+        invoice_number: null,
+      },
+      { total: 1210, totalTaxAmount: 210 },
+      { ...CURRENCY }
+    );
+    expect(event.datos).toMatchObject({
+      moneda: "USD",
+      tipoCambio: "1240.5000",
+      montoUSD: "1000.0000",
+    });
+  });
+
+  it("buildNcVenta incluye los campos de moneda", () => {
+    const event = buildNcVenta(
+      {
+        id: "nc-id",
+        organization_id: "org-id",
+        customer_id: "cust-id",
+        sales_order_id: "sale-id",
+        credit_note_number: "NC-1",
+        issue_date: "2026-01-01",
+        amount: 500,
+      },
+      { id: "sale-id", total_amount: 1210, total_tax_amount: 210 },
+      { ...CURRENCY }
+    );
+    expect(event.datos).toMatchObject({
+      moneda: "USD",
+      tipoCambio: "1240.5000",
+      montoUSD: "1000.0000",
+    });
+  });
+
+  it("buildNdVenta incluye los campos de moneda", () => {
+    const event = buildNdVenta(
+      {
+        id: "nd-id",
+        organizationId: "org-id",
+        customerId: "cust-id",
+        salesOrderId: "sale-id",
+        debitNoteNumber: "ND-1",
+        issueDate: "2026-01-01",
+        amount: 500,
+        items: [{ netAmount: 400, taxAmount: 100, taxes: [] }],
+      },
+      { ...CURRENCY }
+    );
+    expect(event.datos).toMatchObject({
+      moneda: "USD",
+      tipoCambio: "1240.5000",
+      montoUSD: "1000.0000",
+    });
+  });
+
+  it("no emite moneda cuando no se pasa currency", () => {
+    const event = buildFacturaCompra({
+      id: "po-id",
+      organization_id: "org-id",
+      supplier_id: "sup-id",
+      purchase_date: "2026-01-01",
+      expiration_date: null,
+      subtotal_amount: 500,
+      tax_amount: 105,
+      total_amount: 605,
+      remittance_number: null,
+      purchase_number: 42,
+    });
+    expect(event.datos.moneda).toBeUndefined();
+    expect(event.datos.tipoCambio).toBeUndefined();
+    expect(event.datos.montoUSD).toBeUndefined();
   });
 });

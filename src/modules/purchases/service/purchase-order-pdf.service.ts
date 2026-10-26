@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { getPurchaseUnitShortLabel } from "@/modules/purchases/utils/purchase-units";
 
 export type PurchaseOrderPDFItem = {
   productName: string;
@@ -8,6 +9,8 @@ export type PurchaseOrderPDFItem = {
   unitQuantity: number | null;
   unitCost: number;
   subtotal: number;
+  discountAmount: number;
+  discountPercentage: number;
   variantStocks: Record<string, Record<string, number>> | null;
   itemTaxes: Array<{ name: string; rate: number; taxAmount: number }>;
 };
@@ -59,6 +62,7 @@ export type PurchaseOrderPDFSource = {
   tax_amount: number | null;
   total_amount: number;
   items: Array<{
+    id?: string;
     product_name?: string;
     unit_of_measure?: string | null;
     weight_per_unit?: number | null;
@@ -66,6 +70,7 @@ export type PurchaseOrderPDFSource = {
     unit_quantity: number | null;
     unit_cost: number;
     subtotal: number;
+    discount_percentage?: number | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
   }>;
   taxes: Array<{ name: string; rate: number; tax_amount: number }> | null;
@@ -127,11 +132,21 @@ const formatQuantityValue = (value: number): string =>
     ? value.toLocaleString("es-AR", { maximumFractionDigits: 0 })
     : value.toLocaleString("es-AR", { maximumFractionDigits: 2 });
 
-const WEIGHT_OR_VOLUME_UNITS = ["KG", "LT", "MT"];
-
 const SINGLE_PAGE_ITEM_LIMIT = 9;
 const FIRST_PAGE_ITEM_LIMIT = 13;
 const CONTINUATION_PAGE_ITEM_LIMIT = 18;
+
+function getPurchaseItemGrossAmount(
+  item: PurchaseOrderPDFSource["items"][number]
+) {
+  const unitOfMeasure = item.unit_of_measure?.toUpperCase();
+  const quantity =
+    item.unit_quantity != null &&
+    ["KG", "LT", "MT"].includes(unitOfMeasure ?? "")
+      ? item.unit_quantity
+      : item.quantity;
+  return truncateMoney(quantity * item.unit_cost);
+}
 
 function buildPurchaseOrderItems(
   purchaseOrder: PurchaseOrderPDFSource,
@@ -142,18 +157,15 @@ function buildPurchaseOrderItems(
 ): PurchaseOrderPDFItem[] {
   return (purchaseOrder.items ?? []).map((item, index) => {
     const unitOfMeasure = item.unit_of_measure ?? null;
-    const isWeightOrVolume =
-      unitOfMeasure != null &&
-      WEIGHT_OR_VOLUME_UNITS.includes(unitOfMeasure.toUpperCase());
+    const unitQuantity = item.unit_quantity ?? null;
 
-    const unitQuantity =
-      item.unit_quantity ??
-      (isWeightOrVolume && item.weight_per_unit && item.quantity > 0
-        ? item.quantity * item.weight_per_unit
-        : null);
-
-    const lineId = String(index);
+    const lineId = item.id ?? String(index);
     const itemTaxes = itemTaxesByLine?.get(lineId) ?? [];
+    const discountPercentage = item.discount_percentage ?? 0;
+    const grossAmount = getPurchaseItemGrossAmount(item);
+    const discountAmount = truncateMoney(
+      Math.max(0, grossAmount - item.subtotal)
+    );
 
     return {
       productName: item.product_name ?? "—",
@@ -162,6 +174,8 @@ function buildPurchaseOrderItems(
       unitQuantity,
       unitCost: item.unit_cost ?? 0,
       subtotal: item.subtotal ?? 0,
+      discountAmount,
+      discountPercentage,
       variantStocks: item.variant_stocks ?? null,
       itemTaxes,
     };
@@ -401,7 +415,9 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
     .map((item) => {
       const quantity = item.unitQuantity ?? item.quantity;
       const unitLabel =
-        item.unitOfMeasure && item.unitQuantity ? ` ${item.unitOfMeasure}` : "";
+        item.unitOfMeasure && item.unitQuantity
+          ? ` ${getPurchaseUnitShortLabel(item.unitOfMeasure)}`
+          : "";
       const variantHtml = item.variantStocks
         ? renderVariantBreakdownText(item.variantStocks)
         : "";
@@ -412,6 +428,7 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
       <td class="c-desc">${displayValue(item.productName)}${variantHtml}${itemTaxesHtml}</td>
       <td class="c-qty">${formatQuantityValue(quantity)}${escapeHtml(unitLabel)}</td>
       <td class="c-right c-price">${formatCompactCurrency(item.unitCost)}</td>
+      <td class="c-right c-discount">${item.discountPercentage > 0 ? `${formatQuantityValue(item.discountPercentage)}% · -${formatCompactCurrency(item.discountAmount)}` : "—"}</td>
       <td class="c-right c-bold c-amount">${formatCompactCurrency(item.subtotal)}</td>
     </tr>`;
     })
@@ -425,6 +442,7 @@ function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
             <th>Detalle</th>
             <th class="c-qty">Cantidad</th>
             <th class="c-price">Precio U.</th>
+            <th class="c-discount">Descuento</th>
             <th class="c-amount">Importe</th>
           </tr>
         </thead>
@@ -645,9 +663,10 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
     word-break: break-word;
   }
   td:last-child { border-right: none; }
-  .c-qty { width: 60px; text-align: center; }
+  .c-qty { width: 54px; text-align: center; }
   .c-desc { text-align: left; }
-  .c-price { width: 75px; text-align: right; }
+  .c-price { width: 70px; text-align: right; }
+  .c-discount { width: 100px; text-align: right; }
   .c-amount { width: 80px; text-align: right; }
   .c-right { text-align: right; }
   .c-center { text-align: center; }
@@ -662,7 +681,6 @@ export function generatePurchaseOrderHTML(data: PurchaseOrderPDFData): string {
     color: var(--muted);
     margin-top: 2px;
   }
-
   /* TOTALS */
   .breakdown {
     margin-top: 10px;

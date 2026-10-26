@@ -45,6 +45,7 @@ export const READ_PERMISSIONS: Record<string, string[]> = {
   ],
   debitnotes: ["debitnotes.read", "debitnotes.manage"],
   pos: ["pos.read", "pos.read.all", "pos.manage"],
+  mercadolibre: ["mercadolibre.access"],
   commissions: ["commissions.read"],
   accounting: ["accounting.read", "accounting.manage"],
   whatsapp: ["whatsapp.read", "whatsapp.manage"],

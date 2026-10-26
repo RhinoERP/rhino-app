@@ -3,6 +3,7 @@ import "server-only";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getSalesOrderById } from "../service/sales.service";
 import { renderRemittancePdfDocument } from "./remittance-pdf-renderer.service";
 
@@ -46,6 +47,9 @@ export async function generateRemittancePdfDocument(params: {
       logoUrl: organization?.logo_url,
     },
     singlePageDuplicate,
+    showProductBrand:
+      organization != null &&
+      isOrganizationModuleEnabled(organization, "production"),
     finalRemittanceVisibility,
   });
 }

@@ -2,85 +2,213 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import {
-  adjustVariantStock,
-  createProductLotForOrg,
-  createStockMovementForOrg,
-} from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
-  advanceLinkedChildOrderToGoodsReceived,
-  processPurchaseReceipt,
-  updatePurchaseOrderStatus,
+  applyAtomicPurchaseReceipt,
+  getPurchaseReceiptById,
+  type ReceiptLine,
+} from "../service/purchase-receipts.service";
+import {
+  prevalidatePurchaseReceiptFiscalState,
+  previewAtomicReceiptFiscalState,
 } from "../service/purchases.service";
-import type { LotInput, ReceivePurchaseActionInput } from "../types";
+import type { ReceivePurchaseActionInput } from "../types";
 
-type ProductInfo = {
-  unit_of_measure: string | null;
-  tracks_stock_units: boolean | null;
-  has_variants: boolean;
-} | null;
+type IncomingItem = ReceivePurchaseActionInput["receivedItems"][number];
 
-async function processLotEntry(
-  orgSlug: string,
-  productId: string,
-  lotEntry: LotInput,
-  product: ProductInfo
-) {
-  if (!lotEntry.lotNumber?.trim()) {
-    throw new Error(
-      `Un lote del producto ${productId} requiere un número de lote`
-    );
-  }
-  if (!lotEntry.expirationDate) {
-    throw new Error(
-      `Un lote del producto ${productId} requiere una fecha de vencimiento`
-    );
-  }
-  if (lotEntry.quantity <= 0 && lotEntry.unitQuantity <= 0) {
-    throw new Error(
-      `Un lote del producto ${productId} debe tener una cantidad mayor a 0`
-    );
-  }
-
-  const isWeightBased =
-    product?.unit_of_measure === "KG" ||
-    product?.unit_of_measure === "LT" ||
-    product?.unit_of_measure === "MT";
-  const movementQuantity = isWeightBased
-    ? lotEntry.unitQuantity
-    : lotEntry.quantity;
-  const movementUnitQuantity =
-    product?.tracks_stock_units && lotEntry.quantity > 0
-      ? lotEntry.quantity
-      : undefined;
-
-  const lot = await createProductLotForOrg({
-    orgSlug,
-    productId,
-    lotNumber: lotEntry.lotNumber,
-    expirationDate: lotEntry.expirationDate,
-    quantity: 0,
-  });
-
-  await createStockMovementForOrg({
-    orgSlug,
-    productId,
-    lotId: lot.id,
-    type: "INBOUND",
-    quantity: movementQuantity,
-    unitQuantity: movementUnitQuantity,
-    reason: `Recepción de compra - Lote: ${lotEntry.lotNumber}`,
-  });
-
-  return lot;
+function buildItemUpdates(items: IncomingItem[]) {
+  return items.map((item) => ({
+    itemId: item.itemId,
+    unitQuantity: item.variantStocks
+      ? 0
+      : item.lots.reduce((sum, lot) => sum + lot.unitQuantity, 0),
+    quantity: item.variantStocks
+      ? item.variantStocks.reduce((sum, variant) => sum + variant.quantity, 0)
+      : item.lots.reduce((sum, lot) => sum + lot.quantity, 0),
+    unitCost: item.unitCost,
+  }));
 }
 
+function buildReceiptLines(items: IncomingItem[]): ReceiptLine[] {
+  return items.map((item) => {
+    const update = buildItemUpdates([item])[0];
+    const variantStocks: Record<string, Record<string, number>> = {};
+    for (const variant of item.variantStocks ?? []) {
+      variantStocks[variant.color] ??= {};
+      variantStocks[variant.color][variant.talle] =
+        (variantStocks[variant.color][variant.talle] ?? 0) + variant.quantity;
+    }
+    return {
+      itemId: item.itemId,
+      productId: item.productId,
+      newItem: item.newItem,
+      quantity: update.quantity,
+      unitQuantity: update.unitQuantity,
+      unitCost: item.unitCost ?? 0,
+      variantStocks,
+      lots: item.lots,
+    };
+  });
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates received products, quantities, and variants before moving stock.
+async function validatePendingReceipt(params: {
+  orgSlug: string;
+  orgId: string;
+  purchaseOrderId: string;
+  items: IncomingItem[];
+}) {
+  const { orgSlug, orgId, purchaseOrderId, items } = params;
+  const supabase = await createClient();
+  const updates = buildItemUpdates(items);
+  const { data: ordered, error } = await supabase
+    .from("purchase_order_items")
+    .select(
+      "id, product_id, quantity, unit_quantity, variant_stocks, product:products(unit_of_measure)"
+    )
+    .eq("organization_id", orgId)
+    .eq("purchase_order_id", purchaseOrderId);
+  if (error) {
+    throw new Error(`No se pudo consultar el pendiente: ${error.message}`);
+  }
+  const byId = new Map((ordered ?? []).map((item) => [item.id, item]));
+  const newProductIds = items
+    .filter((item) => item.newItem)
+    .map((item) => item.productId);
+  const { data: newProducts, error: newProductsError } = newProductIds.length
+    ? await supabase
+        .from("products")
+        .select("id, has_variants, unit_of_measure")
+        .eq("organization_id", orgId)
+        .in("id", newProductIds)
+    : { data: [], error: null };
+  if (newProductsError) {
+    throw new Error(
+      `No se pudieron verificar los productos: ${newProductsError.message}`
+    );
+  }
+  const newProductById = new Map(
+    (newProducts ?? []).map((product) => [product.id, product])
+  );
+  if (new Set(items.map((item) => item.itemId)).size !== items.length) {
+    throw new Error("La recepción tiene ítems repetidos");
+  }
+  const variantIds = items.flatMap((item) =>
+    (item.variantStocks ?? []).map((variant) => variant.variantId)
+  );
+  const { data: variants, error: variantsError } = variantIds.length
+    ? await supabase
+        .from("product_variants")
+        .select("id, product_id, color, talle")
+        .eq("organization_id", orgId)
+        .in("id", variantIds)
+    : { data: [], error: null };
+  if (variantsError) {
+    throw new Error(
+      `No se pudieron validar las variantes: ${variantsError.message}`
+    );
+  }
+  const variantById = new Map(
+    (variants ?? []).map((variant) => [variant.id, variant])
+  );
+  for (const [index, update] of updates.entries()) {
+    const line = byId.get(update.itemId);
+    const source = items[index];
+    const newProduct = source?.newItem
+      ? newProductById.get(source.productId)
+      : null;
+    if (
+      !source ||
+      (source.newItem
+        ? !newProduct ||
+          line !== undefined ||
+          (ordered ?? []).some(
+            (existing) => existing.product_id === source.productId
+          ) ||
+          items.some(
+            (other, otherIndex) =>
+              otherIndex !== index &&
+              other.newItem &&
+              other.productId === source.productId
+          )
+        : !line || line.product_id !== source.productId) ||
+      (update.quantity <= 0 && update.unitQuantity <= 0) ||
+      !Number.isFinite(update.quantity) ||
+      !Number.isFinite(update.unitQuantity) ||
+      !Number.isFinite(update.unitCost ?? 0) ||
+      (update.unitCost ?? 0) < 0
+    ) {
+      throw new Error("La recepción contiene productos o cantidades inválidos");
+    }
+    const selectedVariants = source.variantStocks ?? [];
+    if (
+      selectedVariants.length > 0 &&
+      selectedVariants.reduce((sum, variant) => sum + variant.quantity, 0) !==
+        update.quantity
+    ) {
+      throw new Error("La suma de variantes no coincide con lo recibido");
+    }
+    if (selectedVariants.length) {
+      const selectedIds = new Set<string>();
+      for (const selected of selectedVariants) {
+        const variant = variantById.get(selected.variantId);
+        if (
+          !variant ||
+          selectedIds.has(selected.variantId) ||
+          variant.product_id !== source.productId ||
+          variant.color !== selected.color ||
+          variant.talle !== selected.talle ||
+          !Number.isSafeInteger(selected.quantity) ||
+          selected.quantity <= 0
+        ) {
+          throw new Error("La variante recibida no pertenece al producto");
+        }
+        selectedIds.add(selected.variantId);
+      }
+    }
+  }
+  const knownUpdates = updates.filter((_, index) => !items[index]?.newItem);
+  if (knownUpdates.length > 0) {
+    await prevalidatePurchaseReceiptFiscalState(
+      orgSlug,
+      purchaseOrderId,
+      knownUpdates.map((item) => item.itemId),
+      knownUpdates
+    );
+  }
+}
+
+function assertValidReceiptLots(items: IncomingItem[]) {
+  for (const item of items) {
+    if (
+      !item.variantStocks?.length &&
+      (item.lots.length === 0 ||
+        item.lots.some(
+          (lot) =>
+            !(lot.lotNumber?.trim() && lot.expirationDate) ||
+            (lot.quantity <= 0 && lot.unitQuantity <= 0)
+        ))
+    ) {
+      throw new Error(`Los lotes del producto ${item.productId} son inválidos`);
+    }
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates and routes new receipts and idempotent retries through the atomic RPC.
 export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
   await ensure("purchases.manage", input.orgSlug);
   try {
-    const { orgSlug, purchaseOrderId, receivedItems } = input;
+    const {
+      orgSlug,
+      purchaseOrderId,
+      receivedItems,
+      receiptId,
+      closePurchase,
+    } = input;
+    if (!receiptId || typeof closePurchase !== "boolean") {
+      throw new Error("Falta identificar la recepción");
+    }
 
     const itemsToProcess = receivedItems.filter((item) => item.received);
 
@@ -98,93 +226,52 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
         error: "Organización no encontrada",
       };
     }
-
     const supabase = await createClient();
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    if (authError || !auth.user) {
+      throw new Error("Usuario no autenticado");
+    }
 
-    // Fetch purchase order number for variant reason string
-    const { data: po } = await supabase
-      .from("purchase_orders")
-      .select("purchase_number")
-      .eq("id", purchaseOrderId)
-      .eq("organization_id", org.id)
-      .single();
-    const purchaseNumber = po?.purchase_number ?? "";
-
-    const processPromises = itemsToProcess.map(async (item) => {
-      // Get product info (has_variants, unit_of_measure, tracks_stock_units)
-      const { data: product } = await supabase
-        .from("products")
-        .select("unit_of_measure, tracks_stock_units, has_variants")
-        .eq("id", item.productId)
-        .eq("organization_id", org.id)
-        .single();
-
-      // Variant products: adjust stock per variant (no lot creation)
-      if (
-        product?.has_variants &&
-        item.variantStocks &&
-        item.variantStocks.length > 0
-      ) {
-        const variantPromises = item.variantStocks.map((vs) =>
-          adjustVariantStock({
-            orgSlug,
-            variantId: vs.variantId,
-            type: "INBOUND",
-            quantity: vs.quantity,
-            reason: `Recepción de compra - Orden N${purchaseNumber}`,
-          })
-        );
-        return Promise.all(variantPromises);
-      }
-
-      // Regular products: require at least one lot
-      if (item.lots.length === 0) {
-        throw new Error(
-          `El producto ${item.productId} debe tener al menos un lote definido`
-        );
-      }
-
-      // Create one lot + one stock movement per lot entry
-      const lotPromises = item.lots.map((lotEntry) =>
-        processLotEntry(orgSlug, item.productId, lotEntry, product)
-      );
-
-      return Promise.all(lotPromises);
-    });
-
-    await Promise.all(processPromises);
-
-    // Aggregate totals per item for purchase_order_items update
-    const receivedItemIds = itemsToProcess.map((item) => item.itemId);
-    const itemUpdates = itemsToProcess.map((item) => {
-      const totalUnitQuantity = item.variantStocks
-        ? 0 // variant products are always unit-based
-        : item.lots.reduce((sum, lot) => sum + lot.unitQuantity, 0);
-      const totalQuantity = item.variantStocks
-        ? item.variantStocks.reduce((sum, vs) => sum + vs.quantity, 0)
-        : item.lots.reduce((sum, lot) => sum + lot.quantity, 0);
-      return {
-        itemId: item.itemId,
-        unitQuantity: totalUnitQuantity,
-        quantity: totalQuantity,
-        unitCost: item.unitCost,
-      };
-    });
-
-    await processPurchaseReceipt(
+    const existingReceipt = await getPurchaseReceiptById(
       orgSlug,
       purchaseOrderId,
-      receivedItemIds,
-      itemUpdates
+      receiptId
     );
-
-    await updatePurchaseOrderStatus(orgSlug, purchaseOrderId, "RECEIVED");
-
-    await advanceLinkedChildOrderToGoodsReceived(
-      purchaseOrderId,
-      org.id,
-      orgSlug
-    );
+    if (existingReceipt && existingReceipt.close_purchase !== closePurchase) {
+      throw new Error("El cierre de esta recepción ya fue decidido");
+    }
+    if (existingReceipt) {
+      await applyAtomicPurchaseReceipt({
+        orgSlug,
+        purchaseOrderId,
+        receiptId,
+        lines: buildReceiptLines(itemsToProcess),
+        closePurchase,
+        actorId: auth.user.id,
+        fiscal: null,
+      });
+    } else {
+      await validatePendingReceipt({
+        orgSlug,
+        orgId: org.id,
+        purchaseOrderId,
+        items: itemsToProcess,
+      });
+      assertValidReceiptLots(itemsToProcess);
+      const lines = buildReceiptLines(itemsToProcess);
+      const fiscal = closePurchase
+        ? await previewAtomicReceiptFiscalState(orgSlug, purchaseOrderId, lines)
+        : null;
+      await applyAtomicPurchaseReceipt({
+        orgSlug,
+        purchaseOrderId,
+        receiptId,
+        lines,
+        closePurchase,
+        actorId: auth.user.id,
+        fiscal,
+      });
+    }
 
     revalidatePath(`/org/${orgSlug}/compras`);
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}`);
@@ -194,7 +281,9 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
 
     return {
       success: true,
-      message: "Pedido recibido exitosamente",
+      message: closePurchase
+        ? "Compra recibida exitosamente"
+        : "Entrega registrada; la compra sigue abierta",
       invalidatedQueryKeys: [
         ["purchases", orgSlug],
         ["purchase-order", orgSlug, purchaseOrderId],

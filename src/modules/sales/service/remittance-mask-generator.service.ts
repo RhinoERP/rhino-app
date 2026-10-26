@@ -69,11 +69,14 @@ function chunkItems<T>(items: T[]): T[][] {
 }
 
 function formatItemDescription(
-  item: Pick<RemittanceData["items"][number], "name" | "brand">
+  item: Pick<RemittanceData["items"][number], "name" | "brand">,
+  showProductBrand: boolean
 ): string {
   // The preprinted form only has room for the product identification line.
   // The variant (size/color) is rendered separately as a second line.
-  return [item.name, item.brand].filter(Boolean).join(" ");
+  return [item.name, showProductBrand ? item.brand : null]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**
@@ -102,7 +105,10 @@ export function buildRemittanceMaskData(
     carrierName: options?.carrierName,
     items: remittance.items.map((item) => ({
       quantity: item.quantity,
-      description: formatItemDescription(item),
+      description: formatItemDescription(
+        item,
+        remittance.showProductBrand === true
+      ),
       variantName: item.variantName ?? null,
     })),
     packageCount:

@@ -94,10 +94,14 @@ import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-in
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
+import { validateConfirmSaleStockAction } from "@/modules/sales/actions/validate-confirm-sale-stock.action";
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
-import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
+import {
+  downloadGeneratedPdf,
+  useRemittanceGenerator,
+} from "@/modules/sales/hooks/use-remittance-generator";
 import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
 import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
 import {
@@ -118,6 +122,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
+import { canCreatePreventaAdvance } from "@/modules/sales-advances/preventa-advance";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
@@ -234,8 +239,10 @@ type SaleDetailProps = {
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   salesAdvancesEnabled: boolean;
+  isFullAdvanceQuote?: boolean;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
+  isProductionEnabled: boolean;
 };
 
 type SellerOption = Pick<OrganizationMember, "user_id" | "user">;
@@ -682,6 +689,8 @@ function buildComparableTaxFingerprint(
 }
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
+  quoteItemId: item.quoteItemId,
+  extras: item.extras,
   type: item.type,
   productId: item.type === "product" ? item.productId : null,
   productVariantId:
@@ -762,7 +771,12 @@ function calculateItemTotals(item: ItemState) {
     ? (item.weightQuantity ?? 0)
     : item.quantity;
   const effectiveUnitPrice = usesWeight ? item.basePrice : item.unitPrice;
-  const gross = effectiveQuantity * effectiveUnitPrice;
+  const extrasPerUnit = (item.extras ?? []).reduce(
+    (sum, extra) => sum + extra.price,
+    0
+  );
+  const gross =
+    effectiveQuantity * effectiveUnitPrice + item.quantity * extrasPerUnit;
   const discount = Math.min(
     Math.max(0, (item.discountPercent / 100) * gross),
     Math.max(0, gross)
@@ -841,8 +855,10 @@ export function SaleDetail({
   relatedOrder,
   remittanceSettings,
   salesAdvancesEnabled,
+  isFullAdvanceQuote = false,
   saleReturns,
   creditNotes,
+  isProductionEnabled,
 }: SaleDetailProps) {
   const router = useRouter();
   const [accountingPayload, setAccountingPayload] =
@@ -875,6 +891,17 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const isIncompleteSale = sale.status === "INCOMPLETE";
+  const canShowAdvanceCard =
+    salesAdvancesEnabled &&
+    !isFullAdvanceQuote &&
+    sale.invoice_type !== "NOTA_DE_VENTA" &&
+    (isDraftSale ||
+      isConfirmedSale ||
+      isDispatchedSale ||
+      isDeliveredSale ||
+      (isIncompleteSale &&
+        sale.preventa_status &&
+        canCreatePreventaAdvance(sale.preventa_status)));
   const { data: dispatchProgress } = useSaleDispatchProgress(
     orgSlug,
     sale.id,
@@ -882,6 +909,7 @@ export function SaleDetail({
   );
   const hasOrderLevelRemitos = (dispatchProgress?.events.length ?? 0) > 0;
   const isOrderFlowWithRemitos = Boolean(relatedOrder) && hasOrderLevelRemitos;
+  const isProductionLocked = isProductionEnabled;
   const canEditSale =
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale);
@@ -894,12 +922,21 @@ export function SaleDetail({
       : persistedArcaStatus;
   const isArcaAuthorized = normalizedArcaStatus === "authorized";
   const isArcaPending = normalizedArcaStatus === "pending";
+  let commercialRateHint = "Requerido antes de emitir la factura ARCA.";
+  if (isArcaAuthorized) {
+    commercialRateHint =
+      "La cotización comercial queda fija tras la autorización ARCA.";
+  } else if (isArcaPending) {
+    commercialRateHint =
+      "Conciliá la emisión pendiente antes de cambiar la cotización.";
+  }
   const startsInReturnMode =
     canReturnProducts && initialMode === "return" && !isArcaAuthorized;
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
   const canEditInternalFields = isEditingDetails;
-  const canEditFiscalFields = isEditingDetails && !isArcaAuthorized;
+  const canEditFiscalFields =
+    isEditingDetails && !isArcaAuthorized && !isArcaPending;
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -938,6 +975,17 @@ export function SaleDetail({
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
+  const [saleAdvancePercentage, setSaleAdvancePercentage] = useState<
+    number | null
+  >(
+    typeof sale.advance_payment_percentage === "number" &&
+      sale.advance_payment_percentage > 0
+      ? sale.advance_payment_percentage
+      : null
+  );
+  const [commercialExchangeRate, setCommercialExchangeRate] = useState<
+    number | null
+  >(sale.commercial_exchange_rate ?? null);
   const [observations, setObservations] = useState<string>(
     sale.observations ?? ""
   );
@@ -1010,7 +1058,15 @@ export function SaleDetail({
   ]);
   const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
+  const [isCheckingConfirmStock, setIsCheckingConfirmStock] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [generatedRemittancePdf, setGeneratedRemittancePdf] = useState<{
+    filename: string;
+    pdfBase64: string;
+  } | null>(null);
+  const [remittanceStorageError, setRemittanceStorageError] = useState<
+    string | null
+  >(null);
 
   // Track the initial customerId so we only auto-fill when the user explicitly
   // changes the customer — not on mount or when orgSettings first loads, which
@@ -1492,20 +1548,6 @@ export function SaleDetail({
     totals.totalDiscountAmount,
   ]);
 
-  const getExtrasAmount = (item: ItemState): number => {
-    if (!item.extras || item.extras.length === 0) {
-      return 0;
-    }
-    const extrasTotal = truncateMoney(
-      item.extras.reduce((sum, extra) => sum + extra.price, 0)
-    );
-    return extrasTotal * item.quantity;
-  };
-
-  const itemsExtrasTotal = truncateMoney(
-    items.reduce((sum, item) => sum + getExtrasAmount(item), 0)
-  );
-
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
@@ -1765,10 +1807,11 @@ export function SaleDetail({
     canManageSale &&
     isDraftSale &&
     !relatedOrder &&
+    !sale.advance_pending &&
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
-  const isSaving = confirmSale.isPending;
+  const isSaving = confirmSale.isPending || isCheckingConfirmStock;
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
@@ -1788,6 +1831,9 @@ export function SaleDetail({
   }, [isSavingDraft]);
 
   const confirmButtonTitle = useMemo(() => {
+    if (isProductionLocked) {
+      return "El estado de la venta se actualiza automáticamente según el pedido.";
+    }
     if (relatedOrder) {
       return "Esta venta pertenece a un pedido. Continúa desde el flujo de pedidos.";
     }
@@ -1796,7 +1842,7 @@ export function SaleDetail({
     }
     // biome-ignore lint/nursery/noUselessUndefined: undefined omits the title attribute intentionally
     return undefined;
-  }, [relatedOrder, isDraftSale]);
+  }, [isProductionLocked, relatedOrder, isDraftSale]);
 
   const toggleEditingDetails = async () => {
     if (!canManageSale) {
@@ -1840,6 +1886,7 @@ export function SaleDetail({
       sale.credit_days ?? null
     ),
     invoiceType,
+    commercialExchangeRate,
     invoiceNumber: invoiceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
@@ -1856,13 +1903,15 @@ export function SaleDetail({
       observations: observations || null,
     };
 
-    if (isArcaAuthorized) {
+    if (isArcaAuthorized || isArcaPending) {
       return internalPayload;
     }
 
     return {
       ...buildFiscalSaleMutationPayload(),
       remittanceNumber: remittanceNumber || null,
+      advancePaymentPercentage:
+        invoiceType === "NOTA_DE_VENTA" ? saleAdvancePercentage : null,
     };
   };
 
@@ -1891,6 +1940,13 @@ export function SaleDetail({
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates permissions, accounting preview/auto-confirm, and sale confirmation in a single handler
   const handleConfirm = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -1920,6 +1976,26 @@ export function SaleDetail({
       return;
     }
 
+    setIsCheckingConfirmStock(true);
+    try {
+      const stockCheck = await validateConfirmSaleStockAction(
+        buildFiscalSaleMutationPayload()
+      );
+      if (!stockCheck.success) {
+        setError(stockCheck.error);
+        return;
+      }
+    } catch (stockError) {
+      setError(
+        stockError instanceof Error
+          ? stockError.message
+          : "No se pudo validar el stock de la venta."
+      );
+      return;
+    } finally {
+      setIsCheckingConfirmStock(false);
+    }
+
     const payload = buildFacturaVentaManual(
       {
         id: sale.id,
@@ -1930,7 +2006,12 @@ export function SaleDetail({
         invoice_number: invoiceNumber || null,
       },
       { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
-      { items: buildSaleAccountingItems(items, totals.taxPlan) }
+      {
+        items: buildSaleAccountingItems(items, totals.taxPlan),
+        moneda: sale.currency === "USD" ? "USD" : "ARS",
+        tipoCambio: commercialExchangeRate,
+        montoUSD: sale.currency === "USD" ? totals.total : undefined,
+      }
     );
 
     if (automaticAccountingEnabled) {
@@ -1988,6 +2069,13 @@ export function SaleDetail({
   };
 
   const handleDispatch = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -2026,6 +2114,13 @@ export function SaleDetail({
   };
 
   const handleDeliver = async () => {
+    if (isProductionLocked) {
+      setError(
+        "El estado de la venta se actualiza automáticamente según el pedido."
+      );
+      return;
+    }
+
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -2183,13 +2278,20 @@ export function SaleDetail({
   const handleConfirmGenerateRemittance = async () => {
     try {
       const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
-      await generateRemittance(type);
+      const result = await generateRemittance(type);
+      setGeneratedRemittancePdf(result.fallbackPdf ?? null);
+      setRemittanceStorageError(result.storageError ?? null);
+      if (result.storageError) {
+        return false;
+      }
       setPreviewHtml(null);
       router.refresh();
+      return true;
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Error al generar el remito"
       );
+      return false;
     }
   };
 
@@ -2255,7 +2357,13 @@ export function SaleDetail({
               isPreviewing={isPreviewingRemittance}
               loadPreview={handlePreviewRemittance}
               onConfirm={handleConfirmGenerateRemittance}
+              onDownloadFallback={
+                generatedRemittancePdf
+                  ? () => downloadGeneratedPdf(generatedRemittancePdf)
+                  : undefined
+              }
               previewHtml={previewHtml}
+              storageError={remittanceStorageError}
               title="Vista previa del presupuesto"
             />
           ) : null}
@@ -2266,9 +2374,26 @@ export function SaleDetail({
               isPreviewing={isPreviewingRemittance}
               loadPreview={handlePreviewRemittance}
               onConfirm={handleConfirmGenerateRemittance}
+              onDownloadFallback={
+                generatedRemittancePdf
+                  ? () => downloadGeneratedPdf(generatedRemittancePdf)
+                  : undefined
+              }
               previewHtml={previewHtml}
+              storageError={remittanceStorageError}
               title="Vista previa del remito"
             />
+          ) : null}
+          {generatedRemittancePdf && !sale.remittance_pdf_url ? (
+            <Button
+              onClick={() => downloadGeneratedPdf(generatedRemittancePdf)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Descargar {isDraftSale ? "Presupuesto" : "Remito"}
+            </Button>
           ) : null}
           {!isOrderFlowWithRemitos &&
           (isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
@@ -2306,9 +2431,14 @@ export function SaleDetail({
           ) : null}
           {canManageSale && isDispatchedSale && !relatedOrder ? (
             <Button
-              disabled={isDeliverMutationPending}
+              disabled={isDeliverMutationPending || isProductionLocked}
               onClick={handleDeliver}
               size="sm"
+              title={
+                isProductionLocked
+                  ? "El estado de la venta se actualiza automáticamente según el pedido."
+                  : undefined
+              }
               type="button"
               variant="outline"
             >
@@ -2319,9 +2449,14 @@ export function SaleDetail({
           ) : null}
           {canManageSale && isConfirmedSale && !relatedOrder ? (
             <Button
-              disabled={isDispatching}
+              disabled={isDispatching || isProductionLocked}
               onClick={() => setIsDispatchDialogOpen(true)}
               size="sm"
+              title={
+                isProductionLocked
+                  ? "El estado de la venta se actualiza automáticamente según el pedido."
+                  : undefined
+              }
               type="button"
             >
               <Truck className="mr-2 h-4 w-4" />
@@ -2396,6 +2531,17 @@ export function SaleDetail({
               Ver pedido {relatedOrder.order_number}
             </Link>
           ) : null}
+        </div>
+      ) : null}
+
+      {sale.advance_payment_percentage &&
+      sale.advance_payment_percentage > 0 ? (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3">
+          <p className="font-medium text-indigo-800 text-sm">
+            Venta con anticipo del {sale.advance_payment_percentage}% — el
+            anticipo se registró como cuenta por cobrar al crear la preventa; el
+            saldo se genera al despachar.
+          </p>
         </div>
       ) : null}
 
@@ -2613,11 +2759,7 @@ export function SaleDetail({
         </Card>
       ) : null}
 
-      {salesAdvancesEnabled &&
-      (sale.status === "DRAFT" ||
-        isConfirmedSale ||
-        isDispatchedSale ||
-        isDeliveredSale) ? (
+      {canShowAdvanceCard ? (
         <SalesAdvanceCard
           canIssueBalance={isConfirmedSale}
           canManage={canManageSale}
@@ -2881,6 +3023,63 @@ export function SaleDetail({
                   </Select>
                 </div>
 
+                {invoiceType === "NOTA_DE_VENTA" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="saleAdvancePercentage">
+                      Anticipo (% del total)
+                    </Label>
+                    <Input
+                      disabled={!canEditFiscalFields}
+                      id="saleAdvancePercentage"
+                      inputMode="numeric"
+                      max={100}
+                      min={0}
+                      onChange={(event) => {
+                        const parsed = Number.parseInt(event.target.value, 10);
+                        setSaleAdvancePercentage(
+                          Number.isNaN(parsed)
+                            ? null
+                            : Math.min(Math.max(parsed, 0), 100)
+                        );
+                      }}
+                      placeholder="Sin anticipo"
+                      step="1"
+                      type="number"
+                      value={saleAdvancePercentage ?? ""}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Si la preventa tiene anticipo, se registra una cuenta por
+                      cobrar por ese porcentaje al guardar.
+                    </p>
+                  </div>
+                ) : null}
+                {sale.currency === "USD" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="commercialExchangeRate">
+                      Tipo de cambio comercial USD → ARS
+                    </Label>
+                    <Input
+                      disabled={!canEditFiscalFields}
+                      id="commercialExchangeRate"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setCommercialExchangeRate(
+                          value === "" ? null : Number(value)
+                        );
+                      }}
+                      placeholder="Cotización comercial"
+                      step="any"
+                      type="number"
+                      value={commercialExchangeRate ?? ""}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      {commercialRateHint}
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label htmlFor="taxes">Impuestos</Label>
                   <Popover
@@ -2979,6 +3178,19 @@ export function SaleDetail({
                       }
                       value={remittanceNumber}
                     />
+                  </div>
+                ) : null}
+                {sale.route_sheet ? (
+                  <div className="space-x-2">
+                    <Label>Hoja de ruta</Label>
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-md border px-3 py-2 font-medium text-sm hover:bg-accent hover:text-accent-foreground"
+                      href={`/org/${orgSlug}/hoja-de-ruta`}
+                    >
+                      <Truck className="h-4 w-4" />
+                      {sale.route_sheet.carrier?.name ?? "Sin transportista"} —{" "}
+                      {sale.route_sheet.scheduled_date}
+                    </Link>
                   </div>
                 ) : null}
                 <div className="space-y-2">
@@ -3455,8 +3667,7 @@ export function SaleDetail({
 
                       if (isAdjustment) {
                         const subtotal = truncateMoney(
-                          calculateItemTotals(item).subtotal +
-                            getExtrasAmount(item)
+                          calculateItemTotals(item).subtotal
                         );
                         return (
                           <div
@@ -3677,8 +3888,7 @@ export function SaleDetail({
                                 <p className="whitespace-nowrap text-right font-medium tabular-nums">
                                   {formatCurrency(
                                     truncateMoney(
-                                      calculateItemTotals(item).subtotal +
-                                        getExtrasAmount(item)
+                                      calculateItemTotals(item).subtotal
                                     )
                                   )}
                                 </p>
@@ -3839,14 +4049,7 @@ export function SaleDetail({
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>
-                      {formatCurrency(
-                        isEditingDetails
-                          ? truncateMoney(
-                              summaryTotals.subtotal + itemsExtrasTotal
-                            )
-                          : summaryTotals.subtotal,
-                        sale.currency
-                      )}
+                      {formatCurrency(summaryTotals.subtotal, sale.currency)}
                     </span>
                   </div>
                   {totals.adjustmentsTotal !== 0 ? (
@@ -3960,7 +4163,7 @@ export function SaleDetail({
                 {canManageSale ? (
                   <Button
                     className="w-full justify-between"
-                    disabled={!canConfirm || isSaving}
+                    disabled={!canConfirm || isSaving || isProductionLocked}
                     onClick={handleConfirm}
                     title={confirmButtonTitle}
                     type="button"
@@ -3977,6 +4180,12 @@ export function SaleDetail({
                       </div>
                     )}
                   </Button>
+                ) : null}
+                {sale.advance_pending ? (
+                  <p className="text-muted-foreground text-xs">
+                    No se puede confirmar la venta: hay un anticipo pendiente de
+                    cobro.
+                  </p>
                 ) : null}
                 <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
                   <span>Descuento %</span>

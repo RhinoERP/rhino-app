@@ -45,6 +45,7 @@ type TabValue =
   | "DRAFT"
   | "ORDERED"
   | "IN_TRANSIT"
+  | "PARTIALLY_RECEIVED"
   | "RECEIVED"
   | "CANCELLED";
 
@@ -77,6 +78,12 @@ const tabs: {
     label: "En tránsito",
     icon: TruckIcon,
     value: "IN_TRANSIT",
+  },
+  {
+    color: "text-amber-600",
+    label: "Parcialmente recibidas",
+    icon: TruckIcon,
+    value: "PARTIALLY_RECEIVED",
   },
   {
     color: "text-green-500",

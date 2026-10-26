@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { downloadStoredDocument } from "@/modules/documents/server/documents-storage.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadSalesDocument } from "../server/documents-storage.service";
 import { generateRemittancePdfDocument } from "../server/remittance-pdf-document.service";
@@ -44,12 +45,10 @@ export async function downloadRemittanceAction(
     } | null;
 
     if (saleData?.remittance_pdf_url && type === "PRESUPUESTO") {
-      // Download from storage
-      const response = await fetch(saleData.remittance_pdf_url);
-      if (!response.ok) {
-        throw new Error("No se pudo descargar el PDF desde el almacenamiento");
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await downloadStoredDocument(
+        saleData.remittance_pdf_url,
+        supabase
+      );
       const saleNumber = saleData.sale_number ?? "sin-numero";
       const filename =
         type === "PRESUPUESTO"

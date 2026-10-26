@@ -89,6 +89,7 @@ export type VariantStockInput = {
 export type ReceivedItemWithLotsInput = {
   itemId: string;
   productId: string;
+  newItem?: boolean;
   received: boolean;
   unitCost?: number;
   lots: LotInput[];
@@ -101,6 +102,8 @@ export type ReceivedItemWithLotsInput = {
 export type ReceivePurchaseActionInput = {
   orgSlug: string;
   purchaseOrderId: string;
+  receiptId: string;
+  closePurchase: boolean;
   receivedItems: ReceivedItemWithLotsInput[];
 };
 

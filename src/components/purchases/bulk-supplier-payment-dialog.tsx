@@ -54,11 +54,14 @@ type BulkSupplierPaymentDistribution = {
   appliedAmount: number;
   newBalance: number;
   newStatus: "PENDING" | "PARTIAL" | "PAID";
+  exchangeRate: number | null;
 };
 
 const formSchema = z.object({
   supplierId: z.string().min(1, "Selecciona un proveedor"),
   totalAmount: z.number().positive("El monto debe ser mayor a cero"),
+  currency: z.enum(["ARS", "USD"]),
+  exchangeRate: z.string().optional(),
   paymentMethod: z.enum([
     "efectivo",
     "transferencia",
@@ -88,6 +91,7 @@ type BulkSupplierPaymentDialogProps = {
   preselectedSupplierId?: string;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this dialog coordinates a multi-step bulk payment flow with rate validation.
 export function BulkSupplierPaymentDialog({
   open,
   onOpenChange,
@@ -111,6 +115,8 @@ export function BulkSupplierPaymentDialog({
     defaultValues: {
       supplierId: preselectedSupplierId ?? "",
       totalAmount: 0,
+      currency: "ARS",
+      exchangeRate: "",
       paymentMethod: "efectivo",
       paymentDate: new Date(),
       referenceNumber: "",
@@ -126,6 +132,7 @@ export function BulkSupplierPaymentDialog({
   const supplierId = form.watch("supplierId");
   const totalAmount = form.watch("totalAmount");
   const paymentMethod = form.watch("paymentMethod");
+  const currency = form.watch("currency");
   const showChequeFields =
     paymentMethod === "cheque" || paymentMethod === "e-cheq";
 
@@ -170,6 +177,7 @@ export function BulkSupplierPaymentDialog({
       orgSlug,
       supplierId,
       totalAmount,
+      currency,
     ],
     queryFn: async () => {
       if (!supplierId || totalAmount <= 0) {
@@ -177,7 +185,7 @@ export function BulkSupplierPaymentDialog({
       }
 
       const response = await fetch(
-        `/api/purchases/bulk-payment-preview?orgSlug=${orgSlug}&supplierId=${supplierId}&totalAmount=${totalAmount}`
+        `/api/purchases/bulk-payment-preview?orgSlug=${orgSlug}&supplierId=${supplierId}&totalAmount=${totalAmount}&currency=${currency}`
       );
 
       if (!response.ok) {
@@ -189,12 +197,48 @@ export function BulkSupplierPaymentDialog({
     enabled: Boolean(supplierId && totalAmount > 0),
   });
 
+  const usdPreviewRates =
+    currency === "USD" && preview
+      ? preview.map((item) => item.exchangeRate)
+      : [];
+  const missingInvoiceRate = usdPreviewRates.some((rate) => rate == null);
+  const ratesDiffer = new Set(usdPreviewRates).size > 1;
+  const bulkRateBlocked =
+    currency === "USD" && (missingInvoiceRate || ratesDiffer);
+  const uniformRate =
+    currency === "USD" && !bulkRateBlocked && usdPreviewRates.length > 0
+      ? (usdPreviewRates[0] ?? null)
+      : null;
+
+  useEffect(() => {
+    if (currency === "USD" && uniformRate != null) {
+      form.setValue("exchangeRate", String(uniformRate));
+    }
+  }, [currency, uniformRate, form]);
+
+  let rateDescription: string;
+  let rateDescriptionWarning = false;
+  if (missingInvoiceRate) {
+    rateDescription =
+      "Hay deudas sin factura de compra registrada con cotización. Registrá la factura antes de pagar o pagá por factura.";
+    rateDescriptionWarning = true;
+  } else if (ratesDiffer) {
+    rateDescription =
+      "Las facturas tienen cotizaciones distintas. Pagá por factura.";
+    rateDescriptionWarning = true;
+  } else {
+    rateDescription = "Cotización fijada por las facturas de compra.";
+  }
+
   const mutation = useMutation({
     mutationFn: async (values: FormValues) => {
       const input = {
         orgSlug,
         supplierId: values.supplierId,
         totalAmount: values.totalAmount,
+        currency: values.currency,
+        exchangeRate:
+          values.currency === "USD" ? Number(values.exchangeRate) : null,
         paymentMethod: values.paymentMethod,
         paymentDate: format(values.paymentDate, "yyyy-MM-dd"),
         referenceNumber: values.referenceNumber,
@@ -371,6 +415,66 @@ export function BulkSupplierPaymentDialog({
                       </p>
                     </div>
                   )}
+
+                <FormField
+                  control={form.control}
+                  name="currency"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Moneda</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="ARS">Pesos (ARS)</SelectItem>
+                          <SelectItem value="USD">Dólares (USD)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        El lote se aplica solo a deudas de esta moneda.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {currency === "USD" && (
+                  <FormField
+                    control={form.control}
+                    name="exchangeRate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tipo de cambio (USD→ARS)</FormLabel>
+                        <FormControl>
+                          <Input
+                            className="bg-muted"
+                            placeholder="Se carga desde las facturas"
+                            readOnly
+                            step="any"
+                            type="number"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription
+                          className={
+                            rateDescriptionWarning
+                              ? "text-amber-600"
+                              : undefined
+                          }
+                        >
+                          {rateDescription}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 <FormField
                   control={form.control}
@@ -639,7 +743,8 @@ export function BulkSupplierPaymentDialog({
               <Button
                 disabled={
                   mutation.isPending ||
-                  (showPreview && (!preview || preview.length === 0))
+                  (showPreview && (!preview || preview.length === 0)) ||
+                  (showPreview && bulkRateBlocked)
                 }
                 type="submit"
               >

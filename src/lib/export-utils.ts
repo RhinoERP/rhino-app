@@ -85,6 +85,7 @@ export const exportStatusLabels = {
   // Purchase statuses
   ORDERED: "Ordenada",
   IN_TRANSIT: "En tránsito",
+  PARTIALLY_RECEIVED: "Parcialmente recibida",
   RECEIVED: "Recibida",
 
   // Payment statuses

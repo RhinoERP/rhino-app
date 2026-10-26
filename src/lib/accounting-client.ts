@@ -8,6 +8,7 @@ import type {
   EventoNcVenta,
   EventoNdVenta,
   EventoOrdenPago,
+  EventoVentaPos,
   InformalEntry,
   InformalEntryFormalizationStatus,
   InformalEntrySourceType,
@@ -743,7 +744,7 @@ export function buildFacturaCompra(
   },
   options: {
     items?: LineaDesglosadaInput[];
-  } = {},
+  } & CurrencyFields = {},
   overrides: {
     referenciaTabla?: "purchase_orders" | "supplier_invoices";
     idempotencyKey?: string;
@@ -775,6 +776,7 @@ export function buildFacturaCompra(
       proveedorId: purchaseOrder.supplier_id,
       facturaNumero,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }
@@ -876,6 +878,62 @@ export function buildCobro(
   };
 }
 
+// ------------------------------------------------------------
+// buildVentaPos
+// Evento único de una venta directa POS. clienteId siempre debe venir
+// resuelto (cliente real o "consumidor final" configurado por org) antes
+// de llamar a estos builders — no se resuelve acá.
+// ------------------------------------------------------------
+export function buildVentaPos(
+  posSale: {
+    id: string;
+    organization_id: string;
+    sale_date: string;
+    receipt_number?: string | null;
+  },
+  totals: { total: number; totalTaxAmount: number },
+  clienteId: string,
+  options: {
+    items?: LineaDesglosadaInput[];
+    metodoPago?: "EFECTIVO" | "TRANSFERENCIA" | "CHEQUE" | "E-CHEQ";
+    bancoAccountCode?: string | null;
+  } & CurrencyFields = {}
+): EventoVentaPos {
+  const montoNeto = totals.total - totals.totalTaxAmount;
+  const comprobanteNumero =
+    posSale.receipt_number?.trim() || `POS-${posSale.id.slice(0, 8)}`;
+  const lineasDesglosadas = options.items?.length
+    ? buildLineasDesglosadas(options.items)
+    : [
+        {
+          accountCode: null,
+          montoNeto: toAccountingStr(montoNeto),
+          montoImpuestos: toAccountingStr(totals.totalTaxAmount),
+        },
+      ];
+
+  return {
+    tipoEvento: "VENTA_POS",
+    orgId: posSale.organization_id,
+    referenciaId: posSale.id,
+    referenciaTabla: "pos_sales",
+    fecha: posSale.sale_date,
+    descripcion: `Venta directa POS ${comprobanteNumero}`,
+    idempotencyKey: `VENTA_POS_${posSale.id}`,
+    datos: {
+      totalVenta: toAccountingStr(totals.total),
+      montoNeto: toAccountingStr(montoNeto),
+      montoImpuestos: toAccountingStr(totals.totalTaxAmount),
+      metodoPago: options.metodoPago,
+      bancoAccountCode: options.bancoAccountCode ?? undefined,
+      clienteId,
+      comprobanteNumero,
+      lineasDesglosadas,
+      ...buildCurrencyDatos(options),
+    },
+  };
+}
+
 export function buildOrdenPago(
   payment: {
     id: string;
@@ -932,7 +990,7 @@ export function buildFacturaVentaManual(
   options: {
     items?: LineaDesglosadaInput[];
     tipoFactura?: "MANUAL" | "REMITO" | "ANTICIPO";
-  } = {}
+  } & CurrencyFields = {}
 ): EventoFacturaVenta {
   const montoNeto = totals.total - totals.totalTaxAmount;
   const facturaNumero = sale.invoice_number ?? `VTA-${sale.id.slice(0, 8)}`;
@@ -963,6 +1021,7 @@ export function buildFacturaVentaManual(
       clienteId: sale.customer_id,
       facturaNumero,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }
@@ -986,7 +1045,7 @@ export function buildNcVenta(
   options: {
     items?: LineaDesglosadaInput[];
     totalTaxAmount?: number;
-  } = {}
+  } & CurrencyFields = {}
 ): EventoNcVenta {
   const total = creditNote.amount;
   const saleTotal = linkedSale?.total_amount ?? 0;
@@ -1023,28 +1082,32 @@ export function buildNcVenta(
       clienteId: creditNote.customer_id,
       ventaId: creditNote.sales_order_id ?? undefined,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }
 
-export function buildNdVenta(debitNote: {
-  id: string;
-  organizationId: string;
-  customerId: string;
-  salesOrderId: string;
-  debitNoteNumber: string;
-  issueDate: string;
-  amount: number;
-  items: Array<{
-    netAmount: number;
-    taxAmount: number;
-    taxes: Array<{
-      name: string;
+export function buildNdVenta(
+  debitNote: {
+    id: string;
+    organizationId: string;
+    customerId: string;
+    salesOrderId: string;
+    debitNoteNumber: string;
+    issueDate: string;
+    amount: number;
+    items: Array<{
+      netAmount: number;
       taxAmount: number;
-      taxCodeSnapshot?: string | null;
+      taxes: Array<{
+        name: string;
+        taxAmount: number;
+        taxCodeSnapshot?: string | null;
+      }>;
     }>;
-  }>;
-}): EventoNdVenta {
+  },
+  options: CurrencyFields = {}
+): EventoNdVenta {
   const lineasDesglosadas = buildLineasDesglosadas(
     debitNote.items.map((item) => ({
       accountCode: null,
@@ -1084,6 +1147,7 @@ export function buildNdVenta(debitNote: {
       clienteId: debitNote.customerId,
       ventaId: debitNote.salesOrderId,
       lineasDesglosadas,
+      ...buildCurrencyDatos(options),
     },
   };
 }

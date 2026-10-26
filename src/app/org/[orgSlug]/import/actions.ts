@@ -4,9 +4,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { normalizeData, parseExcelFile } from "@/lib/excel-parser";
 import { createClient } from "@/lib/supabase/server";
-import { createProductForOrg } from "@/modules/inventory/service/inventory.service";
+import {
+  createProductForOrg,
+  createStockMovementForOrg,
+} from "@/modules/inventory/service/inventory.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createHistoricalCredits } from "@/modules/sales/service/historical-credit.service";
 import { createHistoricalDebts } from "@/modules/sales/service/historical-debt.service";
 import type { Database } from "@/types/supabase";
@@ -544,6 +548,8 @@ type ProcessStockRowOptions = {
   orgId: string;
   suppliers: Supplier[] | null;
   supabase: Awaited<ReturnType<typeof createClient>>;
+  orgSlug: string;
+  createdBy: string;
 };
 
 const parseNumberValue = (value: unknown): number | null => {
@@ -776,6 +782,7 @@ function normalizeExpirationDate(value: unknown): string {
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: import upsert keeps stock and its audit movement in one flow
 async function upsertProductLot(options: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgId: string;
@@ -786,6 +793,8 @@ async function upsertProductLot(options: {
   tracksUnits: boolean;
   unitQuantity: number | null;
   unitQuantityValue: number | null;
+  orgSlug: string;
+  createdBy: string;
 }): Promise<{ imported: boolean }> {
   const {
     supabase,
@@ -797,10 +806,13 @@ async function upsertProductLot(options: {
     tracksUnits,
     unitQuantity,
     unitQuantityValue,
+    orgSlug,
+    createdBy,
   } = options;
   const { data: existingLots, error: existingLotsError } = await supabase
     .from("product_lots")
-    .select("id, unit_quantity_available")
+    .select("id, quantity_available, unit_quantity_available")
+    .eq("organization_id", orgId)
     .eq("product_id", productId)
     .eq("lot_number", lotNumber);
 
@@ -816,17 +828,23 @@ async function upsertProductLot(options: {
       tracksUnits && unitQuantityValue == null
         ? (existingLot.unit_quantity_available ?? 0)
         : unitQuantity;
-    const { error: updateError } = await supabase
-      .from("product_lots")
-      .update({
-        quantity_available: quantity,
-        unit_quantity_available: tracksUnits ? resolvedUnitQuantity : null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", existingLot.id);
+    const quantityDelta = quantity - (existingLot.quantity_available ?? 0);
+    const unitQuantityDelta = tracksUnits
+      ? (resolvedUnitQuantity ?? 0) - (existingLot.unit_quantity_available ?? 0)
+      : null;
 
-    if (updateError) {
-      throw new Error(`No se pudo actualizar el lote: ${updateError.message}`);
+    if (quantityDelta !== 0 || (unitQuantityDelta ?? 0) !== 0) {
+      await createStockMovementForOrg({
+        orgSlug,
+        productId,
+        lotId: existingLot.id,
+        type: "ADJUSTMENT",
+        quantity: quantityDelta,
+        unitQuantity: unitQuantityDelta,
+        reason: "Importación de stock",
+        createdBy,
+        source: "IMPORT",
+      });
     }
 
     return { imported: false };
@@ -837,20 +855,41 @@ async function upsertProductLot(options: {
       organization_id: orgId,
       product_id: productId,
       lot_number: lotNumber,
-      quantity_available: quantity,
+      quantity_available: 0,
       expiration_date: expirationDate,
     };
 
   if (tracksUnits) {
-    insertPayload.unit_quantity_available = unitQuantity ?? 0;
+    insertPayload.unit_quantity_available = 0;
   }
 
-  const { error: insertError } = await supabase
+  const { data: insertedLot, error: insertError } = await supabase
     .from("product_lots")
-    .insert(insertPayload);
+    .insert(insertPayload)
+    .select("id")
+    .single();
 
   if (insertError) {
     throw new Error(`No se pudo crear el lote: ${insertError.message}`);
+  }
+
+  if (quantity > 0 || (unitQuantity ?? 0) > 0) {
+    try {
+      await createStockMovementForOrg({
+        orgSlug,
+        productId,
+        lotId: insertedLot.id,
+        type: quantity > 0 ? "INBOUND" : "ADJUSTMENT",
+        quantity,
+        unitQuantity: tracksUnits ? unitQuantity : undefined,
+        reason: "Importación de stock",
+        createdBy,
+        source: "IMPORT",
+      });
+    } catch (error) {
+      await supabase.from("product_lots").delete().eq("id", insertedLot.id);
+      throw error;
+    }
   }
 
   return { imported: true };
@@ -859,7 +898,8 @@ async function upsertProductLot(options: {
 async function processStockRow(
   options: ProcessStockRowOptions
 ): Promise<{ success: boolean; imported: boolean; error?: string }> {
-  const { row, index, orgId, suppliers, supabase } = options;
+  const { row, index, orgId, suppliers, supabase, orgSlug, createdBy } =
+    options;
   const requiredError = getStockRowRequiredError(row, index);
   if (requiredError) {
     return { success: false, imported: false, error: requiredError };
@@ -918,6 +958,8 @@ async function processStockRow(
     tracksUnits: quantityDetails.tracksUnits,
     unitQuantity: quantityDetails.unitQuantity,
     unitQuantityValue: quantityDetails.unitQuantityValue,
+    orgSlug,
+    createdBy,
   });
 
   return { success: true, imported: upsertResult.imported };
@@ -932,6 +974,7 @@ export async function importStock(
   orgSlug: string
 ): Promise<ImportResult> {
   try {
+    await ensure("inventory.manage", orgSlug);
     const file = formData.get("file") as File;
     if (!file) {
       return { success: false, message: "No se recibió archivo" };
@@ -949,6 +992,10 @@ export async function importStock(
     }
 
     const supabase = await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      return { success: false, message: "Usuario no autenticado" };
+    }
     const { data: suppliers } = await supabase
       .from("suppliers")
       .select("id, name")
@@ -967,6 +1014,8 @@ export async function importStock(
           orgId: org.id,
           suppliers,
           supabase,
+          orgSlug,
+          createdBy: authData.user.id,
         });
 
         if (!result.success) {

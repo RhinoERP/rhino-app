@@ -1,6 +1,7 @@
 import { remittanceIssuerConfig } from "@/config/remittance";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import { formatAmountInWords } from "@/lib/number-to-words";
 import type { SalesOrderDetail } from "./sales.service";
 
@@ -70,6 +71,7 @@ export type RemittanceData = {
   total: number;
   observations?: string | null;
   singlePageDuplicate?: boolean;
+  showProductBrand?: boolean;
   finalRemittanceVisibility?: RemittanceFinalVisibility;
 };
 
@@ -151,7 +153,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       ${isFinalRemittance ? "" : `<td class="c-center">${displayValue(item.unitOfMeasure)}</td>`}
       ${showWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       ${showSku ? `<td class="c-sku">${displayValue(item.sku)}</td>` : ""}
-      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice, displayCurrency)}/u</div>`).join("") : ""}</td>
+      <td>${displayValue(item.name)}${item.variantName ? ` <span class="variant">${displayValue(item.variantName)}</span>` : ""}${data.showProductBrand && item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice, displayCurrency)}/u</div>`).join("") : ""}</td>
       ${showUnitPrice ? `<td class="c-right">${formatCurrency(item.unitPrice, displayCurrency)}</td>` : ""}
       ${showDiscount ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
       ${showLineTotal ? `<td class="c-right c-bold">${formatCurrency(item.subtotal, displayCurrency)}</td>` : ""}
@@ -493,6 +495,7 @@ export function buildRemittanceFromSale(
     cuit?: string | null;
     logoUrl?: string | null;
     singlePageDuplicate?: boolean;
+    showProductBrand?: boolean;
     finalRemittanceVisibility?: RemittanceFinalVisibility;
   }
 ): RemittanceData {
@@ -508,9 +511,20 @@ export function buildRemittanceFromSale(
       description: extra.description,
       unitPrice: truncateMoney(extra.price),
     }));
-    const extrasTotal = truncateMoney(
-      extras.reduce((sum, extra) => sum + extra.unitPrice, 0)
+
+    // El subtotal persistido en sales_order_items es la fuente de verdad:
+    // ya contempla la venta por peso (unit_quantity × precio por kg) o por
+    // unidad (quantity × precio unitario), con su descuento de línea aplicado.
+    // Fallback solo para datos legacy sin subtotal válido.
+    const fallbackSubtotal = computeLineGross(
+      item.unitPrice,
+      item.quantity,
+      item.extras ?? undefined
     );
+    const lineSubtotal =
+      Number.isFinite(item.subtotal) && item.subtotal > 0
+        ? item.subtotal
+        : fallbackSubtotal;
 
     return {
       sku: item.sku,
@@ -525,9 +539,7 @@ export function buildRemittanceFromSale(
           ? undefined
           : (item.weightQuantity ?? undefined),
       unitPrice: item.unitPrice,
-      subtotal: truncateMoney(
-        (item.subtotal ?? 0) + extrasTotal * item.quantity
-      ),
+      subtotal: truncateMoney(lineSubtotal),
       discountPercentage:
         item.type === "adjustment"
           ? undefined
@@ -590,6 +602,7 @@ export function buildRemittanceFromSale(
     total,
     observations: sale.observations ?? undefined,
     singlePageDuplicate: issuer?.singlePageDuplicate ?? false,
+    showProductBrand: issuer?.showProductBrand ?? false,
     finalRemittanceVisibility: issuer?.finalRemittanceVisibility,
   };
 }

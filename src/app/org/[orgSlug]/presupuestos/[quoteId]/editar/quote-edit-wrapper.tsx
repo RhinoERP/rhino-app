@@ -19,7 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import type { Customer } from "@/modules/customers/types";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
 import {
   getQuoteVersionsAction,
@@ -66,14 +68,15 @@ type ProductEntry = {
   productName: string;
   sku?: string;
   brand?: string;
+  productCurrency: string;
   unitPrice: number;
   variants: Array<{
     talle: string;
     color: string;
     quantity: number;
     productVariantId?: string;
+    extras: Array<{ description: string; price: number }>;
   }>;
-  extras: Array<{ description: string; price: number }>;
   totalQuantity: number;
   subtotal: number;
   discountPercentage: number;
@@ -87,6 +90,7 @@ function getOrCreateEntry(
     productName: string;
     sku: string | undefined;
     brand: string | undefined;
+    productCurrency: string;
     unitPrice: number;
   }
 ): ProductEntry {
@@ -96,7 +100,6 @@ function getOrCreateEntry(
       productId,
       ...data,
       variants: [],
-      extras: [],
       totalQuantity: 0,
       subtotal: 0,
       discountPercentage: 0,
@@ -164,6 +167,7 @@ function processQuoteItem(
 ): void {
   const productId = item.product_id ?? "";
   const product = productMap.get(productId);
+  const productCurrency = product?.currency ?? "ARS";
   const parsed = parseDescription(item.description);
   const productName =
     parsed?.productName ?? product?.name ?? item.description ?? "Producto";
@@ -174,17 +178,25 @@ function processQuoteItem(
     productName,
     sku: product?.sku,
     brand: product?.brand ?? undefined,
+    productCurrency,
     unitPrice: item.unit_price,
   });
-
   entry.variants.push({
     talle,
     color,
     quantity: item.quantity,
     productVariantId: item.product_variant_id ?? undefined,
+    extras: (item.quote_item_extras ?? []).map((e) => ({
+      description: e.description,
+      price: e.price,
+    })),
   });
   entry.totalQuantity += item.quantity;
-  entry.subtotal += item.subtotal;
+  entry.subtotal += computeLineGross(
+    item.unit_price,
+    item.quantity,
+    item.quote_item_extras ?? undefined
+  );
 
   const nextDiscount = item.discount_percentage ?? 0;
   const nextTaxes = mapItemTaxes(item.quote_item_taxes ?? []);
@@ -200,13 +212,6 @@ function processQuoteItem(
     // representar a nivel de ítem; se resetean para no persistir nada.
     entry.discountPercentage = 0;
     entry.taxes = [];
-  }
-
-  if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
-    entry.extras = item.quote_item_extras.map((e) => ({
-      description: e.description,
-      price: e.price,
-    }));
   }
 }
 
@@ -226,8 +231,9 @@ function buildDefaultValues(
 
   return {
     customerId: quote.customer_id,
-    salesPriceListId: customer?.sales_price_list_id ?? "none",
-    targetMarginListId: quote.target_margin_list_id ?? "none",
+    salesPriceListId:
+      quote.sales_price_list_id ?? customer?.sales_price_list_id ?? "none",
+    priceLevelId: quote.price_level_id ?? "none",
     currency: quote.currency as "ARS" | "USD",
     exchangeRate: quote.exchange_rate,
     invoiceType: (quote as Record<string, unknown>).invoice_type as
@@ -255,6 +261,7 @@ type QuoteEditWrapperProps = {
   customers: Customer[];
   products: SaleProduct[];
   salesPriceLists: SalesPriceList[];
+  priceLevels: PriceLevel[];
   hasProduction: boolean;
 };
 
@@ -311,14 +318,10 @@ function QuoteDetailCard({
   totalItems: number;
 }) {
   const itemsWithExtras = quote.quote_items.map((item) => {
-    const extrasTotal = truncateMoney(
-      (item.quote_item_extras ?? []).reduce(
-        (sum, extra) => sum + extra.price,
-        0
-      )
-    );
-    const gross = truncateMoney(
-      (item.subtotal ?? 0) + extrasTotal * item.quantity
+    const gross = computeLineGross(
+      item.unit_price,
+      item.quantity,
+      item.quote_item_extras ?? undefined
     );
     const discount = truncateMoney(item.discount_amount ?? 0);
     return {
@@ -432,14 +435,10 @@ function QuoteDetailCard({
           </p>
           <div className="space-y-2">
             {quote.quote_items.map((item) => {
-              const extrasTotal = truncateMoney(
-                (item.quote_item_extras ?? []).reduce(
-                  (sum, extra) => sum + extra.price,
-                  0
-                )
-              );
-              const displaySubtotal = truncateMoney(
-                (item.subtotal ?? 0) + extrasTotal * item.quantity
+              const displaySubtotal = computeLineGross(
+                item.unit_price,
+                item.quantity,
+                item.quote_item_extras ?? undefined
               );
               return (
                 <div
@@ -448,6 +447,12 @@ function QuoteDetailCard({
                 >
                   <div className="min-w-0">
                     <span>{item.description || "Producto"}</span>
+                    {item.products?.brand && (
+                      <span className="text-muted-foreground text-xs">
+                        {" "}
+                        · {item.products.brand}
+                      </span>
+                    )}
                     <ItemExtrasList
                       currency={quote.currency}
                       extras={item.quote_item_extras}
@@ -522,6 +527,7 @@ export function QuoteEditWrapper({
   customers,
   products,
   salesPriceLists,
+  priceLevels,
   hasProduction,
 }: QuoteEditWrapperProps) {
   const { editQuote, isPending } = useEditQuote(orgSlug, quote.id);
@@ -729,6 +735,7 @@ export function QuoteEditWrapper({
         onFileSelect={setSelectedFile}
         onSubmit={handleSubmit}
         orgSlug={orgSlug}
+        priceLevels={priceLevels}
         products={products}
         salesPriceLists={salesPriceLists}
         selectedDesignFile={selectedDesignFile}

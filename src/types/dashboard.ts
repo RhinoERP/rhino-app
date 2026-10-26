@@ -36,6 +36,7 @@ export type DashboardFilters = {
 export type ControlTowerKPIsResponse = {
   sales: {
     totalAmount: number;
+    totalAmountUSD: number;
     totalOrders: number;
   };
   orders: {
@@ -46,6 +47,7 @@ export type ControlTowerKPIsResponse = {
   };
   purchases: {
     pending: number;
+    pendingUSD_AMOUNT: number;
   };
   stock: {
     critical: number;
@@ -64,6 +66,7 @@ export type TopClient = {
   id: string;
   name: string; // business_name from SQL
   total_amount: number;
+  total_amount_usd: number;
   order_count: number;
 };
 
@@ -73,6 +76,7 @@ export type TopProduct = {
   sku: string;
   units_sold: number;
   total_amount: number;
+  total_amount_usd: number;
 };
 
 export type TopPerformersResponse = {
@@ -141,22 +145,32 @@ export type LowStockProduct = {
 
 export type AgingBreakdown = {
   days1_7: number;
+  days1_7USD: number;
   days8_14: number;
+  days8_14USD: number;
   days15_30: number;
+  days15_30USD: number;
   days31_60: number;
+  days31_60USD: number;
   over60: number;
+  over60USD: number;
 };
 
 export type MarginMetrics = {
   amount: number;
+  amountUSD: number;
   percentage: number;
 };
 
 export type FinancialBalanceResponse = {
   invoiced: number;
+  invoicedUSD: number;
   collected: number;
+  collectedUSD: number;
   toCollect: number;
+  toCollectUSD: number;
   toPay: number;
+  toPayUSD: number;
   aging: AgingBreakdown;
   margin: MarginMetrics;
 };
@@ -164,6 +178,7 @@ export type FinancialBalanceResponse = {
 export type FinancialBreakdownResponse = {
   invoicing: {
     total: number;
+    totalUSD: number;
     normalSales: number;
     directSales: number;
     normalSalesCount: number;
@@ -268,26 +283,12 @@ export type WeeklyFlowProjection = {
   week_number: number;
   week: string;
   income: number;
+  income_usd: number;
   expense: number;
+  expense_usd: number;
 };
 
 export type CashFlowProjectionResponse = WeeklyFlowProjection[];
-
-// ============================================================================
-// Profitability Metrics (RPC: get_profitability_metrics)
-// ============================================================================
-
-export type ProfitabilityGroupBy = "CLIENT" | "BRAND" | "PRODUCT";
-
-export type ProfitabilityMetric = {
-  label: string;
-  revenue: number;
-  profit: number;
-  margin_percent: number;
-  order_count: number;
-};
-
-export type ProfitabilityMetricsResponse = ProfitabilityMetric[];
 
 // ============================================================================
 // Customer Profitability Dashboard
@@ -300,6 +301,8 @@ export type CustomerProfitabilityRow = {
   customerName: string;
   totalSales: number;
   totalProfit: number;
+  totalSalesUSD: number;
+  totalProfitUSD: number;
   marginPercent: number;
   orderCount: number;
   status: CustomerProfitabilityStatus;
@@ -309,6 +312,8 @@ export type CustomerProfitabilityDashboardResponse = {
   kpis: {
     totalSales: number;
     totalProfit: number;
+    totalSalesUSD: number;
+    totalProfitUSD: number;
     averageMarginPercent: number;
     activeCustomers: number;
   };

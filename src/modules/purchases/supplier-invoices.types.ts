@@ -23,6 +23,7 @@ export type SupplierInvoice = {
   tax_amount: number;
   total_amount: number;
   currency: string;
+  exchange_rate: number | null;
   status: "REGISTERED" | "CANCELLED";
   invoice_pdf_url: string | null;
   invoice_filename: string | null;
@@ -42,4 +43,5 @@ export type SupplierInvoicePurchaseOrderOption = {
   supplier_id: string | null;
   total_amount: number;
   status: string;
+  currency: string;
 };

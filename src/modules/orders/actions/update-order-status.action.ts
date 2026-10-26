@@ -26,12 +26,64 @@ export type UpdateStatusResult = {
   error?: string;
 };
 
-async function validateStockForTransition(
+// Estados de venta en los que el stock ya fue consumido a nivel venta
+// (confirmIncompleteSaleWithStockDeduction sobre preventa), los mismos con los
+// que syncSaleStatus deja de confirmar en ensureConfirmed.
+const SALE_STOCK_CONSUMED_STATUSES: ReadonlySet<string> = new Set([
+  "CONFIRMED",
+  "DISPATCH",
+  "DELIVERED",
+]);
+
+async function fetchSaleConsumedQuoteItemIds(
   supabase: SupabaseClient<Database>,
-  orgId: string,
-  newStatus: string,
-  quoteId: string | null
-): Promise<string[]> {
+  salesOrderId: string | null
+): Promise<Set<string>> {
+  if (!salesOrderId) {
+    return new Set();
+  }
+
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select("status")
+    .eq("id", salesOrderId)
+    .maybeSingle();
+
+  if (saleError) {
+    throw new Error(`Error al consultar la venta: ${saleError.message}`);
+  }
+
+  // biome-ignore lint/complexity/useSimplifiedLogicExpression: forma más legible
+  if (!sale || !SALE_STOCK_CONSUMED_STATUSES.has(sale.status)) {
+    return new Set();
+  }
+
+  const { data: items, error: itemsError } = await supabase
+    .from("sales_order_items")
+    .select("quote_item_id")
+    .eq("sales_order_id", salesOrderId);
+
+  if (itemsError) {
+    throw new Error(
+      `Error al consultar items de la venta: ${itemsError.message}`
+    );
+  }
+
+  return new Set(
+    (items ?? [])
+      .map((i) => i.quote_item_id)
+      .filter((id): id is string => id !== null)
+  );
+}
+
+async function validateStockForTransition(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  newStatus: string;
+  quoteId: string | null;
+  salesOrderId: string | null;
+}): Promise<string[]> {
+  const { supabase, orgId, newStatus, quoteId, salesOrderId } = params;
   if (newStatus !== "PREPARING" && newStatus !== "IN_PRODUCTION") {
     return [];
   }
@@ -47,17 +99,30 @@ async function validateStockForTransition(
     .eq("quote_id", quoteId)
     .is("assigned_order_id", null);
 
-  if (unassignedItems && unassignedItems.length > 0) {
-    await validateStockForItems({
+  let itemIdsToValidate = (unassignedItems ?? []).map((i) => i.id);
+
+  // En un pedido padre/standalone el stock se consume a nivel venta. Si la
+  // venta vinculada ya quedó confirmada (stock descontado), no se deben
+  // revalidar esos items: el stock actual ya refleja el descuento.
+  if (salesOrderId && itemIdsToValidate.length > 0) {
+    const consumedIds = await fetchSaleConsumedQuoteItemIds(
       supabase,
-      orgId,
-      quoteItemIds: unassignedItems.map((i) => i.id),
-      route,
-    });
-    return unassignedItems.map((i) => i.id);
+      salesOrderId
+    );
+    itemIdsToValidate = itemIdsToValidate.filter((id) => !consumedIds.has(id));
   }
 
-  return [];
+  if (itemIdsToValidate.length === 0) {
+    return [];
+  }
+
+  await validateStockForItems({
+    supabase,
+    orgId,
+    quoteItemIds: itemIdsToValidate,
+    route,
+  });
+  return itemIdsToValidate;
 }
 
 async function deductStockForTransition(params: {
@@ -268,12 +333,13 @@ export async function updateOrderStatusAction(
     const isChildOrder = !!currentOrder.parent_order_id;
 
     if (!isChildOrder) {
-      await validateStockForTransition(
+      await validateStockForTransition({
         supabase,
-        org.id,
+        orgId: org.id,
         newStatus,
-        currentOrder.quote_id
-      );
+        quoteId: currentOrder.quote_id,
+        salesOrderId: currentOrder.sales_order_id,
+      });
     }
 
     const deduction = await deductStockForTransition({

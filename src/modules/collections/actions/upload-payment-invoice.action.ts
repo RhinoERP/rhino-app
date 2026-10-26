@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getDocumentPath } from "@/modules/documents/utils/document-reference";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
@@ -52,22 +53,15 @@ function parseInput(formData: FormData): ParsedInput {
 
 async function deleteOldInvoice(
   supabase: SupabaseClient,
-  invoicePdfUrl: string | null
+  invoicePdfReference: string | null
 ): Promise<void> {
-  if (!invoicePdfUrl) {
+  if (!invoicePdfReference) {
     return;
   }
 
-  try {
-    const oldUrl = new URL(invoicePdfUrl);
-    const parts = oldUrl.pathname.split("/");
-    const bucketIndex = parts.indexOf(BUCKET);
-    if (bucketIndex !== -1 && bucketIndex < parts.length - 1) {
-      const oldPath = parts.slice(bucketIndex + 1).join("/");
-      await supabase.storage.from(BUCKET).remove([oldPath]);
-    }
-  } catch {
-    // ignore malformed old URLs
+  const oldPath = getDocumentPath(invoicePdfReference);
+  if (oldPath) {
+    await supabase.storage.from(BUCKET).remove([oldPath]);
   }
 }
 
@@ -135,14 +129,10 @@ export async function uploadPaymentInvoiceAction(
       };
     }
 
-    const { data: urlData } = await supabase.storage
-      .from(BUCKET)
-      .getPublicUrl(filePath);
-
     const { error: updateError } = await supabase
       .from("payable_payments" as never)
       .update({
-        invoice_pdf_url: `${urlData.publicUrl}?v=${Date.now()}`,
+        invoice_pdf_url: filePath,
         invoice_filename: parsed.file.name,
       } as never)
       .eq("id", parsed.paymentId)
@@ -159,7 +149,7 @@ export async function uploadPaymentInvoiceAction(
 
     return {
       success: true,
-      url: urlData.publicUrl,
+      url: filePath,
       filename: parsed.file.name,
     };
   } catch (error) {

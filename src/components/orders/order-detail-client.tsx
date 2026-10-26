@@ -420,6 +420,11 @@ function ItemsSection({
                   <tr className="border-b last:border-0" key={item.id}>
                     <td className="py-2 pr-4">
                       <div>{item.description}</div>
+                      {item.product?.sku && (
+                        <div className="text-muted-foreground text-xs">
+                          SKU {item.product.sku}
+                        </div>
+                      )}
                       <ItemExtrasList
                         currency={quote.currency}
                         extras={item.quote_item_extras}

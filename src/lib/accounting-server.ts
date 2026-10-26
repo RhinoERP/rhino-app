@@ -14,6 +14,30 @@ import type {
 } from "@/modules/accounting/types";
 
 const TIMEOUT_MS = 10_000;
+const HTTP_NOT_FOUND = 404;
+
+export class AccountingServiceError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AccountingServiceError";
+    this.status = status;
+  }
+}
+
+export function isAccountingNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof AccountingServiceError && error.status === HTTP_NOT_FOUND
+  );
+}
+
+function toServiceError(json: unknown, status: number): AccountingServiceError {
+  return new AccountingServiceError(
+    (json as { error?: string }).error ?? `Accounting service error: ${status}`,
+    status
+  );
+}
 
 function getServiceConfig(): { url: string; token: string } {
   const url = process.env.ACCOUNTING_SERVICE_URL;
@@ -44,10 +68,7 @@ async function servicePost<T>(path: string, body: unknown): Promise<T> {
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(
-        (json as { error?: string }).error ??
-          `Accounting service error: ${res.status}`
-      );
+      throw toServiceError(json, res.status);
     }
     return (json as { data: T }).data;
   } finally {
@@ -129,6 +150,57 @@ export async function asentarInformalEntry(
   );
 }
 
+export type InformalEntryReference = {
+  id: string;
+  referencia_id: string | null;
+  referencia_tabla: string | null;
+  source_type: string | null;
+  estado_formalizacion: string;
+};
+
+// Llama GET /informal-entries/:id — retorna null si no existe en la organización.
+export async function getInformalEntryServer(
+  informalEntryId: string,
+  orgId: string
+): Promise<InformalEntryReference | null> {
+  try {
+    return await serviceGet<InformalEntryReference>(
+      `informal-entries/${encodeURIComponent(informalEntryId)}?org_id=${encodeURIComponent(orgId)}`
+    );
+  } catch (error) {
+    if (isAccountingNotFoundError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function findJournalEntryIdByReferenceServer(params: {
+  orgId: string;
+  referenciaId: string;
+  referenciaTabla: string;
+  tipoEvento: string;
+}): Promise<string | null> {
+  const query = new URLSearchParams({
+    org_id: params.orgId,
+    referencia_id: params.referenciaId,
+    referencia_tabla: params.referenciaTabla,
+    tipo_evento: params.tipoEvento,
+  });
+
+  try {
+    const result = await serviceGet<{ id: string }>(
+      `asientos/by-reference?${query.toString()}`
+    );
+    return result.id;
+  } catch (error) {
+    if (isAccountingNotFoundError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 // ============================================================
 // Plan de Cuentas — CRUD (server-side, bypasses Next.js proxy)
 // ============================================================
@@ -151,10 +223,7 @@ async function serviceGet<T>(path: string): Promise<T> {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(
-        (json as { error?: string }).error ??
-          `Accounting service error: ${res.status}`
-      );
+      throw toServiceError(json, res.status);
     }
     return (json as { data: T }).data;
   } finally {

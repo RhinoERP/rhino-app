@@ -15,7 +15,8 @@ export type QuoteDetails = QuoteRow & {
   purchase_order_file?: string | null;
   design_file_url?: string | null;
   parent_quote_id?: string | null;
-  target_margin_list_id?: string | null;
+  price_level_id?: string | null;
+  sales_price_list_id?: string | null;
   customers: {
     id: string;
     business_name: string;
@@ -25,6 +26,9 @@ export type QuoteDetails = QuoteRow & {
     email: string | null;
   } | null;
   quote_items: (QuoteItemRow & {
+    products: {
+      brand: string | null;
+    } | null;
     quote_item_extras: QuoteItemExtraRow[];
     quote_item_taxes: QuoteItemTaxRow[];
   })[];
@@ -51,6 +55,7 @@ export async function getQuoteById(
       ),
       quote_items (
         *,
+        products (brand),
         quote_item_extras (*),
         quote_item_taxes (*)
       ),

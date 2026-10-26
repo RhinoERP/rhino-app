@@ -3,7 +3,10 @@ import "server-only";
 import QRCode from "qrcode";
 import { remittanceIssuerConfig } from "@/config/remittance";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { computeLineGross } from "@/lib/line-values";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
+import { getOrderQuotePaymentConditionBySaleId } from "@/modules/orders/service/orders.service";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getInvoiceTypeLabel,
@@ -20,9 +23,13 @@ import {
   buildArcaQrVerifierUrl,
   buildArcaQrPayload as buildSharedArcaQrPayload,
 } from "../arca-qr";
+import { formatCommercialExchangeRate } from "../commercial-exchange-rate";
 import { ArcaValidationError } from "../errors";
 import { readAuthorizedFiscalCurrency } from "../fiscal-currency";
-import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
+import {
+  paginateFiscalInvoiceHtml,
+  renderHtmlToPdfDocument,
+} from "./html-to-pdf.service";
 import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
 
 type OrganizationSummary = {
@@ -55,9 +62,6 @@ type ArcaInvoiceBranding = {
 
 const TRAILING_ZERO_DECIMALS_REGEX = /\.00$/;
 const ARCA_DATE_NUMBER_REGEX = /^\d{8}$/;
-const SINGLE_PAGE_ITEM_LIMIT = 7;
-const FIRST_CONTINUED_PAGE_ITEM_LIMIT = 10;
-const CONTINUATION_PAGE_ITEM_LIMIT = 18;
 
 type FiscalInvoicePage = {
   items: SalesOrderItemDetail[];
@@ -179,7 +183,14 @@ function getVoucherTypeCodeLabel(value: number | null | undefined): string {
   return String(value).padStart(3, "0");
 }
 
-function getPaymentConditionLabel(sale: SalesOrderDetail): string {
+function getPaymentConditionLabel(
+  sale: SalesOrderDetail,
+  orderQuotePaymentCondition: string | null
+): string {
+  if (orderQuotePaymentCondition) {
+    return orderQuotePaymentCondition;
+  }
+
   if (sale.credit_days && sale.credit_days > 0) {
     return `Cuenta corriente ${sale.credit_days} días`;
   }
@@ -276,45 +287,6 @@ function generateFiscalQrDataUrl(verificationUrl: string): Promise<string> {
   });
 }
 
-function paginateInvoiceItems(
-  items: SalesOrderItemDetail[]
-): FiscalInvoicePage[] {
-  if (items.length <= SINGLE_PAGE_ITEM_LIMIT) {
-    return [
-      {
-        items,
-        pageNumber: 1,
-        totalPages: 1,
-        isFirstPage: true,
-        isLastPage: true,
-      },
-    ];
-  }
-
-  const pages: SalesOrderItemDetail[][] = [];
-  let cursor = 0;
-  const firstPageItemCount = Math.min(
-    FIRST_CONTINUED_PAGE_ITEM_LIMIT,
-    items.length - 1
-  );
-
-  pages.push(items.slice(cursor, cursor + firstPageItemCount));
-  cursor += firstPageItemCount;
-
-  while (cursor < items.length) {
-    pages.push(items.slice(cursor, cursor + CONTINUATION_PAGE_ITEM_LIMIT));
-    cursor += CONTINUATION_PAGE_ITEM_LIMIT;
-  }
-
-  return pages.map((pageItems, index) => ({
-    items: pageItems,
-    pageNumber: index + 1,
-    totalPages: pages.length,
-    isFirstPage: index === 0,
-    isLastPage: index === pages.length - 1,
-  }));
-}
-
 function generateInvoiceItemsRows(
   items: SalesOrderItemDetail[],
   currency: string
@@ -339,7 +311,14 @@ function generateInvoiceItemsRows(
           <td class="cell-right">${weightLabel ?? "—"}</td>
           <td class="cell-right">${formatCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatDiscountPercent(item.discountPercent)}</td>
-          <td class="cell-right cell-amount">${formatCurrency(item.subtotal, currency)}</td>
+          <td class="cell-right cell-amount">${formatCurrency(
+            computeLineGross(
+              item.unitPrice,
+              item.quantity,
+              item.extras ?? undefined
+            ),
+            currency
+          )}</td>
         </tr>
       `;
     })
@@ -415,8 +394,16 @@ async function generateFiscalInvoiceHtml(params: {
   organization: OrganizationSummary;
   branding: ArcaInvoiceBranding;
   commercialPreventaDetail?: CommercialPreventaDetail | null;
+  orderQuotePaymentCondition?: string | null;
+  printDuplicate: boolean;
 }): Promise<string> {
-  const { sale, organization, branding, commercialPreventaDetail } = params;
+  const {
+    sale,
+    organization,
+    branding,
+    commercialPreventaDetail,
+    orderQuotePaymentCondition,
+  } = params;
 
   if (sale.arca_status !== "authorized") {
     throw new ArcaValidationError(
@@ -427,6 +414,10 @@ async function generateFiscalInvoiceHtml(params: {
   const request = extractWsfeRequest(sale.arca_request_json);
   const fiscalCurrency = readAuthorizedFiscalCurrency(sale.arca_request_json);
   const displayCurrency = fiscalCurrency.code === "DOL" ? "USD" : "ARS";
+  const commercialRate = formatCommercialExchangeRate(
+    displayCurrency,
+    sale.commercial_exchange_rate
+  );
   const qrPayload = buildArcaQrPayload({
     sale,
     organization,
@@ -469,17 +460,30 @@ async function generateFiscalInvoiceHtml(params: {
   const voucherTypeCodeLabel = getVoucherTypeCodeLabel(
     sale.arca_voucher_type_code
   );
-  const paymentConditionLabel = getPaymentConditionLabel(sale);
+  const paymentConditionLabel = getPaymentConditionLabel(
+    sale,
+    orderQuotePaymentCondition ?? null
+  );
   const pointAndNumber =
     sale.arca_point_of_sale && sale.arca_voucher_number
       ? `${String(sale.arca_point_of_sale).padStart(4, "0")}-${String(
           sale.arca_voucher_number
         ).padStart(8, "0")}`
       : (sale.invoice_number ?? "—");
-  const invoicePages = paginateInvoiceItems(sale.items);
-  const commercialPreventaPages = commercialPreventaDetail?.items.length
-    ? paginateInvoiceItems(commercialPreventaDetail.items)
-    : [];
+  const invoicePage: FiscalInvoicePage = {
+    items: sale.items,
+    pageNumber: 1,
+    totalPages: 1,
+    isFirstPage: true,
+    isLastPage: true,
+  };
+  const continuationPage: FiscalInvoicePage = {
+    items: [],
+    pageNumber: 2,
+    totalPages: 2,
+    isFirstPage: false,
+    isLastPage: false,
+  };
   const renderFullHeader = (): string => `
       <header class="invoice-header">
         <section class="issuer-panel">
@@ -506,6 +510,7 @@ async function generateFiscalInvoiceHtml(params: {
 
         <section class="voucher-panel">
           <div class="voucher-title-block">
+            <p class="invoice-copy-label">ORIGINAL</p>
             <h2 class="voucher-heading">${escapeHtml(invoiceTypeLabel)}</h2>
             <p class="voucher-number">Nº ${escapeHtml(pointAndNumber)}</p>
             ${invoiceLegend ? `<p class="voucher-legend">${escapeHtml(invoiceLegend)}</p>` : ""}
@@ -517,12 +522,14 @@ async function generateFiscalInvoiceHtml(params: {
             <div class="voucher-row"><span>Fecha de venta</span><strong>${formatDateOnly(sale.sale_date)}</strong></div>
             <div class="voucher-row"><span>Venta interna</span><strong>#${sale.sale_number ?? "—"}</strong></div>
             <div class="voucher-row"><span>Moneda</span><strong>${displayCurrency}</strong></div>
+            ${commercialRate ? `<div class="voucher-row"><span>Tipo de cambio comercial USD → ARS</span><strong>${commercialRate}</strong></div>` : ""}
           </div>
         </section>
       </header>
   `;
   const renderContinuationHeader = (page: FiscalInvoicePage): string => `
       <header class="continuation-header">
+        <p class="invoice-copy-label">ORIGINAL</p>
         <div>
           <p class="continuation-title">${escapeHtml(invoiceTypeLabel)} Nº ${escapeHtml(pointAndNumber)}</p>
           <p class="continuation-meta">${displayValue(customerName)} · CAE ${displayValue(sale.arca_cae)}</p>
@@ -657,7 +664,7 @@ async function generateFiscalInvoiceHtml(params: {
       </footer>
   `;
   const renderInvoicePage = (page: FiscalInvoicePage): string => `
-  <div class="document-copy">
+  <div class="document-copy" data-pagination-group="invoice">
     <div class="sheet">
       ${issuerLogoUrl ? `<img src="${escapeHtml(issuerLogoUrl)}" alt="" aria-hidden="true" class="watermark" />` : ""}
       ${page.isFirstPage ? renderFullHeader() : renderContinuationHeader(page)}
@@ -669,21 +676,21 @@ async function generateFiscalInvoiceHtml(params: {
   </div>
   `;
   const renderCommercialPreventaPage = (page: FiscalInvoicePage): string => `
-  <div class="document-copy">
+  <div class="document-copy" data-pagination-group="commercial">
     <div class="sheet">
       ${issuerLogoUrl ? `<img src="${escapeHtml(issuerLogoUrl)}" alt="" aria-hidden="true" class="watermark" />` : ""}
       <header class="continuation-header">
+        <p class="invoice-copy-label">ORIGINAL</p>
         <div>
           <p class="continuation-title">Detalle comercial de la preventa</p>
           <p class="continuation-meta">Comprobante fiscal asociado: ${escapeHtml(invoiceTypeLabel)} Nº ${escapeHtml(pointAndNumber)}</p>
         </div>
-        <div class="continuation-page">Anexo ${page.pageNumber}/${commercialPreventaPages.length}</div>
+        <div class="continuation-page">Anexo ${page.pageNumber}/${page.totalPages}</div>
       </header>
       ${generateInvoiceItemsTable(page, displayCurrency, {
-        title:
-          commercialPreventaPages.length > 1 && !page.isFirstPage
-            ? `Detalle comercial de la preventa - continuación ${page.pageNumber}`
-            : "Detalle comercial de la preventa",
+        title: page.isFirstPage
+          ? "Detalle comercial de la preventa"
+          : `Detalle comercial de la preventa - continuación ${page.pageNumber}`,
         description: `Productos correspondientes a la venta interna #${commercialPreventaDetail?.saleNumber ?? "—"}. Este detalle es informativo y no modifica el comprobante ARCA de anticipo.`,
       })}
       <footer class="commercial-footer">
@@ -701,6 +708,7 @@ async function generateFiscalInvoiceHtml(params: {
   <meta charset="UTF-8" />
   <title>${escapeHtml(invoiceTypeLabel)} ${displayValue(sale.invoice_number, "sin-numero")}</title>
   <style>
+    @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -716,6 +724,7 @@ async function generateFiscalInvoiceHtml(params: {
       padding: 5mm;
       background: #ffffff;
       page-break-after: always;
+      break-inside: avoid;
     }
     .document-copy:last-child {
       page-break-after: auto;
@@ -732,6 +741,13 @@ async function generateFiscalInvoiceHtml(params: {
     .sheet > * {
       position: relative;
       z-index: 1;
+      flex-shrink: 0;
+    }
+    .invoice-copy-label {
+      margin: 0 0 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
     }
     .watermark {
       position: absolute;
@@ -911,13 +927,11 @@ async function generateFiscalInvoiceHtml(params: {
     }
     .table-wrap {
       border-top: none;
-      overflow: hidden;
       break-inside: avoid;
     }
     .detail-table-block {
       margin-top: 5px;
       border: 1px solid #4b5563;
-      overflow: hidden;
       break-inside: avoid;
     }
     .table-note {
@@ -1044,13 +1058,18 @@ async function generateFiscalInvoiceHtml(params: {
       break-inside: avoid;
     }
     .continuation-header {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: center;
+      display: block;
       border: 1px solid #4b5563;
       padding: 6px 8px;
       font-size: 10px;
+    }
+    .continuation-header > div:first-of-type {
+      margin-right: 24mm;
+    }
+    .continuation-header > .continuation-page {
+      position: absolute;
+      top: 6px;
+      right: 8px;
     }
     .continuation-title {
       margin: 0;
@@ -1138,22 +1157,27 @@ async function generateFiscalInvoiceHtml(params: {
     }
   </style>
 </head>
-<body>
-  ${invoicePages.map(renderInvoicePage).join("")}
-  ${commercialPreventaPages.map(renderCommercialPreventaPage).join("")}
+<body data-invoice-duplicate="${params.printDuplicate}">
+  <template data-pagination-template="invoice">${renderInvoicePage(continuationPage)}</template>
+  ${commercialPreventaDetail?.items.length ? `<template data-pagination-template="commercial">${renderCommercialPreventaPage(continuationPage)}</template>` : ""}
+  ${renderInvoicePage(invoicePage)}
+  ${commercialPreventaDetail?.items.length ? renderCommercialPreventaPage({ ...invoicePage, items: commercialPreventaDetail.items }) : ""}
 </body>
 </html>
   `;
 }
 
-export async function generateAuthorizedSaleInvoicePdf(params: {
+async function buildAuthorizedSaleInvoiceHtml(params: {
   orgSlug: string;
   saleId: string;
 }): Promise<PrintableFiscalInvoice> {
-  const [sale, organization] = await Promise.all([
-    getSalesOrderById(params.orgSlug, params.saleId),
-    getOrganizationBySlug(params.orgSlug),
-  ]);
+  const [sale, organization, orderQuotePaymentCondition, orgSettings] =
+    await Promise.all([
+      getSalesOrderById(params.orgSlug, params.saleId),
+      getOrganizationBySlug(params.orgSlug),
+      getOrderQuotePaymentConditionBySaleId(params.orgSlug, params.saleId),
+      getOrgSettings(params.orgSlug),
+    ]);
 
   if (!sale) {
     throw new ArcaValidationError("Venta no encontrada.");
@@ -1186,6 +1210,8 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
           items: commercialPreventaDetail.items,
         }
       : null,
+    orderQuotePaymentCondition,
+    printDuplicate: orgSettings.invoice_print_duplicate,
   });
   const filename = `Factura_${sanitizeFilenamePart(
     sale.invoice_number ?? String(sale.sale_number ?? sale.id)
@@ -1197,15 +1223,23 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
   };
 }
 
+export async function generateAuthorizedSaleInvoicePdf(params: {
+  orgSlug: string;
+  saleId: string;
+}): Promise<PrintableFiscalInvoice> {
+  const invoice = await buildAuthorizedSaleInvoiceHtml(params);
+  return { ...invoice, html: await paginateFiscalInvoiceHtml(invoice.html) };
+}
+
 export async function generateAuthorizedSaleInvoicePdfDocument(params: {
   orgSlug: string;
   saleId: string;
 }): Promise<PrintableFiscalInvoiceDocument> {
-  const printableInvoice = await generateAuthorizedSaleInvoicePdf(params);
-  const content = await renderHtmlToPdfBuffer(printableInvoice.html);
+  const printableInvoice = await buildAuthorizedSaleInvoiceHtml(params);
+  const document = await renderHtmlToPdfDocument(printableInvoice.html);
 
   return {
     ...printableInvoice,
-    content,
+    ...document,
   };
 }

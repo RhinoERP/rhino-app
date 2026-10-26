@@ -1,7 +1,7 @@
 "use client";
 
 import { FilePdfIcon, PlusIcon } from "@phosphor-icons/react";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/accounting-client";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { EventoFacturaCompra } from "@/modules/accounting/types";
+import { getDocumentSignedUrlAction } from "@/modules/documents/actions/get-document-signed-url.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { createSupplierInvoiceAction } from "@/modules/purchases/actions/create-supplier-invoice.action";
 import {
@@ -141,21 +142,10 @@ function SupplierInvoicesTable({
               </td>
               <td className="px-4 py-3 text-center">
                 {invoice.invoice_pdf_url ? (
-                  <Button
-                    asChild
-                    size="icon-sm"
-                    title={invoice.invoice_filename ?? "Abrir PDF"}
-                    variant="ghost"
-                  >
-                    <a
-                      href={invoice.invoice_pdf_url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <FilePdfIcon className="size-4" />
-                      <span className="sr-only">Abrir comprobante PDF</span>
-                    </a>
-                  </Button>
+                  <SupplierInvoicePreviewButton
+                    filename={invoice.invoice_filename}
+                    reference={invoice.invoice_pdf_url}
+                  />
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
@@ -165,6 +155,53 @@ function SupplierInvoicesTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SupplierInvoicePreviewButton({
+  filename,
+  reference,
+}: {
+  filename: string | null;
+  reference: string;
+}) {
+  async function handleOpen() {
+    const previewWindow = window.open("about:blank", "_blank");
+    if (!previewWindow) {
+      toast.error(
+        "No se pudo abrir la vista previa. Habilitá las ventanas emergentes."
+      );
+      return;
+    }
+
+    previewWindow.opener = null;
+
+    try {
+      const result = await getDocumentSignedUrlAction(reference);
+      if (!result.success) {
+        previewWindow.close();
+        toast.error(result.error);
+        return;
+      }
+
+      previewWindow.location.href = result.url;
+    } catch {
+      previewWindow.close();
+      toast.error("No se pudo abrir el comprobante PDF");
+    }
+  }
+
+  return (
+    <Button
+      onClick={handleOpen}
+      size="icon-sm"
+      title={filename ?? "Abrir PDF"}
+      type="button"
+      variant="ghost"
+    >
+      <FilePdfIcon className="size-4" />
+      <span className="sr-only">Abrir comprobante PDF</span>
+    </Button>
   );
 }
 
@@ -185,6 +222,7 @@ function SupplierInvoiceDialog({
   const [purchaseOrderId, setPurchaseOrderId] = useState("");
   const [subtotalAmount, setSubtotalAmount] = useState("0");
   const [taxAmount, setTaxAmount] = useState("0");
+  const [exchangeRate, setExchangeRate] = useState("");
   const [isPending, startTransition] = useTransition();
   const [accountingPayload, setAccountingPayload] =
     useState<EventoFacturaCompra | null>(null);
@@ -212,6 +250,46 @@ function SupplierInvoiceDialog({
     [subtotalAmount, taxAmount]
   );
 
+  const selectedPurchaseOrderCurrency = useMemo(
+    () =>
+      purchaseOrders.find(
+        (purchaseOrder) => purchaseOrder.id === purchaseOrderId
+      )?.currency ?? "ARS",
+    [purchaseOrders, purchaseOrderId]
+  );
+  const isUsdPurchaseOrder = selectedPurchaseOrderCurrency === "USD";
+
+  const equivalenteARS = useMemo(() => {
+    const parsedRate = Number(exchangeRate);
+    if (!isUsdPurchaseOrder) {
+      return null;
+    }
+    if (!Number.isFinite(parsedRate) || parsedRate <= 0) {
+      return null;
+    }
+    return ((Number.parseFloat(totalAmount) || 0) * parsedRate).toFixed(2);
+  }, [exchangeRate, isUsdPurchaseOrder, totalAmount]);
+
+  useEffect(() => {
+    if (!(isUsdPurchaseOrder && open) || exchangeRate) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/usd")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data) => {
+        if (!cancelled && data?.venta) {
+          setExchangeRate(String(data.venta));
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isUsdPurchaseOrder, open, exchangeRate]);
+
   function selectPurchaseOrder(value: string) {
     setPurchaseOrderId(value);
     const purchaseOrder = purchaseOrders.find((item) => item.id === value);
@@ -225,6 +303,7 @@ function SupplierInvoiceDialog({
     setPurchaseOrderId("");
     setSubtotalAmount("0");
     setTaxAmount("0");
+    setExchangeRate("");
   }
 
   async function tryAutoAccounting(
@@ -272,7 +351,11 @@ function SupplierInvoiceDialog({
           .join("-"),
         taxes: null,
       },
-      {},
+      {
+        moneda: invoice.currency === "USD" ? "USD" : "ARS",
+        tipoCambio: invoice.exchange_rate,
+        montoUSD: invoice.currency === "USD" ? invoice.total_amount : undefined,
+      },
       {
         referenciaTabla: "supplier_invoices",
         idempotencyKey: `FACTURA_COMPRA_SI_${invoice.id}`,
@@ -317,8 +400,10 @@ function SupplierInvoiceDialog({
           <DialogHeader>
             <DialogTitle>Registrar factura de proveedor</DialogTitle>
             <DialogDescription>
-              El comprobante queda asociado a la orden de compra, sin modificar
-              la recepción de mercadería.
+              El comprobante queda asociado a la orden de compra. Si la OC
+              estaba pendiente de factura o se creó como nota, su cuenta por
+              pagar se actualizará con el total facturado, sin modificar la
+              recepción de mercadería.
             </DialogDescription>
           </DialogHeader>
 
@@ -344,7 +429,11 @@ function SupplierInvoiceDialog({
                         4,
                         "0"
                       )}{" "}
-                      · {formatCurrency(purchaseOrder.total_amount)}
+                      ·{" "}
+                      {formatCurrency(
+                        purchaseOrder.total_amount,
+                        purchaseOrder.currency
+                      )}
                     </option>
                   ))}
                 </select>
@@ -457,6 +546,27 @@ function SupplierInvoiceDialog({
                 <Input disabled id="totalPreview" value={totalAmount} />
               </div>
             </div>
+
+            {isUsdPurchaseOrder && (
+              <div className="space-y-2">
+                <Label htmlFor="exchangeRate">Tipo de cambio (USD→ARS)</Label>
+                <Input
+                  id="exchangeRate"
+                  name="exchangeRate"
+                  onChange={(event) => setExchangeRate(event.target.value)}
+                  placeholder="Ej. 1240.50"
+                  required
+                  step="any"
+                  type="number"
+                  value={exchangeRate}
+                />
+                {equivalenteARS && (
+                  <p className="text-muted-foreground text-xs">
+                    Equivalente en ARS: {formatCurrency(Number(equivalenteARS))}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="file">Comprobante PDF</Label>

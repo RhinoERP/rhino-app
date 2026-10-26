@@ -4,6 +4,7 @@ import type { Organization } from "@/modules/organizations/types";
 import { organizationSettingsSchema } from "@/modules/organizations/types/organization-settings";
 import type { Database } from "@/types/supabase";
 import {
+  createDefaultConsumidorFinalCustomer,
   createSellerRole,
   getOrCreateAdminRole,
   getUniqueSlug,
@@ -85,6 +86,8 @@ export async function createOrganizationWithAdmin({
   const adminRoleId = await getOrCreateAdminRole(orgRes.id, supabaseAdmin);
 
   await createSellerRole(orgRes.id, supabaseAdmin);
+
+  await createDefaultConsumidorFinalCustomer(orgRes.id, supabaseAdmin);
 
   const {
     data: { user },

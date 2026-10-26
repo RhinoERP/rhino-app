@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { generateCommissions } from "@/modules/commissions/service/commissions-generation.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isPosCashPaymentMethod } from "@/modules/pos/utils/payment-method";
@@ -26,6 +27,7 @@ import type {
 type ReceivableRow = Database["public"]["Tables"]["accounts_receivable"]["Row"];
 
 type ReceivableWithRelations = ReceivableRow & {
+  manual_fiscal_invoice_id?: string | null;
   is_collection_deferred?: boolean | null;
   customer:
     | {
@@ -53,6 +55,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sub_total?: number | null;
         global_discount_amount?: number | null;
         remittance_number?: string | null;
+        document_type?: string | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
@@ -66,7 +69,22 @@ type ReceivableWithRelations = ReceivableRow & {
         sub_total?: number | null;
         global_discount_amount?: number | null;
         remittance_number?: string | null;
+        document_type?: string | null;
         items?: SaleItemRaw[] | null;
+      }>
+    | null;
+  manual_invoice:
+    | {
+        invoice_number?: string | null;
+        issue_date?: string | null;
+        sub_total?: number | null;
+        created_by?: string | null;
+      }
+    | Array<{
+        invoice_number?: string | null;
+        issue_date?: string | null;
+        sub_total?: number | null;
+        created_by?: string | null;
       }>
     | null;
 };
@@ -138,12 +156,14 @@ type PayableWithRelations = PayableRow & {
         purchase_number?: number | null;
         purchase_date?: string | null;
         total_amount?: number | null;
+        payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
         items?: PurchaseItemRaw[] | null;
       }
     | Array<{
         purchase_number?: number | null;
         purchase_date?: string | null;
         total_amount?: number | null;
+        payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
         items?: PurchaseItemRaw[] | null;
       }>
     | null;
@@ -260,6 +280,13 @@ function getSaleUserId(sale: ReceivableWithRelations["sale"]): string | null {
   return typeof rawSale.user_id === "string" ? rawSale.user_id : null;
 }
 
+function getManualInvoiceUserId(
+  invoice: ReceivableWithRelations["manual_invoice"]
+): string | null {
+  const raw = Array.isArray(invoice) ? invoice[0] : invoice;
+  return typeof raw?.created_by === "string" ? raw.created_by : null;
+}
+
 function canAccessReceivable(
   receivable: ReceivableWithRelations,
   accessContext: CollectionsAccessContext
@@ -272,7 +299,10 @@ function canAccessReceivable(
     return false;
   }
 
-  return getSaleUserId(receivable.sale) === accessContext.userId;
+  return (
+    getSaleUserId(receivable.sale) === accessContext.userId ||
+    getManualInvoiceUserId(receivable.manual_invoice) === accessContext.userId
+  );
 }
 
 async function fetchLastPayablePaymentDates(
@@ -305,12 +335,11 @@ async function fetchLastPayablePaymentDates(
 
 function getPayableDiscrepancy(params: {
   total: number;
-  pending: number;
   purchaseTotal: number | null;
 }): { hasDiscrepancy: boolean; discrepancyAmount?: number } {
-  const { total, pending, purchaseTotal } = params;
+  const { total, purchaseTotal } = params;
 
-  if (purchaseTotal === null || purchaseTotal <= 0 || pending <= 0) {
+  if (purchaseTotal === null || purchaseTotal <= 0) {
     return { hasDiscrepancy: false };
   }
 
@@ -344,7 +373,6 @@ function mapPayableAccount(
     : null;
   const discrepancy = getPayableDiscrepancy({
     total,
-    pending,
     purchaseTotal,
   });
 
@@ -362,6 +390,7 @@ function mapPayableAccount(
     last_payment_date: lastPaymentDate,
     supplier: normalizeSupplier(row),
     purchase,
+    payableOrigin: purchase?.payable_origin ?? "PURCHASE_NOTE",
     items: normalizePurchaseItems(row),
     type: "payable",
     hasDiscrepancy: discrepancy.hasDiscrepancy,
@@ -413,7 +442,21 @@ function normalizeSaleInfo(
     : receivable.sale;
 
   if (!hasSaleData(rawSale)) {
-    return null;
+    const rawManual = Array.isArray(receivable.manual_invoice)
+      ? receivable.manual_invoice[0]
+      : receivable.manual_invoice;
+    if (!rawManual) {
+      return null;
+    }
+    return {
+      invoice_number: rawManual.invoice_number ?? null,
+      sale_date: rawManual.issue_date ?? null,
+      dispatched_at: null,
+      sale_number: null,
+      sub_total: normalizeOptionalMoney(rawManual.sub_total),
+      global_discount_amount: null,
+      remittance_number: "Factura manual",
+    };
   }
 
   return {
@@ -430,6 +473,7 @@ function normalizeSaleInfo(
       rawSale.global_discount_amount as number | null | undefined
     ),
     remittance_number: (rawSale.remittance_number as string | null) ?? null,
+    document_type: (rawSale.document_type as string | null) ?? null,
   };
 }
 
@@ -684,12 +728,9 @@ type SellerInfo = { id: string; name?: string | null; email?: string | null };
 
 async function buildSellersByUserId(
   orgSlug: string,
-  accessContext: CollectionsAccessContext
+  _accessContext: CollectionsAccessContext
 ): Promise<Map<string, SellerInfo>> {
   const map = new Map<string, SellerInfo>();
-  if (accessContext.scope !== "all") {
-    return map;
-  }
   try {
     const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
     for (const member of members) {
@@ -1001,7 +1042,11 @@ function mapReceivableAccount(
     id: row.id,
     organization_id: row.organization_id,
     customer_id: row.customer_id,
-    sales_order_id: row.sales_order_id,
+    // Consumers still use this legacy display identifier. Manual documents use
+    // their own id here and expose their invoice metadata through `sale`.
+    sales_order_id:
+      row.sales_order_id ?? row.manual_fiscal_invoice_id ?? row.id,
+    manual_fiscal_invoice_id: row.manual_fiscal_invoice_id ?? null,
     total_amount: total,
     pending_balance: pending,
     currency: row.currency ?? "ARS",
@@ -1032,8 +1077,10 @@ const RECEIVABLES_SELECT = `
     sale_number,
     sub_total,
     global_discount_amount,
-    remittance_number
-  )
+    remittance_number,
+    document_type
+  ),
+  manual_invoice:manual_fiscal_invoices(invoice_number, issue_date, sub_total, created_by)
 `;
 
 export async function getReceivablesByOrgSlug(
@@ -1160,7 +1207,8 @@ const PAYABLES_SELECT = `
   purchase:purchase_orders(
     purchase_number,
     purchase_date,
-    total_amount
+    total_amount,
+    payable_origin
   )
 `;
 
@@ -1416,207 +1464,6 @@ function calculateDistributions(
     appliedAmount: truncateMoney(totalAmount - remainingAmount),
     creditBalance: truncateMoney(remainingAmount),
   };
-}
-
-async function fetchCommissionRates(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  sellerIds: string[],
-  priceListIds: string[],
-  orgId: string
-): Promise<{
-  baseRateMap: Map<string, number>;
-  extraRateMap: Map<string, number>;
-}> {
-  const [baseRatesRes, extraRatesRes] = (await Promise.all([
-    sellerIds.length > 0
-      ? supabase
-          .from("organization_members")
-          .select("user_id, base_commission_rate")
-          .in("user_id", sellerIds)
-          .eq("organization_id", orgId)
-      : { data: [] },
-    priceListIds.length > 0
-      ? supabase
-          .from("sales_price_lists")
-          .select("id, extra_commission_rate")
-          .in("id", priceListIds)
-      : { data: [] },
-  ])) as [
-    { data: { user_id: string; base_commission_rate: number | null }[] | null },
-    { data: { id: string; extra_commission_rate: number | null }[] | null },
-  ];
-
-  const baseRateMap = new Map(
-    (baseRatesRes.data ?? []).map((m) => [
-      m.user_id,
-      m.base_commission_rate ?? 0,
-    ])
-  );
-  const extraRateMap = new Map(
-    (extraRatesRes.data ?? []).map((pl) => [
-      pl.id,
-      pl.extra_commission_rate ?? 0,
-    ])
-  );
-
-  return { baseRateMap, extraRateMap };
-}
-
-function buildCommissionRows(params: {
-  orgId: string;
-  insertedPayments: Array<{
-    id: string;
-    account_receivable_id: string;
-    amount: number;
-  }>;
-  accounts: Array<{ id: string; sales_order_id: string }>;
-  saleMap: Map<string, { user_id: string; sales_price_list_id: string | null }>;
-  baseRateMap: Map<string, number>;
-  extraRateMap: Map<string, number>;
-}): Array<{
-  organization_id: string;
-  user_id: string;
-  sales_order_id: string;
-  receivable_payment_id: string;
-  sales_price_list_id: string | null;
-  base_commission_rate: number;
-  extra_commission_rate: number;
-  commission_amount: number;
-  paid_amount: number;
-}> {
-  const {
-    orgId,
-    insertedPayments,
-    accounts,
-    saleMap,
-    baseRateMap,
-    extraRateMap,
-  } = params;
-  const result: Array<{
-    organization_id: string;
-    user_id: string;
-    sales_order_id: string;
-    receivable_payment_id: string;
-    sales_price_list_id: string | null;
-    base_commission_rate: number;
-    extra_commission_rate: number;
-    commission_amount: number;
-    paid_amount: number;
-  }> = [];
-
-  for (const payment of insertedPayments) {
-    const account = accounts.find(
-      (a) => a.id === payment.account_receivable_id
-    );
-    if (!account) {
-      continue;
-    }
-
-    const sale = saleMap.get(account.sales_order_id);
-    if (!sale?.user_id) {
-      continue;
-    }
-
-    const baseRate = baseRateMap.get(sale.user_id) ?? 0;
-    const extraRate = sale.sales_price_list_id
-      ? (extraRateMap.get(sale.sales_price_list_id) ?? 0)
-      : 0;
-    const rate = baseRate + extraRate;
-
-    if (rate <= 0) {
-      continue;
-    }
-
-    const commissionAmount = truncateMoney((payment.amount * rate) / 100);
-
-    result.push({
-      organization_id: orgId,
-      user_id: sale.user_id,
-      sales_order_id: account.sales_order_id,
-      receivable_payment_id: payment.id,
-      sales_price_list_id: sale.sales_price_list_id ?? null,
-      base_commission_rate: baseRate,
-      extra_commission_rate: extraRate,
-      commission_amount: commissionAmount,
-      paid_amount: payment.amount,
-    });
-  }
-
-  return result;
-}
-
-export async function generateCommissions(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  orgId: string,
-  insertedPayments: Array<{
-    id: string;
-    account_receivable_id: string;
-    amount: number;
-  }>
-): Promise<void> {
-  const accountIds = insertedPayments.map((p) => p.account_receivable_id);
-
-  const { data: accounts } = await supabase
-    .from("accounts_receivable")
-    .select("id, sales_order_id")
-    .in("id", accountIds)
-    .eq("organization_id", orgId);
-
-  if (!accounts || accounts.length === 0) {
-    return;
-  }
-
-  const saleIds = [
-    ...new Set(accounts.map((a) => a.sales_order_id).filter(Boolean)),
-  ] as string[];
-
-  if (saleIds.length === 0) {
-    return;
-  }
-
-  const { data: sales } = (await supabase
-    .from("sales_orders")
-    .select("id, user_id, sales_price_list_id")
-    .in("id", saleIds)
-    .eq("organization_id", orgId)) as {
-    data:
-      | { id: string; user_id: string; sales_price_list_id: string | null }[]
-      | null;
-  };
-
-  if (!sales || sales.length === 0) {
-    return;
-  }
-
-  const saleMap = new Map(sales.map((s) => [s.id, s]));
-  const sellerIds = [...new Set(sales.map((s) => s.user_id))];
-  const priceListIds = [
-    ...new Set(sales.map((s) => s.sales_price_list_id).filter(Boolean)),
-  ] as string[];
-
-  const { baseRateMap, extraRateMap } = await fetchCommissionRates(
-    supabase,
-    sellerIds,
-    priceListIds,
-    orgId
-  );
-
-  const commissionRows = buildCommissionRows({
-    orgId,
-    insertedPayments,
-    accounts,
-    saleMap,
-    baseRateMap,
-    extraRateMap,
-  });
-
-  if (commissionRows.length > 0) {
-    const { error } = await supabase.from("commissions").insert(commissionRows);
-
-    if (error) {
-      throw new Error(`Error generating commissions: ${error.message}`);
-    }
-  }
 }
 
 function insertBulkPayments(
@@ -2190,6 +2037,7 @@ type LightReceivableRow = {
   id: string;
   pending_balance: number;
   total_amount: number;
+  currency?: string | null;
   due_date: string;
   created_at: string | null;
   customer: {
@@ -2204,6 +2052,9 @@ type LightReceivableRow = {
     invoice_number: string | null;
     remittance_number: string | null;
     dispatched_at: string | null;
+  } | null;
+  manual_invoice: {
+    created_by: string | null;
   } | null;
 };
 
@@ -2626,7 +2477,14 @@ function filterAndSortLightRows(
   if (params.sort && params.sort.length > 0) {
     sortReceivables(visible, params.sort, sellersByUserId, lastPaymentDatesMap);
   } else {
-    visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
+    const statusRank = (row: LightReceivableRow) =>
+      Number(row.pending_balance ?? 0) <= 0 ? 1 : 0;
+    visible.sort(
+      (a, b) =>
+        statusRank(a) - statusRank(b) ||
+        (a.due_date ?? "").localeCompare(b.due_date ?? "") ||
+        a.id.localeCompare(b.id)
+    );
   }
 
   return visible;
@@ -2704,7 +2562,8 @@ export async function getReceivablesPaginated(
       due_date,
       created_at,
       customer:customers(id, business_name, fantasy_name, city),
-      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at)
+      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at, document_type),
+      manual_invoice:manual_fiscal_invoices(created_by)
     `
   );
 
@@ -2795,7 +2654,7 @@ export async function getReceivablesPaginated(
     : undefined;
 
   const visible = filterAndSortLightRows(
-    lightRows ?? [],
+    (lightRows ?? []) as unknown as LightReceivableRow[],
     accessContext,
     params,
     sellersByUserId,
@@ -2970,7 +2829,8 @@ export async function getReceivablesMetrics(
       total_amount,
       currency,
       due_date,
-      sale:sales_orders(status, user_id)
+      sale:sales_orders(status, user_id),
+      manual_invoice:manual_fiscal_invoices(created_by)
     `
     )
     .eq("organization_id", org.id)
@@ -2981,7 +2841,7 @@ export async function getReceivablesMetrics(
     return { byCurrency: [] };
   }
 
-  const visible = (lightRows ?? []).filter(
+  const visible = ((lightRows ?? []) as unknown as LightReceivableRow[]).filter(
     (r) =>
       !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
       canAccessReceivable(

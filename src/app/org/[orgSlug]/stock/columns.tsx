@@ -104,7 +104,8 @@ function renderMeasureCell(item: StockItem) {
 
 export function createColumns(
   orgSlug: string,
-  canViewSupplier = true
+  canViewSupplier = true,
+  viewOnly = false
 ): ColumnDef<StockItem>[] {
   const cols: ColumnDef<StockItem>[] = [
     {
@@ -141,8 +142,13 @@ export function createColumns(
         const sku = row.getValue("sku") as string | null;
         return sku ? (
           <Link
+            aria-disabled={viewOnly}
             className="block transition-colors hover:text-primary"
-            href={`/org/${orgSlug}/stock/${row.original.product_id}`}
+            href={
+              viewOnly
+                ? "#"
+                : `/org/${orgSlug}/stock/${row.original.product_id}`
+            }
           >
             <span className="font-medium font-mono tabular-nums">{sku}</span>
           </Link>
@@ -166,8 +172,9 @@ export function createColumns(
 
         return (
           <Link
+            aria-disabled={viewOnly}
             className="block transition-colors hover:text-primary"
-            href={href}
+            href={viewOnly ? "#" : href}
           >
             <div className="font-medium">{productName}</div>
           </Link>
@@ -379,5 +386,19 @@ export function createColumns(
       enableSorting: false,
     }
   );
-  return cols;
+  return viewOnly
+    ? cols.filter((column) => {
+        const columnId =
+          "accessorKey" in column ? column.accessorKey : column.id;
+        return [
+          "sku",
+          "product_name",
+          "category_name",
+          "brand",
+          "stock_units",
+          "stock_measure",
+          "is_active",
+        ].includes(String(columnId));
+      })
+    : cols;
 }

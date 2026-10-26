@@ -2,6 +2,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import type { Database } from "@/types/supabase";
 import type {
   CommissionMetrics,
   CommissionSale,
@@ -73,6 +74,11 @@ type CommissionRow = {
         customer_id?: string | null;
       }>
     | null;
+};
+
+type ReceivableStatusRow = {
+  sales_order_id: string;
+  status?: Database["public"]["Enums"]["receivable_status"] | null;
 };
 
 async function fetchSellerNames(
@@ -215,54 +221,138 @@ async function fetchSellerBaseRates(
   return baseRateMap;
 }
 
-function buildCommissionSellers(
-  commissionRows: CommissionRow[],
-  nameMap: Map<string, string>,
-  baseRateMap: Map<string, number>,
-  customerMap: Map<string, string>
-): Map<string, CommissionSeller> {
+function resolveSaleStatus(
+  status: Database["public"]["Enums"]["receivable_status"] | null | undefined
+): CommissionSale["status"] {
+  if (status === "PAID") {
+    return "PAID";
+  }
+  if (status === "PARTIALLY_PAID") {
+    return "PARTIAL";
+  }
+  if (status === "OVERDUE") {
+    return "PENDING";
+  }
+  return "PENDING";
+}
+
+function createSaleFromRow(
+  row: CommissionRow,
+  customerMap: Map<string, string>,
+  receivableStatusMap: Map<
+    string,
+    Database["public"]["Enums"]["receivable_status"] | null
+  >
+): CommissionSale {
+  const saleData = Array.isArray(row.sale) ? row.sale[0] : row.sale;
+  const subTotal = saleData?.sub_total ?? 0;
+  const commissionRate = row.base_commission_rate + row.extra_commission_rate;
+  return {
+    id: row.sales_order_id,
+    saleNumber: saleData?.sale_number ?? null,
+    customerName: customerMap.get(row.sales_order_id) || "",
+    invoiceNumber: saleData?.invoice_number ?? null,
+    dispatchedAt: saleData?.dispatched_at ?? null,
+    subTotal,
+    commissionRate,
+    totalCommission: truncateMoney((subTotal * commissionRate) / 100),
+    paidCommission: 0,
+    remainingCommission: truncateMoney((subTotal * commissionRate) / 100),
+    status: resolveSaleStatus(receivableStatusMap.get(row.sales_order_id)),
+    payments: [],
+  };
+}
+
+async function fetchReceivableStatusMap(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  saleIds: string[],
+  orgId: string
+): Promise<
+  Map<string, Database["public"]["Enums"]["receivable_status"] | null>
+> {
+  const map = new Map<
+    string,
+    Database["public"]["Enums"]["receivable_status"] | null
+  >();
+  if (saleIds.length === 0) {
+    return map;
+  }
+
+  const { data: receivables } = await supabase
+    .from("accounts_receivable")
+    .select("sales_order_id, status")
+    .in("sales_order_id", saleIds)
+    .eq("organization_id", orgId);
+
+  for (const r of (receivables ?? []) as ReceivableStatusRow[]) {
+    map.set(r.sales_order_id, r.status ?? null);
+  }
+  return map;
+}
+
+function buildCommissionSellers({
+  commissionRows,
+  nameMap,
+  baseRateMap,
+  customerMap,
+  receivableStatusMap,
+}: {
+  commissionRows: CommissionRow[];
+  nameMap: Map<string, string>;
+  baseRateMap: Map<string, number>;
+  customerMap: Map<string, string>;
+  receivableStatusMap: Map<
+    string,
+    Database["public"]["Enums"]["receivable_status"] | null
+  >;
+}): Map<string, CommissionSeller> {
   const sellerMap = new Map<string, CommissionSeller>();
+  const salesBySeller = new Map<string, Map<string, CommissionSale>>();
 
   for (const row of commissionRows) {
-    if (!sellerMap.has(row.user_id)) {
-      sellerMap.set(row.user_id, {
-        userId: row.user_id,
-        sellerName: nameMap.get(row.user_id) || row.user_id,
-        baseCommissionRate: baseRateMap.get(row.user_id) ?? 0,
-        saleCount: 0,
-        totalSubtotal: 0,
-        totalCommission: 0,
-        sales: [],
-      });
+    if (!salesBySeller.has(row.user_id)) {
+      salesBySeller.set(row.user_id, new Map());
     }
-
-    const seller = sellerMap.get(row.user_id);
-    if (!seller) {
+    const salesMap = salesBySeller.get(row.user_id);
+    if (!salesMap) {
       continue;
     }
 
-    const saleData = Array.isArray(row.sale) ? row.sale[0] : row.sale;
+    let sale = salesMap.get(row.sales_order_id);
+    if (!sale) {
+      sale = createSaleFromRow(row, customerMap, receivableStatusMap);
+      salesMap.set(row.sales_order_id, sale);
+    }
 
-    const commissionSale: CommissionSale = {
+    sale.paidCommission = truncateMoney(
+      sale.paidCommission + row.commission_amount
+    );
+    sale.remainingCommission = truncateMoney(
+      Math.max(0, sale.totalCommission - sale.paidCommission)
+    );
+    sale.payments.push({
       id: row.id,
-      saleNumber: saleData?.sale_number ?? null,
-      customerName: customerMap.get(row.sales_order_id) || "",
-      invoiceNumber: saleData?.invoice_number ?? null,
-      dispatchedAt: saleData?.dispatched_at ?? null,
-      subTotal: saleData?.sub_total ?? 0,
-      commissionRate: row.base_commission_rate + row.extra_commission_rate,
-      commissionAmount: row.commission_amount,
       paidAmount: row.paid_amount,
-    };
+      commissionAmount: row.commission_amount,
+      paidAt: row.created_at,
+    });
+  }
 
-    seller.sales.push(commissionSale);
-    seller.saleCount += 1;
-    seller.totalSubtotal = truncateMoney(
-      seller.totalSubtotal + (saleData?.sub_total ?? 0)
-    );
-    seller.totalCommission = truncateMoney(
-      seller.totalCommission + row.commission_amount
-    );
+  for (const [userId, salesMap] of salesBySeller.entries()) {
+    const sales = Array.from(salesMap.values());
+    sellerMap.set(userId, {
+      userId,
+      sellerName: nameMap.get(userId) || userId,
+      baseCommissionRate: baseRateMap.get(userId) ?? 0,
+      saleCount: sales.length,
+      totalSubtotal: truncateMoney(
+        sales.reduce((sum, s) => sum + s.subTotal, 0)
+      ),
+      totalCommission: truncateMoney(
+        sales.reduce((sum, s) => sum + s.paidCommission, 0)
+      ),
+      sales,
+    });
   }
 
   return sellerMap;
@@ -284,35 +374,65 @@ export async function getCommissionsPaginated(
   const supabase = await createClient();
   const { monthStart, monthEnd } = getMonthRange(params.month);
 
-  let query = supabase
+  // 1. Todos los vendedores únicos con comisiones en el período.
+  let userQuery = supabase
+    .from("commissions")
+    .select("user_id")
+    .eq("organization_id", org.id)
+    .gte("created_at", monthStart)
+    .lte("created_at", `${monthEnd}T23:59:59`);
+
+  if (params.sellerId) {
+    userQuery = userQuery.eq("user_id", params.sellerId);
+  }
+
+  const { data: userRows, error: userError } = await userQuery;
+
+  if (userError) {
+    throw new Error(
+      `Error fetching commission sellers: ${userError?.message ?? "No data"}`
+    );
+  }
+
+  let allUserIds = [...new Set((userRows ?? []).map((r) => r.user_id))];
+
+  // 2. Búsqueda por nombre de vendedor (server-side).
+  if (params.search) {
+    const term = params.search.toLowerCase();
+    const allNameMap = await fetchSellerNames(supabase, allUserIds, org.id);
+    allUserIds = allUserIds.filter((id) =>
+      (allNameMap.get(id) ?? "").toLowerCase().includes(term)
+    );
+  }
+
+  const totalCount = allUserIds.length;
+
+  // 3. Paginar por vendedor en memoria.
+  const pageUserIds = allUserIds.slice((page - 1) * pageSize, page * pageSize);
+
+  if (pageUserIds.length === 0) {
+    return { data: [], totalCount, page, pageSize };
+  }
+
+  // 4. Traer las filas de comisión de los vendedores de la página (sin range,
+  //    para armar las cards por venta completas).
+  const { data: commissionRows, error } = await supabase
     .from("commissions")
     .select(
       `id, user_id, sales_order_id, base_commission_rate, extra_commission_rate,
-       commission_amount, paid_amount, created_at`,
-      { count: "exact" }
+       commission_amount, paid_amount, created_at`
     )
     .eq("organization_id", org.id)
+    .in("user_id", pageUserIds)
     .gte("created_at", monthStart)
     .lte("created_at", `${monthEnd}T23:59:59`)
     .order("created_at", { ascending: false });
-
-  if (params.sellerId) {
-    query = query.eq("user_id", params.sellerId);
-  }
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  query = query.range(from, to);
-
-  const { data: commissionRows, error, count } = await query;
 
   if (error || !commissionRows) {
     throw new Error(
       `Error fetching commissions: ${error?.message ?? "No data"}`
     );
   }
-
-  const totalCount = count ?? 0;
 
   const userIds = [...new Set(commissionRows.map((c) => c.user_id))];
   const saleIds = [...new Set(commissionRows.map((c) => c.sales_order_id))];
@@ -343,19 +463,21 @@ export async function getCommissionsPaginated(
     fetchSellerBaseRates(supabase, userIds, org.id),
   ]);
 
-  const sellerMap = buildCommissionSellers(
-    enrichedRows,
-    nameMap,
-    baseRateMap,
-    customerMap
+  const receivableStatusMap = await fetchReceivableStatusMap(
+    supabase,
+    saleIds,
+    org.id
   );
 
-  let sellers = Array.from(sellerMap.values());
+  const sellerMap = buildCommissionSellers({
+    commissionRows: enrichedRows,
+    nameMap,
+    baseRateMap,
+    customerMap,
+    receivableStatusMap,
+  });
 
-  if (params.search) {
-    const term = params.search.toLowerCase();
-    sellers = sellers.filter((s) => s.sellerName.toLowerCase().includes(term));
-  }
+  const sellers = Array.from(sellerMap.values());
 
   const sorted = sortSellers(sellers, params);
 
@@ -414,11 +536,25 @@ export async function getAllCommissionsForExport(
   orgSlug: string,
   month?: string
 ): Promise<CommissionSeller[]> {
-  const result = await getCommissionsPaginated(orgSlug, {
+  const PAGE_SIZE = 100;
+  const all: CommissionSeller[] = [];
+
+  const first = await getCommissionsPaginated(orgSlug, {
     page: 1,
-    pageSize: 10_000, // Max rows: silently truncates data beyond this limit
+    pageSize: PAGE_SIZE,
     month,
   });
+  all.push(...first.data);
 
-  return result.data;
+  const pageCount = Math.max(1, Math.ceil(first.totalCount / PAGE_SIZE));
+  for (let page = 2; page <= pageCount; page += 1) {
+    const result = await getCommissionsPaginated(orgSlug, {
+      page,
+      pageSize: PAGE_SIZE,
+      month,
+    });
+    all.push(...result.data);
+  }
+
+  return all;
 }

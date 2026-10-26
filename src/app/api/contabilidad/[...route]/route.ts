@@ -21,6 +21,10 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 const ACCOUNTING_SERVICE_URL = process.env.ACCOUNTING_SERVICE_URL;
 const SERVICE_TOKEN = process.env.ACCOUNTING_SERVICE_TOKEN;
 const ORG_SLUG_HEADER = "x-org-slug";
+const INFORMAL_ENTRY_MUTATION_RE =
+  /^informal-entries\/([^/]+)\/(formalizar|cancelar|asentar)$/;
+const HTTP_CONFLICT = 409;
+const HTTP_BAD_GATEWAY = 502;
 
 type ParsedProxyBody = {
   contentType: string;
@@ -237,6 +241,84 @@ async function verifyAccountingAccess(params: {
   return null;
 }
 
+// Los asientos de ventas POS sólo se gestionan desde su bandeja, que mantiene
+// sincronizado el vínculo en pos_sales.
+async function rejectPosSaleEntryMutation(params: {
+  req: NextRequest;
+  route: string[];
+  organizationId: string;
+}): Promise<NextResponse | null> {
+  if (params.req.method !== "POST") {
+    return null;
+  }
+
+  const match = INFORMAL_ENTRY_MUTATION_RE.exec(params.route.join("/"));
+  if (!match) {
+    return null;
+  }
+
+  const url = new URL(
+    `${ACCOUNTING_SERVICE_URL}/informal-entries/${encodeURIComponent(match[1])}`
+  );
+  url.searchParams.set("org_id", params.organizationId);
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "X-Service-Token": SERVICE_TOKEN as string },
+    });
+
+    if (!res.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            res.status === 404
+              ? "Asiento informal no encontrado"
+              : "No se pudo verificar el tipo de asiento informal",
+        },
+        { status: res.status === 404 ? 404 : HTTP_BAD_GATEWAY }
+      );
+    }
+
+    const json = (await res.json().catch(() => null)) as {
+      data?: { source_type?: string };
+    } | null;
+
+    if (!json?.data || typeof json.data.source_type !== "string") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "El servicio contable no devolvió el tipo de asiento informal",
+        },
+        { status: HTTP_BAD_GATEWAY }
+      );
+    }
+
+    if (json.data.source_type !== "VENTA_POS") {
+      return null;
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Los asientos de ventas POS se gestionan desde la bandeja de Ventas POS sin contabilizar.",
+      },
+      { status: HTTP_CONFLICT }
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Error de red";
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `No se pudo conectar al servicio contable: ${message}`,
+      },
+      { status: HTTP_BAD_GATEWAY }
+    );
+  }
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ route: string[] }> }
@@ -305,6 +387,16 @@ async function proxyRequest(
 
   if (accessError) {
     return accessError;
+  }
+
+  const posEntryError = await rejectPosSaleEntryMutation({
+    req,
+    route,
+    organizationId: organization.id,
+  });
+
+  if (posEntryError) {
+    return posEntryError;
   }
 
   const url = buildUpstreamUrl(route, req, organization.id);

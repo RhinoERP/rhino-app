@@ -24,6 +24,7 @@ export type PurchaseItem = {
   discount_percent?: number;
   has_variants?: boolean;
   variant_stocks?: Record<string, Record<string, number>>;
+  taxes?: import("@/modules/taxes/item-tax-calculations").ItemTaxInput[];
 };
 
 function isWeightOrVolumeUnit(unit: string): boolean {

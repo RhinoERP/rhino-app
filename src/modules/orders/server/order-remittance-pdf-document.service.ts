@@ -1,11 +1,13 @@
 import "server-only";
 
-import { truncateMoney } from "@/lib/decimal";
+import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
+import { computeLineGross } from "@/lib/line-values";
 import { createClient } from "@/lib/supabase/server";
 import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
   generateRemittanceHTML,
   type RemittanceData,
@@ -26,6 +28,7 @@ export type OrderRemittanceData = {
 
 type QuoteItemWithProduct = {
   id: string;
+  product_id: string | null;
   description: string | null;
   quantity: number;
   unit_price: number;
@@ -56,6 +59,57 @@ type SaleItemPrices = {
   unit_price: number;
   discount_percentage: number | null;
 };
+
+export function groupOrderRemittanceItems(
+  rows: Array<{
+    source: {
+      id: string;
+      product_id: string | null;
+      product_variant_id: string | null;
+    };
+    item: RemittanceData["items"][number];
+  }>
+): RemittanceData["items"] {
+  const grouped = new Map<string, RemittanceData["items"][number]>();
+
+  for (const { source, item } of rows) {
+    // The sale's weight can represent the entire unsplit line. Without a
+    // per-child weight allocation, merging weighted lines would be misleading.
+    const key =
+      source.product_id && item.weightQuantity == null
+        ? JSON.stringify([
+            source.product_id,
+            source.product_variant_id,
+            item.sku,
+            item.name,
+            item.brand ?? null,
+            item.variantName ?? null,
+            item.unitOfMeasure,
+            item.unitPrice,
+            item.discountPercentage ?? 0,
+            [...(item.extras ?? [])]
+              .map((extra) => [extra.description, extra.unitPrice])
+              .sort(([descriptionA, priceA], [descriptionB, priceB]) =>
+                JSON.stringify([descriptionA, priceA]).localeCompare(
+                  JSON.stringify([descriptionB, priceB])
+                )
+              ),
+          ])
+        : JSON.stringify(["single", source.id]);
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      existing.subtotal = truncateToDecimals(
+        existing.subtotal + item.subtotal,
+        6
+      );
+    } else {
+      grouped.set(key, { ...item });
+    }
+  }
+
+  return [...grouped.values()];
+}
 
 async function fetchOrderItems(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -128,38 +182,48 @@ async function fetchOrderItems(
     }
   }
 
-  return (quoteItems ?? []).map((item: QuoteItemWithProduct) => {
+  const rows = (quoteItems ?? []).map((item: QuoteItemWithProduct) => {
     const saleItem = saleByQuoteId.get(item.id);
     const unitPrice = saleItem?.unit_price ?? item.unit_price;
-    const quantity = saleItem?.quantity ?? item.quantity;
+    // The sale keeps the original commercial quantity; a quote item may have
+    // been split across child orders, so only its assigned quantity is shipped.
+    const quantity = item.quantity;
     const description = saleItem?.description ?? item.description;
     const extras = (item.quote_item_extras ?? []).map((extra) => ({
       description: extra.description,
       unitPrice: Number(extra.price ?? 0),
     }));
-    const extrasTotal = truncateMoney(
-      extras.reduce((sum, extra) => sum + extra.unitPrice, 0)
-    );
 
     return {
-      sku: item.products?.sku ?? "",
-      name: item.products?.name ?? description ?? "Producto",
-      brand: item.products?.brand ?? undefined,
-      variantName: item.product_variants
-        ? [item.product_variants.talle, item.product_variants.color]
-            .filter(Boolean)
-            .join(" · ") || undefined
-        : undefined,
-      quantity,
-      unitOfMeasure: item.products?.unit_of_measure ?? "UN",
-      weightQuantity: saleItem?.unit_quantity ?? undefined,
-      unitPrice,
-      subtotal: truncateMoney(unitPrice * quantity + extrasTotal * quantity),
-      discountPercentage:
-        saleItem?.discount_percentage ?? item.discount_percentage ?? undefined,
-      extras,
+      source: item,
+      item: {
+        sku: item.products?.sku ?? "",
+        name: item.products?.name ?? description ?? "Producto",
+        brand: item.products?.brand ?? undefined,
+        variantName: item.product_variants
+          ? [item.product_variants.talle, item.product_variants.color]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          : undefined,
+        quantity,
+        unitOfMeasure: item.products?.unit_of_measure ?? "UN",
+        weightQuantity: saleItem?.unit_quantity ?? undefined,
+        unitPrice,
+        subtotal: computeLineGross(
+          unitPrice,
+          quantity,
+          item.quote_item_extras ?? undefined
+        ),
+        discountPercentage:
+          saleItem?.discount_percentage ??
+          item.discount_percentage ??
+          undefined,
+        extras,
+      },
     };
   });
+
+  return groupOrderRemittanceItems(rows);
 }
 
 type CustomerRow = {
@@ -299,6 +363,9 @@ export async function getOrderRemittanceData(params: {
     total,
     observations: orderData.observations ?? null,
     singlePageDuplicate,
+    showProductBrand:
+      organization != null &&
+      isOrganizationModuleEnabled(organization, "production"),
     finalRemittanceVisibility,
   };
 

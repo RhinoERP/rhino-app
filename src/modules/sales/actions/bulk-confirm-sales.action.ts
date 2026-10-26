@@ -54,6 +54,11 @@ type SaleRow = {
     unit_quantity: number | null;
     unit_price: number;
     discount_percentage: number | null;
+    quote_item_id: string | null;
+    sales_order_item_extras: Array<{
+      name_snapshot: string;
+      price_snapshot: number;
+    }> | null;
   }> | null;
 };
 
@@ -83,6 +88,11 @@ async function confirmOneSale(
         weightQuantity: item.unit_quantity,
         unitPrice: item.unit_price,
         discountPercentage: item.discount_percentage,
+        quoteItemId: item.quote_item_id,
+        extras: (item.sales_order_item_extras ?? []).map((extra) => ({
+          description: extra.name_snapshot,
+          price: extra.price_snapshot,
+        })),
       })),
     });
     return { saleId: sale.id, saleNumber: saleLabel, ok: true };
@@ -126,7 +136,7 @@ export async function bulkConfirmSalesAction(
         `id, sale_number, customer_id, user_id, sale_date, expiration_date,
          credit_days, invoice_type, invoice_number, observations,
          global_discount_percentage,
-         sales_order_items(id, product_id, description, quantity, unit_quantity, unit_price, discount_percentage)`
+          sales_order_items(id, product_id, description, quantity, unit_quantity, unit_price, discount_percentage, quote_item_id, sales_order_item_extras(name_snapshot, price_snapshot))`
       )
       .in("id", saleIds)
       .eq("status", "DRAFT");

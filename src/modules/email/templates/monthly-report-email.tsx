@@ -29,9 +29,12 @@ type MonthlyReportEmailProps = {
   totalBilled: number;
   totalCollected: number;
   pendingCollection: number;
+  totalBilledUSD?: number;
+  totalCollectedUSD?: number;
+  pendingCollectionUSD?: number;
   // Top performers
-  topClients: TopPerformer[];
-  topProducts: TopPerformer[];
+  topClients: { ars: TopPerformer[]; usd: TopPerformer[] };
+  topProducts: { ars: TopPerformer[]; usd: TopPerformer[] };
   // Operational alerts
   outOfStockCount: number;
   delayedOrdersCount: number;
@@ -45,6 +48,9 @@ export function MonthlyReportEmail({
   totalBilled,
   totalCollected,
   pendingCollection,
+  totalBilledUSD,
+  totalCollectedUSD,
+  pendingCollectionUSD,
   topClients,
   topProducts,
   outOfStockCount,
@@ -74,7 +80,7 @@ export function MonthlyReportEmail({
                   <td style={tableCell}>
                     <Text style={tableLabel}>Total Facturado</Text>
                     <Text style={tableValue}>
-                      {formatCurrency(totalBilled)}
+                      {formatDualCurrency(totalBilled, totalBilledUSD)}
                     </Text>
                   </td>
                 </tr>
@@ -82,7 +88,7 @@ export function MonthlyReportEmail({
                   <td style={tableCell}>
                     <Text style={tableLabel}>Total Cobrado</Text>
                     <Text style={tableValue}>
-                      {formatCurrency(totalCollected)}
+                      {formatDualCurrency(totalCollected, totalCollectedUSD)}
                     </Text>
                   </td>
                 </tr>
@@ -90,7 +96,10 @@ export function MonthlyReportEmail({
                   <td style={tableCell}>
                     <Text style={tableLabel}>Pendiente de Cobro</Text>
                     <Text style={tableValueWarning}>
-                      {formatCurrency(pendingCollection)}
+                      {formatDualCurrency(
+                        pendingCollection,
+                        pendingCollectionUSD
+                      )}
                     </Text>
                   </td>
                 </tr>
@@ -103,43 +112,27 @@ export function MonthlyReportEmail({
             <Heading style={h2}>🏆 Top Performers</Heading>
 
             <Row style={row}>
-              <Column style={column}>
-                <Text style={h3}>Top 5 Clientes</Text>
-                <table style={table}>
-                  <tbody>
-                    {topClients.map((client, index) => (
-                      <tr key={client.name}>
-                        <td style={topItemCell}>
-                          <Text style={topItemRank}>{index + 1}.</Text>
-                          <Text style={topItemName}>{client.name}</Text>
-                          <Text style={topItemValue}>
-                            {formatCurrency(client.value)}
-                          </Text>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Column>
+              <TopPerformersColumn
+                items={topClients.ars}
+                title="Top 5 Clientes (ARS)"
+              />
+              <TopPerformersColumn
+                currency="USD"
+                items={topClients.usd}
+                title="Top 5 Clientes (USD)"
+              />
+            </Row>
 
-              <Column style={column}>
-                <Text style={h3}>Top 5 Productos</Text>
-                <table style={table}>
-                  <tbody>
-                    {topProducts.map((product, index) => (
-                      <tr key={product.name}>
-                        <td style={topItemCell}>
-                          <Text style={topItemRank}>{index + 1}.</Text>
-                          <Text style={topItemName}>{product.name}</Text>
-                          <Text style={topItemValue}>
-                            {formatCurrency(product.value)}
-                          </Text>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Column>
+            <Row style={row}>
+              <TopPerformersColumn
+                items={topProducts.ars}
+                title="Top 5 Productos (ARS)"
+              />
+              <TopPerformersColumn
+                currency="USD"
+                items={topProducts.usd}
+                title="Top 5 Productos (USD)"
+              />
             </Row>
           </Section>
 
@@ -181,14 +174,60 @@ export function MonthlyReportEmail({
   );
 }
 
+function TopPerformersColumn({
+  title,
+  items,
+  currency = "ARS",
+}: {
+  title: string;
+  items: TopPerformer[];
+  currency?: string;
+}) {
+  return (
+    <Column style={column}>
+      <Text style={h3}>{title}</Text>
+      <table style={table}>
+        <tbody>
+          {items.length === 0 ? (
+            <tr>
+              <td style={topItemCell}>
+                <Text style={topItemName}>Sin datos</Text>
+              </td>
+            </tr>
+          ) : (
+            items.map((item, index) => (
+              <tr key={item.name}>
+                <td style={topItemCell}>
+                  <Text style={topItemRank}>{index + 1}.</Text>
+                  <Text style={topItemName}>{item.name}</Text>
+                  <Text style={topItemValue}>
+                    {formatCurrency(item.value, currency)}
+                  </Text>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </Column>
+  );
+}
+
 // Helper function for currency formatting
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number, currency = "ARS"): string {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
-    currency: "ARS",
+    currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+function formatDualCurrency(amount: number, amountUsd?: number): string {
+  if (amountUsd && amountUsd > 0) {
+    return `${formatCurrency(amount)} / ${formatCurrency(amountUsd, "USD")}`;
+  }
+  return formatCurrency(amount);
 }
 
 // Styles

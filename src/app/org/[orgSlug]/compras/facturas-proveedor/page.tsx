@@ -37,6 +37,7 @@ export default async function SupplierInvoicesPage({
             supplier_id: purchaseOrder.supplier_id,
             total_amount: purchaseOrder.total_amount,
             status: purchaseOrder.status,
+            currency: purchaseOrder.currency ?? "ARS",
           }))}
         suppliers={suppliers}
       />

@@ -18,6 +18,8 @@ import {
 import { useVariantLoader } from "@/hooks/use-variant-loader";
 import type { Category } from "@/modules/categories/types";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
+import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
 import { FilterPopover } from "./filter-popover";
 import { ItemsView } from "./items-view";
 import { ProductSection } from "./product-section";
@@ -33,6 +35,10 @@ type PurchaseItemsListProps = {
   onRemoveItem: (index: number) => void;
   isLoadingProducts: boolean;
   categories?: Category[];
+  productTaxes: Map<string, ItemTaxInput[]>;
+  fallbackTaxes?: ItemTaxInput[];
+  taxes: Tax[];
+  globalDiscountPercent: number;
 };
 
 export function PurchaseItemsList({
@@ -44,6 +50,10 @@ export function PurchaseItemsList({
   onRemoveItem,
   isLoadingProducts,
   categories = [],
+  productTaxes,
+  fallbackTaxes = [],
+  taxes,
+  globalDiscountPercent,
 }: PurchaseItemsListProps) {
   const { variantMetaMap } = useVariantLoader(orgSlug, items);
 
@@ -152,6 +162,8 @@ export function PurchaseItemsList({
           </div>
           <ItemsView
             currency={currency}
+            fallbackTaxes={fallbackTaxes}
+            globalDiscountPercent={globalDiscountPercent}
             handleUpdateDiscount={handleItemUpdate("discount")}
             handleUpdatePricePerKg={handleItemUpdate("pricePerKg")}
             handleUpdateQuantity={handleItemUpdate("quantity")}
@@ -159,7 +171,10 @@ export function PurchaseItemsList({
             handleVariantStockChange={handleVariantStockChange}
             items={items}
             onRemoveItem={onRemoveItem}
+            onUpdateItem={onUpdateItem}
             products={products}
+            productTaxes={productTaxes}
+            taxes={taxes}
             variantMetaMap={variantMetaMap}
           />
         </div>

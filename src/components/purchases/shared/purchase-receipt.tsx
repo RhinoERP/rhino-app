@@ -22,10 +22,25 @@ import {
   purchasesQueryKey,
 } from "@/modules/purchases/queries/query-keys";
 import type {
+  ProductWithPrice,
   PurchaseOrder,
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
 import type { LotInput, VariantStockInput } from "@/modules/purchases/types";
+import {
+  getPurchaseUnitShortLabel,
+  isMeasuredUnit,
+} from "@/modules/purchases/utils/purchase-units";
+import {
+  hasUnreceivedPurchaseQuantities,
+  hasUnreceivedVariantQuantities,
+  pendingReceiptUnitQuantity,
+  remainingVariantStocks,
+} from "@/modules/purchases/utils/receipt-progress";
+import type {
+  ItemTaxInput,
+  ItemTaxSource,
+} from "@/modules/taxes/item-tax-calculations";
 import { PurchaseReceiptItems } from "./purchase-receipt-items";
 import { PurchaseReceiptSummary } from "./purchase-receipt-summary";
 
@@ -41,11 +56,12 @@ export type LotEntryForm = {
 export type ReceivedItemForm = {
   itemId: string;
   productId: string;
+  newItem?: boolean;
   product_name?: string;
   received: boolean;
   /** Total ordered quantity in units */
   orderedQuantity: number;
-  /** Total ordered unit quantity (kg/lt/mt) */
+  /** Total ordered unit quantity (kg/lt/m) */
   orderedUnitQuantity: number;
   unitCost: number;
   unit_of_measure?: string | null;
@@ -66,47 +82,87 @@ type PurchaseReceiptProps = {
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean | null;
+      tax_override?: ItemTaxInput[] | null;
+      item_taxes?: Array<{
+        tax_id: string | null;
+        name: string;
+        rate: number;
+        tax_code_snapshot: string | null;
+        source: ItemTaxSource;
+      }>;
     })[];
+    fallback_taxes?: ItemTaxInput[];
+    tax_snapshot_initialized?: boolean;
     taxes: Array<{
-      tax_id: string;
+      tax_id: string | null;
       name: string;
       rate: number;
     }> | null;
   };
   orgSlug: string;
   allTaxes: unknown[];
+  receivedProgress: Record<
+    string,
+    {
+      quantity: number;
+      unitQuantity: number;
+      variantStocks: Record<string, Record<string, number>>;
+    }
+  >;
+  products: ProductWithPrice[];
+  hasSupplierInvoice: boolean;
 };
 
 function buildInitialItems(
-  purchaseOrder: PurchaseReceiptProps["purchaseOrder"]
+  purchaseOrder: PurchaseReceiptProps["purchaseOrder"],
+  progress: PurchaseReceiptProps["receivedProgress"]
 ): ReceivedItemForm[] {
-  return purchaseOrder.items.map((item) => ({
-    itemId: item.id,
-    productId: item.product_id,
-    product_name: item.product_name,
-    received: false,
-    orderedQuantity: item.quantity ?? 0,
-    orderedUnitQuantity: item.unit_quantity ?? 0,
-    unitCost: item.unit_cost ?? 0,
-    unit_of_measure: item.unit_of_measure ?? null,
-    weight_per_unit: item.weight_per_unit ?? null,
-    has_variants: item.has_variants ?? false,
-    variant_stocks: (item.variant_stocks ?? null) as Record<
-      string,
-      Record<string, number>
-    > | null,
-    lots: item.has_variants
-      ? []
-      : [
-          {
-            _key: crypto.randomUUID(),
-            lotNumber: "",
-            expirationDate: undefined,
-            quantity: item.quantity ?? 0,
-            unitQuantity: item.unit_quantity ?? 0,
-          },
-        ],
-  }));
+  return purchaseOrder.items.map((item) => {
+    const pendingVariants = remainingVariantStocks(
+      (item.variant_stocks ?? null) as Record<
+        string,
+        Record<string, number>
+      > | null,
+      progress[item.id]?.variantStocks
+    );
+    const remainingQuantity = item.has_variants
+      ? Object.values(pendingVariants).reduce(
+          (sum, sizes) =>
+            sum + Object.values(sizes).reduce((count, qty) => count + qty, 0),
+          0
+        )
+      : Math.max(0, (item.quantity ?? 0) - (progress[item.id]?.quantity ?? 0));
+    const pendingUnitQuantity = pendingReceiptUnitQuantity({
+      hasVariants: Boolean(item.has_variants),
+      unitQuantity: item.unit_quantity,
+      receivedUnitQuantity: progress[item.id]?.unitQuantity ?? 0,
+      pendingVariantUnits: remainingQuantity,
+    });
+    return {
+      itemId: item.id,
+      productId: item.product_id,
+      product_name: item.product_name,
+      received: false,
+      orderedQuantity: remainingQuantity,
+      orderedUnitQuantity: pendingUnitQuantity,
+      unitCost: item.unit_cost ?? 0,
+      unit_of_measure: item.unit_of_measure ?? null,
+      weight_per_unit: item.weight_per_unit ?? null,
+      has_variants: item.has_variants ?? false,
+      variant_stocks: pendingVariants,
+      lots: item.has_variants
+        ? []
+        : [
+            {
+              _key: crypto.randomUUID(),
+              lotNumber: "",
+              expirationDate: undefined,
+              quantity: remainingQuantity,
+              unitQuantity: pendingUnitQuantity,
+            },
+          ],
+    };
+  });
 }
 
 function validateSingleLot(
@@ -183,6 +239,8 @@ function buildItemVariantStocks(
 function buildActionInput(input: {
   orgSlug: string;
   purchaseOrderId: string;
+  receiptId: string;
+  closePurchase: boolean;
   itemsToReceive: ReceivedItemForm[];
   variantData: Record<string, VariantProductData>;
   variantStockValues: Record<string, Record<string, Record<string, number>>>;
@@ -190,6 +248,8 @@ function buildActionInput(input: {
   const {
     orgSlug,
     purchaseOrderId,
+    receiptId,
+    closePurchase,
     itemsToReceive,
     variantData,
     variantStockValues,
@@ -198,10 +258,13 @@ function buildActionInput(input: {
   return {
     orgSlug,
     purchaseOrderId,
+    receiptId,
+    closePurchase,
     receivedItems: itemsToReceive.map((item) => {
       const base = {
         itemId: item.itemId,
         productId: item.productId,
+        newItem: item.newItem ?? false,
         received: true as const,
         unitCost: item.unitCost,
       };
@@ -244,14 +307,6 @@ export type ModifiedItemDisplay = {
   isWeightBased: boolean;
   variantChanges?: VariantChangeDetail[];
 };
-
-function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
-  if (!unitOfMeasure) {
-    return false;
-  }
-  const normalized = unitOfMeasure.toUpperCase();
-  return normalized === "KG" || normalized === "LT" || normalized === "MT";
-}
 
 function computeVariantModifications(
   item: ReceivedItemForm,
@@ -326,7 +381,7 @@ function computeModifications(
         modifiedQty: assignedQty,
         modifiedUnitQty: assignedUnitQty,
         unit_of_measure: item.unit_of_measure,
-        isWeightBased: hasWeightOrVolumeMeasure(item.unit_of_measure),
+        isWeightBased: isMeasuredUnit(item.unit_of_measure),
       };
     });
 }
@@ -334,17 +389,20 @@ function computeModifications(
 export function PurchaseReceipt({
   purchaseOrder,
   orgSlug,
+  receivedProgress,
+  products,
+  hasSupplierInvoice,
 }: PurchaseReceiptProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
 
   const form = useForm<ReceiptFormValues>({
     defaultValues: {
-      items: buildInitialItems(purchaseOrder),
+      items: buildInitialItems(purchaseOrder, receivedProgress),
     },
   });
 
-  const { fields: itemFields } = useFieldArray({
+  const { fields: itemFields, append: appendItem } = useFieldArray({
     control: form.control,
     name: "items",
   });
@@ -355,6 +413,9 @@ export function PurchaseReceipt({
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [modifiedItems, setModifiedItems] = useState<ModifiedItemDisplay[]>([]);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [newProductId, setNewProductId] = useState("");
+  const [hasPending, setHasPending] = useState(false);
+  const receiptIdRef = useRef<string | null>(null);
 
   const [variantData, setVariantData] = useState<
     Record<string, VariantProductData>
@@ -439,23 +500,65 @@ export function PurchaseReceipt({
 
   const items = form.watch("items");
 
+  const addReceivedProduct = () => {
+    const product = products.find((candidate) => candidate.id === newProductId);
+    if (!product?.id || items.some((item) => item.productId === product.id)) {
+      setError("Seleccioná un producto que todavía no figure en la compra");
+      return;
+    }
+    appendItem({
+      itemId: crypto.randomUUID(),
+      productId: product.id,
+      newItem: true,
+      product_name: product.name ?? product.id,
+      received: true,
+      orderedQuantity: 0,
+      orderedUnitQuantity: 0,
+      unitCost: product.cost_price ?? 0,
+      unit_of_measure: product.unit_of_measure,
+      has_variants: product.has_variants,
+      variant_stocks: product.has_variants ? {} : null,
+      lots: product.has_variants
+        ? []
+        : [
+            {
+              _key: crypto.randomUUID(),
+              lotNumber: "",
+              expirationDate: undefined,
+              quantity: 1,
+              unitQuantity: 1,
+            },
+          ],
+    });
+    setNewProductId("");
+    setError(null);
+  };
+
   const handleToggleAll = (checked: boolean) => {
     for (const [index] of items.entries()) {
       form.setValue(`items.${index}.received`, checked);
     }
   };
 
-  const submitReceive = async (itemsToReceive: ReceivedItemForm[]) => {
+  const submitReceive = async (
+    itemsToReceive: ReceivedItemForm[],
+    closePurchase: boolean
+  ) => {
     const validationError = validateLots(itemsToReceive);
     if (validationError) {
       setError(validationError);
       return;
     }
 
+    if (!receiptIdRef.current) {
+      receiptIdRef.current = crypto.randomUUID();
+    }
     const result = await receivePurchaseAction(
       buildActionInput({
         orgSlug,
         purchaseOrderId: purchaseOrder.id,
+        receiptId: receiptIdRef.current,
+        closePurchase,
         itemsToReceive,
         variantData,
         variantStockValues,
@@ -495,25 +598,55 @@ export function PurchaseReceipt({
     );
     const hasModifications = modifications.some(
       (m) =>
-        m.modifiedQty !== m.orderedQty || m.modifiedUnitQty !== m.orderedUnitQty
+        m.modifiedQty !== m.orderedQty ||
+        m.modifiedUnitQty !== m.orderedUnitQty ||
+        (m.variantChanges?.length ?? 0) > 0
     );
 
-    if (hasModifications) {
-      setModifiedItems(modifications);
+    const unselected = values.items.filter(
+      (item) =>
+        !item.received &&
+        (item.orderedQuantity > 0 || item.orderedUnitQuantity > 0)
+    );
+    const leavesPending =
+      hasUnreceivedPurchaseQuantities(values.items, modifications) ||
+      values.items.some(
+        (item) =>
+          item.received &&
+          item.has_variants &&
+          hasUnreceivedVariantQuantities(
+            item.variant_stocks ?? null,
+            variantStockValues[item.productId] ?? {}
+          )
+      );
+    if (hasModifications || leavesPending) {
+      setHasPending(leavesPending);
+      setModifiedItems([
+        ...modifications,
+        ...unselected.map((item) => ({
+          productName: item.product_name ?? item.productId,
+          orderedQty: item.orderedQuantity,
+          orderedUnitQty: item.orderedUnitQuantity,
+          modifiedQty: 0,
+          modifiedUnitQty: 0,
+          unit_of_measure: item.unit_of_measure,
+          isWeightBased: isMeasuredUnit(item.unit_of_measure),
+        })),
+      ]);
       setConfirmModalOpen(true);
       return;
     }
 
-    await submitReceive(itemsToReceive);
+    await submitReceive(itemsToReceive, true);
   });
 
-  const handleConfirmReceive = async () => {
+  const handleConfirmReceive = async (closePurchase: boolean) => {
     setIsConfirming(true);
     setError(null);
 
     const values = form.getValues();
     const itemsToReceive = values.items.filter((item) => item.received);
-    await submitReceive(itemsToReceive);
+    await submitReceive(itemsToReceive, closePurchase);
 
     setIsConfirming(false);
     setConfirmModalOpen(false);
@@ -522,6 +655,12 @@ export function PurchaseReceipt({
   const receivedCount = items.filter((item) => item.received).length;
   const totalItems = items.length;
   const allSelected = totalItems > 0 && receivedCount === totalItems;
+  let confirmLabel = "Confirmar recepción";
+  if (isConfirming) {
+    confirmLabel = "Procesando...";
+  } else if (hasPending) {
+    confirmLabel = "Recibir y cerrar con faltante";
+  }
 
   return (
     <div className="space-y-6">
@@ -549,6 +688,38 @@ export function PurchaseReceipt({
           <p className="text-red-900 text-sm">{error}</p>
         </div>
       )}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
+        <label htmlFor="extra-received-product">
+          Producto adicional recibido
+        </label>
+        <select
+          className="min-w-48 rounded-md border bg-background px-3 py-2 text-sm"
+          id="extra-received-product"
+          onChange={(event) => setNewProductId(event.target.value)}
+          value={newProductId}
+        >
+          <option value="">Seleccionar producto</option>
+          {products
+            .filter(
+              (product) =>
+                product.id &&
+                !items.some((item) => item.productId === product.id)
+            )
+            .map((product) => (
+              <option key={product.id} value={product.id ?? ""}>
+                {product.name}
+              </option>
+            ))}
+        </select>
+        <Button
+          disabled={!newProductId}
+          onClick={addReceivedProduct}
+          type="button"
+          variant="outline"
+        >
+          Agregar a recepción
+        </Button>
+      </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
@@ -572,9 +743,28 @@ export function PurchaseReceipt({
         <PurchaseReceiptSummary
           currency={purchaseOrder.currency ?? "ARS"}
           error={error}
+          fallbackTaxes={purchaseOrder.fallback_taxes ?? []}
           globalDiscountPercentage={purchaseOrder.global_discount_percentage}
+          hasItemTaxSnapshots={purchaseOrder.tax_snapshot_initialized ?? false}
           isReceiving={isReceiving}
           items={items}
+          itemTaxSelections={
+            new Map(
+              purchaseOrder.items.map((item) => [
+                item.id,
+                item.tax_override ??
+                  (item.item_taxes ?? [])
+                    .filter((tax) => tax.source !== "fallback")
+                    .map((tax) => ({
+                      taxId: tax.tax_id ?? "",
+                      name: tax.name,
+                      rate: tax.rate,
+                      taxCodeSnapshot: tax.tax_code_snapshot,
+                      source: tax.source,
+                    })),
+              ])
+            )
+          }
           onReceive={handleReceive}
           receivedCount={receivedCount}
           taxes={purchaseOrder.taxes || []}
@@ -588,9 +778,21 @@ export function PurchaseReceipt({
           <DialogHeader>
             <DialogTitle>Confirmar recepción</DialogTitle>
             <DialogDescription>
-              ¿Está seguro que quiere marcar el pedido como recibido con las
-              siguientes modificaciones?
+              {hasPending
+                ? "Quedan productos pendientes. Podés esperar otra entrega o cerrar la compra con faltante."
+                : "¿Confirmás la recepción con las siguientes cantidades?"}
             </DialogDescription>
+            {hasSupplierInvoice &&
+              modifiedItems.some(
+                (item) =>
+                  item.modifiedQty !== item.orderedQty ||
+                  item.variantChanges?.length
+              ) && (
+                <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm">
+                  Pedido ya facturado: las cantidades no coinciden. La factura
+                  prevalece para la cuenta por pagar.
+                </p>
+              )}
           </DialogHeader>
 
           <div className="overflow-x-auto">
@@ -599,7 +801,7 @@ export function PurchaseReceipt({
                 <tr className="border-b text-left text-muted-foreground">
                   <th className="pb-2 font-medium">Producto</th>
                   <th className="pr-4 pb-2 text-right font-medium">
-                    Pedido original
+                    Pendiente previo
                   </th>
                   <th className="pb-2 text-right font-medium">
                     Pedido Recibido
@@ -620,22 +822,9 @@ export function PurchaseReceipt({
                         })
                       : qty.toLocaleString("es-AR");
 
-                  const unitLabel = (() => {
-                    if (!item.unit_of_measure) {
-                      return "un";
-                    }
-                    const n = item.unit_of_measure.toUpperCase();
-                    if (n === "KG") {
-                      return "kg";
-                    }
-                    if (n === "LT") {
-                      return "lt";
-                    }
-                    if (n === "MT") {
-                      return "t";
-                    }
-                    return "un";
-                  })();
+                  const unitLabel = getPurchaseUnitShortLabel(
+                    item.unit_of_measure
+                  );
 
                   return (
                     <Fragment key={item.productName}>
@@ -688,12 +877,21 @@ export function PurchaseReceipt({
             >
               Cancelar
             </Button>
+            {hasPending && (
+              <Button
+                disabled={isConfirming}
+                onClick={() => handleConfirmReceive(false)}
+                type="button"
+              >
+                Recibir y esperar el resto
+              </Button>
+            )}
             <Button
               disabled={isConfirming}
-              onClick={handleConfirmReceive}
+              onClick={() => handleConfirmReceive(true)}
               type="button"
             >
-              {isConfirming ? "Procesando..." : "Confirmar y recibir"}
+              {confirmLabel}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -19,6 +19,7 @@ function remittanceWithItems(itemCount = 1): RemittanceData {
       taxCondition: "RESPONSABLE INSCRIPTO",
     },
     seller: { name: "Vendedor" },
+    showProductBrand: true,
     items: Array.from({ length: itemCount }, (_, index) => ({
       sku: `SKU-${index}`,
       name: `Producto ${index + 1}`,
@@ -57,6 +58,15 @@ describe("remittance mask data", () => {
       description: "Producto 1 Marca",
       variantName: null,
     });
+  });
+
+  it("hides product brands when production is disabled", () => {
+    const remittance = remittanceWithItems();
+    remittance.showProductBrand = false;
+
+    expect(buildRemittanceMaskData(remittance).items[0].description).toBe(
+      "Producto 1"
+    );
   });
 
   it("keeps variants out of the description and exposes them as a separate field", () => {

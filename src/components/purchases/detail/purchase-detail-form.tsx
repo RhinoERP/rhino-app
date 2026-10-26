@@ -25,6 +25,8 @@ import {
 import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseTaxSelector } from "../forms/purchase-tax-selector";
 
 type PurchaseDetailFormProps = {
   supplierId: string;
@@ -34,13 +36,19 @@ type PurchaseDetailFormProps = {
   remittanceNumber: string;
   globalDiscountPercentage: number;
   isEditingDetails: boolean;
+  isEditingFiscal: boolean;
+  frozenTaxes?: Array<{ taxId: string; name: string; rate: number }>;
+  hasLegacyTaxes?: boolean;
   isSupplierPickerOpen: boolean;
+  selectedTaxIds: string[];
+  taxes: Tax[];
   onSupplierChange: (supplierId: string) => void;
   onSupplierPickerOpenChange: (open: boolean) => void;
   onPurchaseDateChange: (date: Date) => void;
   onExpirationDaysChange: (days: number | null) => void;
   onRemittanceNumberChange: (value: string) => void;
   onGlobalDiscountPercentageChange: (value: number) => void;
+  onTaxesChange: (taxIds: string[]) => void;
 };
 
 export function PurchaseDetailForm({
@@ -51,13 +59,19 @@ export function PurchaseDetailForm({
   remittanceNumber,
   globalDiscountPercentage,
   isEditingDetails,
+  isEditingFiscal,
+  frozenTaxes = [],
+  hasLegacyTaxes = false,
   isSupplierPickerOpen,
+  selectedTaxIds,
+  taxes,
   onSupplierChange,
   onSupplierPickerOpenChange,
   onPurchaseDateChange,
   onExpirationDaysChange,
   onRemittanceNumberChange,
   onGlobalDiscountPercentageChange,
+  onTaxesChange,
 }: PurchaseDetailFormProps) {
   const selectedSupplier = suppliers.find((s) => s.id === supplierId);
 
@@ -231,7 +245,7 @@ export function PurchaseDetailForm({
               Descuento global (%)
             </Label>
             <Input
-              disabled={!isEditingDetails}
+              disabled={!isEditingFiscal}
               id="globalDiscountPercentage"
               inputMode="decimal"
               max={100}
@@ -251,6 +265,24 @@ export function PurchaseDetailForm({
                 globalDiscountPercentage === 0 ? "" : globalDiscountPercentage
               }
             />
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="purchaseTaxes">Impuestos</Label>
+            <PurchaseTaxSelector
+              disabled={!isEditingFiscal}
+              frozenTaxes={frozenTaxes}
+              onTaxesChange={onTaxesChange}
+              selectedTaxIds={selectedTaxIds}
+              taxes={taxes}
+            />
+            <p className="text-muted-foreground text-xs">
+              {hasLegacyTaxes
+                ? "Impuestos históricos agregados; para asignarlos por ítem, convertí la compra explícitamente."
+                : "Impuestos generales aplicados a la compra."}
+            </p>
           </div>
         </div>
       </CardContent>

@@ -8,6 +8,7 @@ const AUTHORIZED_SALE_FISCAL_FIELDS: Array<keyof UpdateSaleOrderInput> = [
   "creditDays",
   "invoiceType",
   "invoiceNumber",
+  "commercialExchangeRate",
   "globalDiscountPercentage",
   "items",
   "taxes",

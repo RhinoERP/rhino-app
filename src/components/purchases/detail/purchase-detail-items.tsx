@@ -3,6 +3,7 @@
 import { CaretUpDownIcon } from "@phosphor-icons/react";
 import { Check, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,6 +40,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { VariantMeta } from "@/hooks/use-variant-loader";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
@@ -50,6 +53,18 @@ import {
   getUnitLabel,
   type InputUnit,
 } from "@/modules/purchases/utils/purchase-calculations";
+import {
+  quantityAfterVariantChange,
+  sumPurchaseVariantStocks,
+} from "@/modules/purchases/utils/purchase-item-variants";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+  type ItemTaxSnapshot,
+} from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
+import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
+import { VariantBreakdown } from "../shared/variant-breakdown";
 
 export type PurchaseDetailItem = {
   id?: string;
@@ -66,31 +81,9 @@ export type PurchaseDetailItem = {
   discount_percent?: number;
   has_variants?: boolean;
   variant_stocks?: Record<string, Record<string, number>> | null;
+  taxes?: ItemTaxInput[];
+  persistedTaxes?: ItemTaxSnapshot[];
 };
-
-function renderVariantBreakdown(
-  variantStocks: Record<string, Record<string, number>>
-) {
-  const parts: string[] = [];
-
-  for (const [attribute, values] of Object.entries(variantStocks)) {
-    const detailParts = Object.entries(values)
-      .filter(([, qty]) => qty > 0)
-      .map(([variantName, qty]) => `${variantName}: ${qty}`);
-
-    if (detailParts.length > 0) {
-      parts.push(`${attribute} ${detailParts.join(", ")}`);
-    }
-  }
-
-  if (parts.length === 0) {
-    return null;
-  }
-
-  return (
-    <p className="mt-1 text-muted-foreground text-xs">{parts.join(" — ")}</p>
-  );
-}
 
 type PurchaseDetailItemsProps = {
   items: PurchaseDetailItem[];
@@ -98,9 +91,16 @@ type PurchaseDetailItemsProps = {
   supplierId: string;
   currency?: string;
   isEditingDetails: boolean;
+  hasItemTaxSnapshots: boolean;
   onItemsChange: (items: PurchaseDetailItem[]) => void;
   onError: (error: string | null) => void;
   categories?: Category[];
+  taxes: Tax[];
+  productTaxes: Map<string, ItemTaxInput[]>;
+  fallbackTaxes: ItemTaxInput[];
+  globalDiscountPercent: number;
+  receivedProgress: Record<string, { quantity: number }>;
+  variantMetaMap: Record<string, VariantMeta>;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Component handles multiple unit types, conversions, and complex state management
@@ -110,9 +110,16 @@ export function PurchaseDetailItems({
   supplierId,
   currency = "ARS",
   isEditingDetails,
+  hasItemTaxSnapshots,
   onItemsChange,
   onError,
   categories = [],
+  taxes,
+  productTaxes,
+  fallbackTaxes,
+  globalDiscountPercent,
+  receivedProgress,
+  variantMetaMap,
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
@@ -122,6 +129,22 @@ export function PurchaseDetailItems({
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [isBrandFilterOpen, setIsBrandFilterOpen] = useState(false);
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+  const orderSubtotal = items.reduce(
+    (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
+    0
+  );
+  const taxPlan = buildItemizedTaxPlan({
+    lines: items.map((item, index) => ({
+      lineId: item.id ?? `new-${index}`,
+      productId: item.product_id,
+      netAmount: item.subtotal,
+      taxes: item.taxes ?? productTaxes.get(item.product_id),
+    })),
+    globalDiscountAmount: truncateMoney(
+      Math.min(orderSubtotal, (orderSubtotal * globalDiscountPercent) / 100)
+    ),
+    fallbackTaxes,
+  });
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableUnits = useMemo(
@@ -253,6 +276,37 @@ export function PurchaseDetailItems({
           return item;
         }
         return updateItemQuantity(item, quantity);
+      })
+    );
+  };
+
+  const handleVariantStockChange = (
+    id: string | undefined,
+    color: string,
+    talle: string,
+    value: number
+  ) => {
+    if (!id) {
+      return;
+    }
+    onItemsChange(
+      items.map((item) => {
+        if (item.id !== id) {
+          return item;
+        }
+        const nextStocks = {
+          ...item.variant_stocks,
+          [color]: { ...item.variant_stocks?.[color], [talle]: value },
+        };
+        const nextQuantity = quantityAfterVariantChange(
+          item.quantity,
+          item.variant_stocks,
+          nextStocks
+        );
+        return {
+          ...updateItemQuantity(item, nextQuantity),
+          variant_stocks: nextStocks,
+        };
       })
     );
   };
@@ -399,6 +453,7 @@ export function PurchaseDetailItems({
     const subtotal = gross;
 
     return {
+      id: crypto.randomUUID(),
       product_id: product.id,
       product_name: product.name,
       quantity: itemQuantity,
@@ -410,6 +465,8 @@ export function PurchaseDetailItems({
       total_weight_kg: itemTotalWeight ?? undefined,
       price_per_kg: pricePerKg,
       discount_percent: 0,
+      has_variants: product.has_variants,
+      variant_stocks: product.has_variants ? {} : null,
     };
   };
 
@@ -827,6 +884,11 @@ export function PurchaseDetailItems({
                   const product = products.find(
                     (p) => p.id === item.product_id
                   );
+                  const isVariantItem =
+                    item.has_variants || product?.has_variants;
+                  const assignedVariants = isVariantItem
+                    ? sumPurchaseVariantStocks(item.variant_stocks)
+                    : 0;
                   const unitOfMeasure = item.unit_of_measure || "UN";
                   const unitOfMeasureLabels: Record<string, string> = {
                     UN: "unidad",
@@ -879,16 +941,34 @@ export function PurchaseDetailItems({
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
                         </p>
-                        {item.has_variants && item.variant_stocks
-                          ? renderVariantBreakdown(item.variant_stocks)
-                          : null}
+                        {(receivedProgress[item.id ?? ""]?.quantity ?? 0) >
+                          0 && (
+                          <p className="text-teal-700 text-xs">
+                            Recibidas:{" "}
+                            {receivedProgress[item.id ?? ""]?.quantity ?? 0} ·
+                            Pendientes:{" "}
+                            {Math.max(
+                              0,
+                              item.quantity -
+                                (receivedProgress[item.id ?? ""]?.quantity ?? 0)
+                            )}
+                          </p>
+                        )}
+                        {!isEditingDetails &&
+                        isVariantItem &&
+                        item.variant_stocks ? (
+                          <VariantBreakdown
+                            className="mt-1"
+                            variantStocks={item.variant_stocks}
+                          />
+                        ) : null}
                       </div>
 
                       <div className="flex flex-col gap-1">
                         <span className="text-muted-foreground text-xs">
                           Cantidad
                         </span>
-                        {isEditingDetails ? (
+                        {isEditingDetails && !isVariantItem ? (
                           <Input
                             className="h-8 w-full"
                             inputMode={
@@ -1081,6 +1161,77 @@ export function PurchaseDetailItems({
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                        </div>
+                      )}
+                      {isEditingDetails && isVariantItem && (
+                        <div className="space-y-2 sm:col-span-full">
+                          <p className="font-medium text-sm">
+                            Talles y colores
+                          </p>
+                          {variantMetaMap[item.product_id] ? (
+                            <VariantStockMatrix
+                              colores={variantMetaMap[item.product_id].colores}
+                              editable
+                              isCellAvailable={(color, talle) =>
+                                variantMetaMap[
+                                  item.product_id
+                                ].availableSizesByColor[color]?.includes(
+                                  talle
+                                ) ?? false
+                              }
+                              onChange={(color, talle, value) =>
+                                handleVariantStockChange(
+                                  item.id,
+                                  color,
+                                  talle,
+                                  value
+                                )
+                              }
+                              stocks={item.variant_stocks ?? {}}
+                              talles={variantMetaMap[item.product_id].talles}
+                            />
+                          ) : (
+                            <p className="text-muted-foreground text-sm">
+                              Cargando variantes...
+                            </p>
+                          )}
+                          {assignedVariants !== item.quantity && (
+                            <output className="text-amber-700 text-sm">
+                              Asignadas por talle y color: {assignedVariants} de{" "}
+                              {item.quantity} unidades.
+                            </output>
+                          )}
+                        </div>
+                      )}
+                      {(isEditingDetails || hasItemTaxSnapshots) && (
+                        <div className="sm:col-span-full">
+                          <PurchaseItemTaxPicker
+                            availableTaxes={taxes}
+                            calculatedTaxes={
+                              isEditingDetails
+                                ? taxPlan.itemTaxes.filter(
+                                    (tax) =>
+                                      tax.lineId ===
+                                      (item.id ?? `new-${items.indexOf(item)}`)
+                                  )
+                                : (item.persistedTaxes ?? [])
+                            }
+                            currency={currency}
+                            editable={isEditingDetails}
+                            fallbackTaxes={fallbackTaxes}
+                            onChange={(next) =>
+                              onItemsChange(
+                                items.map((current) =>
+                                  current === item
+                                    ? { ...current, taxes: next }
+                                    : current
+                                )
+                              )
+                            }
+                            productName={item.product_name}
+                            productTaxes={productTaxes.get(item.product_id)}
+                            taxes={item.taxes}
+                          />
                         </div>
                       )}
                     </div>

@@ -5,6 +5,7 @@ import { getOrganizationArcaSettingsByOrganizationId } from "@/modules/arca/serv
 import {
   getDirectSaleConfigByOrgSlug,
   getOrganizationBySlug,
+  getOrganizationLayoutData,
 } from "@/modules/organizations/service/organizations.service";
 import { getDirectSaleById } from "@/modules/sales/service/direct-sales.service";
 import type { TicketCompanyData } from "@/modules/sales/types";
@@ -24,11 +25,19 @@ export default async function DirectSaleDetailPage({
   noStore();
 
   const { orgSlug, saleId } = await params;
-  const [sale, organization, directSaleConfig] = await Promise.all([
+  const [sale, organization, directSaleConfig, layoutData] = await Promise.all([
     getDirectSaleById(orgSlug, saleId),
     getOrganizationBySlug(orgSlug),
     getDirectSaleConfigByOrgSlug(orgSlug),
+    getOrganizationLayoutData(orgSlug),
   ]);
+  const viewOnly = Boolean(
+    layoutData?.permissions.includes("mercadolibre.access") &&
+      !layoutData.permissions.includes("organization.admin") &&
+      !layoutData.permissions.some((permission) =>
+        ["pos.read", "pos.read.all", "pos.manage"].includes(permission)
+      )
+  );
 
   if (!sale) {
     notFound();
@@ -67,6 +76,7 @@ export default async function DirectSaleDetailPage({
           : null
       }
       sale={sale}
+      viewOnly={viewOnly}
     />
   );
 }

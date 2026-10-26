@@ -375,6 +375,17 @@ function ProductionChildActions({
   if (isDesignReview) {
     return (
       <div className="flex flex-wrap items-center justify-end gap-2">
+        {hasBoceto && (
+          <Button asChild variant="outline">
+            <Link
+              href={`/org/${orgSlug}/produccion/${orderId}/boceto`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <EyeIcon className="size-4" />
+              Ver boceto
+            </Link>
+          </Button>
+        )}
         <Button
           disabled={isPending}
           onClick={(e) => {

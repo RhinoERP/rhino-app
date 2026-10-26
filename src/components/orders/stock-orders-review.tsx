@@ -48,6 +48,11 @@ import {
   type StockInfo,
   stripRouteFromObservations,
 } from "@/modules/orders/types";
+import {
+  originalQuoteQuantities,
+  type ReceivedBadge,
+  receivedBadgesByItem,
+} from "@/modules/orders/utils/original-quote-quantities";
 import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
 
@@ -132,7 +137,12 @@ export function StockOrdersReview({
         <div className="space-y-4">
           <h2 className="font-heading text-lg">En compra</h2>
           {purchasingOrders?.map((order) => (
-            <PurchasingCard key={order.id} order={order} orgSlug={orgSlug} />
+            <PurchasingCard
+              key={order.id}
+              order={order}
+              orgSlug={orgSlug}
+              revertInfoMap={revertInfoMap}
+            />
           ))}
         </div>
       )}
@@ -143,10 +153,20 @@ export function StockOrdersReview({
 type PurchasingCardProps = {
   order: PurchasingOrder;
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
+function PurchasingCard({
+  order,
+  orgSlug,
+  revertInfoMap,
+}: PurchasingCardProps) {
+  const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const revertInfo = revertInfoMap[order.id];
+  const canRevert =
+    order.status === "PURCHASE_REQUIRED" && (revertInfo?.canRevert ?? false);
 
   return (
     <Card className="overflow-hidden opacity-75 transition-shadow">
@@ -175,6 +195,20 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
           {order.parent_customer_name}
         </span>
         <div className="flex-1" />
+        {canRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            onClick={(event) => {
+              event.stopPropagation();
+              setRevertOpen(true);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
         {isExpanded ? (
           <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
         ) : (
@@ -206,6 +240,19 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
             ))}
           </div>
         </CardContent>
+      )}
+      {canRevert && revertInfo?.previousStatus && revertInfo.previousLabel && (
+        <RevertOrderModal
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={revertInfo.previousStatus}
+          previousStatusLabel={revertInfo.previousLabel}
+          revertType={revertInfo.revertType}
+        />
       )}
     </Card>
   );
@@ -241,6 +288,7 @@ function StockOrderCard({
   const childNotesRef = useRef(childNotes);
   childNotesRef.current = childNotes;
   const [pendingDirectTransition, setPendingDirectTransition] = useState(false);
+  const [directConfirmPending, setDirectConfirmPending] = useState(false);
   const [isReleasePending, setIsReleasePending] = useState(false);
 
   const prevChildrenLenRef = useRef(order.children.length);
@@ -253,6 +301,10 @@ function StockOrderCard({
   }, [order.children.length]);
 
   const quote = order.quotes;
+  const orderedQuantities = useMemo(
+    () => originalQuoteQuantities(quote?.quote_items ?? []),
+    [quote]
+  );
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
 
@@ -320,6 +372,17 @@ function StockOrderCard({
     return map;
   }, [order.children]);
 
+  const receivedBadges = useMemo(
+    () =>
+      receivedBadgesByItem({
+        portions: quote?.quote_items ?? [],
+        statusByChildId: new Map(
+          order.children.map((child) => [child.id, child.status])
+        ),
+      }),
+    [quote, order.children]
+  );
+
   const { stockInfo, isLoadingStock } = useLoadStockForItems({
     orgSlug,
     items: selectableItems,
@@ -382,35 +445,33 @@ function StockOrderCard({
     allSelected &&
     assignedItems.length === 0 &&
     reassignableItems.length === 0 &&
-    selectedRoute !== "reserve";
+    selectedRoute !== "reserve" &&
+    !(selectedRoute === "purchase" && supplierCount > 1);
 
   const availableRoutes = useMemo(() => {
     if (hasAssignedItemSelected) {
+      const hasReservedItem = selectableItems.some(
+        (item) =>
+          selectedQuantities.has(item.id) &&
+          item.assigned_order_id != null &&
+          childMap.get(item.assigned_order_id)?.status === "STOCK_RESERVED"
+      );
       return ROUTE_OPTIONS.filter(
-        (r) => r.value !== "purchase" && r.value !== "reserve"
+        (r) =>
+          r.value !== "purchase" && !(hasReservedItem && r.value === "reserve")
       );
     }
     return ROUTE_OPTIONS;
-  }, [hasAssignedItemSelected]);
-
-  const _sourceChildOrderId = useMemo(() => {
-    if (!hasAssignedItemSelected) {
-      return;
-    }
-    const item = selectableItems.find(
-      (i) => selectedQuantities.has(i.id) && i.assigned_order_id != null
-    );
-    return item?.assigned_order_id ?? undefined;
-  }, [hasAssignedItemSelected, selectableItems, selectedQuantities]);
+  }, [hasAssignedItemSelected, selectableItems, selectedQuantities, childMap]);
 
   useEffect(() => {
     if (
       hasAssignedItemSelected &&
-      (selectedRoute === "purchase" || selectedRoute === "reserve")
+      !availableRoutes.some((route) => route.value === selectedRoute)
     ) {
       setSelectedRoute("direct");
     }
-  }, [hasAssignedItemSelected, selectedRoute]);
+  }, [hasAssignedItemSelected, selectedRoute, availableRoutes]);
 
   const setItemQuantity = useCallback((itemId: string, quantity: number) => {
     setSelectedQuantities((prev) => {
@@ -503,27 +564,32 @@ function StockOrderCard({
   ]);
 
   const handleDirectConfirm = useCallback(async () => {
-    const result = await directTransitionAction({
-      orgSlug,
-      orderId: order.id,
-      quoteItemIds: Array.from(selectedQuantitiesRef.current.keys()),
-      route: selectedRoute,
-      observations: childNotesRef.current || null,
-    });
+    setDirectConfirmPending(true);
+    try {
+      const result = await directTransitionAction({
+        orgSlug,
+        orderId: order.id,
+        quoteItemIds: Array.from(selectedQuantitiesRef.current.keys()),
+        route: selectedRoute,
+        observations: childNotesRef.current || null,
+      });
 
-    if (!result.success) {
-      toast.error(`Error al confirmar: ${result.error}`);
-      return;
+      if (!result.success) {
+        toast.error(`Error al confirmar: ${result.error}`);
+        return;
+      }
+
+      const routeLabel =
+        ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+        selectedRoute;
+      toast.success(`Pedido enviado a ${routeLabel}`);
+      setSelectedQuantities(new Map());
+      setChildNotes("");
+      setPendingDirectTransition(false);
+      router.refresh();
+    } finally {
+      setDirectConfirmPending(false);
     }
-
-    const routeLabel =
-      ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
-      selectedRoute;
-    toast.success(`Pedido enviado a ${routeLabel}`);
-    setSelectedQuantities(new Map());
-    setChildNotes("");
-    setPendingDirectTransition(false);
-    router.refresh();
   }, [orgSlug, order.id, selectedRoute, router]);
 
   const handleSubmit = useCallback(() => {
@@ -603,6 +669,7 @@ function StockOrderCard({
           availableRoutes={availableRoutes}
           childMap={childMap}
           childNotes={childNotes}
+          directConfirmPending={directConfirmPending}
           handleDirectConfirm={handleDirectConfirm}
           handleReleaseReservation={handleReleaseReservation}
           handleSubmit={handleSubmit}
@@ -614,8 +681,10 @@ function StockOrderCard({
           noAssigned={noAssigned}
           noSelectable={noSelectable}
           order={order}
+          orderedQuantities={orderedQuantities}
           orgSlug={orgSlug}
           pendingDirectTransition={pendingDirectTransition}
+          receivedBadges={receivedBadges}
           revertInfoMap={revertInfoMap}
           routeLabel={routeLabel}
           selectableItems={selectableItems}
@@ -660,13 +729,16 @@ type StockOrderCardBodyProps = {
   isDirectTransition: boolean;
   isLoadingStock: boolean;
   isPending: boolean;
+  directConfirmPending: boolean;
   isReleasePending: boolean;
   itemStockMap: Map<string, StockInfo | undefined>;
   noAssigned: boolean;
   noSelectable: boolean;
   order: OrderWithChildren;
+  orderedQuantities: Map<string, number>;
   orgSlug: string;
   pendingDirectTransition: boolean;
+  receivedBadges: Map<string, ReceivedBadge>;
   revertInfoMap: OrdersRevertInfoMap;
   routeLabel: string;
   selectableItems: QuoteItem[];
@@ -693,13 +765,16 @@ function StockOrderCardBody({
   isDirectTransition,
   isLoadingStock,
   isPending,
+  directConfirmPending,
   isReleasePending,
   itemStockMap,
   noAssigned,
   noSelectable,
   order,
+  orderedQuantities,
   orgSlug,
   pendingDirectTransition,
+  receivedBadges,
   revertInfoMap,
   routeLabel,
   selectableItems,
@@ -732,6 +807,8 @@ function StockOrderCardBody({
           onRouteChange={setSelectedRoute}
           onSubmit={handleSubmit}
           onToggleAll={toggleAll}
+          orderedQuantities={orderedQuantities}
+          receivedBadges={receivedBadges}
           selectedQuantities={selectedQuantities}
           selectedRoute={selectedRoute}
           supplierCount={supplierCount}
@@ -769,7 +846,7 @@ function StockOrderCardBody({
       )}
       {pendingDirectTransition && (
         <ConfirmReviewBar
-          isPending={isPending}
+          isPending={isPending || directConfirmPending}
           onCancel={() => setPendingDirectTransition(false)}
           onConfirm={handleDirectConfirm}
           orderId={order.id}
@@ -883,10 +960,18 @@ function useLoadStockForItems({
 }
 
 type ItemBadgeProps = {
-  badge: "goods" | "reserved" | null;
+  badge: ReceivedBadge | "reserved" | null;
 };
 
 function ItemBadge({ badge }: ItemBadgeProps) {
+  if (badge === "partial_goods") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 text-xs dark:bg-amber-900/30 dark:text-amber-400">
+        <PackageIcon className="size-3" weight="fill" />
+        Mercadería recibida parcialmente
+      </span>
+    );
+  }
   if (badge === "goods") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
@@ -908,17 +993,19 @@ function ItemBadge({ badge }: ItemBadgeProps) {
 
 type ItemRowProps = {
   item: QuoteItem;
+  orderedQuantity: number;
   stock: StockInfo | undefined;
   enteredQty: number;
   isPending: boolean;
   isReleasePending: boolean;
-  badge: "goods" | "reserved" | null;
+  badge: ReceivedBadge | "reserved" | null;
   onQuantityChange: (itemId: string, quantity: number) => void;
   onReleaseReservation?: (childId: string) => void;
 };
 
 function ItemRow({
   item,
+  orderedQuantity,
   stock,
   enteredQty,
   isPending,
@@ -961,7 +1048,7 @@ function ItemRow({
       <td className="px-2 py-1.5">
         <span className="text-sm">{stock?.brand ?? "—"}</span>
       </td>
-      <td className="px-2 py-1.5 text-right tabular-nums">{item.quantity}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums">{orderedQuantity}</td>
       <td className="px-2 py-1.5">
         <div className="flex items-center justify-center gap-2">
           <input
@@ -1034,6 +1121,8 @@ type UnassignedItemsSectionProps = {
   isReleasePending: boolean;
   isLoadingStock: boolean;
   items: readonly QuoteItem[];
+  orderedQuantities: Map<string, number>;
+  receivedBadges: Map<string, ReceivedBadge>;
   selectedQuantities: Map<string, number>;
   selectedRoute: ChildOrderRoute;
   itemStockMap: Map<string, StockInfo | undefined>;
@@ -1056,6 +1145,8 @@ function UnassignedItemsSection({
   isReleasePending,
   isLoadingStock,
   items,
+  orderedQuantities,
+  receivedBadges,
   selectedQuantities,
   selectedRoute,
   itemStockMap,
@@ -1073,7 +1164,7 @@ function UnassignedItemsSection({
     selectedRoute;
 
   const getItemBadge = useCallback(
-    (item: QuoteItem): "goods" | "reserved" | null => {
+    (item: QuoteItem): ReceivedBadge | "reserved" | null => {
       if (!item.assigned_order_id) {
         return null;
       }
@@ -1081,12 +1172,9 @@ function UnassignedItemsSection({
       if (child?.status === "STOCK_RESERVED") {
         return "reserved";
       }
-      if (child?.status === "GOODS_RECEIVED") {
-        return "goods";
-      }
-      return null;
+      return receivedBadges.get(item.id) ?? null;
     },
-    [childMap]
+    [childMap, receivedBadges]
   );
 
   const hasInsufficientStock = useMemo(() => {
@@ -1161,6 +1249,9 @@ function UnassignedItemsSection({
                   key={item.id}
                   onQuantityChange={onItemQuantityChange}
                   onReleaseReservation={handleReleaseReservation}
+                  orderedQuantity={
+                    orderedQuantities.get(item.id) ?? item.quantity
+                  }
                   stock={itemStockMap.get(item.id)}
                 />
               ))}

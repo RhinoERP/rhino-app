@@ -19,6 +19,7 @@ export type ReceivableAccount = {
   organization_id: string;
   customer_id: string;
   sales_order_id: string;
+  manual_fiscal_invoice_id?: string | null;
   total_amount: number;
   pending_balance: number;
   currency?: string;
@@ -46,6 +47,7 @@ export type ReceivableAccount = {
     sub_total?: number | null;
     global_discount_amount?: number | null;
     remittance_number?: string | null;
+    document_type?: string | null;
   } | null;
   seller?: {
     id: string;
@@ -76,7 +78,9 @@ export type PayableAccount = {
     purchase_number?: number | null;
     purchase_date?: string | null;
     total_amount?: number | null;
+    payable_origin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE" | null;
   } | null;
+  payableOrigin?: "PURCHASE_NOTE" | "SUPPLIER_INVOICE";
   items?: CollectionExportItem[];
   type: "payable";
   // Discrepancy warning (if total differs from purchase order by >1%)

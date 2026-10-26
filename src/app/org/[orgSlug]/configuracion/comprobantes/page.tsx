@@ -1,4 +1,5 @@
 import { DispatchSettings } from "@/components/configuration/dispatch-settings";
+import { InvoicePrintSettings } from "@/components/configuration/invoice-print-settings";
 import { RemittanceSettings } from "@/components/configuration/remittance-settings";
 
 type ComprobantesPageProps = {
@@ -20,6 +21,8 @@ export default async function ComprobantesPage({
           Configurá la numeración y formato de los documentos de venta.
         </p>
       </div>
+
+      <InvoicePrintSettings orgSlug={orgSlug} />
 
       <RemittanceSettings orgSlug={orgSlug} />
 

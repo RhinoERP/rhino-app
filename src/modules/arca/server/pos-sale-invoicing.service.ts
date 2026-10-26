@@ -1,6 +1,10 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import {
+  formalizeSinglePosSaleAccountingEntry,
+  persistPosSaleAccountingPatch,
+} from "@/modules/pos/service/pos-sale-accounting.service";
 import type { Database, Json } from "@/types/supabase";
 import {
   ArcaConnectionError,
@@ -887,6 +891,69 @@ async function recoverPosVoucherReservationConflict(params: {
     : "blocked";
 }
 
+// Nunca lanza: un fallo al formalizar no debe revertir la autorización ARCA
+// ya obtenida, ni bloquear la respuesta al usuario.
+async function formalizePosSaleAccountingIfPending(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  posSaleId: string;
+}): Promise<void> {
+  try {
+    // Select aparte: columnas todavía no reflejadas en los tipos generados de Supabase.
+    const { data, error } = await params.supabase
+      .from("pos_sales")
+      .select("accounting_status, accounting_sale_entry_id" as never)
+      .eq("organization_id", params.orgId)
+      .eq("id", params.posSaleId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const row = data as unknown as {
+      accounting_status: string | null;
+      accounting_sale_entry_id: string | null;
+    } | null;
+    const isPendingFormalization =
+      row?.accounting_status === "PENDING" ||
+      row?.accounting_status === "FORMALIZATION_ERROR";
+
+    if (!(isPendingFormalization && row?.accounting_sale_entry_id)) {
+      return;
+    }
+
+    const patch = await formalizeSinglePosSaleAccountingEntry({
+      orgId: params.orgId,
+      posSaleId: params.posSaleId,
+      saleEntryId: row.accounting_sale_entry_id,
+    });
+
+    const updateError = await persistPosSaleAccountingPatch({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      posSaleId: params.posSaleId,
+      patch,
+    });
+
+    if (updateError) {
+      console.error(
+        "Se formalizó el asiento de la venta POS, pero no se pudo persistir el estado contable",
+        {
+          posSaleId: params.posSaleId,
+          journalEntryId: patch.accounting_sale_entry_id,
+          error: updateError,
+        }
+      );
+    }
+  } catch (error) {
+    console.error(
+      "No se pudo formalizar el asiento contable de la venta POS tras la autorización ARCA",
+      { posSaleId: params.posSaleId, error }
+    );
+  }
+}
+
 async function persistAuthorizedPosInvoice(params: {
   orgId: string;
   posSaleId: string;
@@ -939,6 +1006,12 @@ async function persistAuthorizedPosInvoice(params: {
       `ARCA autorizó la factura POS, pero no se pudo persistir el resultado: ${error?.message ?? "sin respuesta"}`
     );
   }
+
+  await formalizePosSaleAccountingIfPending({
+    supabase,
+    orgId: params.orgId,
+    posSaleId: params.posSaleId,
+  });
 
   return toArcaSaleInvoiceResult(
     {

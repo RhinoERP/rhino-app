@@ -18,11 +18,15 @@ import {
   getProductDetail,
   getProductLots,
   getProductTaxIds,
+  getProductVariantsByProductId,
   getStockMovementsForProduct,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  getOrganizationBySlug,
+  getOrganizationLayoutData,
+} from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
@@ -61,7 +65,21 @@ export default async function ProductDetailsPage({
 }: ProductDetailsPageProps) {
   const { orgSlug, productId } = await params;
 
-  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.inventory);
+  await guardOrganizationPermissionAccess(orgSlug, [
+    ...READ_PERMISSIONS.inventory,
+    ...READ_PERMISSIONS.mercadolibre,
+  ]);
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+  const isMercadoLibreOnly = Boolean(
+    layoutData?.permissions.includes("mercadolibre.access") &&
+      !layoutData.permissions.includes("organization.admin") &&
+      !layoutData.permissions.some((permission) =>
+        READ_PERMISSIONS.inventory.includes(permission)
+      )
+  );
+  if (isMercadoLibreOnly) {
+    notFound();
+  }
 
   const [
     productDetail,
@@ -101,6 +119,9 @@ export default async function ProductDetailsPage({
     salePrice,
   } = productDetail;
   const resolvedSalePrice = salePrice ?? product.sale_price ?? null;
+  const variants = product.has_variants
+    ? await getProductVariantsByProductId(orgSlug, productId)
+    : [];
   const { tracksUnits, stockLabel, associatedUnits } = getStockDisplayInfo(
     product.unit_of_measure,
     product.tracks_stock_units,
@@ -191,6 +212,7 @@ export default async function ProductDetailsPage({
               orgSlug={orgSlug}
               product={product}
               productId={productId}
+              variants={variants}
             />
           </div>
 
