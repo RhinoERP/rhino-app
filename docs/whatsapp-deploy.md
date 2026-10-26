@@ -243,6 +243,22 @@ accesos y que pegar las URLs de configuración, inbox y simulador no permite
 entrar. Deshabilitar la empresa piloto desde superadmin: los nuevos eventos no
 encolan automatización y los jobs pendientes dejan de reclamarse.
 
+### Si Meta no puede verificar el webhook
+
+La verificación usa el handler GET de Next y `WHATSAPP_WEBHOOK_VERIFY_TOKEN`.
+No necesita una instancia del daemon ni el token de envío de Meta. La URL debe
+ser `/api/webhooks/whatsapp` en el dominio productivo, sin login intermedio.
+Los puntos de entrada `proxy.ts` y `src/proxy.ts` delegan en una única
+implementación en `src/lib/request-proxy.ts`, para que la detección del proxy
+en Next y en la plataforma de deploy respete los mismos controles. El webhook
+y las herramientas internas llegan a sus propios controles de autenticación.
+Mantener los matchers estáticos de ambos puntos de entrada sincronizados.
+
+Si la URL devuelve un redirect a `/auth/login`, revisar que el deploy productivo
+incluya el proxy actualizado. Un token de verificación inválido debe responder
+403, nunca redirigir al login. Si responde 403 incluso con el valor correcto,
+comprobar la variable en Production y redesplegar después de guardarla.
+
 ## 6. Límites operativos y reversión
 
 El envío usa actualmente **un token Meta global por servicio**, no los secretos
