@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { proxy } from "./proxy";
+import { config as rootConfig, proxy as rootProxy } from "../proxy";
+import { config as srcConfig, proxy as srcProxy } from "./proxy";
 
 const { updateSessionMock } = vi.hoisted(() => ({
   updateSessionMock: vi.fn(),
@@ -10,7 +11,10 @@ vi.mock("@/lib/supabase/proxy", () => ({
   updateSession: updateSessionMock,
 }));
 
-describe("WhatsApp server requests", () => {
+describe.each([
+  ["root", rootProxy],
+  ["src", srcProxy],
+])("WhatsApp server requests through %s entry point", (_name, proxy) => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateSessionMock.mockResolvedValue(
@@ -52,4 +56,8 @@ describe("WhatsApp server requests", () => {
       "https://rhinos.example/auth/login"
     );
   });
+});
+
+it("keeps the statically declared matchers identical in both Next entry points", () => {
+  expect(rootConfig).toEqual(srcConfig);
 });
