@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import { generateCommissions } from "@/modules/commissions/service/commissions-generation.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -1620,6 +1621,15 @@ export async function processBulkPayment(
       success: false,
       error: "El monto debe ser mayor a cero",
       code: "invalid_amount",
+    };
+  }
+
+  if (isCheckPaymentMethod(paymentMethod)) {
+    return {
+      success: false,
+      error:
+        "Las cobranzas masivas no admiten cheques ni e-cheqs. Registrá el cobro individualmente.",
+      code: "invalid_payment_method",
     };
   }
 

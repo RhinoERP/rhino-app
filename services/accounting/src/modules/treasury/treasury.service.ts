@@ -959,7 +959,13 @@ async function validateReceivedCheckPaymentLink(params: {
 
   const payment = await trx
     .selectFrom("public.receivable_payments")
-    .select(["id", "account_receivable_id", "amount", "payment_method"])
+    .select([
+      "id",
+      "account_receivable_id",
+      "amount",
+      "payment_method",
+      "currency",
+    ])
     .where("id", "=", receivablePaymentId)
     .where("organization_id", "=", input.orgId)
     .forUpdate()
@@ -973,6 +979,11 @@ async function validateReceivedCheckPaymentLink(params: {
   ) {
     throw AppError.unprocessable(
       "Solo se pueden vincular cheques con cobranzas pagadas con cheque o e-cheq"
+    );
+  }
+  if (payment.currency !== "ARS") {
+    throw AppError.unprocessable(
+      "Solo se pueden vincular cheques a cobranzas en pesos"
     );
   }
   if (!new Decimal(payment.amount).eq(normalizedAmount)) {

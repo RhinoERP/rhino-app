@@ -58,6 +58,7 @@ import type {
   CustomerCreditApiResponse,
   PaymentMethod,
 } from "@/modules/collections/types";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
 import {
   useChequesRecibidos,
@@ -578,7 +579,12 @@ export function RegisterPaymentDialog({
   );
 
   const availablePaymentMethodOptions = useMemo(() => {
-    if (isEditMode || type !== "payable" || currency === "USD") {
+    if (isEditMode || currency === "USD") {
+      return paymentMethodOptions.filter(
+        (option) => !isCheckPaymentMethod(option.value)
+      );
+    }
+    if (type !== "payable") {
       return paymentMethodOptions.filter(
         (option) => option.value !== "cheque_endosado"
       );

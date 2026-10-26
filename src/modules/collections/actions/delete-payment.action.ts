@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
@@ -89,7 +90,7 @@ async function deleteReceivablePayment({
   // Get the payment to retrieve its amount
   const { data: payment, error: paymentError } = await supabase
     .from("receivable_payments")
-    .select("id, amount, account_receivable_id")
+    .select("id, amount, account_receivable_id, payment_method")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .eq("account_receivable_id", accountId)
@@ -107,6 +108,14 @@ async function deleteReceivablePayment({
       success: false,
       error: "Pago no encontrado",
       code: "payment_not_found",
+    };
+  }
+
+  if (isCheckPaymentMethod(payment.payment_method)) {
+    return {
+      success: false,
+      error:
+        "Los cobros con cheque o e-cheq no se pueden eliminar. Gestioná el rechazo desde Tesorería.",
     };
   }
 

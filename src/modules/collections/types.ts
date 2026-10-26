@@ -152,6 +152,7 @@ export type BulkPaymentResult =
       error: string;
       code?:
         | "invalid_amount"
+        | "invalid_payment_method"
         | "no_pending_accounts"
         | "customer_not_found"
         | "organization_not_found"

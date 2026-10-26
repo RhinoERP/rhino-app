@@ -16,6 +16,14 @@ import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/acc
 import type { AnyEvento } from "@/modules/accounting/types";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import {
+  type AppliedCustomerCredit,
+  type AppliedSupplierCredit,
+  restoreCustomerCreditBalances,
+  restoreSupplierCreditBalances,
+  rollbackCustomerCreditApplications,
+} from "@/modules/collections/service/credit-restoration.service";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
+import {
   assertPaymentExchangeRate,
   type PaymentCurrencyFields,
   resolvePaymentCurrencyFields,
@@ -275,7 +283,12 @@ function getSupplierCreditScopeError(
     : null;
 }
 
-const applyCustomerCredits = async ({
+type ApplyCustomerCreditsResult =
+  | { success: true; applications: AppliedCustomerCredit[] }
+  | { success: false; error: string };
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: credit application validates availability, mutates balances and records applications.
+async function applyCustomerCredits({
   supabase,
   orgId,
   customerId,
@@ -301,9 +314,9 @@ const applyCustomerCredits = async ({
   supplierDifferentiatedCredits?: boolean;
   customerCreditId?: string | null;
   currency: string;
-}) => {
+}): Promise<ApplyCustomerCreditsResult> {
   if (creditToApply <= 0) {
-    return null;
+    return { success: true, applications: [] };
   }
 
   let query = supabase
@@ -324,7 +337,7 @@ const applyCustomerCredits = async ({
     supplierId
   );
   if (supplierScopeError) {
-    return supplierScopeError;
+    return { success: false, error: supplierScopeError };
   }
   if (supplierDifferentiatedCredits) {
     query = query.eq("supplier_id", supplierId as string);
@@ -333,17 +346,24 @@ const applyCustomerCredits = async ({
   const { data: credits, error: creditsError } = await query;
 
   if (creditsError || !credits) {
-    return "No se pudo obtener los créditos disponibles";
+    return {
+      success: false,
+      error: "No se pudo obtener los créditos disponibles",
+    };
   }
 
   const totalAvailable = sumRemainingAmounts(credits);
 
   if (totalAvailable < creditToApply) {
-    return `Crédito insuficiente. Disponible: $${truncateMoney(totalAvailable).toFixed(2)}`;
+    return {
+      success: false,
+      error: `Crédito insuficiente. Disponible: $${truncateMoney(totalAvailable).toFixed(2)}`,
+    };
   }
 
   let remainingToApply = creditToApply;
-  const applications: Array<{ customerCreditId: string; amount: number }> = [];
+  const appliedCredits: Array<{ customerCreditId: string; amount: number }> =
+    [];
 
   for (const credit of credits) {
     if (remainingToApply <= 0) {
@@ -367,34 +387,65 @@ const applyCustomerCredits = async ({
       .eq("organization_id", orgId);
 
     if (updateCreditError) {
-      return `Error al aplicar crédito: ${updateCreditError.message}`;
+      const rollbackError = await restoreCustomerCreditBalances({
+        supabase,
+        orgId,
+        credits: appliedCredits,
+      });
+      return {
+        success: false,
+        error: rollbackError
+          ? `Error al aplicar crédito: ${updateCreditError.message} ${rollbackError}`
+          : `Error al aplicar crédito: ${updateCreditError.message}`,
+      };
     }
 
     remainingToApply = truncateMoney(remainingToApply - amountToUse);
-    applications.push({ customerCreditId: credit.id, amount: amountToUse });
+    appliedCredits.push({
+      customerCreditId: credit.id,
+      amount: amountToUse,
+    });
   }
+
+  const applicationRows = appliedCredits.map((application) => ({
+    id: crypto.randomUUID(),
+    organization_id: orgId,
+    customer_id: customerId,
+    customer_credit_id: application.customerCreditId,
+    account_receivable_id: accountReceivableId,
+    amount: application.amount,
+    payment_date: paymentDate,
+    reference_number: referenceNumber,
+    notes,
+  }));
 
   const { error: insertError } = await supabase
     .from("customer_credit_applications")
-    .insert(
-      applications.map((application) => ({
-        organization_id: orgId,
-        customer_id: customerId,
-        customer_credit_id: application.customerCreditId,
-        account_receivable_id: accountReceivableId,
-        amount: application.amount,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      }))
-    );
+    .insert(applicationRows);
 
   if (insertError) {
-    return `Error al registrar aplicacion de credito: ${insertError.message}`;
+    const rollbackError = await restoreCustomerCreditBalances({
+      supabase,
+      orgId,
+      credits: appliedCredits,
+    });
+    return {
+      success: false,
+      error: rollbackError
+        ? `Error al registrar aplicacion de credito: ${insertError.message} ${rollbackError}`
+        : `Error al registrar aplicacion de credito: ${insertError.message}`,
+    };
   }
 
-  return null;
-};
+  return {
+    success: true,
+    applications: applicationRows.map((application) => ({
+      applicationId: application.id,
+      customerCreditId: application.customer_credit_id,
+      amount: application.amount,
+    })),
+  };
+}
 
 const createCustomerOverpaymentCredit = async (params: {
   supabase: SupabaseServerClient;
@@ -494,6 +545,10 @@ const createSupplierOverpaymentCredit = async (params: {
   } as never);
 };
 
+type ApplySupplierCreditsResult =
+  | { success: true; applied: AppliedSupplierCredit[] }
+  | { success: false; error: string };
+
 const applySupplierCredits = async ({
   supabase,
   orgId,
@@ -506,9 +561,9 @@ const applySupplierCredits = async ({
   supplierId: string;
   creditToApply: number;
   currency: string;
-}) => {
+}): Promise<ApplySupplierCreditsResult> => {
   if (creditToApply <= 0) {
-    return null;
+    return { success: true, applied: [] };
   }
 
   const { data: credits, error: creditsError } = await supabase
@@ -521,7 +576,10 @@ const applySupplierCredits = async ({
     .order("created_at", { ascending: true });
 
   if (creditsError || !credits) {
-    return "No se pudo obtener los créditos disponibles";
+    return {
+      success: false,
+      error: "No se pudo obtener los créditos disponibles",
+    };
   }
 
   const totalAvailable = sumRemainingAmounts(
@@ -529,10 +587,14 @@ const applySupplierCredits = async ({
   );
 
   if (totalAvailable < creditToApply) {
-    return `Crédito insuficiente. Disponible: $${truncateMoney(totalAvailable).toFixed(2)}`;
+    return {
+      success: false,
+      error: `Crédito insuficiente. Disponible: $${truncateMoney(totalAvailable).toFixed(2)}`,
+    };
   }
 
   let remainingToApply = creditToApply;
+  const applied: AppliedSupplierCredit[] = [];
 
   for (const credit of credits as Array<{
     id: string;
@@ -559,13 +621,27 @@ const applySupplierCredits = async ({
       .eq("organization_id", orgId);
 
     if (updateCreditError) {
-      return `Error al aplicar crédito: ${updateCreditError.message}`;
+      const rollbackError = await restoreSupplierCreditBalances({
+        supabase,
+        orgId,
+        credits: applied,
+      });
+      return {
+        success: false,
+        error: rollbackError
+          ? `Error al aplicar crédito: ${updateCreditError.message} ${rollbackError}`
+          : `Error al aplicar crédito: ${updateCreditError.message}`,
+      };
     }
 
     remainingToApply = truncateMoney(remainingToApply - amountToUse);
+    applied.push({
+      supplierCreditId: credit.id,
+      amount: amountToUse,
+    });
   }
 
-  return null;
+  return { success: true, applied };
 };
 
 async function createReceivablePaymentWithAccounting(params: {
@@ -597,6 +673,7 @@ async function createReceivablePaymentWithAccounting(params: {
   | {
       success: false;
       error: string;
+      paymentRolledBack: boolean;
     }
 > {
   const { data: insertedPayment, error: insertError } = await params.supabase
@@ -622,6 +699,7 @@ async function createReceivablePaymentWithAccounting(params: {
     return {
       success: false,
       error: `No se pudo registrar el pago: ${insertError.message}`,
+      paymentRolledBack: true,
     };
   }
 
@@ -702,7 +780,10 @@ async function persistReceivedCheckForPayment(params: {
   customerId: string;
   paymentMethod: PaymentMethod;
   receivedCheckData: NonNullable<RegisterPaymentInput["receivedCheckData"]>;
-}): Promise<{ success: true } | { success: false; error: string }> {
+}): Promise<
+  | { success: true }
+  | { success: false; error: string; paymentRolledBack: boolean }
+> {
   try {
     await createChequeRecibidoServer({
       orgId: params.orgId,
@@ -733,6 +814,7 @@ async function persistReceivedCheckForPayment(params: {
         success: false,
         error:
           "El cheque no se registró y la cobranza requiere revisión manual. No vuelvas a intentarlo.",
+        paymentRolledBack: false,
       };
     }
 
@@ -742,6 +824,7 @@ async function persistReceivedCheckForPayment(params: {
         error instanceof Error
           ? `No se pudo registrar el cheque recibido: ${error.message}`
           : "No se pudo registrar el cheque recibido",
+      paymentRolledBack: true,
     };
   }
 }
@@ -754,7 +837,10 @@ async function persistIssuedCheckForPayment(params: {
   amount: number;
   paymentMethod: PaymentMethod;
   issuedCheckData: NonNullable<RegisterPaymentInput["issuedCheckData"]>;
-}): Promise<{ success: true } | { success: false; error: string }> {
+}): Promise<
+  | { success: true }
+  | { success: false; error: string; paymentRolledBack: boolean }
+> {
   try {
     await createChequeEmitidoServer({
       orgId: params.orgId,
@@ -786,6 +872,7 @@ async function persistIssuedCheckForPayment(params: {
         success: false,
         error:
           "El cheque no se registró y el pago requiere revisión manual. No vuelvas a intentarlo.",
+        paymentRolledBack: false,
       };
     }
 
@@ -795,6 +882,7 @@ async function persistIssuedCheckForPayment(params: {
         error instanceof Error
           ? `No se pudo registrar el cheque propio: ${error.message}`
           : "No se pudo registrar el cheque propio",
+      paymentRolledBack: true,
     };
   }
 }
@@ -826,6 +914,7 @@ async function createPayablePaymentWithAccounting(params: {
   | {
       success: false;
       error: string;
+      paymentRolledBack: boolean;
     }
 > {
   const { data: insertedPayment, error: insertError } = await params.supabase
@@ -851,6 +940,7 @@ async function createPayablePaymentWithAccounting(params: {
     return {
       success: false,
       error: `No se pudo registrar el pago: ${insertError.message}`,
+      paymentRolledBack: true,
     };
   }
 
@@ -969,6 +1059,18 @@ async function applyReceivablePayment({
     };
   }
 
+  const checkCurrencyError = validateCheckCurrency(
+    input.paymentMethod,
+    receivable.currency
+  );
+  if (checkCurrencyError) {
+    return {
+      success: false,
+      error: checkCurrencyError,
+      code: "invalid_payment_method",
+    };
+  }
+
   const pendingBalance = truncateMoney(Number(receivable.pending_balance ?? 0));
   const totalAmount = truncateMoney(Number(receivable.total_amount ?? 0));
   const totals = computePaymentTotals({
@@ -1000,7 +1102,7 @@ async function applyReceivablePayment({
     );
   }
 
-  const creditError = await applyCustomerCredits({
+  const creditResult = await applyCustomerCredits({
     supabase,
     orgId,
     customerId: receivable.customer_id,
@@ -1015,10 +1117,10 @@ async function applyReceivablePayment({
     currency: receivable.currency ?? "ARS",
   });
 
-  if (creditError) {
+  if (!creditResult.success) {
     return {
       success: false,
-      error: creditError,
+      error: creditResult.error,
     };
   }
 
@@ -1034,12 +1136,20 @@ async function applyReceivablePayment({
       effectiveExchangeRate
     );
     if (exchangeRateError) {
+      const exchangeRateFailureMessage =
+        (receivable.currency ?? "ARS") === "USD"
+          ? NO_RECEIVABLE_INVOICE_RATE_MESSAGE
+          : exchangeRateError;
+      const rollbackError = await rollbackCustomerCreditApplications({
+        supabase,
+        orgId,
+        applications: creditResult.applications,
+      });
       return {
         success: false,
-        error:
-          (receivable.currency ?? "ARS") === "USD"
-            ? NO_RECEIVABLE_INVOICE_RATE_MESSAGE
-            : exchangeRateError,
+        error: rollbackError
+          ? `${exchangeRateFailureMessage} ${rollbackError}`
+          : exchangeRateFailureMessage,
         code: "exchange_rate_required",
       };
     }
@@ -1070,6 +1180,20 @@ async function applyReceivablePayment({
     });
 
     if (!paymentPersistence.success) {
+      if (paymentPersistence.paymentRolledBack) {
+        const rollbackError = await rollbackCustomerCreditApplications({
+          supabase,
+          orgId,
+          applications: creditResult.applications,
+        });
+        if (rollbackError) {
+          return {
+            success: false,
+            error: `${paymentPersistence.error} ${rollbackError}`,
+          };
+        }
+      }
+
       return {
         success: false,
         error: paymentPersistence.error,
@@ -1204,7 +1328,7 @@ async function applyStandardPayablePayment(params: {
 
   const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
     totals;
-  const creditError = await applySupplierCredits({
+  const creditResult = await applySupplierCredits({
     supabase: params.supabase,
     orgId: params.orgId,
     supplierId: params.payableAccount.supplier_id,
@@ -1212,10 +1336,10 @@ async function applyStandardPayablePayment(params: {
     currency: params.payableAccount.currency ?? "ARS",
   });
 
-  if (creditError) {
+  if (!creditResult.success) {
     return {
       success: false,
-      error: creditError,
+      error: creditResult.error,
     };
   }
 
@@ -1234,12 +1358,20 @@ async function applyStandardPayablePayment(params: {
       effectiveExchangeRate
     );
     if (exchangeRateError) {
+      const exchangeRateFailureMessage =
+        (params.payableAccount.currency ?? "ARS") === "USD"
+          ? NO_PAYABLE_INVOICE_RATE_MESSAGE
+          : exchangeRateError;
+      const rollbackError = await restoreSupplierCreditBalances({
+        supabase: params.supabase,
+        orgId: params.orgId,
+        credits: creditResult.applied,
+      });
       return {
         success: false,
-        error:
-          (params.payableAccount.currency ?? "ARS") === "USD"
-            ? NO_PAYABLE_INVOICE_RATE_MESSAGE
-            : exchangeRateError,
+        error: rollbackError
+          ? `${exchangeRateFailureMessage} ${rollbackError}`
+          : exchangeRateFailureMessage,
         code: "exchange_rate_required",
       };
     }
@@ -1270,6 +1402,20 @@ async function applyStandardPayablePayment(params: {
     });
 
     if (!paymentPersistence.success) {
+      if (paymentPersistence.paymentRolledBack) {
+        const rollbackError = await restoreSupplierCreditBalances({
+          supabase: params.supabase,
+          orgId: params.orgId,
+          credits: creditResult.applied,
+        });
+        if (rollbackError) {
+          return {
+            success: false,
+            error: `${paymentPersistence.error} ${rollbackError}`,
+          };
+        }
+      }
+
       return {
         success: false,
         error: paymentPersistence.error,
@@ -1370,15 +1516,19 @@ async function applyPayablePayment({
 
   const payableAccount = payable as PayableAccountRow;
 
+  const checkCurrencyError = validateCheckCurrency(
+    input.paymentMethod,
+    payableAccount.currency
+  );
+  if (checkCurrencyError) {
+    return {
+      success: false,
+      error: checkCurrencyError,
+      code: "invalid_payment_method",
+    };
+  }
+
   if (input.paymentMethod === "cheque_endosado") {
-    if ((payableAccount.currency ?? "ARS") === "USD") {
-      return {
-        success: false,
-        error:
-          "El pago con cheque endosado no está disponible para deudas en USD.",
-        code: "invalid_payment_method",
-      };
-    }
     return applyEndorsedPayablePayment({
       orgId,
       input,
@@ -1452,6 +1602,19 @@ export async function markPaymentAccountingJournalAction(input: {
           : "Error al marcar el asiento contable",
     };
   }
+}
+
+function validateCheckCurrency(
+  paymentMethod: PaymentMethod,
+  currency: string | null | undefined
+): string | null {
+  if (!isCheckPaymentMethod(paymentMethod)) {
+    return null;
+  }
+
+  return (currency ?? "ARS") === "ARS"
+    ? null
+    : "Los cheques y e-cheqs solo están disponibles para deudas en pesos.";
 }
 
 function validatePaymentAmounts(
