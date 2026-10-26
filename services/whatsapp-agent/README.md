@@ -17,8 +17,28 @@ OPENAI_API_KEY=<clave-del-proveedor-de-modelo>
 WHATSAPP_AGENT_OPENAI_MODEL=gpt-5-mini
 ```
 
-En Railway, usar `services/whatsapp-agent` como directorio raíz, `pnpm install` como instalación, `pnpm build` como build y `pnpm start` como comando de inicio. Si faltan las tres variables comerciales (`OPENAI_API_KEY`, `WHATSAPP_AGENT_RHINOS_URL` y `WHATSAPP_AGENT_SERVICE_TOKEN`), el servicio mantiene `/health` disponible pero no reclama trabajos: así nunca confirma un procesamiento sin responder al cliente.
+## Deploy en Railway
 
-Rhinos incluye `/org/[orgSlug]/whatsapp/simulador`, que reutiliza el ciclo de
-herramientas de `src/agent-core.ts` con catálogo y estado ficticios. La
-simulación no usa Meta ni persiste conversaciones o preventas reales.
+Usar la **raíz del repositorio `/`**, con Node 22, para que esté disponible el
+lockfile y el workspace de pnpm versionados. No usar como raíz
+`services/whatsapp-agent`: allí no hay un lockfile independiente.
+
+- Instalación: `pnpm install --frozen-lockfile`.
+- Build: `pnpm --filter @rhinos/whatsapp-agent build`.
+- Inicio: `pnpm --filter @rhinos/whatsapp-agent start`.
+- Healthcheck: `/health`. Confirmar también `configured: true` en el JSON.
+- Watch paths: `/services/whatsapp-agent/**`, `/pnpm-lock.yaml`, `/pnpm-workspace.yaml`, `/package.json`.
+
+Sin cualquiera de las cuatro variables `OPENAI_API_KEY`,
+`WHATSAPP_AGENT_RHINOS_URL`, `WHATSAPP_AGENT_SERVICE_TOKEN` y
+`WHATSAPP_META_ACCESS_TOKEN`, el servicio mantiene `/health` disponible con
+`configured: false` y no reclama trabajos. Las credenciales de Supabase sí son
+obligatorias para iniciar el proceso.
+
+Los trabajos de empresas sin `whatsapp_enabled = true` o inactivas no se
+reclaman. El sandbox de Rhinos no necesita este worker: se ejecuta en Vercel con
+el modelo y datos reales de la organización, sin enviar mensajes a Meta.
+
+Procedimiento completo, incluyendo las migraciones históricas con versiones
+duplicadas y los toggles de superadmin:
+[docs/whatsapp-deploy.md](../../docs/whatsapp-deploy.md).

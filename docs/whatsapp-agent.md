@@ -129,29 +129,40 @@ Restricciones e índices mínimos:
 | Ruta | Contenido |
 | --- | --- |
 | `/org/[orgSlug]/whatsapp/conversaciones` | Inbox, filtros, historial, carrito, preventa y respuesta manual. |
-| `/org/[orgSlug]/whatsapp/simulador` | Prueba conversacional con catálogo ficticio y captura local de respuestas. |
+| `/org/[orgSlug]/whatsapp/simulador` | Sandbox con clientes, catálogo, precios y stock reales; sin enviar mensajes a Meta. |
 | `/org/[orgSlug]/whatsapp/metricas` | Conversaciones, respuesta, preventas, conversión, abandono, derivaciones, intervención humana, productos y faltantes. |
 | `/org/[orgSlug]/whatsapp/configuracion` | Meta, lista de precios, vendedor, horario, activación y reglas de derivación. |
 
-El simulador usa el mismo ciclo de Responses API y llamadas a herramientas del
-worker (`services/whatsapp-agent/src/agent-core.ts`), con herramientas que
-operan exclusivamente sobre productos, precios, carrito, preventa y derivación
-ficticios. El estado queda vinculado a la organización autorizada. No crea
-conversaciones ni ventas en Supabase y no llama a Meta; sólo captura el texto
-de respuesta en la pantalla. Requiere `OPENAI_API_KEY` configurada en Rhinos.
-Los valores de catálogo son de prueba: mate térmico ARS 18.500, termo ARS
-42.000, bombilla ARS 6.500, stock ficticio y una lista demo de +5% sobre precio
-base.
+El sandbox usa el mismo ciclo del modelo y herramientas comerciales del worker
+(`services/whatsapp-agent/src/agent-core.ts`). Consulta datos reales de la empresa,
+guarda conversaciones y carritos de prueba y puede crear **preventas reales en
+borrador** tras confirmación explícita y con permiso `sales.manage`. No factura,
+no reserva stock y nunca envía mensajes a Meta. Requiere `OPENAI_API_KEY` en
+Vercel; no requiere Railway ni credenciales de Meta.
+
+Superadmin controla dos flags independientes en
+`/admin/organizacion/[orgSlug]` → Configuración de Módulos:
+`whatsapp_enabled` y `whatsapp_sandbox_enabled`. Ambos son `false` por defecto
+para empresas existentes y nuevas. Los permisos de usuario siguen siendo
+necesarios después de habilitar un módulo. La navegación, rutas, acciones,
+herramientas internas, RLS, ingesta y reclamo de trabajos respetan el opt-in.
+Los jobs pendientes de una empresa deshabilitada dejan de reclamarse y pueden
+reanudar cuando se habilita nuevamente; los webhooks recibidos mientras está
+apagada se ignoran. El envío vuelve a comprobar la habilitación tras ejecutar el
+modelo; un envío ya aceptado por Meta no se puede retirar.
+
+Para el procedimiento de publicación, variables por servicio, migraciones,
+pruebas y reversión, ver [Deploy de WhatsApp](whatsapp-deploy.md).
 
 Los permisos del módulo distinguen lectura de inbox, atención de conversaciones, administración de configuración y lectura de métricas.
 
 ## Backlog
 
-### Estado actual — 7 de septiembre de 2026
+### Estado actual — 26 de octubre de 2026
 
 | Fase | Estado | Alcance disponible en código |
 | --- | --- | --- |
-| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable, horarios semanales, zona horaria, demora aleatoria y derivación. Falta el provisionamiento real de secretos y completar la interfaz para reglas comerciales. |
+| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable, horarios semanales, zona horaria, demora aleatoria y derivación. Flags de disponibilidad configurables desde superadmin. Las credenciales de Meta todavía son variables globales del servicio; no hay provisionamiento de secretos por integración. |
 | 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta/Railway. |
 | 3 — Asistente comercial | En curso | Worker con Responses API, herramientas comerciales acotadas, carrito persistente, cotización, confirmación explícita, preventa idempotente y auditoría. Falta una prueba end-to-end contra Meta y el proveedor de modelo. |
 | 4 — Operación humana | En curso | Inbox inicial, respuesta manual, derivación y pausa/reactivación explícita. Faltan asignación, alertas y vista detallada de historial. |

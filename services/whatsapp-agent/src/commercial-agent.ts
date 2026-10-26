@@ -47,7 +47,8 @@ function model(): string {
 
 export function isCommercialAgentConfigured(): boolean {
   return Boolean(
-    process.env.OPENAI_API_KEY &&
+    process.env.WHATSAPP_META_ACCESS_TOKEN &&
+      process.env.OPENAI_API_KEY &&
       process.env.WHATSAPP_AGENT_SERVICE_TOKEN &&
       process.env.WHATSAPP_AGENT_RHINOS_URL
   );
@@ -110,6 +111,8 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
     supabase
       .from("organizations")
       .select("name")
+      .eq("is_active", true)
+      .eq("whatsapp_enabled", true)
       .eq("id", job.organization_id)
       .single(),
     supabase
@@ -120,6 +123,7 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
       .eq("id", job.integration_id)
       .eq("organization_id", job.organization_id)
       .eq("status", "ACTIVE")
+      .not("phone_number_id", "like", "rhinos-local-simulator:%")
       .single(),
     supabase
       .from("whatsapp_conversations")

@@ -31,7 +31,7 @@ async function poll(): Promise<void> {
   try {
     if (!running) {
       running = true;
-      while (await worker.runOnce()) {
+      while (!stopped && (await worker.runOnce())) {
         // Drenar los trabajos disponibles antes de volver a esperar.
       }
     }
@@ -48,7 +48,7 @@ async function poll(): Promise<void> {
   }
 }
 
-createServer((request, response) => {
+const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(
@@ -78,6 +78,7 @@ createServer((request, response) => {
 
 function shutdown(): void {
   stopped = true;
+  server.close();
 }
 
 process.on("SIGTERM", shutdown);

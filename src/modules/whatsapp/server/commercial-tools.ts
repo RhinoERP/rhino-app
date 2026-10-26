@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createWhatsAppPreSaleOrder } from "@/modules/sales/service/sales.service";
+import { assertWhatsAppEnabled } from "./access";
 import { isExplicitConfirmation } from "./confirmation";
 import { isLocalSimulatorIntegration } from "./simulation";
 import { createWhatsAppAdminClient } from "./supabase-admin";
@@ -161,6 +162,10 @@ function roundMoney(value: number): number {
 async function verifyContext(
   context: CommercialToolContext
 ): Promise<VerifiedContext> {
+  await assertWhatsAppEnabled(
+    context.organizationId,
+    context.mode === "LOCAL_SIMULATOR" ? "whatsapp_sandbox" : "whatsapp"
+  );
   const supabase = createWhatsAppAdminClient();
   const [
     { data: integration, error: integrationError },
@@ -195,7 +200,10 @@ async function verifyContext(
     integrationError ||
     conversationError ||
     !(integration && conversation) ||
-    (integration.status !== "ACTIVE" && !isSimulator)
+    (context.mode === "LOCAL_SIMULATOR"
+      ? !isSimulator
+      : integration.status !== "ACTIVE" ||
+        isLocalSimulatorIntegration(integration.phone_number_id))
   ) {
     throw new Error("La conversación no está disponible para automatización");
   }

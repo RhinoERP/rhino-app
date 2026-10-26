@@ -22,6 +22,7 @@ import {
 } from "../../../../../../../services/whatsapp-agent/src/agent-core";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const stateSchema = z
   .object({
@@ -51,7 +52,7 @@ async function requestModel(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "La simulación requiere OPENAI_API_KEY en la configuración del servidor local"
+      "La simulación requiere OPENAI_API_KEY en la configuración del servidor"
     );
   }
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -183,7 +184,7 @@ export async function GET(
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
   const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug);
+  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization) {
     return NextResponse.json(
@@ -212,8 +213,8 @@ export async function POST(
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
   const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug);
-  await ensure("whatsapp.manage", orgSlug);
+  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
+  await ensure("whatsapp.manage", orgSlug, "whatsapp_sandbox");
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization) {
     return NextResponse.json(

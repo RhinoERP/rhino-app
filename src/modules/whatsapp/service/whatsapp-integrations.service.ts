@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import type { WhatsAppIntegrationConfigurationInput } from "../schemas";
+import { assertWhatsAppEnabled } from "../server/access";
 import type { WhatsAppIntegration } from "../types";
 import { DEFAULT_WHATSAPP_BUSINESS_HOURS } from "../types";
 
@@ -82,6 +83,7 @@ async function getOrganizationId(orgSlug: string): Promise<string> {
     throw new Error("Organización no encontrada");
   }
 
+  await assertWhatsAppEnabled(organization.id);
   return organization.id;
 }
 

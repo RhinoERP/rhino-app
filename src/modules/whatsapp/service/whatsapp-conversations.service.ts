@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
+import { assertWhatsAppEnabled } from "../server/access";
+
 export type WhatsAppInboxConversation = {
   id: string;
   isSimulator: boolean;
@@ -35,6 +37,7 @@ export async function getWhatsAppInboxByOrgSlug(
     throw new Error("Organización no encontrada");
   }
 
+  await assertWhatsAppEnabled(organization.id);
   const supabase = createAdminClient();
   const { data: conversations, error } = await supabase
     .from("whatsapp_conversations")
@@ -109,17 +112,23 @@ export async function getWhatsAppInboxByOrgSlug(
     }
   }
 
-  return rows.map((conversation) => ({
-    id: conversation.id,
-    isSimulator: simulatorIntegrationIds.has(conversation.integration_id),
-    customerPhone: conversation.customer_phone,
-    customerName: conversation.customer_id
-      ? (customerNames.get(conversation.customer_id) ?? null)
-      : null,
-    status: conversation.status,
-    handoffReason: conversation.handoff_reason,
-    lastMessageAt: conversation.last_message_at,
-    lastMessage: latestMessages.get(conversation.id) ?? null,
-    currentPreSaleId: conversation.current_pre_sale_id,
-  }));
+  return rows
+    .filter(
+      (conversation) =>
+        organization.whatsapp_sandbox_enabled === true ||
+        !simulatorIntegrationIds.has(conversation.integration_id)
+    )
+    .map((conversation) => ({
+      id: conversation.id,
+      isSimulator: simulatorIntegrationIds.has(conversation.integration_id),
+      customerPhone: conversation.customer_phone,
+      customerName: conversation.customer_id
+        ? (customerNames.get(conversation.customer_id) ?? null)
+        : null,
+      status: conversation.status,
+      handoffReason: conversation.handoff_reason,
+      lastMessageAt: conversation.last_message_at,
+      lastMessage: latestMessages.get(conversation.id) ?? null,
+      currentPreSaleId: conversation.current_pre_sale_id,
+    }));
 }

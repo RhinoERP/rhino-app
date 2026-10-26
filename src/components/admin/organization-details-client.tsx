@@ -104,6 +104,12 @@ export function OrganizationDetailsClient({
   const [commissionsEnabled, setCommissionsEnabled] = useState(
     organization.commissions_enabled ?? false
   );
+  const [whatsappEnabled, setWhatsappEnabled] = useState(
+    organization.whatsapp_enabled === true
+  );
+  const [whatsappSandboxEnabled, setWhatsappSandboxEnabled] = useState(
+    organization.whatsapp_sandbox_enabled === true
+  );
   const [routeSheetsEnabled, setRouteSheetsEnabled] = useState(
     organization.route_sheets_enabled ?? false
   );
@@ -130,6 +136,8 @@ export function OrganizationDetailsClient({
   }, [organization.is_active]);
 
   useEffect(() => {
+    setWhatsappEnabled(organization.whatsapp_enabled === true);
+    setWhatsappSandboxEnabled(organization.whatsapp_sandbox_enabled === true);
     setWholesaleEnabled(organization.wholesale_enabled ?? true);
     setPosEnabled(organization.pos_enabled ?? true);
     setProductionEnabled(organization.production_enabled ?? false);
@@ -142,6 +150,8 @@ export function OrganizationDetailsClient({
     );
     setRemittanceMaskPrintingEnabled(configuredRemittanceMaskPrintingEnabled);
   }, [
+    organization.whatsapp_enabled,
+    organization.whatsapp_sandbox_enabled,
     organization.wholesale_enabled,
     organization.pos_enabled,
     organization.supplier_differentiated_credits,
@@ -182,6 +192,9 @@ export function OrganizationDetailsClient({
   };
 
   const hasModuleChanges =
+    whatsappEnabled !== (organization.whatsapp_enabled === true) ||
+    whatsappSandboxEnabled !==
+      (organization.whatsapp_sandbox_enabled === true) ||
     wholesaleEnabled !== (organization.wholesale_enabled ?? true) ||
     posEnabled !== (organization.pos_enabled ?? true) ||
     productionEnabled !== (organization.production_enabled ?? false) ||
@@ -208,6 +221,8 @@ export function OrganizationDetailsClient({
           salesAdvancesEnabled,
           commissionsEnabled,
           routeSheetsEnabled,
+          whatsappEnabled,
+          whatsappSandboxEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
           remittanceMaskPrintingEnabled,
         },
@@ -472,6 +487,37 @@ export function OrganizationDetailsClient({
             </div>
 
             <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">WhatsApp comercial</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita el inbox, la configuración de Meta y el agente para
+                    el número real. Oculto por defecto.
+                  </p>
+                </div>
+                <Switch
+                  aria-label="WhatsApp comercial"
+                  checked={whatsappEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setWhatsappEnabled}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Sandbox de WhatsApp</p>
+                  <p className="text-muted-foreground text-xs">
+                    Prueba el agente sin enviar a Meta. Usa datos reales y puede
+                    crear preventas reales. Oculto por defecto.
+                  </p>
+                </div>
+                <Switch
+                  aria-label="Sandbox de WhatsApp"
+                  checked={whatsappSandboxEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setWhatsappSandboxEnabled}
+                />
+              </div>
+
               <div className="flex items-center justify-between rounded-md border p-3">
                 <div>
                   <p className="font-medium">Venta Distribuidora</p>

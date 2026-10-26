@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { assertWhatsAppEnabled } from "../server/access";
 import { createWhatsAppAdminClient } from "../server/supabase-admin";
 
 const inputSchema = z.object({
@@ -30,6 +31,7 @@ export async function sendWhatsAppManualMessageAction(input: unknown): Promise<{
     if (!token) {
       return { success: false, error: "Falta configurar el envío de WhatsApp" };
     }
+    await assertWhatsAppEnabled(organization.id);
     const supabase = createWhatsAppAdminClient();
     const { data: conversation, error: conversationError } = await supabase
       .from("whatsapp_conversations")

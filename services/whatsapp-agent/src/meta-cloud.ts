@@ -19,6 +19,54 @@ export async function sendWhatsAppText(
     throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
   }
 
+  // Re-check after model/tool execution: superadmin may have disabled the
+  // tenant or a human may have paused the conversation in the meantime.
+  const { data: integration, error: integrationError } = await supabase
+    .from("whatsapp_integrations")
+    .select("organization_id, phone_number_id")
+    .eq("id", input.integrationId)
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+  if (
+    integrationError ||
+    !integration ||
+    integration.phone_number_id !== input.phoneNumberId ||
+    input.phoneNumberId.startsWith("rhinos-local-simulator:")
+  ) {
+    throw new Error("La integración no está disponible para enviar mensajes");
+  }
+  const [
+    { data: organization, error: organizationError },
+    { data: conversation, error: conversationError },
+  ] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select("id")
+      .eq("id", integration.organization_id)
+      .eq("is_active", true)
+      .eq("whatsapp_enabled", true)
+      .maybeSingle(),
+    supabase
+      .from("whatsapp_conversations")
+      .select("id")
+      .eq("id", input.conversationId)
+      .eq("organization_id", integration.organization_id)
+      .eq("integration_id", input.integrationId)
+      .eq("customer_phone", input.recipient)
+      .in("status", ["ACTIVE", "HANDOFF"])
+      .maybeSingle(),
+  ]);
+  if (
+    organizationError ||
+    conversationError ||
+    !organization ||
+    !conversation
+  ) {
+    throw new Error(
+      "El canal está deshabilitado o la conversación fue pausada"
+    );
+  }
+
   const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
   const response = await fetch(
     `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`,

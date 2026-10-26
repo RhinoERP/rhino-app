@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { assertWhatsAppEnabled } from "../server/access";
 import { createWhatsAppAdminClient } from "../server/supabase-admin";
 
 const inputSchema = z.object({
@@ -35,6 +36,7 @@ export async function setWhatsAppConversationAutomationAction(
     if (!user) {
       return { success: false, error: "No autenticado" };
     }
+    await assertWhatsAppEnabled(organization.id);
     const supabase = createWhatsAppAdminClient();
     const { error } = await supabase
       .from("whatsapp_conversations")

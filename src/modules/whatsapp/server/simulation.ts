@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { assertWhatsAppEnabled } from "./access";
 import { createWhatsAppAdminClient } from "./supabase-admin";
 
 const localSimulatorIntegrationPrefix = "rhinos-local-simulator:";
@@ -31,6 +32,7 @@ export function isLocalSimulatorIntegration(phoneNumberId: string): boolean {
 export async function getWhatsAppSimulationOptions(
   organizationId: string
 ): Promise<SimulationOptions> {
+  await assertWhatsAppEnabled(organizationId, "whatsapp_sandbox");
   const supabase = createWhatsAppAdminClient();
   const [priceListsResult, customersResult] = await Promise.all([
     supabase
@@ -121,6 +123,7 @@ export async function createLocalSimulatorSession(params: {
   priceListId: string;
 }): Promise<SimulationState> {
   const supabase = createWhatsAppAdminClient();
+  await assertWhatsAppEnabled(params.organizationId, "whatsapp_sandbox");
   await verifySimulationSelection(params);
 
   const integrationKey = createHash("sha256")
@@ -207,6 +210,7 @@ export async function verifyLocalSimulatorSession(
   state: SimulationState,
   actorId: string
 ): Promise<void> {
+  await assertWhatsAppEnabled(state.organizationId, "whatsapp_sandbox");
   const supabase = createWhatsAppAdminClient();
   const [
     { data: integration, error: integrationError },

@@ -9,7 +9,7 @@ export default async function WhatsAppSimulatorPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug);
+  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization) {
     throw new Error("Organización no encontrada");
