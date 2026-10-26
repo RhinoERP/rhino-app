@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { hostname } from "node:os";
 import {
   createCommercialJobProcessor,
+  getMissingCommercialEnvironment,
   isCommercialAgentConfigured,
 } from "./commercial-agent.js";
 import { createWorkerSupabaseClient, WhatsAppWorker } from "./worker.js";
@@ -55,6 +56,7 @@ const server = createServer((request, response) => {
       JSON.stringify({
         ok: true,
         configured: isConfigured,
+        missingConfiguration: getMissingCommercialEnvironment(),
         service: "whatsapp-agent",
         workerId,
       })
@@ -72,7 +74,7 @@ const server = createServer((request, response) => {
     });
   } else {
     console.warn(
-      "[whatsapp-agent] faltan variables comerciales; el worker no reclamará trabajos"
+      `[whatsapp-agent] faltan variables comerciales: ${getMissingCommercialEnvironment().join(", ")}; el worker no reclamará trabajos. Guardarlas en Production y crear un nuevo deployment; reiniciar el daemon no actualiza su entorno.`
     );
   }
 });
