@@ -84,14 +84,9 @@ import {
 } from "@/components/ui/tooltip";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
-import { computeLineGross } from "@/lib/line-values";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
-import {
-  calculateSalePrice,
-  type SalePriceAdjustment,
-} from "@/modules/price-levels/service/price-calculator";
 import type { PriceLevel } from "@/modules/price-levels/types";
 import {
   type QuoteFormValues,
@@ -99,10 +94,14 @@ import {
   type QuoteItemVariantFormValues,
   quoteFormSchema,
 } from "@/modules/quotes/types";
+import { needsExchangeRate } from "@/modules/quotes/utils/currency-conversion";
 import {
-  convertPriceToQuoteCurrency,
-  needsExchangeRate,
-} from "@/modules/quotes/utils/currency-conversion";
+  computeQuoteItemSubtotal,
+  convertQuoteItemsCurrency,
+  getAdjustedQuoteUnitPrice,
+  type QuotePricing,
+  repriceQuoteItems,
+} from "@/modules/quotes/utils/quote-form-pricing";
 import {
   buildQuoteTaxLines,
   computeQuoteTotals,
@@ -157,7 +156,7 @@ function getEffectivePriceList(
   form: { getValues: (name: string) => string },
   salesPriceLists: SalesPriceList[],
   priceLevels: PriceLevel[]
-): { level: PriceLevel | null; adjustment: SalesPriceList | null } {
+): QuotePricing {
   const priceLevelId = form.getValues("priceLevelId");
   const level =
     priceLevelId && priceLevelId !== "none"
@@ -173,113 +172,12 @@ function getEffectivePriceList(
   return { level, adjustment };
 }
 
-type EffectivePricing = {
-  level: PriceLevel | null;
-  adjustment: SalesPriceList | null;
-};
-
-type PriceAdjustArgs = {
-  basePrice: number;
-  costPrice: number | null | undefined;
-  productCurrency: string;
-  pricing: EffectivePricing;
-  rate: number | null | undefined;
-  targetCurrency: string;
-};
-
-function recalcItemPrices(params: {
-  items: QuoteFormValues["items"];
-  products: SaleProduct[];
-  pricing: EffectivePricing;
-  exchangeRate: number | null | undefined;
-  quoteCurrency: string;
-  adjustFn: (args: PriceAdjustArgs) => number;
-}): QuoteFormValues["items"] {
-  const { items, products, pricing, exchangeRate, quoteCurrency, adjustFn } =
-    params;
-  return items.map((item) => {
-    const product = products.find((p) => p.id === item.productId);
-    const newUnitPrice = adjustFn({
-      basePrice: product?.price ?? 0,
-      costPrice: product?.costPrice,
-      productCurrency: product?.currency ?? "ARS",
-      pricing,
-      rate: exchangeRate,
-      targetCurrency: quoteCurrency,
-    });
-    return {
-      ...item,
-      unitPrice: newUnitPrice,
-      subtotal: computeSubtotalForItem({
-        unitPrice: newUnitPrice,
-        variants: item.variants,
-        productCurrency: item.productCurrency ?? "ARS",
-        quoteCurrency,
-        exchangeRate,
-      }),
-    };
-  });
-}
-
 function hasItemVariants(item: QuoteFormValues["items"][number]): boolean {
   return (
     item.variants.length > 1 ||
     (item.variants.length === 1 &&
       (item.variants[0].talle !== "Único" || item.variants[0].color !== "—"))
   );
-}
-
-type SubtotalItem = {
-  unitPrice: number;
-  variants: Array<{ quantity: number; extras?: Array<{ price: number }> }>;
-  productCurrency: string;
-  quoteCurrency: string;
-  exchangeRate: number | null | undefined;
-};
-
-function computeSubtotalForItem(item: SubtotalItem): number {
-  return truncateMoney(
-    item.variants.reduce(
-      (acc, variant) =>
-        acc +
-        computeLineGross(
-          item.unitPrice,
-          variant.quantity,
-          (variant.extras ?? []).map((extra) => ({
-            ...extra,
-            price: convertPriceToQuoteCurrency(
-              extra.price,
-              item.productCurrency,
-              item.quoteCurrency,
-              item.exchangeRate
-            ),
-          }))
-        ),
-      0
-    )
-  );
-}
-
-function buildCalcItemsForQuote(
-  items: QuoteFormValues["items"],
-  quoteCurrency: string,
-  exchangeRate: number | null | undefined
-): QuoteFormValues["items"] {
-  return items.map((item) => ({
-    ...item,
-    variants: item.variants.map((variant) => ({
-      ...variant,
-      extras: (variant.extras ?? []).map((extra) => ({
-        ...extra,
-        price: convertPriceToQuoteCurrency(
-          extra.price,
-          item.productCurrency ?? "ARS",
-          quoteCurrency,
-          exchangeRate
-        ),
-      })),
-    })),
-  }));
 }
 
 const formatTaxSummary = (
@@ -775,12 +673,9 @@ export function QuoteForm({
         ...existingItem,
         variants: updatedVariants,
         totalQuantity: existingItem.totalQuantity + quantity,
-        subtotal: computeSubtotalForItem({
+        subtotal: computeQuoteItemSubtotal({
           unitPrice: existingItem.unitPrice,
           variants: updatedVariants,
-          productCurrency: existingItem.productCurrency ?? "ARS",
-          quoteCurrency: currency,
-          exchangeRate,
         }),
       });
     } else {
@@ -808,48 +703,32 @@ export function QuoteForm({
     setSelectedProduct(null);
   };
 
-  const getAdjustedPrice = useCallback(
-    ({
-      basePrice,
-      costPrice,
-      productCurrency,
-      pricing,
-      rate,
-      targetCurrency,
-    }: PriceAdjustArgs): number => {
-      const { level, adjustment } = pricing;
-
-      const adjustments: SalePriceAdjustment[] = adjustment
-        ? [{ type: adjustment.type, value: adjustment.value }]
-        : [];
-
-      const { price } = calculateSalePrice({
-        basePrice,
-        costPrice,
-        level,
-        adjustments,
-      });
-
-      return convertPriceToQuoteCurrency(
-        price,
-        productCurrency,
-        targetCurrency,
-        rate
-      );
-    },
-    []
-  );
-
   const getUnitPrice = (product: SaleProduct) => {
     const pricing = getEffectivePriceList(form, salesPriceLists, priceLevels);
-    return getAdjustedPrice({
-      basePrice: product.price || 0,
-      costPrice: product.costPrice,
-      productCurrency: product.currency ?? "ARS",
-      pricing,
-      rate: exchangeRate,
-      targetCurrency: currency,
-    });
+    return getAdjustedQuoteUnitPrice(product, pricing, currency, exchangeRate);
+  };
+
+  const handleCurrencyChange = (nextCurrency: "ARS" | "USD") => {
+    const previousCurrency = form.getValues("currency");
+    if (previousCurrency === nextCurrency) {
+      return;
+    }
+    const items = form.getValues("items");
+    const rate = form.getValues("exchangeRate");
+    if (items.length > 0) {
+      if (!rate || rate <= 0) {
+        toast.error("Ingresá el tipo de cambio para convertir el presupuesto");
+        return;
+      }
+      const convertedItems = convertQuoteItemsCurrency({
+        items,
+        previousCurrency,
+        currency: nextCurrency,
+        exchangeRate: rate,
+      });
+      form.setValue("items", convertedItems, { shouldDirty: true });
+    }
+    form.setValue("currency", nextCurrency, { shouldDirty: true });
   };
 
   const applyEditVariants = (variants: QuoteItemVariantFormValues[]) => {
@@ -878,12 +757,9 @@ export function QuoteForm({
       ...existingItem,
       variants: mergedVariants,
       totalQuantity,
-      subtotal: computeSubtotalForItem({
+      subtotal: computeQuoteItemSubtotal({
         unitPrice,
         variants: mergedVariants,
-        productCurrency: existingItem.productCurrency ?? "ARS",
-        quoteCurrency: currency,
-        exchangeRate,
       }),
     });
     setEditingItemIndex(null);
@@ -927,12 +803,9 @@ export function QuoteForm({
         ...existingItem,
         variants: mergedVariants,
         totalQuantity: newTotalQuantity,
-        subtotal: computeSubtotalForItem({
+        subtotal: computeQuoteItemSubtotal({
           unitPrice: existingItem.unitPrice,
           variants: mergedVariants,
-          productCurrency: existingItem.productCurrency ?? "ARS",
-          quoteCurrency: currency,
-          exchangeRate,
         }),
       });
     } else {
@@ -945,7 +818,7 @@ export function QuoteForm({
         unitPrice,
         variants,
         totalQuantity,
-        subtotal: truncateMoney(totalQuantity * unitPrice),
+        subtotal: computeQuoteItemSubtotal({ unitPrice, variants }),
         discountPercentage: 0,
         taxes: product.taxes ?? [],
       });
@@ -1001,12 +874,9 @@ export function QuoteForm({
       ...item,
       totalQuantity: newQuantity,
       variants: updatedVariants,
-      subtotal: computeSubtotalForItem({
+      subtotal: computeQuoteItemSubtotal({
         unitPrice: item.unitPrice,
         variants: updatedVariants,
-        productCurrency: item.productCurrency ?? "ARS",
-        quoteCurrency: currency,
-        exchangeRate,
       }),
     });
   };
@@ -1021,12 +891,9 @@ export function QuoteForm({
     update(index, {
       ...item,
       unitPrice: parsed,
-      subtotal: computeSubtotalForItem({
+      subtotal: computeQuoteItemSubtotal({
         unitPrice: parsed,
         variants: item.variants,
-        productCurrency: item.productCurrency ?? "ARS",
-        quoteCurrency: currency,
-        exchangeRate,
       }),
     });
   };
@@ -1143,21 +1010,14 @@ export function QuoteForm({
   });
 
   const totals = useMemo(() => {
-    const calcItems = buildCalcItemsForQuote(formItems, currency, exchangeRate);
-    const lines = buildQuoteTaxLines(calcItems);
+    const lines = buildQuoteTaxLines(formItems);
     return computeQuoteTotals({
-      items: calcItems,
+      items: formItems,
       globalDiscountPercentage: globalDiscountPercentage ?? 0,
       fallbackTaxes: formFallbackTaxes,
       lines,
     });
-  }, [
-    formItems,
-    formFallbackTaxes,
-    globalDiscountPercentage,
-    currency,
-    exchangeRate,
-  ]);
+  }, [formItems, formFallbackTaxes, globalDiscountPercentage]);
 
   const quoteTotal = totals.totalAmount;
   const advancePaymentPercentage = useWatch({
@@ -1180,60 +1040,68 @@ export function QuoteForm({
     name: "priceLevelId",
   });
 
+  const previousPricingRef = useRef({
+    customerId: form.getValues("customerId"),
+    priceListId: form.getValues("salesPriceListId"),
+    priceLevelId: form.getValues("priceLevelId"),
+    exchangeRate: form.getValues("exchangeRate"),
+  });
+  const initialRate = form.getValues("exchangeRate");
+  const lastValidRateRef = useRef(
+    initialRate && initialRate > 0 ? initialRate : null
+  );
+
   const targetMarginLists = useMemo(
     () => priceLevels.filter((pl) => pl.is_active),
     [priceLevels]
   );
 
   useEffect(() => {
-    if (!selectedCustomerId) {
-      return;
+    const previous = previousPricingRef.current;
+    const previousRate = lastValidRateRef.current;
+    if (exchangeRate && exchangeRate > 0) {
+      lastValidRateRef.current = exchangeRate;
     }
-    const customer = customers.find((c) => c.id === selectedCustomerId);
-    const priceListId = customer?.sales_price_list_id ?? NO_PRICE_LIST;
-    form.setValue("salesPriceListId", priceListId);
-    form.setValue("priceLevelId", customer?.price_level_id ?? NO_PRICE_LIST);
-  }, [selectedCustomerId, customers, form]);
-
-  useEffect(() => {
-    if (fields.length === 0) {
-      return;
-    }
-
-    const pricing: EffectivePricing = {
-      level:
-        selectedPriceLevelId && selectedPriceLevelId !== NO_PRICE_LIST
-          ? (priceLevels.find((pl) => pl.id === selectedPriceLevelId) ?? null)
-          : null,
-      adjustment:
-        selectedPriceListId && selectedPriceListId !== NO_PRICE_LIST
-          ? (salesPriceLists.find((pl) => pl.id === selectedPriceListId) ??
-            null)
-          : null,
+    previousPricingRef.current = {
+      customerId: selectedCustomerId,
+      priceListId: selectedPriceListId,
+      priceLevelId: selectedPriceLevelId,
+      exchangeRate,
     };
+    const pricingChanged =
+      previous.customerId !== selectedCustomerId ||
+      previous.priceListId !== selectedPriceListId ||
+      previous.priceLevelId !== selectedPriceLevelId;
+    if (!pricingChanged && previous.exchangeRate === exchangeRate) {
+      return;
+    }
 
     const currentItems = form.getValues("items");
-    const updatedItems = recalcItemPrices({
+    if (currentItems.length === 0) {
+      return;
+    }
+    const updatedItems = repriceQuoteItems({
       items: currentItems,
       products,
-      pricing,
-      exchangeRate,
-      quoteCurrency: currency,
-      adjustFn: getAdjustedPrice,
+      pricing: getEffectivePriceList(form, salesPriceLists, priceLevels),
+      exchangeRate: form.getValues("exchangeRate"),
+      currency: form.getValues("currency"),
+      rateOnly: !pricingChanged,
+      previousRate,
     });
 
-    form.setValue("items", updatedItems, { shouldDirty: true });
+    if (updatedItems.some((item, index) => item !== currentItems[index])) {
+      form.setValue("items", updatedItems, { shouldDirty: true });
+    }
   }, [
+    selectedCustomerId,
     selectedPriceListId,
     selectedPriceLevelId,
     salesPriceLists,
     priceLevels,
     form,
     products,
-    currency,
     exchangeRate,
-    fields.length,
-    getAdjustedPrice,
   ]);
 
   return (
@@ -1317,7 +1185,23 @@ export function QuoteForm({
                                       className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
                                       key={customer.id}
                                       onClick={() => {
-                                        field.onChange(customer.id);
+                                        if (
+                                          customer.id !== selectedCustomerId
+                                        ) {
+                                          form.setValue(
+                                            "salesPriceListId",
+                                            customer.sales_price_list_id ??
+                                              NO_PRICE_LIST,
+                                            { shouldDirty: true }
+                                          );
+                                          form.setValue(
+                                            "priceLevelId",
+                                            customer.price_level_id ??
+                                              NO_PRICE_LIST,
+                                            { shouldDirty: true }
+                                          );
+                                          field.onChange(customer.id);
+                                        }
                                         setIsCustomerPickerOpen(false);
                                         setCustomerSearch("");
                                       }}
@@ -1389,7 +1273,9 @@ export function QuoteForm({
                       <FormItem>
                         <FormLabel>Moneda</FormLabel>
                         <Select
-                          onValueChange={field.onChange}
+                          onValueChange={(value: "ARS" | "USD") =>
+                            handleCurrencyChange(value)
+                          }
                           value={field.value}
                         >
                           <FormControl>
@@ -1816,9 +1702,7 @@ export function QuoteForm({
                                             {v.talle} / {v.color}: {v.quantity}
                                           </span>
                                           <QuoteItemExtrasPopover
-                                            currency={
-                                              item.productCurrency ?? "ARS"
-                                            }
+                                            currency={currency}
                                             extras={v.extras ?? []}
                                             onChange={(newExtras) => {
                                               const updatedVariants =
@@ -1835,14 +1719,9 @@ export function QuoteForm({
                                                 ...item,
                                                 variants: updatedVariants,
                                                 subtotal:
-                                                  computeSubtotalForItem({
+                                                  computeQuoteItemSubtotal({
                                                     unitPrice: item.unitPrice,
                                                     variants: updatedVariants,
-                                                    productCurrency:
-                                                      item.productCurrency ??
-                                                      "ARS",
-                                                    quoteCurrency: currency,
-                                                    exchangeRate,
                                                   }),
                                               });
                                             }}
@@ -1855,7 +1734,7 @@ export function QuoteForm({
                                     {canEditPrices ? (
                                       <div className="flex items-center gap-1">
                                         <span className="text-muted-foreground text-sm">
-                                          $
+                                          {currency === "USD" ? "US$" : "$"}
                                         </span>
                                         <UnitPriceInput
                                           onChange={(raw) =>

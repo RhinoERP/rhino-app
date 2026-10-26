@@ -63,6 +63,7 @@ export type CreateQuoteInput = {
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
   priceLevelId?: string | null;
+  salesPriceListId?: string | null;
   globalDiscountPercentage?: number | null;
   /** Tipo de comprobante de la venta que se generará al convertir. */
   invoiceType?: InvoiceType | null;
@@ -102,6 +103,8 @@ export type UpdateQuoteInput = {
   designFileUrl?: string | null;
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
+  priceLevelId?: string | null;
+  salesPriceListId?: string | null;
   globalDiscountPercentage?: number | null;
   /** Tipo de comprobante de la venta que se generará al convertir. */
   invoiceType?: InvoiceType | null;
@@ -159,7 +162,7 @@ export const quoteItemSchema = z.object({
     .min(1, "Debe agregar al menos una cantidad/talle"),
   // Total quantity across all variants for this item
   totalQuantity: z.number().min(1),
-  // Subtotal (totalQuantity * unitPrice)
+  // Subtotal del producto y los extras, en la moneda del presupuesto.
   subtotal: z.number().min(0),
   discountPercentage: z.number().min(0).max(100).default(0),
   // Impuestos de la línea; vacío = usar fallback global

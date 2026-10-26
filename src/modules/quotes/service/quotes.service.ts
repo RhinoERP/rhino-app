@@ -357,6 +357,7 @@ function buildQuoteInsertPayload({
       ? (input.advancePaymentPercentage ?? null)
       : null,
     price_level_id: input.priceLevelId ?? null,
+    sales_price_list_id: input.salesPriceListId ?? null,
   };
 }
 
@@ -617,6 +618,7 @@ async function createCancelledVersion(
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
       price_level_id: original.price_level_id,
+      sales_price_list_id: original.sales_price_list_id,
       advance_payment:
         ((original as Record<string, unknown>).advance_payment as boolean) ??
         false,
@@ -799,6 +801,10 @@ function buildUpdatePayload(
         : undefined,
     invoice_type:
       input.invoiceType !== undefined ? input.invoiceType : undefined,
+    price_level_id:
+      input.priceLevelId !== undefined ? input.priceLevelId : undefined,
+    sales_price_list_id:
+      input.salesPriceListId !== undefined ? input.salesPriceListId : undefined,
     updated_at: new Date().toISOString(),
   };
 }
