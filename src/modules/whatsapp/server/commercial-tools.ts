@@ -1,0 +1,812 @@
+import { z } from "zod";
+import { createWhatsAppPreSaleOrder } from "@/modules/sales/service/sales.service";
+import { assertWhatsAppEnabled } from "./access";
+import { isExplicitConfirmation } from "./confirmation";
+import { isLocalSimulatorIntegration } from "./simulation";
+import { createWhatsAppAdminClient } from "./supabase-admin";
+
+export const commercialToolNames = [
+  "find_customer_by_phone",
+  "search_catalog",
+  "get_offer",
+  "get_cart",
+  "upsert_cart_item",
+  "quote_cart",
+  "create_pre_sale",
+  "get_pre_sale_status",
+  "handoff_to_human",
+] as const;
+
+export type CommercialToolName = (typeof commercialToolNames)[number];
+
+export type CommercialToolContext = {
+  organizationId: string;
+  integrationId: string;
+  conversationId: string;
+  mode?: "LOCAL_SIMULATOR";
+};
+
+type VerifiedContext = CommercialToolContext & {
+  customerPhone: string;
+  customerId: string | null;
+  currentPreSaleId: string | null;
+  salesPriceListId: string;
+  responsibleUserId: string;
+  handoffMessage: string | null;
+};
+
+type CartItem = {
+  id: string;
+  product_id: string;
+  product_variant_id: string | null;
+  quantity: number;
+  unit_price: number;
+  price_snapshot: Record<string, unknown> | null;
+};
+
+const identifier = z.string().uuid();
+const nonDigit = /\D/g;
+const searchWhitespace = /\s+/;
+const trailingPlural = /s$/u;
+const ignoredSearchTerms = new Set([
+  "a",
+  "al",
+  "con",
+  "de",
+  "del",
+  "el",
+  "la",
+  "las",
+  "lo",
+  "los",
+  "para",
+  "por",
+  "un",
+  "una",
+  "y",
+]);
+
+const toolSchemas = {
+  find_customer_by_phone: z.object({}).strict(),
+  search_catalog: z
+    .object({ query: z.string().trim().min(2).max(120) })
+    .strict(),
+  get_offer: z.object({ product_id: identifier }).strict(),
+  get_cart: z.object({}).strict(),
+  upsert_cart_item: z
+    .object({
+      product_id: identifier,
+      product_variant_id: identifier.nullable().optional(),
+      quantity: z.number().positive().max(10_000),
+    })
+    .strict(),
+  quote_cart: z.object({}).strict(),
+  create_pre_sale: z.object({}).strict(),
+  get_pre_sale_status: z.object({}).strict(),
+  handoff_to_human: z
+    .object({ reason: z.string().trim().min(2).max(500) })
+    .strict(),
+} satisfies Record<CommercialToolName, z.ZodType>;
+
+function normalizedPhone(value: string | null): string {
+  return (value ?? "").replace(nonDigit, "");
+}
+
+function normalizedSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/(\d)(kg|gr|g|lt|l|ml|unidades|unidad|un)\b/gu, "$1 $2")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function searchTokens(value: string): string[] {
+  return [
+    ...new Set(
+      normalizedSearch(value)
+        .split(searchWhitespace)
+        .map((term) =>
+          term.length > 3 ? term.replace(trailingPlural, "") : term
+        )
+        .filter((term) => term.length > 1 && !ignoredSearchTerms.has(term))
+    ),
+  ].slice(0, 8);
+}
+
+function catalogMatchScore(
+  product: {
+    name: string | null;
+    sku: string | null;
+    description: string | null;
+    brand: string | null;
+    unit_of_measure: string | null;
+    categoryName: string;
+  },
+  query: string,
+  terms: string[]
+): number {
+  const fields = [
+    product.name,
+    product.sku,
+    product.description,
+    product.brand,
+    product.unit_of_measure,
+    product.categoryName,
+  ].map((value) => normalizedSearch(value ?? ""));
+  const matchedTerms = terms.filter((term) =>
+    fields.some((field) => field.includes(term))
+  );
+  if (!matchedTerms.length) {
+    return 0;
+  }
+
+  const normalizedQuery = normalizedSearch(query);
+  const phraseMatch = fields.some((field) => field.includes(normalizedQuery));
+  const nameMatch = normalizedSearch(product.name ?? "").includes(
+    normalizedQuery
+  );
+  return (
+    matchedTerms.length * 10 +
+    (matchedTerms.length === terms.length ? 40 : 0) +
+    (phraseMatch ? 30 : 0) +
+    (nameMatch ? 20 : 0)
+  );
+}
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+async function verifyContext(
+  context: CommercialToolContext
+): Promise<VerifiedContext> {
+  await assertWhatsAppEnabled(
+    context.organizationId,
+    context.mode === "LOCAL_SIMULATOR" ? "whatsapp_sandbox" : "whatsapp"
+  );
+  const supabase = createWhatsAppAdminClient();
+  const [
+    { data: integration, error: integrationError },
+    { data: conversation, error: conversationError },
+  ] = await Promise.all([
+    supabase
+      .from("whatsapp_integrations")
+      .select(
+        "id, organization_id, phone_number_id, status, sales_price_list_id, responsible_user_id, handoff_message"
+      )
+      .eq("id", context.integrationId)
+      .eq("organization_id", context.organizationId)
+      .maybeSingle(),
+    supabase
+      .from("whatsapp_conversations")
+      .select(
+        "id, organization_id, integration_id, status, customer_phone, customer_id, current_pre_sale_id"
+      )
+      .eq("id", context.conversationId)
+      .eq("organization_id", context.organizationId)
+      .eq("integration_id", context.integrationId)
+      .eq("status", "ACTIVE")
+      .maybeSingle(),
+  ]);
+
+  const isSimulator =
+    context.mode === "LOCAL_SIMULATOR" &&
+    integration?.status === "DRAFT" &&
+    isLocalSimulatorIntegration(integration.phone_number_id) &&
+    conversation?.customer_phone.startsWith("SIMULACIÓN LOCAL · ");
+  if (
+    integrationError ||
+    conversationError ||
+    !(integration && conversation) ||
+    (context.mode === "LOCAL_SIMULATOR"
+      ? !isSimulator
+      : integration.status !== "ACTIVE" ||
+        isLocalSimulatorIntegration(integration.phone_number_id))
+  ) {
+    throw new Error("La conversación no está disponible para automatización");
+  }
+  if (!(integration.sales_price_list_id && integration.responsible_user_id)) {
+    throw new Error("La integración comercial está incompleta");
+  }
+
+  return {
+    ...context,
+    customerPhone: conversation.customer_phone,
+    customerId: conversation.customer_id,
+    currentPreSaleId: conversation.current_pre_sale_id,
+    salesPriceListId: integration.sales_price_list_id,
+    responsibleUserId: integration.responsible_user_id,
+    handoffMessage: integration.handoff_message,
+  };
+}
+
+async function resolvePrice(params: {
+  organizationId: string;
+  priceListId: string;
+  productId: string;
+}) {
+  const supabase = createWhatsAppAdminClient();
+  const [
+    { data: product, error: productError },
+    { data: priceList, error: priceListError },
+  ] = await Promise.all([
+    supabase
+      .from("products_with_price")
+      .select("id, name, sku, calculated_sale_price, currency, is_active")
+      .eq("id", params.productId)
+      .eq("organization_id", params.organizationId)
+      .eq("is_active", true)
+      .maybeSingle(),
+    supabase
+      .from("sales_price_lists")
+      .select("id, name, type, value, percentage, is_active, valid_from")
+      .eq("id", params.priceListId)
+      .eq("organization_id", params.organizationId)
+      .maybeSingle(),
+  ]);
+
+  if (productError || !product) {
+    throw new Error("El producto no está disponible para la venta");
+  }
+  if (priceListError || !priceList?.is_active) {
+    throw new Error("La lista de precios de WhatsApp no está disponible");
+  }
+  if (priceList.valid_from > new Date().toISOString().slice(0, 10)) {
+    throw new Error("La lista de precios de WhatsApp aún no está vigente");
+  }
+
+  const basePrice = Number(product.calculated_sale_price ?? 0);
+  const type = priceList.type ?? "PERCENTAGE";
+  const value = Number(
+    priceList.value ?? (type === "PERCENTAGE" ? priceList.percentage : 0) ?? 0
+  );
+  const unitPrice =
+    type === "PRICE"
+      ? roundMoney(Math.max(0, basePrice + value))
+      : roundMoney(Math.max(0, basePrice * (1 + value / 100)));
+
+  return {
+    productId: product.id,
+    productName: product.name,
+    sku: product.sku,
+    currency: product.currency ?? "ARS",
+    unitPrice,
+    priceList: { id: priceList.id, name: priceList.name },
+  };
+}
+
+async function getOrCreateCart(context: VerifiedContext) {
+  const supabase = createWhatsAppAdminClient();
+  const { data: existing, error: existingError } = await supabase
+    .from("conversation_carts")
+    .select("id, status, currency, quoted_at, confirmed_at")
+    .eq("conversation_id", context.conversationId)
+    .eq("organization_id", context.organizationId)
+    .maybeSingle();
+  if (existingError) {
+    throw new Error(`No se pudo obtener el carrito: ${existingError.message}`);
+  }
+  if (existing) {
+    return existing;
+  }
+
+  const { data, error } = await supabase
+    .from("conversation_carts")
+    .insert({
+      organization_id: context.organizationId,
+      conversation_id: context.conversationId,
+    })
+    .select("id, status, currency, quoted_at, confirmed_at")
+    .single();
+  if (error || !data) {
+    throw new Error(
+      `No se pudo crear el carrito: ${error?.message ?? "sin datos"}`
+    );
+  }
+  return data;
+}
+
+async function cartSummary(context: VerifiedContext) {
+  const supabase = createWhatsAppAdminClient();
+  const cart = await getOrCreateCart(context);
+  const { data: items, error } = await supabase
+    .from("conversation_cart_items")
+    .select(
+      "id, product_id, product_variant_id, quantity, unit_price, price_snapshot"
+    )
+    .eq("cart_id", cart.id)
+    .eq("organization_id", context.organizationId)
+    .order("created_at");
+  if (error) {
+    throw new Error(
+      `No se pudo obtener los ítems del carrito: ${error.message}`
+    );
+  }
+
+  const cartItems = (items ?? []) as CartItem[];
+  return {
+    cart,
+    items: cartItems.map((item) => ({
+      id: item.id,
+      productId: item.product_id,
+      productVariantId: item.product_variant_id,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unit_price),
+      subtotal: roundMoney(Number(item.quantity) * Number(item.unit_price)),
+      productName: item.price_snapshot?.productName ?? "Producto",
+      sku: item.price_snapshot?.sku ?? null,
+    })),
+  };
+}
+
+async function findCustomer(context: VerifiedContext) {
+  const supabase = createWhatsAppAdminClient();
+  if (context.customerId) {
+    const { data: linkedCustomer } = await supabase
+      .from("customers")
+      .select("id, business_name, fantasy_name, phone, email")
+      .eq("id", context.customerId)
+      .eq("organization_id", context.organizationId)
+      .maybeSingle();
+    if (linkedCustomer) {
+      return { found: true, customer: linkedCustomer };
+    }
+  }
+
+  const phone = normalizedPhone(context.customerPhone);
+  const { data, error } = await supabase
+    .from("customers")
+    .select("id, business_name, fantasy_name, phone, email")
+    .eq("organization_id", context.organizationId)
+    .eq("is_active", true)
+    .ilike("phone", `%${phone}%`)
+    .limit(5);
+  if (error) {
+    throw new Error(`No se pudo buscar el cliente: ${error.message}`);
+  }
+  const customer = (
+    (data ?? []) as Array<{ id: string; phone: string | null }>
+  ).find((candidate) => normalizedPhone(candidate.phone) === phone);
+  if (!customer) {
+    return { found: false, customer: null };
+  }
+
+  const { error: updateError } = await supabase
+    .from("whatsapp_conversations")
+    .update({ customer_id: customer.id })
+    .eq("id", context.conversationId)
+    .eq("organization_id", context.organizationId)
+    .eq("integration_id", context.integrationId);
+  if (updateError) {
+    throw new Error(`No se pudo vincular el cliente: ${updateError.message}`);
+  }
+  return { found: true, customer };
+}
+
+async function searchCatalog(context: VerifiedContext, query: string) {
+  const terms = searchTokens(query);
+  if (!terms.length) {
+    throw new Error("La búsqueda debe incluir al menos dos caracteres");
+  }
+  const supabase = createWhatsAppAdminClient();
+  const { data: categories, error: categoriesError } = await supabase
+    .from("categories")
+    .select("id, name")
+    .eq("organization_id", context.organizationId);
+  if (categoriesError) {
+    throw new Error(
+      `No se pudieron buscar categorías: ${categoriesError.message}`
+    );
+  }
+
+  const categoryNames = new Map(
+    ((categories ?? []) as Array<{ id: string; name: string }>).map(
+      (category) => [category.id, category.name]
+    )
+  );
+  const matchingCategoryIds = [...categoryNames.entries()]
+    .filter(([, name]) => {
+      const categoryTokens = searchTokens(name);
+      return terms.some((term) => categoryTokens.includes(term));
+    })
+    .map(([id]) => id);
+  // unit_of_measure is a PostgreSQL enum in products_with_price. It can be
+  // used to rank the returned rows, but PostgREST cannot apply ILIKE to it.
+  const productFields = ["name", "sku", "description", "brand"];
+  const textFilters = terms.flatMap((term) =>
+    productFields.map((field) => `${field}.ilike.%${term}%`)
+  );
+  const baseQuery = () =>
+    supabase
+      .from("products_with_price")
+      .select(
+        "id, name, sku, description, brand, category_id, currency, unit_of_measure"
+      )
+      .eq("organization_id", context.organizationId)
+      .eq("is_active", true)
+      .limit(100);
+  const [{ data: textProducts, error: textError }, categoryProductsResult] =
+    await Promise.all([
+      baseQuery().or(textFilters.join(",")),
+      matchingCategoryIds.length
+        ? baseQuery().in("category_id", matchingCategoryIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+  if (textError) {
+    throw new Error(`No se pudo buscar el catálogo: ${textError.message}`);
+  }
+  if (categoryProductsResult.error) {
+    throw new Error(
+      `No se pudo buscar el catálogo: ${categoryProductsResult.error.message}`
+    );
+  }
+
+  type CatalogRow = {
+    id: string | null;
+    name: string | null;
+    sku: string | null;
+    description: string | null;
+    brand: string | null;
+    category_id: string | null;
+    currency: string | null;
+    unit_of_measure: string | null;
+  };
+  const candidates = new Map<string, CatalogRow>();
+  for (const product of [
+    ...((textProducts ?? []) as CatalogRow[]),
+    ...((categoryProductsResult.data ?? []) as CatalogRow[]),
+  ]) {
+    if (product.id) {
+      candidates.set(product.id, product);
+    }
+  }
+  const rankedProducts = [...candidates.values()]
+    .map((product) => {
+      const categoryName = product.category_id
+        ? (categoryNames.get(product.category_id) ?? "")
+        : "";
+      return {
+        product,
+        categoryName,
+        score: catalogMatchScore({ ...product, categoryName }, query, terms),
+      };
+    })
+    .filter(({ score }) => score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        (left.product.name ?? "").localeCompare(right.product.name ?? "")
+    )
+    .slice(0, 8);
+
+  return {
+    products: rankedProducts.map(({ product, categoryName }) => ({
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      description: product.description,
+      brand: product.brand,
+      category: categoryName || null,
+      unitOfMeasure: product.unit_of_measure,
+      currency: product.currency ?? "ARS",
+    })),
+  };
+}
+
+async function getOffer(context: VerifiedContext, productId: string) {
+  const [offer, stockResult] = await Promise.all([
+    resolvePrice({
+      organizationId: context.organizationId,
+      priceListId: context.salesPriceListId,
+      productId,
+    }),
+    createWhatsAppAdminClient()
+      .from("view_stock_detail")
+      .select("total_stock, unit_of_measure")
+      .eq("organization_id", context.organizationId)
+      .eq("product_id", productId)
+      .maybeSingle(),
+  ]);
+  if (stockResult.error) {
+    throw new Error(
+      `No se pudo consultar el stock: ${stockResult.error.message}`
+    );
+  }
+  return {
+    ...offer,
+    stockAvailable: stockResult.data?.total_stock ?? null,
+    unitOfMeasure: stockResult.data?.unit_of_measure ?? null,
+  };
+}
+
+async function upsertCartItem(
+  context: VerifiedContext,
+  args: z.infer<(typeof toolSchemas)["upsert_cart_item"]>
+) {
+  const offer = await getOffer(context, args.product_id);
+  const cart = await getOrCreateCart(context);
+  if (cart.status === "CONVERTED") {
+    throw new Error("El carrito ya fue convertido en preventa");
+  }
+  const supabase = createWhatsAppAdminClient();
+  let query = supabase
+    .from("conversation_cart_items")
+    .select("id")
+    .eq("cart_id", cart.id)
+    .eq("organization_id", context.organizationId)
+    .eq("product_id", args.product_id);
+  query = args.product_variant_id
+    ? query.eq("product_variant_id", args.product_variant_id)
+    : query.is("product_variant_id", null);
+  const { data: existing, error: existingError } = await query.maybeSingle();
+  if (existingError) {
+    throw new Error(
+      `No se pudo actualizar el carrito: ${existingError.message}`
+    );
+  }
+
+  const values = {
+    quantity: args.quantity,
+    unit_price: offer.unitPrice,
+    price_snapshot: {
+      productName: offer.productName,
+      sku: offer.sku,
+      priceListId: offer.priceList.id,
+      priceListName: offer.priceList.name,
+      quotedAt: new Date().toISOString(),
+    },
+  };
+  const write = existing
+    ? supabase
+        .from("conversation_cart_items")
+        .update(values)
+        .eq("id", existing.id)
+        .eq("organization_id", context.organizationId)
+    : supabase.from("conversation_cart_items").insert({
+        ...values,
+        organization_id: context.organizationId,
+        cart_id: cart.id,
+        product_id: args.product_id,
+        product_variant_id: args.product_variant_id ?? null,
+      });
+  const { error } = await write;
+  if (error) {
+    throw new Error(`No se pudo guardar el ítem: ${error.message}`);
+  }
+  await supabase
+    .from("conversation_carts")
+    .update({ status: "OPEN", quoted_at: null })
+    .eq("id", cart.id)
+    .eq("organization_id", context.organizationId);
+  return cartSummary(context);
+}
+
+async function quoteCart(context: VerifiedContext) {
+  const initial = await cartSummary(context);
+  if (!initial.items.length) {
+    throw new Error("El carrito está vacío");
+  }
+  const supabase = createWhatsAppAdminClient();
+  for (const item of initial.items) {
+    const offer = await getOffer(context, item.productId);
+    const { error } = await supabase
+      .from("conversation_cart_items")
+      .update({
+        unit_price: offer.unitPrice,
+        price_snapshot: {
+          productName: offer.productName,
+          sku: offer.sku,
+          priceListId: offer.priceList.id,
+          priceListName: offer.priceList.name,
+          quotedAt: new Date().toISOString(),
+        },
+      })
+      .eq("id", item.id)
+      .eq("cart_id", initial.cart.id)
+      .eq("organization_id", context.organizationId);
+    if (error) {
+      throw new Error(`No se pudo recalcular el carrito: ${error.message}`);
+    }
+  }
+  const { error: cartError } = await supabase
+    .from("conversation_carts")
+    .update({ status: "QUOTED", quoted_at: new Date().toISOString() })
+    .eq("id", initial.cart.id)
+    .eq("organization_id", context.organizationId);
+  if (cartError) {
+    throw new Error(`No se pudo cotizar el carrito: ${cartError.message}`);
+  }
+  const quoted = await cartSummary(context);
+  const total = quoted.items.reduce((sum, item) => sum + item.subtotal, 0);
+  return {
+    ...quoted,
+    total: roundMoney(total),
+    currency: quoted.cart.currency,
+  };
+}
+
+async function createPreSale(context: VerifiedContext) {
+  if (context.currentPreSaleId) {
+    return { preSaleId: context.currentPreSaleId, alreadyCreated: true };
+  }
+  const supabase = createWhatsAppAdminClient();
+  const { data: linkedPreSale, error: linkedPreSaleError } = await supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("organization_id", context.organizationId)
+    .eq("conversation_id" as never, context.conversationId)
+    .maybeSingle();
+  if (linkedPreSaleError) {
+    throw new Error(
+      `No se pudo verificar la preventa existente: ${linkedPreSaleError.message}`
+    );
+  }
+  if (linkedPreSale) {
+    await supabase
+      .from("whatsapp_conversations")
+      .update({ current_pre_sale_id: linkedPreSale.id })
+      .eq("id", context.conversationId)
+      .eq("organization_id", context.organizationId)
+      .eq("integration_id", context.integrationId);
+    return { preSaleId: linkedPreSale.id, alreadyCreated: true };
+  }
+  const [{ data: cart }, { data: latestInbound }] = await Promise.all([
+    supabase
+      .from("conversation_carts")
+      .select("id, status")
+      .eq("conversation_id", context.conversationId)
+      .eq("organization_id", context.organizationId)
+      .maybeSingle(),
+    supabase
+      .from("whatsapp_messages")
+      .select("content")
+      .eq("conversation_id", context.conversationId)
+      .eq("organization_id", context.organizationId)
+      .eq("integration_id", context.integrationId)
+      .eq("direction", "INBOUND")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (cart?.status !== "QUOTED") {
+    throw new Error("Primero hay que cotizar el carrito actualizado");
+  }
+  if (!isExplicitConfirmation(latestInbound?.content ?? null)) {
+    throw new Error("Todavía falta una confirmación explícita del cliente");
+  }
+
+  const customer = await findCustomer(context);
+  if (!(customer.found && customer.customer)) {
+    throw new Error(
+      "No se encontró un cliente asociado al teléfono para crear la preventa"
+    );
+  }
+  const quoted = await quoteCart(context);
+  const saleDate = new Date().toISOString().slice(0, 10);
+  const preSaleId = await createWhatsAppPreSaleOrder({
+    organizationId: context.organizationId,
+    conversationId: context.conversationId,
+    sellerId: context.responsibleUserId,
+    input: {
+      orgSlug: "whatsapp-integration",
+      customerId: customer.customer.id,
+      saleDate,
+      salesPriceListId: context.salesPriceListId,
+      observations: `${context.mode === "LOCAL_SIMULATOR" ? "[SIMULACIÓN LOCAL] " : ""}Preventa originada por WhatsApp · conversación ${context.conversationId}`,
+      items: quoted.items.map((item) => ({
+        productId: item.productId,
+        productVariantId: item.productVariantId,
+        description: String(item.productName),
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+    },
+  });
+  const { error } = await supabase
+    .from("whatsapp_conversations")
+    .update({ current_pre_sale_id: preSaleId })
+    .eq("id", context.conversationId)
+    .eq("organization_id", context.organizationId)
+    .eq("integration_id", context.integrationId);
+  if (error) {
+    throw new Error(
+      `No se pudo vincular la preventa a la conversación: ${error.message}`
+    );
+  }
+  await supabase
+    .from("conversation_carts")
+    .update({ status: "CONVERTED", confirmed_at: new Date().toISOString() })
+    .eq("id", cart.id)
+    .eq("organization_id", context.organizationId);
+  return { preSaleId, alreadyCreated: false };
+}
+
+async function getPreSaleStatus(context: VerifiedContext) {
+  if (!context.currentPreSaleId) {
+    return { preSale: null };
+  }
+  const { data, error } = await createWhatsAppAdminClient()
+    .from("sales_orders")
+    .select("id, sale_number, status, preventa_status, total_amount, currency")
+    .eq("id", context.currentPreSaleId)
+    .eq("organization_id", context.organizationId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`No se pudo consultar la preventa: ${error.message}`);
+  }
+  return { preSale: data ?? null };
+}
+
+async function handoffToHuman(context: VerifiedContext, reason: string) {
+  const { error } = await createWhatsAppAdminClient()
+    .from("whatsapp_conversations")
+    .update({
+      status: "HANDOFF",
+      handoff_reason: reason,
+      bot_paused_at: new Date().toISOString(),
+      assigned_user_id: context.responsibleUserId,
+    })
+    .eq("id", context.conversationId)
+    .eq("organization_id", context.organizationId)
+    .eq("integration_id", context.integrationId)
+    .eq("status", "ACTIVE");
+  if (error) {
+    throw new Error(`No se pudo derivar la conversación: ${error.message}`);
+  }
+  return {
+    handedOff: true,
+    message:
+      context.handoffMessage ??
+      "Te conectamos con una persona del equipo comercial para continuar.",
+  };
+}
+
+export async function executeCommercialTool(
+  context: CommercialToolContext,
+  name: CommercialToolName,
+  rawArgs: unknown
+): Promise<unknown> {
+  const verified = await verifyContext(context);
+
+  switch (name) {
+    case "find_customer_by_phone":
+      toolSchemas.find_customer_by_phone.parse(rawArgs);
+      return findCustomer(verified);
+    case "search_catalog":
+      return searchCatalog(
+        verified,
+        toolSchemas.search_catalog.parse(rawArgs).query
+      );
+    case "get_offer":
+      return getOffer(
+        verified,
+        toolSchemas.get_offer.parse(rawArgs).product_id
+      );
+    case "get_cart":
+      toolSchemas.get_cart.parse(rawArgs);
+      return cartSummary(verified);
+    case "upsert_cart_item":
+      return upsertCartItem(
+        verified,
+        toolSchemas.upsert_cart_item.parse(rawArgs)
+      );
+    case "quote_cart":
+      toolSchemas.quote_cart.parse(rawArgs);
+      return quoteCart(verified);
+    case "create_pre_sale":
+      toolSchemas.create_pre_sale.parse(rawArgs);
+      return createPreSale(verified);
+    case "get_pre_sale_status":
+      toolSchemas.get_pre_sale_status.parse(rawArgs);
+      return getPreSaleStatus(verified);
+    case "handoff_to_human":
+      return handoffToHuman(
+        verified,
+        toolSchemas.handoff_to_human.parse(rawArgs).reason
+      );
+    default:
+      throw new Error("Herramienta comercial no soportada");
+  }
+}

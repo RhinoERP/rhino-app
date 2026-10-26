@@ -50,9 +50,13 @@ next-env.d.ts
 /docs
 !/docs/
 !/docs/whatsapp-agent.md
+!/docs/whatsapp-deploy.md
 
 #pmpm-workspace
 pnpm-workspace.yaml
 
 # supabase
 supabase/.temp/
+
+# Standalone service build output
+/services/whatsapp-agent/dist/

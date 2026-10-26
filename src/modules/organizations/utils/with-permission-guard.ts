@@ -1,4 +1,7 @@
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import {
+  guardOrganizationModuleAccess,
+  guardOrganizationPermissionAccess,
+} from "@/modules/organizations/service/module-access.service";
 
 /**
  * Verifica que el usuario tenga el permiso requerido antes de ejecutar
@@ -14,7 +17,12 @@ import { guardOrganizationPermissionAccess } from "@/modules/organizations/servi
  */
 export async function ensure(
   permission: string | string[],
-  orgSlug: string
+  orgSlug: string,
+  whatsappMode: "whatsapp" | "whatsapp_sandbox" = "whatsapp"
 ): Promise<void> {
   await guardOrganizationPermissionAccess(orgSlug, permission);
+  const permissions = Array.isArray(permission) ? permission : [permission];
+  if (permissions.some((value) => value.startsWith("whatsapp."))) {
+    await guardOrganizationModuleAccess(orgSlug, whatsappMode);
+  }
 }

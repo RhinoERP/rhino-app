@@ -26,19 +26,21 @@ type QuickLink = {
   description: string;
   icon: typeof UsersIcon;
   href: string;
-  module?: "pos" | "accounting";
+  module?: "pos" | "accounting" | "whatsapp";
 };
 
 type ConfigurationQuickLinksProps = {
   orgSlug: string;
   posEnabled: boolean;
   accountingEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export function ConfigurationQuickLinks({
   orgSlug,
   posEnabled,
   accountingEnabled,
+  whatsappEnabled,
 }: ConfigurationQuickLinksProps) {
   const quickLinks: QuickLink[] = [
     {
@@ -115,12 +117,14 @@ export function ConfigurationQuickLinks({
         "Configurá el número, lista de precios y responsable del asistente comercial",
       icon: WhatsappLogo,
       href: `/org/${orgSlug}/whatsapp/configuracion`,
+      module: "whatsapp",
     },
   ];
   const moduleFlags = {
     wholesale_enabled: true,
     pos_enabled: posEnabled,
     accounting_enabled: accountingEnabled,
+    whatsapp_enabled: whatsappEnabled,
   };
 
   return (

@@ -2,7 +2,9 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import type { WhatsAppIntegrationConfigurationInput } from "../schemas";
+import { assertWhatsAppEnabled } from "../server/access";
 import type { WhatsAppIntegration } from "../types";
+import { DEFAULT_WHATSAPP_BUSINESS_HOURS } from "../types";
 
 type WhatsAppIntegrationRow = {
   id: string;
@@ -13,6 +15,8 @@ type WhatsAppIntegrationRow = {
   sales_price_list_id: string | null;
   responsible_user_id: string | null;
   business_hours: Record<string, unknown> | null;
+  response_delay_min_minutes: number | null;
+  response_delay_max_minutes: number | null;
   commercial_rules: Record<string, unknown> | null;
   handoff_message: string | null;
   created_at: string;
@@ -27,6 +31,33 @@ export type WhatsAppResponsibleUserOption = {
 };
 
 function mapIntegration(row: WhatsAppIntegrationRow): WhatsAppIntegration {
+  const rawBusinessHours = row.business_hours ?? {};
+  const rawSchedule = rawBusinessHours.weeklySchedule;
+  const weeklySchedule =
+    typeof rawSchedule === "object" && rawSchedule !== null
+      ? (rawSchedule as Record<string, unknown>)
+      : {};
+  const businessHours = {
+    ...DEFAULT_WHATSAPP_BUSINESS_HOURS,
+    ...rawBusinessHours,
+    weeklySchedule: Object.fromEntries(
+      Object.entries(DEFAULT_WHATSAPP_BUSINESS_HOURS.weeklySchedule).map(
+        ([day, defaults]) => {
+          const configured = weeklySchedule[day];
+          return [
+            day,
+            {
+              ...defaults,
+              ...(typeof configured === "object" && configured !== null
+                ? configured
+                : {}),
+            },
+          ];
+        }
+      )
+    ),
+  } as WhatsAppIntegration["businessHours"];
+
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -35,7 +66,9 @@ function mapIntegration(row: WhatsAppIntegrationRow): WhatsAppIntegration {
     status: row.status,
     salesPriceListId: row.sales_price_list_id,
     responsibleUserId: row.responsible_user_id,
-    businessHours: row.business_hours ?? {},
+    businessHours,
+    responseDelayMinMinutes: row.response_delay_min_minutes ?? 1,
+    responseDelayMaxMinutes: row.response_delay_max_minutes ?? 3,
     commercialRules: row.commercial_rules ?? {},
     handoffMessage: row.handoff_message,
     createdAt: row.created_at,
@@ -50,6 +83,7 @@ async function getOrganizationId(orgSlug: string): Promise<string> {
     throw new Error("Organización no encontrada");
   }
 
+  await assertWhatsAppEnabled(organization.id);
   return organization.id;
 }
 
@@ -62,9 +96,10 @@ export async function getWhatsAppIntegrationByOrgSlug(
   const { data, error } = await supabase
     .from("whatsapp_integrations")
     .select(
-      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, responsible_user_id, business_hours, commercial_rules, handoff_message, created_at, updated_at"
+      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, responsible_user_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, commercial_rules, handoff_message, created_at, updated_at"
     )
     .eq("organization_id", organizationId)
+    .not("phone_number_id", "like", "rhinos-local-simulator:%")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -151,6 +186,7 @@ export async function saveWhatsAppIntegrationByOrgSlug(
     .from("whatsapp_integrations")
     .select("id")
     .eq("organization_id", organizationId)
+    .not("phone_number_id", "like", "rhinos-local-simulator:%")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -168,6 +204,8 @@ export async function saveWhatsAppIntegrationByOrgSlug(
     sales_price_list_id: input.salesPriceListId,
     responsible_user_id: input.responsibleUserId,
     business_hours: input.businessHours,
+    response_delay_min_minutes: input.responseDelayMinMinutes,
+    response_delay_max_minutes: input.responseDelayMaxMinutes,
     commercial_rules: input.commercialRules,
     handoff_message: input.handoffMessage || null,
   };
@@ -186,7 +224,7 @@ export async function saveWhatsAppIntegrationByOrgSlug(
 
   const { data, error } = await query
     .select(
-      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, responsible_user_id, business_hours, commercial_rules, handoff_message, created_at, updated_at"
+      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, responsible_user_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, commercial_rules, handoff_message, created_at, updated_at"
     )
     .single();
 
