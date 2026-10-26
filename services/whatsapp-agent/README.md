@@ -18,3 +18,7 @@ WHATSAPP_AGENT_OPENAI_MODEL=gpt-5-mini
 ```
 
 En Railway, usar `services/whatsapp-agent` como directorio raíz, `pnpm install` como instalación, `pnpm build` como build y `pnpm start` como comando de inicio. Si faltan las tres variables comerciales (`OPENAI_API_KEY`, `WHATSAPP_AGENT_RHINOS_URL` y `WHATSAPP_AGENT_SERVICE_TOKEN`), el servicio mantiene `/health` disponible pero no reclama trabajos: así nunca confirma un procesamiento sin responder al cliente.
+
+Rhinos incluye `/org/[orgSlug]/whatsapp/simulador`, que reutiliza el ciclo de
+herramientas de `src/agent-core.ts` con catálogo y estado ficticios. La
+simulación no usa Meta ni persiste conversaciones o preventas reales.

@@ -51,16 +51,19 @@ Incorporar `src/modules/whatsapp` y rutas bajo `/org/[orgSlug]/whatsapp`.
 
 El webhook verifica la firma, deduplica, persiste el mensaje, encola un trabajo durable y responde `200`. Si no existe una integración activa para el número, no encola automatización.
 
+La configuración permite establecer días y franjas semanales, zona horaria y un rango de demora aleatoria (0–120 minutos). Si un mensaje llega fuera de horario, el trabajo queda en la cola hasta la próxima apertura; el agente vuelve a comprobar el horario antes de procesarlo. La instrucción compartida con el simulador y el worker prohíbe el uso de emojis.
+
 ### Worker `services/whatsapp-agent`
 
 El worker reclama trabajos pendientes, obtiene el contexto autorizado y opera el asistente:
 
 1. Reclama un trabajo de forma exclusiva.
-2. Lee conversación, últimos mensajes, carrito y configuración permitida.
-3. Ejecuta el modelo y sus herramientas comerciales.
-4. Registra la ejecución y cada llamada de herramienta.
-5. Envía la respuesta por Meta o deriva a atención manual.
-6. Termina el trabajo o programa un reintento transitorio.
+2. Consulta el horario y la demora configurados; si corresponde, difiere el trabajo en la cola durable.
+3. Lee conversación, últimos mensajes, carrito y configuración permitida.
+4. Ejecuta el modelo y sus herramientas comerciales.
+5. Registra la ejecución y cada llamada de herramienta.
+6. Envía la respuesta por Meta o deriva a atención manual.
+7. Termina el trabajo o programa un reintento transitorio.
 
 No procesa conversaciones en atención manual, pausadas ni asociadas a una integración inactiva.
 
@@ -126,8 +129,19 @@ Restricciones e índices mínimos:
 | Ruta | Contenido |
 | --- | --- |
 | `/org/[orgSlug]/whatsapp/conversaciones` | Inbox, filtros, historial, carrito, preventa y respuesta manual. |
+| `/org/[orgSlug]/whatsapp/simulador` | Prueba conversacional con catálogo ficticio y captura local de respuestas. |
 | `/org/[orgSlug]/whatsapp/metricas` | Conversaciones, respuesta, preventas, conversión, abandono, derivaciones, intervención humana, productos y faltantes. |
 | `/org/[orgSlug]/whatsapp/configuracion` | Meta, lista de precios, vendedor, horario, activación y reglas de derivación. |
+
+El simulador usa el mismo ciclo de Responses API y llamadas a herramientas del
+worker (`services/whatsapp-agent/src/agent-core.ts`), con herramientas que
+operan exclusivamente sobre productos, precios, carrito, preventa y derivación
+ficticios. El estado queda vinculado a la organización autorizada. No crea
+conversaciones ni ventas en Supabase y no llama a Meta; sólo captura el texto
+de respuesta en la pantalla. Requiere `OPENAI_API_KEY` configurada en Rhinos.
+Los valores de catálogo son de prueba: mate térmico ARS 18.500, termo ARS
+42.000, bombilla ARS 6.500, stock ficticio y una lista demo de +5% sobre precio
+base.
 
 Los permisos del módulo distinguen lectura de inbox, atención de conversaciones, administración de configuración y lectura de métricas.
 
@@ -137,7 +151,7 @@ Los permisos del módulo distinguen lectura de inbox, atención de conversacione
 
 | Fase | Estado | Alcance disponible en código |
 | --- | --- | --- |
-| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable y derivación. Faltan exponer horario y reglas comerciales en la UI, además del provisionamiento real de secretos. |
+| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable, horarios semanales, zona horaria, demora aleatoria y derivación. Falta el provisionamiento real de secretos y completar la interfaz para reglas comerciales. |
 | 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta/Railway. |
 | 3 — Asistente comercial | En curso | Worker con Responses API, herramientas comerciales acotadas, carrito persistente, cotización, confirmación explícita, preventa idempotente y auditoría. Falta una prueba end-to-end contra Meta y el proveedor de modelo. |
 | 4 — Operación humana | En curso | Inbox inicial, respuesta manual, derivación y pausa/reactivación explícita. Faltan asignación, alertas y vista detallada de historial. |

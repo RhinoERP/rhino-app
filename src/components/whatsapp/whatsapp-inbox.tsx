@@ -30,6 +30,128 @@ function statusLabel(status: WhatsAppInboxConversation["status"]): string {
   }[status];
 }
 
+function ConversationActions({
+  conversation,
+  draft,
+  isPending,
+  onDraftChange,
+  onSend,
+  onSetAutomation,
+}: {
+  conversation: WhatsAppInboxConversation;
+  draft: string;
+  isPending: boolean;
+  onDraftChange: (text: string) => void;
+  onSend: () => void;
+  onSetAutomation: (enabled: boolean) => void;
+}) {
+  if (conversation.isSimulator) {
+    return (
+      <p className="text-muted-foreground text-xs">
+        Esta conversación se generó desde el simulador. Para probar otro
+        mensaje, continuá desde esa pantalla.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <Textarea
+        aria-label={`Responder a ${conversation.customerName ?? conversation.customerPhone}`}
+        onChange={(event) => onDraftChange(event.target.value)}
+        placeholder="Escribí una respuesta manual…"
+        value={draft}
+      />
+      <div className="flex justify-between gap-2">
+        {conversation.status !== "CLOSED" ? (
+          <Button
+            disabled={isPending}
+            onClick={() => onSetAutomation(conversation.status !== "ACTIVE")}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {conversation.status === "ACTIVE" ? "Pausar bot" : "Reactivar bot"}
+          </Button>
+        ) : (
+          <span />
+        )}
+        <Button
+          disabled={isPending || conversation.status === "CLOSED"}
+          onClick={onSend}
+          size="sm"
+          type="button"
+        >
+          <PaperPlaneTiltIcon className="mr-2 size-4" />
+          Enviar
+        </Button>
+      </div>
+    </>
+  );
+}
+
+function ConversationCard({
+  conversation,
+  draft,
+  isPending,
+  onDraftChange,
+  onSend,
+  onSetAutomation,
+}: {
+  conversation: WhatsAppInboxConversation;
+  draft: string;
+  isPending: boolean;
+  onDraftChange: (text: string) => void;
+  onSend: () => void;
+  onSetAutomation: (enabled: boolean) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="gap-1 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">
+              {conversation.customerName ?? conversation.customerPhone}
+            </CardTitle>
+            <CardDescription>{conversation.customerPhone}</CardDescription>
+            {conversation.isSimulator ? (
+              <CardDescription className="text-amber-700">
+                Simulación local · mensajes no enviados a WhatsApp
+              </CardDescription>
+            ) : null}
+          </div>
+          <span className="rounded-full bg-muted px-2 py-1 text-xs">
+            {statusLabel(conversation.status)}
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="rounded-md bg-muted/50 p-3 text-sm">
+          <p className="mb-1 text-muted-foreground text-xs">
+            {conversation.lastMessage?.direction === "OUTBOUND"
+              ? "Equipo"
+              : "Cliente"}
+          </p>
+          <p>{conversation.lastMessage?.content ?? "Sin mensajes de texto"}</p>
+        </div>
+        {conversation.handoffReason ? (
+          <p className="text-muted-foreground text-xs">
+            Derivación: {conversation.handoffReason}
+          </p>
+        ) : null}
+        <ConversationActions
+          conversation={conversation}
+          draft={draft}
+          isPending={isPending}
+          onDraftChange={onDraftChange}
+          onSend={onSend}
+          onSetAutomation={onSetAutomation}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 export function WhatsAppInbox({ conversations, orgSlug }: WhatsAppInboxProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [isPending, startTransition] = useTransition();
@@ -82,80 +204,17 @@ export function WhatsAppInbox({ conversations, orgSlug }: WhatsAppInboxProps) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {conversations.map((conversation) => (
-        <Card key={conversation.id}>
-          <CardHeader className="gap-1 pb-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle className="text-base">
-                  {conversation.customerName ?? conversation.customerPhone}
-                </CardTitle>
-                <CardDescription>{conversation.customerPhone}</CardDescription>
-              </div>
-              <span className="rounded-full bg-muted px-2 py-1 text-xs">
-                {statusLabel(conversation.status)}
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-md bg-muted/50 p-3 text-sm">
-              <p className="mb-1 text-muted-foreground text-xs">
-                {conversation.lastMessage?.direction === "OUTBOUND"
-                  ? "Equipo"
-                  : "Cliente"}
-              </p>
-              <p>
-                {conversation.lastMessage?.content ?? "Sin mensajes de texto"}
-              </p>
-            </div>
-            {conversation.handoffReason ? (
-              <p className="text-muted-foreground text-xs">
-                Derivación: {conversation.handoffReason}
-              </p>
-            ) : null}
-            <Textarea
-              aria-label={`Responder a ${conversation.customerName ?? conversation.customerPhone}`}
-              onChange={(event) =>
-                setDrafts((current) => ({
-                  ...current,
-                  [conversation.id]: event.target.value,
-                }))
-              }
-              placeholder="Escribí una respuesta manual…"
-              value={drafts[conversation.id] ?? ""}
-            />
-            <div className="flex justify-between gap-2">
-              {conversation.status !== "CLOSED" ? (
-                <Button
-                  disabled={isPending}
-                  onClick={() =>
-                    setAutomation(
-                      conversation.id,
-                      conversation.status !== "ACTIVE"
-                    )
-                  }
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {conversation.status === "ACTIVE"
-                    ? "Pausar bot"
-                    : "Reactivar bot"}
-                </Button>
-              ) : (
-                <span />
-              )}
-              <Button
-                disabled={isPending || conversation.status === "CLOSED"}
-                onClick={() => send(conversation.id)}
-                size="sm"
-                type="button"
-              >
-                <PaperPlaneTiltIcon className="mr-2 size-4" />
-                Enviar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <ConversationCard
+          conversation={conversation}
+          draft={drafts[conversation.id] ?? ""}
+          isPending={isPending}
+          key={conversation.id}
+          onDraftChange={(text) =>
+            setDrafts((current) => ({ ...current, [conversation.id]: text }))
+          }
+          onSend={() => send(conversation.id)}
+          onSetAutomation={(enabled) => setAutomation(conversation.id, enabled)}
+        />
       ))}
     </div>
   );

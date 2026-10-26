@@ -3,6 +3,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 
 export type WhatsAppInboxConversation = {
   id: string;
+  isSimulator: boolean;
   customerPhone: string;
   customerName: string | null;
   status: "ACTIVE" | "PAUSED" | "HANDOFF" | "CLOSED";
@@ -17,6 +18,7 @@ export type WhatsAppInboxConversation = {
 
 type ConversationRow = {
   id: string;
+  integration_id: string;
   customer_phone: string;
   customer_id: string | null;
   status: WhatsAppInboxConversation["status"];
@@ -37,7 +39,7 @@ export async function getWhatsAppInboxByOrgSlug(
   const { data: conversations, error } = await supabase
     .from("whatsapp_conversations")
     .select(
-      "id, customer_phone, customer_id, status, handoff_reason, last_message_at, current_pre_sale_id"
+      "id, integration_id, customer_phone, customer_id, status, handoff_reason, last_message_at, current_pre_sale_id"
     )
     .eq("organization_id", organization.id)
     .order("last_message_at", { ascending: false, nullsFirst: false })
@@ -50,28 +52,38 @@ export async function getWhatsAppInboxByOrgSlug(
   if (!rows.length) {
     return [];
   }
-  const [customersResult, messagesResult] = await Promise.all([
-    supabase
-      .from("customers")
-      .select("id, business_name, fantasy_name")
-      .eq("organization_id", organization.id)
-      .in(
-        "id",
-        rows
-          .map((conversation) => conversation.customer_id)
-          .filter((id): id is string => Boolean(id))
-      ),
-    supabase
-      .from("whatsapp_messages")
-      .select("conversation_id, direction, content, created_at")
-      .eq("organization_id", organization.id)
-      .in(
-        "conversation_id",
-        rows.map((conversation) => conversation.id)
-      )
-      .order("created_at", { ascending: false }),
-  ]);
-  if (customersResult.error || messagesResult.error) {
+  const [customersResult, messagesResult, integrationsResult] =
+    await Promise.all([
+      supabase
+        .from("customers")
+        .select("id, business_name, fantasy_name")
+        .eq("organization_id", organization.id)
+        .in(
+          "id",
+          rows
+            .map((conversation) => conversation.customer_id)
+            .filter((id): id is string => Boolean(id))
+        ),
+      supabase
+        .from("whatsapp_messages")
+        .select("conversation_id, direction, content, created_at")
+        .eq("organization_id", organization.id)
+        .in(
+          "conversation_id",
+          rows.map((conversation) => conversation.id)
+        )
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("whatsapp_integrations")
+        .select("id, phone_number_id")
+        .eq("organization_id", organization.id)
+        .like("phone_number_id", "rhinos-local-simulator:%"),
+    ]);
+  if (
+    customersResult.error ||
+    messagesResult.error ||
+    integrationsResult.error
+  ) {
     throw new Error("No se pudo cargar el detalle de las conversaciones");
   }
 
@@ -80,6 +92,9 @@ export async function getWhatsAppInboxByOrgSlug(
       customer.id,
       customer.fantasy_name || customer.business_name,
     ])
+  );
+  const simulatorIntegrationIds = new Set(
+    (integrationsResult.data ?? []).map((integration) => integration.id)
   );
   const latestMessages = new Map<
     string,
@@ -96,6 +111,7 @@ export async function getWhatsAppInboxByOrgSlug(
 
   return rows.map((conversation) => ({
     id: conversation.id,
+    isSimulator: simulatorIntegrationIds.has(conversation.integration_id),
     customerPhone: conversation.customer_phone,
     customerName: conversation.customer_id
       ? (customerNames.get(conversation.customer_id) ?? null)

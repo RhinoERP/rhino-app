@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createWhatsAppPreSaleOrder } from "@/modules/sales/service/sales.service";
 import { isExplicitConfirmation } from "./confirmation";
+import { isLocalSimulatorIntegration } from "./simulation";
 import { createWhatsAppAdminClient } from "./supabase-admin";
 
 export const commercialToolNames = [
@@ -21,6 +22,7 @@ export type CommercialToolContext = {
   organizationId: string;
   integrationId: string;
   conversationId: string;
+  mode?: "LOCAL_SIMULATOR";
 };
 
 type VerifiedContext = CommercialToolContext & {
@@ -43,8 +45,25 @@ type CartItem = {
 
 const identifier = z.string().uuid();
 const nonDigit = /\D/g;
-const unsafeSearchCharacter = /[%_,.]/g;
-const whitespace = /\s+/g;
+const searchWhitespace = /\s+/;
+const trailingPlural = /s$/u;
+const ignoredSearchTerms = new Set([
+  "a",
+  "al",
+  "con",
+  "de",
+  "del",
+  "el",
+  "la",
+  "las",
+  "lo",
+  "los",
+  "para",
+  "por",
+  "un",
+  "una",
+  "y",
+]);
 
 const toolSchemas = {
   find_customer_by_phone: z.object({}).strict(),
@@ -74,9 +93,65 @@ function normalizedPhone(value: string | null): string {
 
 function normalizedSearch(value: string): string {
   return value
-    .replace(unsafeSearchCharacter, " ")
-    .replace(whitespace, " ")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/(\d)(kg|gr|g|lt|l|ml|unidades|unidad|un)\b/gu, "$1 $2")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+function searchTokens(value: string): string[] {
+  return [
+    ...new Set(
+      normalizedSearch(value)
+        .split(searchWhitespace)
+        .map((term) =>
+          term.length > 3 ? term.replace(trailingPlural, "") : term
+        )
+        .filter((term) => term.length > 1 && !ignoredSearchTerms.has(term))
+    ),
+  ].slice(0, 8);
+}
+
+function catalogMatchScore(
+  product: {
+    name: string | null;
+    sku: string | null;
+    description: string | null;
+    brand: string | null;
+    unit_of_measure: string | null;
+    categoryName: string;
+  },
+  query: string,
+  terms: string[]
+): number {
+  const fields = [
+    product.name,
+    product.sku,
+    product.description,
+    product.brand,
+    product.unit_of_measure,
+    product.categoryName,
+  ].map((value) => normalizedSearch(value ?? ""));
+  const matchedTerms = terms.filter((term) =>
+    fields.some((field) => field.includes(term))
+  );
+  if (!matchedTerms.length) {
+    return 0;
+  }
+
+  const normalizedQuery = normalizedSearch(query);
+  const phraseMatch = fields.some((field) => field.includes(normalizedQuery));
+  const nameMatch = normalizedSearch(product.name ?? "").includes(
+    normalizedQuery
+  );
+  return (
+    matchedTerms.length * 10 +
+    (matchedTerms.length === terms.length ? 40 : 0) +
+    (phraseMatch ? 30 : 0) +
+    (nameMatch ? 20 : 0)
+  );
 }
 
 function roundMoney(value: number): number {
@@ -94,11 +169,10 @@ async function verifyContext(
     supabase
       .from("whatsapp_integrations")
       .select(
-        "id, organization_id, status, sales_price_list_id, responsible_user_id, handoff_message"
+        "id, organization_id, phone_number_id, status, sales_price_list_id, responsible_user_id, handoff_message"
       )
       .eq("id", context.integrationId)
       .eq("organization_id", context.organizationId)
-      .eq("status", "ACTIVE")
       .maybeSingle(),
     supabase
       .from("whatsapp_conversations")
@@ -112,7 +186,17 @@ async function verifyContext(
       .maybeSingle(),
   ]);
 
-  if (integrationError || conversationError || !(integration && conversation)) {
+  const isSimulator =
+    context.mode === "LOCAL_SIMULATOR" &&
+    integration?.status === "DRAFT" &&
+    isLocalSimulatorIntegration(integration.phone_number_id) &&
+    conversation?.customer_phone.startsWith("SIMULACIÓN LOCAL · ");
+  if (
+    integrationError ||
+    conversationError ||
+    !(integration && conversation) ||
+    (integration.status !== "ACTIVE" && !isSimulator)
+  ) {
     throw new Error("La conversación no está disponible para automatización");
   }
   if (!(integration.sales_price_list_id && integration.responsible_user_id)) {
@@ -294,37 +378,110 @@ async function findCustomer(context: VerifiedContext) {
 }
 
 async function searchCatalog(context: VerifiedContext, query: string) {
-  const search = normalizedSearch(query);
-  if (search.length < 2) {
+  const terms = searchTokens(query);
+  if (!terms.length) {
     throw new Error("La búsqueda debe incluir al menos dos caracteres");
   }
   const supabase = createWhatsAppAdminClient();
-  const { data: products, error } = await supabase
-    .from("products_with_price")
-    .select("id, name, sku, description, currency")
-    .eq("organization_id", context.organizationId)
-    .eq("is_active", true)
-    .or(`name.ilike.%${search}%,sku.ilike.%${search}%`)
-    .order("name")
-    .limit(8);
-  if (error) {
-    throw new Error(`No se pudo buscar el catálogo: ${error.message}`);
+  const { data: categories, error: categoriesError } = await supabase
+    .from("categories")
+    .select("id, name")
+    .eq("organization_id", context.organizationId);
+  if (categoriesError) {
+    throw new Error(
+      `No se pudieron buscar categorías: ${categoriesError.message}`
+    );
   }
 
+  const categoryNames = new Map(
+    ((categories ?? []) as Array<{ id: string; name: string }>).map(
+      (category) => [category.id, category.name]
+    )
+  );
+  const matchingCategoryIds = [...categoryNames.entries()]
+    .filter(([, name]) => {
+      const categoryTokens = searchTokens(name);
+      return terms.some((term) => categoryTokens.includes(term));
+    })
+    .map(([id]) => id);
+  // unit_of_measure is a PostgreSQL enum in products_with_price. It can be
+  // used to rank the returned rows, but PostgREST cannot apply ILIKE to it.
+  const productFields = ["name", "sku", "description", "brand"];
+  const textFilters = terms.flatMap((term) =>
+    productFields.map((field) => `${field}.ilike.%${term}%`)
+  );
+  const baseQuery = () =>
+    supabase
+      .from("products_with_price")
+      .select(
+        "id, name, sku, description, brand, category_id, currency, unit_of_measure"
+      )
+      .eq("organization_id", context.organizationId)
+      .eq("is_active", true)
+      .limit(100);
+  const [{ data: textProducts, error: textError }, categoryProductsResult] =
+    await Promise.all([
+      baseQuery().or(textFilters.join(",")),
+      matchingCategoryIds.length
+        ? baseQuery().in("category_id", matchingCategoryIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+  if (textError) {
+    throw new Error(`No se pudo buscar el catálogo: ${textError.message}`);
+  }
+  if (categoryProductsResult.error) {
+    throw new Error(
+      `No se pudo buscar el catálogo: ${categoryProductsResult.error.message}`
+    );
+  }
+
+  type CatalogRow = {
+    id: string | null;
+    name: string | null;
+    sku: string | null;
+    description: string | null;
+    brand: string | null;
+    category_id: string | null;
+    currency: string | null;
+    unit_of_measure: string | null;
+  };
+  const candidates = new Map<string, CatalogRow>();
+  for (const product of [
+    ...((textProducts ?? []) as CatalogRow[]),
+    ...((categoryProductsResult.data ?? []) as CatalogRow[]),
+  ]) {
+    if (product.id) {
+      candidates.set(product.id, product);
+    }
+  }
+  const rankedProducts = [...candidates.values()]
+    .map((product) => {
+      const categoryName = product.category_id
+        ? (categoryNames.get(product.category_id) ?? "")
+        : "";
+      return {
+        product,
+        categoryName,
+        score: catalogMatchScore({ ...product, categoryName }, query, terms),
+      };
+    })
+    .filter(({ score }) => score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        (left.product.name ?? "").localeCompare(right.product.name ?? "")
+    )
+    .slice(0, 8);
+
   return {
-    products: (
-      (products ?? []) as Array<{
-        id: string | null;
-        name: string | null;
-        sku: string | null;
-        description: string | null;
-        currency: string | null;
-      }>
-    ).map((product) => ({
+    products: rankedProducts.map(({ product, categoryName }) => ({
       id: product.id,
       name: product.name,
       sku: product.sku,
       description: product.description,
+      brand: product.brand,
+      category: categoryName || null,
+      unitOfMeasure: product.unit_of_measure,
       currency: product.currency ?? "ARS",
     })),
   };
@@ -529,7 +686,7 @@ async function createPreSale(context: VerifiedContext) {
       customerId: customer.customer.id,
       saleDate,
       salesPriceListId: context.salesPriceListId,
-      observations: `Preventa originada por WhatsApp · conversación ${context.conversationId}`,
+      observations: `${context.mode === "LOCAL_SIMULATOR" ? "[SIMULACIÓN LOCAL] " : ""}Preventa originada por WhatsApp · conversación ${context.conversationId}`,
       items: quoted.items.map((item) => ({
         productId: item.productId,
         productVariantId: item.productVariantId,

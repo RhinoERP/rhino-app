@@ -154,6 +154,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "whatsapp.read",
         },
         {
+          title: "Simulador WhatsApp",
+          url: `/org/${orgSlug}/whatsapp/simulador`,
+          icon: <SparkleIcon weight="duotone" />,
+          requiredPermission: "whatsapp.read",
+        },
+        {
           title: "Notas de Crédito",
           url: `/org/${orgSlug}/notas-de-credito`,
           icon: <ReceiptIcon weight="duotone" />,
