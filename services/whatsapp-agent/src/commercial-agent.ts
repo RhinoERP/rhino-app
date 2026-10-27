@@ -45,13 +45,21 @@ function model(): string {
   return process.env.WHATSAPP_AGENT_OPENAI_MODEL?.trim() || "gpt-5-mini";
 }
 
-export function isCommercialAgentConfigured(): boolean {
-  return Boolean(
-    process.env.WHATSAPP_META_ACCESS_TOKEN &&
-      process.env.OPENAI_API_KEY &&
-      process.env.WHATSAPP_AGENT_SERVICE_TOKEN &&
-      process.env.WHATSAPP_AGENT_RHINOS_URL
+const requiredCommercialEnvironment = [
+  "WHATSAPP_META_ACCESS_TOKEN",
+  "OPENAI_API_KEY",
+  "WHATSAPP_AGENT_SERVICE_TOKEN",
+  "WHATSAPP_AGENT_RHINOS_URL",
+] as const;
+
+export function getMissingCommercialEnvironment(): string[] {
+  return requiredCommercialEnvironment.filter(
+    (name) => !process.env[name]?.trim()
   );
+}
+
+export function isCommercialAgentConfigured(): boolean {
+  return getMissingCommercialEnvironment().length === 0;
 }
 
 async function requestModel(

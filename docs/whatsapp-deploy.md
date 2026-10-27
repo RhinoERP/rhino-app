@@ -109,9 +109,9 @@ provisionada en Pro; tener Pro no implica consumo ilimitado ni gratuito.
 
 El repositorio incluye `vercel.json` y
 `services/whatsapp-agent/Dockerfile`, con una imagen Node 22 para Linux amd64,
-dependencias fijadas en un lockfile independiente y ejecución como usuario sin
-privilegios. El contexto Docker excluye los archivos `.env`, el `node_modules`
-local y cualquier archivo ajeno al worker. No agregar secretos al Dockerfile.
+dependencias fijadas en un lockfile independiente, certificados CA del sistema
+y ejecución como usuario sin privilegios. El contexto Docker excluye los archivos
+`.env`, el `node_modules` local y cualquier archivo ajeno al worker. No agregar secretos al Dockerfile.
 
 **El daemon se publica con cero instancias** (`iad1: 0`). Así el deploy registra
 la configuración, pero no arranca el proceso ni consume jobs hasta activarlo.
@@ -136,8 +136,11 @@ SIGTERM. El sandbox funciona con el daemon detenido.
 5. En los logs del daemon, comprobar
    `[whatsapp-agent] worker configurado; iniciando polling`. Si aparece el aviso
    de variables comerciales faltantes, corregirlas y hacer un nuevo deploy de
-   Production. Cambiar variables en Settings sin redesplegar no actualiza un
-   proceso ya iniciado. La prueba de punta a punta sigue siendo necesaria.
+   Production. El aviso de arranque enumera los nombres de las variables
+   faltantes, sin sus valores. Cambiar variables en Settings sin redesplegar no
+   actualiza un proceso ya iniciado; tampoco alcanza con reiniciar o escalar el
+   daemon, porque reutiliza el entorno del deployment anterior. La prueba de punta
+   a punta sigue siendo necesaria.
 6. Habilitar únicamente la empresa piloto y su integración según el paso 4.
 
 Variables del worker en **Settings → Environment Variables → Production**:

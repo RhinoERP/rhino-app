@@ -1,4 +1,9 @@
-FROM node:22-bookworm-slim AS dependencies
+FROM node:22-bookworm-slim AS base
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS dependencies
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@12.4.1 --activate
 COPY package.json pnpm-lock.yaml ./
@@ -12,7 +17,7 @@ RUN pnpm build
 FROM dependencies AS production-dependencies
 RUN pnpm prune --prod --ignore-scripts
 
-FROM node:22-bookworm-slim AS runtime
+FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
