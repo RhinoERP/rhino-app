@@ -308,13 +308,17 @@ Referencias oficiales: [Vercel Daemons](https://vercel.com/docs/daemons),
 
 ## Actualización a pedidos recurrentes
 
-1. Antes del merge, generar y revisar `/tmp/whatsapp-release.sql` desde el commit
-   del PR. No ejecutar el nuevo worker contra el esquema anterior.
+1. Si WhatsApp ya está instalado, aplicar **sólo**
+   `supabase/migrations/20261027000000_whatsapp_recurring_orders.sql`, dentro de
+   `BEGIN;` y `COMMIT;`. Son 275 líneas de migración; el bundle completo de unas
+   1400 líneas incluye la instalación y actualizaciones anteriores y no hace
+   falta repetirlo para este caso. No ejecutar el worker nuevo contra el esquema
+   anterior.
 2. En Vercel → Daemons → whatsapp-agent → Scale, poner temporalmente **0**
    instancias. Esperar a que termine la instancia: el webhook sigue desplegado,
    recibe mensajes y los guarda en la cola. No pausar la integración de Meta ni
    deshabilitar la empresa, porque eso impide la ingesta.
-3. Ejecutar el SQL completo generado, en una transacción, en el Supabase correcto.
+3. Ejecutar únicamente esa migración pendiente, completa y en una transacción, en el Supabase correcto.
 4. Integrar el PR y esperar un deployment Production **Ready**, con la aplicación
    y la imagen nueva del daemon. No mezclar un worker anterior con este esquema.
 5. Volver a **1** instancia. Los overrides de Scale persisten entre deployments;
@@ -360,8 +364,8 @@ select whatsapp_cart_id from public.sales_orders limit 0;
 ```
 
 Si alguna columna no existe, falta completar la migración de este release.
-Aplicar el procedimiento de actualización de pedidos recurrentes anterior,
-con el daemon temporalmente en 0 y el webhook recibiendo mensajes. Luego usar
+Aplicar sólo la migración pendiente indicada en el procedimiento de actualización
+anterior, con el daemon temporalmente en 0 y el webhook recibiendo mensajes. Luego usar
 **Reiniciar** en el simulador y volver a elegir cliente/lista de precios.
 El sandbox no usa el daemon para responder; encenderlo no crea las columnas.
 
