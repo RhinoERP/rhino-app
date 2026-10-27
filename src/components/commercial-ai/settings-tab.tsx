@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { testAiConnectionAction } from "@/modules/commercial-ai/actions/assistant.actions";
 import { saveConfigAction } from "@/modules/commercial-ai/actions/commercial-ai.actions";
 import { OPPORTUNITY_TYPES } from "@/modules/commercial-ai/constants";
 import {
@@ -48,10 +49,64 @@ export function SettingsTab() {
           </TabsList>
         </Tabs>
       </div>
+      <AiStatus />
       {section === "cartera" ? <AnalysisSettings /> : null}
       {section === "rutas" ? <RouteSettingsSection /> : null}
       {section === "prospeccion" ? <IcpSection /> : null}
     </div>
+  );
+}
+
+function AiStatus() {
+  const { snapshot } = useCommercialAi();
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<string | null>(null);
+  const [ok, setOk] = useState<boolean | null>(null);
+
+  const test = () =>
+    startTransition(async () => {
+      const response = await testAiConnectionAction(snapshot.orgSlug);
+      setOk(response.success);
+      setResult(
+        response.success
+          ? `Conectado con ${response.model} en ${(response.latencyMs / 1000).toFixed(1)} s. Respondió: “${response.reply}”.`
+          : response.error
+      );
+    });
+
+  return (
+    <Card className="flex-row flex-wrap items-center gap-3 p-4">
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-sm">IA</p>
+        <p className="text-muted-foreground text-sm">
+          {snapshot.aiEnabled
+            ? `Activa con ${snapshot.aiModel}.`
+            : "Apagada: falta ANTHROPIC_API_KEY. El módulo funciona con reglas."}{" "}
+          Google Places:{" "}
+          {snapshot.prospecting.googlePlacesEnabled
+            ? "activo."
+            : "sin configurar."}
+        </p>
+        {result ? (
+          <p
+            className={
+              ok
+                ? "text-emerald-700 text-sm dark:text-emerald-400"
+                : "text-destructive text-sm"
+            }
+          >
+            {result}
+          </p>
+        ) : null}
+      </div>
+      <Button
+        disabled={pending || !snapshot.aiEnabled}
+        onClick={test}
+        variant="outline"
+      >
+        {pending ? "Probando…" : "Probar conexión con la IA"}
+      </Button>
+    </Card>
   );
 }
 
