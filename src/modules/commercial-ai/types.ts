@@ -434,6 +434,36 @@ export type LearnedPattern = {
   sample: number;
 };
 
+/** Ubicación tomada del celular al registrar una visita. */
+export type CheckinLocation =
+  | {
+      latitude: number;
+      longitude: number;
+      accuracyM: number;
+      capturedAt: string;
+    }
+  | { error: string };
+
+export type CheckinView = {
+  id: string;
+  userId: string | null;
+  userName: string | null;
+  routeId: string | null;
+  stopId: string | null;
+  kind: "cliente" | "prospecto";
+  accountId: string;
+  accountName: string;
+  accountCity: string | null;
+  result: VisitResult | null;
+  note: string;
+  latitude: number | null;
+  longitude: number | null;
+  accuracyM: number | null;
+  locationError: string | null;
+  capturedAt: string | null;
+  createdAt: string;
+};
+
 export type ProspectingSnapshot = {
   routeSettings: RouteSettings;
   memoryOn: boolean;
@@ -447,5 +477,6 @@ export type ProspectingSnapshot = {
   prospectEvents: ProspectEventView[];
   learnings: LearningView[];
   patterns: LearnedPattern[];
+  checkins: CheckinView[];
   googlePlacesEnabled: boolean;
 };

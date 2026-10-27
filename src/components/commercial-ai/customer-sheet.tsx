@@ -36,6 +36,7 @@ import {
   StatusDot,
   useCommercialAi,
 } from "./shared";
+import { VisitButton } from "./visit-button";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -147,6 +148,7 @@ export function CustomerSheet({
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          <VisitButton customerId={customer.id} />
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Kpi
               label="Compra por mes"

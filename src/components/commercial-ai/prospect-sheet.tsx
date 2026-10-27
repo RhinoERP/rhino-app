@@ -35,6 +35,7 @@ import {
   SellerChip,
   useCommercialAi,
 } from "./shared";
+import { VisitButton } from "./visit-button";
 
 const NEXT_STAGES: Record<ProspectStage, ProspectStage[]> = {
   sin_contactar: ["contactado", "descartado"],
@@ -208,6 +209,7 @@ export function ProspectSheet({
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          <VisitButton prospectId={prospect.id} />
           <div className="flex items-start gap-3 rounded-lg border bg-card p-4">
             <FitBadge score={prospect.fitScore} />
             <div>

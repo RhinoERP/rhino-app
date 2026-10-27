@@ -14,6 +14,7 @@ import {
 import {
   type CampaignRunView,
   type CampaignView,
+  type CheckinView,
   DEFAULT_ROUTE_SETTINGS,
   type IcpView,
   type LearningView,
@@ -166,6 +167,7 @@ export async function loadProspectingSnapshot(params: {
     prospects,
     events,
     learnings,
+    checkins,
   ] = await Promise.all([
     optionalRows<Row>(
       admin
@@ -240,6 +242,22 @@ export async function loadProspectingSnapshot(params: {
         .select("*")
         .eq("organization_id", org)
         .order("created_at", { ascending: false })
+    ),
+    optionalRows<Row>(
+      (() => {
+        let query = admin
+          .from("commercial_ai_checkins")
+          .select("*")
+          .eq("organization_id", org)
+          .gte("created_at", `${since}T00:00:00Z`)
+          .order("created_at", { ascending: false })
+          .limit(5000);
+        // El vendedor ve solo sus propios registros.
+        if (!isManager) {
+          query = query.eq("user_id", access.userId);
+        }
+        return query;
+      })()
     ),
   ]);
 
@@ -363,6 +381,33 @@ export async function loadProspectingSnapshot(params: {
     prospects: prospectViews,
     prospectEvents: eventViews,
     learnings: learningViews,
+    checkins: checkins.map((row): CheckinView => {
+      const customerId = str(row.customer_id);
+      const prospectId = str(row.prospect_id);
+      const customer = customerId ? params.customerNames.get(customerId) : null;
+      const prospect = prospectId ? allProspectById.get(prospectId) : null;
+      const num = (value: unknown) =>
+        value === null || value === undefined ? null : Number(value);
+      return {
+        id: row.id as string,
+        userId: str(row.user_id),
+        userName: str(row.user_name),
+        routeId: str(row.route_id),
+        stopId: str(row.stop_id),
+        kind: customerId ? "cliente" : "prospecto",
+        accountId: (customerId ?? prospectId) as string,
+        accountName: customer?.name ?? prospect?.name ?? "Cuenta",
+        accountCity: customer?.city ?? prospect?.city ?? null,
+        result: (row.result as CheckinView["result"]) ?? null,
+        note: (row.note as string) ?? "",
+        latitude: num(row.latitude),
+        longitude: num(row.longitude),
+        accuracyM: num(row.accuracy_m),
+        locationError: str(row.location_error),
+        capturedAt: str(row.captured_at),
+        createdAt: row.created_at as string,
+      };
+    }),
     patterns: memoryOn
       ? computePatterns({
           opportunities: params.opportunities,

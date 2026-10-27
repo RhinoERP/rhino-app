@@ -30,7 +30,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   createRouteAction,
@@ -46,7 +45,9 @@ import {
   type StopCandidate,
 } from "@/modules/commercial-ai/engine/routes";
 import type { RouteView, VisitResult } from "@/modules/commercial-ai/types";
+import { CheckinLocationLine, CheckinsView } from "./checkins-view";
 import { EmptyRow, SectionCard, SellerChip, useCommercialAi } from "./shared";
+import { VisitResultPicker } from "./visit-location";
 
 const MS_PER_DAY = 86_400_000;
 const DAYS_IN_WEEK = 7;
@@ -97,10 +98,17 @@ function shortDay(iso: string): string {
 
 export function RoutesTab() {
   const [mode, setMode] = useState<
-    { view: "lista" } | { view: "nueva" } | { view: "ruta"; id: string }
+    | { view: "lista" }
+    | { view: "nueva" }
+    | { view: "registros" }
+    | { view: "ruta"; id: string }
   >({
     view: "lista",
   });
+
+  if (mode.view === "registros") {
+    return <CheckinsView onBack={() => setMode({ view: "lista" })} />;
+  }
 
   if (mode.view === "nueva") {
     return (
@@ -119,6 +127,7 @@ export function RoutesTab() {
   }
   return (
     <RoutesWeek
+      onCheckins={() => setMode({ view: "registros" })}
       onNew={() => setMode({ view: "nueva" })}
       onOpen={(id) => setMode({ view: "ruta", id })}
     />
@@ -128,9 +137,11 @@ export function RoutesTab() {
 function RoutesWeek({
   onNew,
   onOpen,
+  onCheckins,
 }: {
   onNew: () => void;
   onOpen: (id: string) => void;
+  onCheckins: () => void;
 }) {
   const { snapshot, isManager } = useCommercialAi();
   const { routes } = snapshot.prospecting;
@@ -225,7 +236,11 @@ function RoutesWeek({
         >
           <CaretRightIcon />
         </Button>
-        <Button className="ml-auto" onClick={onNew}>
+        <Button className="ml-auto" onClick={onCheckins} variant="outline">
+          <MapPinIcon />
+          {isManager ? "Registros con ubicación" : "Mis registros"}
+        </Button>
+        <Button onClick={onNew}>
           <PlusIcon />
           Armar ruta
         </Button>
@@ -931,6 +946,11 @@ function RouteDetail({
                 </span>
                 <p className="text-muted-foreground text-sm">{stop.reason}</p>
                 {stop.note ? <p className="text-sm">“{stop.note}”</p> : null}
+                <CheckinLocationLine
+                  checkin={snapshot.prospecting.checkins.find(
+                    (c) => c.stopId === stop.id
+                  )}
+                />
               </div>
               {stop.result ? (
                 <Badge
@@ -979,55 +999,30 @@ function StopResultForm({
   customerId: string | null;
   onDone: () => void;
 }) {
-  const [note, setNote] = useState("");
-  const [pending, startTransition] = useTransition();
-
-  const save = (result: VisitResult) =>
-    startTransition(async () => {
-      const response = await recordStopResultAction(orgSlug, {
-        stopId,
-        result,
-        note,
-      });
-      if (!response.success) {
-        toast.error(response.error);
-        return;
-      }
-      toast.success("Visita registrada.");
-      onDone();
-      if (result === "pedido" && stopKind === "cliente" && customerId) {
-        window.location.href = `/org/${orgSlug}/preventa/nueva?customerId=${encodeURIComponent(customerId)}`;
-      }
-    });
-
   return (
-    <div className="mt-3 space-y-2 rounded-md bg-muted/50 p-3">
-      <p className="font-medium text-sm">¿Cómo salió?</p>
-      <div className="flex flex-wrap gap-2">
-        {(Object.keys(VISIT_RESULTS) as VisitResult[]).map((result) => (
-          <Button
-            disabled={pending}
-            key={result}
-            onClick={() => save(result)}
-            size="sm"
-            variant="outline"
-          >
-            {VISIT_RESULTS[result].label}
-          </Button>
-        ))}
-      </div>
-      <Textarea
-        aria-label="Nota de la visita"
-        onChange={(e) => setNote(e.target.value)}
-        placeholder="Nota opcional (se guarda antes de tocar el resultado)"
-        rows={2}
-        value={note}
+    <div className="mt-3">
+      <VisitResultPicker
+        hint={
+          stopKind === "cliente"
+            ? "Si marcás “Pedido”, se abre la preventa con el cliente elegido."
+            : undefined
+        }
+        onSave={async (result, note, location) => {
+          const response = await recordStopResultAction(orgSlug, {
+            stopId,
+            result,
+            note,
+            location,
+          });
+          if (response.success) {
+            onDone();
+            if (result === "pedido" && stopKind === "cliente" && customerId) {
+              window.location.href = `/org/${orgSlug}/preventa/nueva?customerId=${encodeURIComponent(customerId)}`;
+            }
+          }
+          return response;
+        }}
       />
-      {stopKind === "cliente" ? (
-        <p className="text-muted-foreground text-xs">
-          Si marcás “Pedido”, se abre la preventa con el cliente elegido.
-        </p>
-      ) : null}
     </div>
   );
 }

@@ -321,15 +321,122 @@ const PROSPECT_STAGE_AFTER_VISIT = {
   seguimiento: "contactado",
 } as const;
 
+const locationSchema = z
+  .union([
+    z.object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      accuracyM: z.number().min(0).max(100_000),
+      capturedAt: z.iso.datetime(),
+    }),
+    z.object({ error: z.string().max(200) }),
+  ])
+  .nullable();
+
+const visitResultSchema = z.enum([
+  "pedido",
+  "interesado",
+  "noestaba",
+  "seguimiento",
+  "nofue",
+]);
+
+type VisitResult = z.infer<typeof visitResultSchema>;
+
+/** Guarda dónde y cuándo se registró la visita (aunque el GPS no haya respondido). */
+async function insertCheckin(
+  access: CommercialAiAccess,
+  row: {
+    routeId?: string | null;
+    stopId?: string | null;
+    customerId: string | null;
+    prospectId: string | null;
+    result: VisitResult | null;
+    note: string;
+    location: z.infer<typeof locationSchema>;
+  }
+) {
+  const location = row.location;
+  const hasPosition = location !== null && "latitude" in location;
+  const { error } = await createAdminClient()
+    .from("commercial_ai_checkins")
+    .insert({
+      organization_id: access.organizationId,
+      user_id: access.userId,
+      user_name: access.userName,
+      route_id: row.routeId ?? null,
+      stop_id: row.stopId ?? null,
+      customer_id: row.customerId,
+      prospect_id: row.prospectId,
+      result: row.result,
+      note: row.note,
+      latitude: hasPosition ? location.latitude : null,
+      longitude: hasPosition ? location.longitude : null,
+      accuracy_m: hasPosition ? location.accuracyM : null,
+      captured_at: hasPosition ? location.capturedAt : null,
+      location_error: hasPosition ? null : (location?.error ?? "Sin ubicación"),
+    });
+  check(error);
+}
+
+/** Refleja la visita en el historial del cliente o prospecto (y avanza la etapa del prospecto). */
+async function applyVisit(
+  access: CommercialAiAccess,
+  visit: {
+    customerId: string | null;
+    prospectId: string | null;
+    result: VisitResult;
+    note: string;
+  }
+) {
+  const admin = createAdminClient();
+  const body = visit.note
+    ? `${RESULT_TEXT[visit.result]} · ${visit.note}`
+    : RESULT_TEXT[visit.result];
+  if (visit.customerId) {
+    await admin.from("commercial_ai_events").insert({
+      organization_id: access.organizationId,
+      customer_id: visit.customerId,
+      kind: "note",
+      body,
+      actor_id: access.userId,
+      actor_name: access.userName,
+    });
+    return;
+  }
+  if (!visit.prospectId) {
+    return;
+  }
+  await admin.from("commercial_ai_prospect_events").insert({
+    organization_id: access.organizationId,
+    prospect_id: visit.prospectId,
+    kind: "visit",
+    body,
+    actor_id: access.userId,
+    actor_name: access.userName,
+  });
+  const nextStage =
+    visit.result in PROSPECT_STAGE_AFTER_VISIT
+      ? PROSPECT_STAGE_AFTER_VISIT[
+          visit.result as keyof typeof PROSPECT_STAGE_AFTER_VISIT
+        ]
+      : null;
+  if (nextStage) {
+    await admin
+      .from("commercial_ai_prospects")
+      .update({ stage: nextStage, updated_at: new Date().toISOString() })
+      .eq("id", visit.prospectId)
+      .in("stage", ["sin_contactar", "contactado", "en_conversacion"]);
+  }
+}
+
 const stopResultSchema = z.object({
   stopId: uuid,
-  result: z
-    .enum(["pedido", "interesado", "noestaba", "seguimiento", "nofue"])
-    .nullable(),
+  result: visitResultSchema.nullable(),
   note: text(1000),
+  location: locationSchema.optional(),
 });
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: registra la visita y la refleja en la cuenta visitada
 export async function recordStopResultAction(
   orgSlug: string,
   input: z.infer<typeof stopResultSchema>
@@ -364,42 +471,66 @@ export async function recordStopResultAction(
     check(error);
 
     if (data.result) {
-      const body = data.note
-        ? `${RESULT_TEXT[data.result]} · ${data.note}`
-        : RESULT_TEXT[data.result];
-      if (stop.customer_id) {
-        await admin.from("commercial_ai_events").insert({
-          organization_id: access.organizationId,
-          customer_id: stop.customer_id,
-          kind: "note",
-          body,
-          actor_id: access.userId,
-          actor_name: access.userName,
-        });
-      } else if (stop.prospect_id) {
-        await admin.from("commercial_ai_prospect_events").insert({
-          organization_id: access.organizationId,
-          prospect_id: stop.prospect_id,
-          kind: "visit",
-          body,
-          actor_id: access.userId,
-          actor_name: access.userName,
-        });
-        const nextStage =
-          data.result in PROSPECT_STAGE_AFTER_VISIT
-            ? PROSPECT_STAGE_AFTER_VISIT[
-                data.result as keyof typeof PROSPECT_STAGE_AFTER_VISIT
-              ]
-            : null;
-        if (nextStage) {
-          await admin
-            .from("commercial_ai_prospects")
-            .update({ stage: nextStage, updated_at: new Date().toISOString() })
-            .eq("id", stop.prospect_id)
-            .in("stage", ["sin_contactar", "contactado", "en_conversacion"]);
-        }
-      }
+      const visit = {
+        customerId: (stop.customer_id as string | null) ?? null,
+        prospectId: (stop.prospect_id as string | null) ?? null,
+        result: data.result,
+        note: data.note,
+      };
+      await insertCheckin(access, {
+        ...visit,
+        routeId: stop.route_id as string,
+        stopId: data.stopId,
+        location: data.location ?? null,
+      });
+      await applyVisit(access, visit);
     }
+    return done(orgSlug);
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const looseVisitSchema = z
+  .object({
+    customerId: uuid.nullable(),
+    prospectId: uuid.nullable(),
+    result: visitResultSchema,
+    note: text(1000),
+    location: locationSchema,
+  })
+  .refine((v) => Boolean(v.customerId) !== Boolean(v.prospectId), {
+    message: "Elegí un cliente o un prospecto",
+  });
+
+/** Visita fuera de una ruta, desde la ficha del cliente o del prospecto. */
+export async function recordVisitAction(
+  orgSlug: string,
+  input: z.infer<typeof looseVisitSchema>
+): Promise<ActionResult> {
+  try {
+    const data = looseVisitSchema.parse(input);
+    const access = await requireCommercialAiAccess(orgSlug);
+    const admin = createAdminClient();
+    if (data.customerId) {
+      const { data: customer } = await admin
+        .from("customers")
+        .select("assigned_seller_id")
+        .eq("organization_id", access.organizationId)
+        .eq("id", data.customerId)
+        .maybeSingle();
+      if (!customer) {
+        throw new Error("Cliente no encontrado");
+      }
+      const sellerId = (customer.assigned_seller_id as string | null) ?? null;
+      if (sellerId) {
+        assertOwner(access, sellerId);
+      }
+    } else if (data.prospectId) {
+      await loadProspect(access, data.prospectId);
+    }
+    await insertCheckin(access, { ...data });
+    await applyVisit(access, data);
     return done(orgSlug);
   } catch (error) {
     return fail(error);
