@@ -1,5 +1,6 @@
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -29,6 +30,7 @@ type PosSaleWithProductRaw =
             tracks_stock_units?: boolean | null;
             unit_of_measure?: string | null;
           } | null;
+          variant?: { talle: string; color: string } | null;
         })[]
       | null;
   };
@@ -61,7 +63,7 @@ type MutableLotState = {
   id: string;
   productId: string;
   lotNumber: string;
-  expirationDate: string;
+  expirationDate: string | null;
   quantityAvailable: number;
   unitQuantityAvailable: number | null;
 };
@@ -518,12 +520,14 @@ export async function getPosSaleReturnableItems(params: {
       items:pos_sale_items(
         id,
         product_id,
+        product_variant_id,
         lot_id,
         quantity,
         unit_price,
         subtotal,
         discount_amount,
-        product:products(id, name, sku, tracks_stock_units, unit_of_measure)
+        product:products(id, name, sku, tracks_stock_units, unit_of_measure),
+        variant:product_variants!pos_sale_items_product_variant_id_fkey(talle, color)
       )
     `)
     .eq("organization_id", org.id)
@@ -566,6 +570,7 @@ export async function getPosSaleReturnableItems(params: {
   );
 
   const items = (sale.items ?? [])
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps quantity and discount calculations alongside variant display
     .map((item) => {
       if (!(item.id && item.product_id)) {
         return null;
@@ -610,7 +615,10 @@ export async function getPosSaleReturnableItems(params: {
       return {
         posSaleItemId: item.id,
         productId: item.product_id,
-        productName: item.product?.name ?? "Producto sin nombre",
+        productVariantId: item.product_variant_id ?? null,
+        productName: item.variant
+          ? `${item.product?.name ?? "Producto sin nombre"} — ${item.variant.color} / ${item.variant.talle}`
+          : (item.product?.name ?? "Producto sin nombre"),
         productSku: item.product?.sku ?? "",
         lotId: item.lot_id ?? null,
         soldQuantity,
@@ -664,6 +672,20 @@ function resolveReturnLines(params: {
   for (const item of params.saleItems) {
     if (item.id) {
       saleItemsById.set(item.id, item);
+    }
+  }
+
+  for (const requestedLine of params.requestedItems) {
+    const soldItem = saleItemsById.get(requestedLine.posSaleItemId);
+    if (
+      soldItem &&
+      hasFractionalVariantReturn({
+        variantId: soldItem.product_variant_id,
+        quantity: requestedLine.quantity,
+        unitQuantity: requestedLine.unitQuantity,
+      })
+    ) {
+      throw new Error("Las variantes deben devolverse en unidades enteras.");
     }
   }
 
@@ -811,7 +833,7 @@ async function buildInboundStockReversalContext(params: {
   const lotsById = new Map<string, MutableLotState>();
 
   for (const lot of lotsResult.data ?? []) {
-    if (!(lot.id && lot.product_id && lot.lot_number && lot.expiration_date)) {
+    if (!(lot.id && lot.product_id && lot.lot_number)) {
       continue;
     }
 

@@ -82,6 +82,7 @@ export type PosSaleReturnableSale = {
 export type PosSaleReturnableItem = {
   posSaleItemId: string;
   productId: string;
+  productVariantId: string | null;
   productName: string;
   productSku: string;
   lotId: string | null;
