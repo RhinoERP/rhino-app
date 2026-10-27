@@ -225,6 +225,7 @@ function EndorsedChecksSection({
   checks,
   selectedIds,
   totalSelected,
+  appliedAmount,
   pendingBalance,
   currency = "ARS",
   onToggle,
@@ -240,13 +241,14 @@ function EndorsedChecksSection({
   }>;
   selectedIds: string[];
   totalSelected: number;
+  appliedAmount: number;
   pendingBalance: number;
   currency?: string;
   onToggle: (id: string, checked: boolean) => void;
 }) {
   const selectedSet = new Set(selectedIds);
   const remainingBalance = truncateMoney(
-    Math.max(0, pendingBalance - totalSelected)
+    Math.max(0, pendingBalance - appliedAmount)
   );
 
   return (
@@ -315,7 +317,7 @@ function EndorsedChecksSection({
                     {check.fecha_vencimiento.slice(0, 10)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {formatCurrency(Number(check.importe), currency)}
+                    {formatCurrency(Number(check.importe), "ARS")}
                   </TableCell>
                 </TableRow>
               ))}
@@ -329,9 +331,12 @@ function EndorsedChecksSection({
           {selectedIds.length} cheque{selectedIds.length !== 1 ? "s" : ""}{" "}
           seleccionado{selectedIds.length !== 1 ? "s" : ""}
         </span>
-        <span className="font-semibold tabular-nums">
-          Total: {formatCurrency(totalSelected, currency)}
-        </span>
+        <div className="text-right font-semibold tabular-nums">
+          <p>Total: {formatCurrency(totalSelected, "ARS")}</p>
+          {currency === "USD" ? (
+            <p>Equivalente: {formatCurrency(appliedAmount, "USD")}</p>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -412,6 +417,7 @@ function useCreditQuery({
   isEditMode,
   open,
   pendingBalance,
+  currency,
 }: {
   type: "receivable" | "payable";
   orgSlug: string;
@@ -420,6 +426,7 @@ function useCreditQuery({
   isEditMode: boolean;
   open: boolean;
   pendingBalance: number;
+  currency: string;
 }) {
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
   const creditQuery = useQuery<CustomerCreditApiResponse>({
@@ -428,12 +435,13 @@ function useCreditQuery({
       orgSlug,
       counterpartyId,
       supplierId,
+      currency,
     ],
     queryFn: async () => {
       const endpoint =
         type === "receivable"
           ? `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${counterpartyId}${supplierId ? `&supplierId=${supplierId}` : ""}`
-          : `/api/purchases/supplier-credit-balance?orgSlug=${orgSlug}&supplierId=${counterpartyId}`;
+          : `/api/purchases/supplier-credit-balance?orgSlug=${orgSlug}&supplierId=${counterpartyId}&currency=${currency}`;
 
       const response = await fetch(endpoint);
       if (!response.ok) {
@@ -587,18 +595,13 @@ export function RegisterPaymentDialog({
         (option) => !isCheckPaymentMethod(option.value)
       );
     }
-    if (currency === "USD") {
-      return paymentMethodOptions.filter(
-        (option) => option.value !== "cheque_endosado"
-      );
-    }
     if (type !== "payable") {
       return paymentMethodOptions.filter(
         (option) => option.value !== "cheque_endosado"
       );
     }
     return paymentMethodOptions;
-  }, [isEditMode, type, currency]);
+  }, [isEditMode, type]);
 
   const isUsdDebt = currency === "USD";
 
@@ -704,6 +707,14 @@ export function RegisterPaymentDialog({
     [selectedReceivedChecks]
   );
 
+  let endorsementAmount = selectedReceivedChecksTotal;
+  if (isUsdDebt) {
+    endorsementAmount =
+      Number(exchangeRate) > 0
+        ? truncateMoney(selectedReceivedChecksTotal / Number(exchangeRate))
+        : 0;
+  }
+
   const {
     creditBalance,
     supplierCreditEnabled,
@@ -719,6 +730,7 @@ export function RegisterPaymentDialog({
     isEditMode,
     open,
     pendingBalance,
+    currency,
   });
 
   const maxCreditForCurrentSelection = useMemo(() => {
@@ -727,7 +739,7 @@ export function RegisterPaymentDialog({
     }
 
     const remainingPending = isEndorsedCheckMethod
-      ? truncateMoney(Math.max(0, pendingBalance - selectedReceivedChecksTotal))
+      ? truncateMoney(Math.max(0, pendingBalance - endorsementAmount))
       : pendingBalance;
 
     return truncateMoney(
@@ -738,7 +750,7 @@ export function RegisterPaymentDialog({
     isEditMode,
     isEndorsedCheckMethod,
     pendingBalance,
-    selectedReceivedChecksTotal,
+    endorsementAmount,
   ]);
 
   const resetForm = () => {
@@ -827,8 +839,8 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    setAmount(formatMoneyInput(selectedReceivedChecksTotal));
-  }, [isEditMode, isEndorsedCheckMethod, selectedReceivedChecksTotal]);
+    setAmount(formatMoneyInput(endorsementAmount));
+  }, [isEditMode, isEndorsedCheckMethod, endorsementAmount]);
 
   useEffect(() => {
     if (isEditMode) {
@@ -981,7 +993,7 @@ export function RegisterPaymentDialog({
       return "Selecciona al menos un cheque recibido para endosar.";
     }
 
-    if (truncateMoney(parsedAmount) !== selectedReceivedChecksTotal) {
+    if (truncateMoney(parsedAmount) !== endorsementAmount) {
       return "El monto debe coincidir con el total de cheques seleccionados.";
     }
 
@@ -1700,6 +1712,7 @@ export function RegisterPaymentDialog({
 
                 {!isEditMode && type === "payable" && isEndorsedCheckMethod ? (
                   <EndorsedChecksSection
+                    appliedAmount={endorsementAmount}
                     checks={receivedChecks}
                     currency={currency}
                     onToggle={toggleReceivedCheck}

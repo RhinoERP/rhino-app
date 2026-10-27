@@ -1060,18 +1060,6 @@ async function applyReceivablePayment({
     };
   }
 
-  const checkCurrencyError = validateCheckCurrency(
-    input.paymentMethod,
-    receivable.currency
-  );
-  if (checkCurrencyError) {
-    return {
-      success: false,
-      error: checkCurrencyError,
-      code: "invalid_payment_method",
-    };
-  }
-
   const pendingBalance = truncateMoney(Number(receivable.pending_balance ?? 0));
   const totalAmount = truncateMoney(Number(receivable.total_amount ?? 0));
   const totals = computePaymentTotals({
@@ -1517,18 +1505,6 @@ async function applyPayablePayment({
 
   const payableAccount = payable as PayableAccountRow;
 
-  const checkCurrencyError = validateCheckCurrency(
-    input.paymentMethod,
-    payableAccount.currency
-  );
-  if (checkCurrencyError) {
-    return {
-      success: false,
-      error: checkCurrencyError,
-      code: "invalid_payment_method",
-    };
-  }
-
   if (input.paymentMethod === "cheque_endosado") {
     return applyEndorsedPayablePayment({
       orgId,
@@ -1603,19 +1579,6 @@ export async function markPaymentAccountingJournalAction(input: {
           : "Error al marcar el asiento contable",
     };
   }
-}
-
-function validateCheckCurrency(
-  paymentMethod: PaymentMethod,
-  currency: string | null | undefined
-): string | null {
-  if (paymentMethod !== "cheque_endosado") {
-    return null;
-  }
-
-  return (currency ?? "ARS") === "ARS"
-    ? null
-    : "Los cheques endosados solo están disponibles para deudas en pesos.";
 }
 
 function validatePaymentAmounts(
@@ -1728,6 +1691,10 @@ function validateEndorsedChecks(input: RegisterPaymentInput): string | null {
 function mapEndorsementErrorCode(error: string): RegisterPaymentErrorCode {
   const normalized = error.toLowerCase();
 
+  if (normalized.includes("factura de compra registrada con cotización")) {
+    return "exchange_rate_required";
+  }
+
   if (normalized.includes("crédito insuficiente")) {
     return "insufficient_credit";
   }
@@ -1822,7 +1789,7 @@ async function createEndorsedCheckPayablePaymentWithAccounting(params: {
         id: endorsement.paymentId,
         organization_id: params.orgId,
         account_payable_id: params.payableAccount.id,
-        amount: Number(endorsement.paymentAmount),
+        amount: Number(endorsement.paymentAmountArs),
         payment_method: "cheque",
         payment_date: params.paymentDate,
         reference_number: buildEndorsedChecksAccountingReference(
@@ -1836,6 +1803,13 @@ async function createEndorsedCheckPayablePaymentWithAccounting(params: {
       },
       {
         bancoAccountCode: "VALORES_A_DEPOSITAR",
+        ...(endorsement.currency === "USD"
+          ? {
+              moneda: "USD" as const,
+              tipoCambio: endorsement.exchangeRate,
+              montoUSD: endorsement.paymentAmount,
+            }
+          : {}),
       }
     );
 

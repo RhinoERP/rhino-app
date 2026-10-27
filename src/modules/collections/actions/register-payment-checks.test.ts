@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const createClient = vi.fn();
 const createChequeRecibidoServer = vi.fn();
 const createChequeEmitidoServer = vi.fn();
+const endorseReceivedChecksForPayableServer = vi.fn();
+const buildOrdenPago = vi.fn();
+const isAccountingIntegrationEnabled = vi.fn(async () => false);
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({
@@ -11,7 +14,7 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/supabase/auth", () => ({ requireAuth: vi.fn() }));
 vi.mock("@/lib/accounting-client", () => ({
   buildCobro: vi.fn(),
-  buildOrdenPago: vi.fn(),
+  buildOrdenPago: (...args: unknown[]) => buildOrdenPago(...args),
 }));
 vi.mock("@/lib/accounting-server", () => ({
   confirmAccountingEvent: vi.fn(),
@@ -19,11 +22,12 @@ vi.mock("@/lib/accounting-server", () => ({
     createChequeEmitidoServer(...args),
   createChequeRecibidoServer: (...args: unknown[]) =>
     createChequeRecibidoServer(...args),
-  endorseReceivedChecksForPayableServer: vi.fn(),
+  endorseReceivedChecksForPayableServer: (...args: unknown[]) =>
+    endorseReceivedChecksForPayableServer(...args),
   previewAccountingEvent: vi.fn(),
 }));
 vi.mock("@/modules/accounting/service/accounting-integration.service", () => ({
-  isAccountingIntegrationEnabled: vi.fn(async () => false),
+  isAccountingIntegrationEnabled: () => isAccountingIntegrationEnabled(),
 }));
 vi.mock("@/modules/collections/service/collections.service", () => ({
   deriveReceivableCreditSupplier: vi.fn(),
@@ -296,29 +300,52 @@ describe("nominal ARS de cheques aplicados a deudas USD", () => {
     expect(createChequeRecibidoServer).not.toHaveBeenCalled();
   });
 
-  it("mantiene bloqueado el endoso para pagar una deuda USD", async () => {
+  it("endosa cheques ARS a una deuda USD y contabiliza el valor en ARS", async () => {
     const from = vi.fn(() =>
       makeQuery({
         ...payable,
         currency: "USD",
+        exchange_rate: 1200,
       })
     );
     createClient.mockResolvedValue({ from });
+    isAccountingIntegrationEnabled.mockResolvedValueOnce(true);
+    endorseReceivedChecksForPayableServer.mockResolvedValue({
+      paymentId: "payment-1",
+      paymentAmount: "50.0000",
+      paymentAmountArs: "60000.0000",
+      currency: "USD",
+      exchangeRate: "1200.0000",
+      newPendingBalance: "50.0000",
+      newStatus: "PARTIAL",
+      endorsedChecks: [{ numeroCheque: "123" }],
+    });
+    buildOrdenPago.mockReturnValue({ tipoEvento: "ORDEN_PAGO" });
 
     const result = await registerPaymentAction({
       orgSlug: "org",
       accountId: "ap-1",
-      amount: 100,
+      amount: 50,
       paymentMethod: "cheque_endosado",
       paymentDate: "2026-01-01",
       receivedCheckIds: ["check-1"],
       type: "payable",
     });
 
-    expect(result).toMatchObject({
-      success: false,
-      code: "invalid_payment_method",
-    });
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(endorseReceivedChecksForPayableServer).toHaveBeenCalledWith(
+      expect.objectContaining({ receivedCheckIds: ["check-1"] })
+    );
+    expect(buildOrdenPago).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 60_000 }),
+      expect.anything(),
+      expect.objectContaining({
+        bancoAccountCode: "VALORES_A_DEPOSITAR",
+        moneda: "USD",
+        tipoCambio: "1200.0000",
+        montoUSD: "50.0000",
+      })
+    );
     expect(from).toHaveBeenCalledTimes(1);
   });
 });

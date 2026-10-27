@@ -118,6 +118,7 @@ describe("endorseReceivedChecksForPayableService", () => {
     treasuryMocks.listSupplierCreditsForUpdateMock.mockResolvedValue([
       {
         id: "credit-1",
+        currency: "ARS",
         remaining_amount: "300.0000",
       },
     ]);
@@ -221,6 +222,9 @@ describe("endorseReceivedChecksForPayableService", () => {
     expect(result).toEqual({
       paymentId: "payment-1",
       paymentAmount: "900.0000",
+      paymentAmountArs: "900.0000",
+      currency: "ARS",
+      exchangeRate: null,
       creditApplied: "200.0000",
       newPendingBalance: "400.0000",
       newStatus: "PARTIAL",
@@ -265,6 +269,7 @@ describe("endorseReceivedChecksForPayableService", () => {
     treasuryMocks.listSupplierCreditsForUpdateMock.mockResolvedValue([
       {
         id: "credit-1",
+        currency: "ARS",
         remaining_amount: "500.0000",
       },
     ]);
@@ -374,5 +379,162 @@ describe("endorseReceivedChecksForPayableService", () => {
       { pendingBalance: "0.0000", status: "PAID" },
       expect.anything()
     );
+  });
+
+  it("converts endorsed ARS checks to USD using the invoice rate and only consumes USD credits", async () => {
+    const invoiceQuery = {
+      select: vi.fn(),
+      where: vi.fn(),
+      orderBy: vi.fn(),
+      executeTakeFirst: vi
+        .fn()
+        .mockResolvedValue({ exchange_rate: "1000.0000" }),
+    };
+    invoiceQuery.select.mockReturnValue(invoiceQuery);
+    invoiceQuery.where.mockReturnValue(invoiceQuery);
+    invoiceQuery.orderBy.mockReturnValue(invoiceQuery);
+    const selectFrom = vi.fn().mockReturnValue(invoiceQuery);
+    treasuryMocks.runIdempotentTreasuryOperationMock.mockImplementation(
+      async (options) => {
+        const executed = await options.execute(
+          { selectFrom } as never,
+          "operation-1"
+        );
+        return executed.result;
+      }
+    );
+    treasuryMocks.getPayableAccountByIdForUpdateMock.mockResolvedValue({
+      id: "payable-1",
+      supplier_id: "supplier-1",
+      currency: "USD",
+      exchange_rate: null,
+      purchase_order_id: "po-1",
+      total_amount: "150.0000",
+      pending_balance: "150.0000",
+      status: "PENDING",
+    });
+    treasuryMocks.listReceivedChecksByIdsForUpdateMock.mockResolvedValue([
+      {
+        id: "check-1",
+        numero_cheque: "0001",
+        importe: "120000.0000",
+        estado: "EN_CARTERA",
+        deposit_slip_id: null,
+      },
+    ]);
+    treasuryMocks.listReceivedCheckEndorsementsByCheckIdsMock.mockResolvedValue(
+      []
+    );
+    treasuryMocks.listSupplierCreditsForUpdateMock.mockResolvedValue([
+      { id: "ars-credit", currency: "ARS", remaining_amount: "500.0000" },
+      { id: "usd-credit", currency: "USD", remaining_amount: "20.0000" },
+    ]);
+    treasuryMocks.createPayablePaymentMock.mockResolvedValue({
+      id: "payment-1",
+    });
+    treasuryMocks.updateSupplierCreditRemainingAmountMock.mockResolvedValue({
+      id: "usd-credit",
+    });
+    treasuryMocks.createSupplierCreditApplicationsMock.mockResolvedValue(
+      undefined
+    );
+    treasuryMocks.createReceivedCheckEndorsementsMock.mockResolvedValue([]);
+    treasuryMocks.updateReceivedCheckEstadoMock.mockResolvedValue({
+      id: "check-1",
+      numero_cheque: "0001",
+      importe: "120000.0000",
+      estado: "ENDOSADO",
+    });
+    treasuryMocks.updatePayableAccountBalanceMock.mockResolvedValue({
+      id: "payable-1",
+    });
+
+    const result = await endorseReceivedChecksForPayableService({
+      orgId: "org-1",
+      accountPayableId: "payable-1",
+      supplierId: "supplier-1",
+      receivedCheckIds: ["check-1"],
+      creditAmount: "10",
+      paymentDate: "2026-08-01",
+    });
+
+    expect(selectFrom).toHaveBeenCalledWith("public.supplier_invoices");
+    expect(treasuryMocks.listSupplierCreditsForUpdateMock).toHaveBeenCalledWith(
+      "org-1",
+      "supplier-1",
+      "USD",
+      expect.anything()
+    );
+    expect(treasuryMocks.createPayablePaymentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: "120.0000",
+        amount_ars: "120000.0000",
+        currency: "USD",
+        exchange_rate: "1000.0000",
+      }),
+      expect.anything()
+    );
+    expect(
+      treasuryMocks.updateSupplierCreditRemainingAmountMock
+    ).toHaveBeenCalledWith("usd-credit", "org-1", "10.0000", expect.anything());
+    expect(result).toMatchObject({
+      paymentAmount: "120.0000",
+      paymentAmountArs: "120000.0000",
+      exchangeRate: "1000.0000",
+      currency: "USD",
+      creditApplied: "10.0000",
+      newPendingBalance: "20.0000",
+    });
+
+    treasuryMocks.getPayableAccountByIdForUpdateMock.mockResolvedValue({
+      id: "payable-1",
+      supplier_id: "supplier-1",
+      currency: "USD",
+      exchange_rate: "1000.0000",
+      pending_balance: "100.0000",
+      total_amount: "100.0000",
+      status: "PENDING",
+    });
+    await expect(
+      endorseReceivedChecksForPayableService({
+        orgId: "org-1",
+        accountPayableId: "payable-1",
+        supplierId: "supplier-1",
+        receivedCheckIds: ["check-1"],
+        paymentDate: "2026-08-02",
+      })
+    ).rejects.toMatchObject({
+      status: 422,
+      message:
+        "La suma de cheques y crédito no puede exceder el saldo pendiente",
+    });
+    expect(treasuryMocks.createPayablePaymentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects USD endorsements without an invoice rate", async () => {
+    treasuryMocks.getPayableAccountByIdForUpdateMock.mockResolvedValue({
+      id: "payable-1",
+      supplier_id: "supplier-1",
+      purchase_order_id: null,
+      currency: "USD",
+      exchange_rate: null,
+      total_amount: "100.0000",
+      pending_balance: "100.0000",
+      status: "PENDING",
+    });
+
+    await expect(
+      endorseReceivedChecksForPayableService({
+        orgId: "org-1",
+        accountPayableId: "payable-1",
+        supplierId: "supplier-1",
+        receivedCheckIds: ["check-1"],
+        paymentDate: "2026-08-01",
+      })
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining("cotización"),
+    });
+    expect(treasuryMocks.createPayablePaymentMock).not.toHaveBeenCalled();
   });
 });
