@@ -1,6 +1,7 @@
 "use client";
 
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -47,10 +48,23 @@ function ConversationActions({
 }) {
   if (conversation.isSimulator) {
     return (
-      <p className="text-muted-foreground text-xs">
-        Esta conversación se generó desde el simulador. Para probar otro
-        mensaje, continuá desde esa pantalla.
-      </p>
+      <div className="space-y-2">
+        <p className="text-muted-foreground text-xs">
+          Continuá la prueba desde el simulador.
+        </p>
+        {conversation.status !== "ACTIVE" &&
+        conversation.status !== "CLOSED" ? (
+          <Button
+            disabled={isPending}
+            onClick={() => onSetAutomation(true)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Reactivar bot
+          </Button>
+        ) : null}
+      </div>
     );
   }
 
@@ -92,6 +106,7 @@ function ConversationActions({
 
 function ConversationCard({
   conversation,
+  orgSlug,
   draft,
   isPending,
   onDraftChange,
@@ -99,6 +114,7 @@ function ConversationCard({
   onSetAutomation,
 }: {
   conversation: WhatsAppInboxConversation;
+  orgSlug: string;
   draft: string;
   isPending: boolean;
   onDraftChange: (text: string) => void;
@@ -138,6 +154,35 @@ function ConversationCard({
           <p className="text-muted-foreground text-xs">
             Derivación: {conversation.handoffReason}
           </p>
+        ) : null}
+        {conversation.pendingOrder ? (
+          <p className="text-sm">
+            Pedido pendiente ·{" "}
+            {conversation.pendingOrder.status === "QUOTED"
+              ? "Cotizado"
+              : "En preparación"}{" "}
+            · {conversation.pendingOrder.createdAt.slice(0, 10)}
+          </p>
+        ) : null}
+        {conversation.preSales.length ? (
+          <details className="text-sm">
+            <summary>
+              Preventas de este chat ({conversation.preSales.length})
+            </summary>
+            <ul className="mt-2 space-y-1">
+              {conversation.preSales.map((order) => (
+                <li key={order.id}>
+                  <Link
+                    className="underline"
+                    href={`/org/${orgSlug}/ventas/${order.id}`}
+                  >
+                    {order.number || "Preventa"}
+                  </Link>{" "}
+                  · {order.date} · {order.status}
+                </li>
+              ))}
+            </ul>
+          </details>
         ) : null}
         <ConversationActions
           conversation={conversation}
@@ -214,6 +259,7 @@ export function WhatsAppInbox({ conversations, orgSlug }: WhatsAppInboxProps) {
           }
           onSend={() => send(conversation.id)}
           onSetAutomation={(enabled) => setAutomation(conversation.id, enabled)}
+          orgSlug={orgSlug}
         />
       ))}
     </div>

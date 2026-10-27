@@ -6,6 +6,8 @@ export type SendWhatsAppTextInput = {
   phoneNumberId: string;
   recipient: string;
   text: string;
+  sourceMessageId?: string;
+  orderPrompt?: boolean;
 };
 
 type MetaSendResponse = { messages?: Array<{ id?: string }> };
@@ -100,7 +102,11 @@ export async function sendWhatsAppText(
     p_external_message_id: externalMessageId,
     p_message_type: "TEXT",
     p_content: input.text,
-    p_payload: { provider: "META_CLOUD" },
+    p_payload: {
+      provider: "META_CLOUD",
+      sourceMessageId: input.sourceMessageId,
+      orderPrompt: input.orderPrompt ?? false,
+    },
   });
   if (error) {
     throw new Error(

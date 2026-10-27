@@ -252,9 +252,13 @@ export async function recordSimulationMessage(params: {
   state: SimulationState;
   direction: "INBOUND" | "OUTBOUND";
   content: string;
-}): Promise<void> {
+  sourceMessageId?: string;
+  orderPrompt?: boolean;
+}): Promise<string> {
   const supabase = createWhatsAppAdminClient();
+  const messageId = randomUUID();
   const { error } = await supabase.from("whatsapp_messages").insert({
+    id: messageId,
     organization_id: params.state.organizationId,
     integration_id: params.state.integrationId,
     conversation_id: params.state.conversationId,
@@ -266,6 +270,8 @@ export async function recordSimulationMessage(params: {
     payload: {
       source: "LOCAL_SIMULATOR",
       sentToWhatsApp: false,
+      sourceMessageId: params.sourceMessageId,
+      orderPrompt: params.orderPrompt ?? false,
     },
   });
   if (error) {
@@ -278,14 +284,6 @@ export async function recordSimulationMessage(params: {
     .from("whatsapp_conversations")
     .update({
       last_message_at: new Date().toISOString(),
-      ...(params.direction === "INBOUND"
-        ? {
-            status: "ACTIVE",
-            handoff_reason: null,
-            bot_paused_at: null,
-            bot_paused_by: null,
-          }
-        : {}),
     })
     .eq("id", params.state.conversationId)
     .eq("organization_id", params.state.organizationId)
@@ -295,6 +293,7 @@ export async function recordSimulationMessage(params: {
       `No se pudo actualizar la conversación local: ${conversationError.message}`
     );
   }
+  return messageId;
 }
 
 export async function getSimulationMessages(state: SimulationState): Promise<
@@ -310,14 +309,15 @@ export async function getSimulationMessages(state: SimulationState): Promise<
     .eq("organization_id", state.organizationId)
     .eq("integration_id", state.integrationId)
     .eq("conversation_id", state.conversationId)
-    .order("created_at", { ascending: true })
-    .limit(24);
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(32);
   if (error) {
     throw new Error(
       `No se pudo cargar la conversación local: ${error.message}`
     );
   }
-  return (data ?? []) as Array<{
+  return [...(data ?? [])].reverse() as Array<{
     direction: "INBOUND" | "OUTBOUND";
     content: string | null;
     created_at: string;
@@ -344,6 +344,8 @@ export async function getSimulationSnapshot(
       .select("id, status")
       .eq("conversation_id", state.conversationId)
       .eq("organization_id", state.organizationId)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle(),
   ]);
   if (conversationError || cartError || !conversation) {
