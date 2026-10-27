@@ -40,7 +40,7 @@ export default async function DistributorCatalogPage({
       <div>
         <h1 className="font-heading text-2xl">Catálogo Distribuidor</h1>
         <p className="text-muted-foreground text-sm">
-          Stock disponible y precio de distribuidor (costo + {margin}%).
+          Stock disponible y precio de distribuidor.
         </p>
       </div>
 

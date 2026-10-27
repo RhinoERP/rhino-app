@@ -6,6 +6,7 @@ import {
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import type { QueryBuilder } from "@/lib/query-builder";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
@@ -53,6 +54,26 @@ import { applySalesDateFilters } from "./sales-filters";
 import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Contexto de confianza para integraciones de sistema. No se expone a Server
+ * Actions ni al navegador: permite reutilizar el alta comercial sin una cookie
+ * de usuario, conservando un vendedor/actor de la organización.
+ */
+type TrustedPreSaleExecution = {
+  supabase: SupabaseServerClient;
+  organizationId: string;
+  actorId: string;
+  conversationId?: string;
+  prepareOnly?: (payload: PreparedWhatsAppPreSale) => void;
+};
+
+export type PreparedWhatsAppPreSale = {
+  order: Record<string, unknown>;
+  items: Record<string, unknown>[];
+  itemTaxes: Record<string, unknown>[];
+  taxes: Record<string, unknown>[];
+};
 
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
   "NOTA_DE_VENTA";
@@ -237,6 +258,7 @@ type SalesOrderItemRaw = Partial<
       | null;
     tracks_stock_units?: boolean | null;
     weight_per_unit?: number | null;
+    units_per_box?: number | null;
     category_id?: string | null;
     accounting_account_code?: string | null;
   } | null;
@@ -1711,6 +1733,8 @@ export async function getSalesOrdersByOrgSlug(
             id,
             name,
             unit_of_measure,
+            tracks_stock_units,
+            units_per_box,
             supplier:suppliers(name)
           )
         ),
@@ -1763,6 +1787,9 @@ export async function getSalesOrdersByOrgSlug(
         supplierName: normalizeSupplierNameFromProduct(product),
         units: quantities.units,
         kilograms: quantities.kilograms,
+        unitOfMeasure: product?.unit_of_measure ?? null,
+        tracksStockUnits: Boolean(product?.tracks_stock_units),
+        unitsPerBox: product?.units_per_box ?? null,
         subtotal: quantities.subtotal,
       };
     });
@@ -1957,6 +1984,8 @@ function buildSalesQuery(
             id,
             name,
             unit_of_measure,
+            tracks_stock_units,
+            units_per_box,
             supplier:suppliers(name)
           )
         ),
@@ -2059,6 +2088,9 @@ function enrichSalesOrders(
         supplierName: normalizeSupplierNameFromProduct(product),
         units: quantities.units,
         kilograms: quantities.kilograms,
+        unitOfMeasure: product?.unit_of_measure ?? null,
+        tracksStockUnits: Boolean(product?.tracks_stock_units),
+        unitsPerBox: product?.units_per_box ?? null,
         subtotal: quantities.subtotal,
       };
     });
@@ -2392,6 +2424,8 @@ export async function getAllSalesForExport(
             id,
             name,
             unit_of_measure,
+            tracks_stock_units,
+            units_per_box,
             supplier:suppliers(name)
           )
         ),
@@ -2443,6 +2477,9 @@ export async function getAllSalesForExport(
         supplierName: normalizeSupplierNameFromProduct(product),
         units: quantities.units,
         kilograms: quantities.kilograms,
+        unitOfMeasure: product?.unit_of_measure ?? null,
+        tracksStockUnits: Boolean(product?.tracks_stock_units),
+        unitsPerBox: product?.units_per_box ?? null,
         subtotal: quantities.subtotal,
       };
     });
@@ -2802,7 +2839,8 @@ export async function getSalesOrderById(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: business logic involves several guarded steps
 export async function createPreSaleOrder(
-  input: CreatePreSaleOrderInput
+  input: CreatePreSaleOrderInput,
+  trustedExecution?: TrustedPreSaleExecution
 ): Promise<string> {
   const { orgSlug, customerId, sellerId, saleDate } = input;
 
@@ -2820,18 +2858,24 @@ export async function createPreSaleOrder(
     throw new Error("Agrega al menos un ítem a la preventa");
   }
 
-  const org = await getOrganizationBySlug(orgSlug);
+  const org = trustedExecution
+    ? { id: trustedExecution.organizationId }
+    : await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
 
-  const supabase = await createClient();
-  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
-  assertCanManageSales(accessContext);
-  const userId = await getCurrentUserId(supabase);
+  const supabase = trustedExecution?.supabase ?? (await createClient());
+  if (!trustedExecution) {
+    const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+    assertCanManageSales(accessContext);
+    const resolvedSellerId = sellerId || (await getCurrentUserId(supabase));
+    assertCanAssignSeller(accessContext, resolvedSellerId);
+  }
+  const userId =
+    trustedExecution?.actorId ?? (await getCurrentUserId(supabase));
   const resolvedSellerId = sellerId || userId;
-  assertCanAssignSeller(accessContext, resolvedSellerId);
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
@@ -2929,29 +2973,59 @@ export async function createPreSaleOrder(
     input.creditDays
   );
 
+  const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] = {
+    organization_id: org.id,
+    customer_id: customerId,
+    user_id: resolvedSellerId as string,
+    sale_date: saleDate,
+    credit_days: input.creditDays ?? null,
+    expiration_date: dueDate,
+    invoice_type: invoiceType,
+    invoice_number: sanitizeText(input.invoiceNumber),
+    observations: sanitizeText(input.observations),
+    sub_total: subTotalAmount,
+    total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
+    global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+    global_discount_amount: globalDiscountAmount,
+    total_amount: totalAmount,
+    sales_price_list_id: input.salesPriceListId ?? null,
+    price_level_id: input.priceLevelId ?? null,
+    advance_payment_percentage: normalizedAdvancePercentage,
+    status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
+    created_by: userId,
+  };
+  if (trustedExecution?.prepareOnly) {
+    const saleOrderId = randomUUID();
+    trustedExecution.prepareOnly({
+      order: { ...orderValues, id: saleOrderId },
+      items: items.map((item) => ({
+        ...createPreSaleItemPayload(item, org.id, saleOrderId),
+        product_variant_id: item.productVariantId ?? null,
+      })),
+      itemTaxes: buildSalesOrderItemTaxesPayload({
+        orgId: org.id,
+        saleOrderId,
+        taxPlan,
+      }),
+      taxes: buildSalesOrderTaxesPayload({
+        orgId: org.id,
+        saleOrderId,
+        taxPlan,
+      }),
+    });
+    return saleOrderId;
+  }
   const { data: order, error: orderError } = await supabase
     .from("sales_orders")
-    .insert({
-      organization_id: org.id,
-      customer_id: customerId,
-      user_id: resolvedSellerId as string,
-      sale_date: saleDate,
-      credit_days: input.creditDays ?? null,
-      expiration_date: dueDate,
-      invoice_type: invoiceType,
-      invoice_number: sanitizeText(input.invoiceNumber),
-      observations: sanitizeText(input.observations),
-      sub_total: subTotalAmount,
-      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
-      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
-      global_discount_amount: globalDiscountAmount,
-      total_amount: totalAmount,
-      sales_price_list_id: input.salesPriceListId ?? null,
-      price_level_id: input.priceLevelId ?? null,
-      advance_payment_percentage: normalizedAdvancePercentage,
-      status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
-      created_by: userId,
-    })
+    .insert(
+      trustedExecution?.conversationId
+        ? ({
+            ...orderValues,
+            source: "WHATSAPP",
+            conversation_id: trustedExecution.conversationId,
+          } as never)
+        : orderValues
+    )
     .select("id")
     .maybeSingle();
 
@@ -3033,6 +3107,36 @@ export async function createPreSaleOrder(
   }
 
   return saleOrderId;
+}
+
+/**
+ * Prepara importes, productos e impuestos con las mismas reglas del alta manual,
+ * sin persistir. Las herramientas de WhatsApp cotizan este resultado y lo
+ * convierten transaccionalmente sólo después de la confirmación de esa versión.
+ */
+export async function prepareWhatsAppPreSaleOrder(params: {
+  organizationId: string;
+  conversationId: string;
+  sellerId: string;
+  input: Omit<CreatePreSaleOrderInput, "sellerId">;
+}): Promise<PreparedWhatsAppPreSale> {
+  let prepared: PreparedWhatsAppPreSale | undefined;
+  await createPreSaleOrder(
+    { ...params.input, sellerId: params.sellerId },
+    {
+      supabase: createAdminClient() as unknown as SupabaseServerClient,
+      organizationId: params.organizationId,
+      actorId: params.sellerId,
+      conversationId: params.conversationId,
+      prepareOnly: (payload) => {
+        prepared = payload;
+      },
+    }
+  );
+  if (!prepared) {
+    throw new Error("No se pudo preparar la preventa");
+  }
+  return prepared;
 }
 
 type ProductStockMetadata = {

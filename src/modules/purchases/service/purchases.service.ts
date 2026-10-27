@@ -244,6 +244,7 @@ export type CreatePurchaseOrderInput = {
     unit_quantity: number;
     unit_cost: number;
     subtotal: number;
+    discount_percentage?: number;
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>>;
     taxes?: ItemTaxInput[];
@@ -484,6 +485,7 @@ export async function createPurchaseOrder(
       unit_quantity: item.unit_quantity,
       unit_cost: truncateMoney(item.unit_cost),
       subtotal: truncateMoney(item.subtotal),
+      discount_percentage: item.discount_percentage ?? 0,
       variant_stocks: item.variant_stocks ?? null,
       tax_override: item.taxes ?? null,
     }));
@@ -1656,6 +1658,7 @@ export type UpdatePurchaseOrderInput = {
     unit_quantity: number;
     unit_cost: number;
     subtotal: number;
+    discount_percentage?: number;
     unit_of_measure?: string | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
     taxes?: ItemTaxInput[];
@@ -1785,7 +1788,7 @@ export async function updatePurchaseOrder(
   if (input.items?.length) {
     const { data: savedItems, error: savedItemsError } = await supabase
       .from("purchase_order_items")
-      .select("id, product_id, quantity, variant_stocks")
+      .select("id, product_id, quantity, variant_stocks, discount_percentage")
       .eq("purchase_order_id", input.purchaseOrderId)
       .eq("organization_id", org.id);
     if (savedItemsError) {
@@ -1867,6 +1870,7 @@ export async function updatePurchaseOrder(
       unit_quantity: item.unit_quantity,
       unit_cost: truncateMoney(item.unit_cost),
       subtotal: truncateMoney(item.subtotal),
+      discount_percentage: item.discount_percentage ?? 0,
       variant_stocks: item.variant_stocks ?? null,
       tax_override: item.taxes ?? null,
     }));
@@ -1958,6 +1962,7 @@ export async function getPurchaseOrderWithItems(
       accountingAccountCode?: string | null;
       product_name?: string;
       product_sku?: string | null;
+      discount_percentage?: number | null;
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean;
@@ -2071,9 +2076,8 @@ export async function getPurchaseOrderWithItems(
         item.tax_override === null
           ? null
           : tryParsePurchaseTaxInputs(item.tax_override);
-      if (item.tax_override !== null && parsedOverride === null) {
-        fiscalDataInvalid = true;
-      }
+      fiscalDataInvalid ||=
+        item.tax_override !== null && parsedOverride === null;
       return {
         ...item,
         category_id: item.product?.category_id ?? null,
@@ -2084,6 +2088,9 @@ export async function getPurchaseOrderWithItems(
             : null),
         product_name: item.product?.name || item.product_id,
         product_sku: item.product?.sku ?? null,
+        discount_percentage:
+          (item as PurchaseOrderItem & { discount_percentage?: number | null })
+            .discount_percentage ?? 0,
         weight_per_unit: item.product?.weight_per_unit ?? null,
         unit_of_measure: item.product?.unit_of_measure ?? null,
         has_variants: item.product?.has_variants ?? false,

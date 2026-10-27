@@ -177,6 +177,7 @@ function NewPurchaseContent() {
           unit_quantity: unitQuantity,
           unit_cost: item.unit_cost,
           subtotal: item.subtotal,
+          discount_percentage: item.discount_percent ?? 0,
           unit_of_measure: item.unit_of_measure,
           variant_stocks: item.has_variants ? item.variant_stocks : undefined,
           taxes: item.taxes,

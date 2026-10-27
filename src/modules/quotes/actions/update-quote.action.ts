@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
-import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-conversion";
+import {
+  mapQuoteFormItems,
+  toNullablePricingId,
+} from "@/modules/quotes/utils/quote-form-items";
 import { updateQuote } from "../service/quotes.service";
 import type { QuoteFormValues } from "../types";
 
@@ -31,32 +34,12 @@ export async function updateQuoteAction(
       advancePaymentPercentage: values.advancePaymentEnabled
         ? (values.advancePaymentPercentage ?? null)
         : null,
+      priceLevelId: toNullablePricingId(values.priceLevelId),
+      salesPriceListId: toNullablePricingId(values.salesPriceListId),
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
       invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",
       taxes: values.taxes,
-      items: values.items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        currency: values.currency,
-        unitPrice: item.unitPrice,
-        variants: item.variants.map((v) => ({
-          talle: v.talle,
-          color: v.color,
-          quantity: v.quantity,
-          productVariantId: v.productVariantId,
-          extras: (v.extras ?? []).map((extra) => ({
-            ...extra,
-            price: convertPriceToQuoteCurrency(
-              extra.price,
-              item.productCurrency ?? "ARS",
-              values.currency,
-              values.exchangeRate
-            ),
-          })),
-        })),
-        discountPercentage: item.discountPercentage ?? null,
-        taxes: item.taxes,
-      })),
+      items: mapQuoteFormItems(values.items, values.currency),
     };
 
     await updateQuote(quoteId, input);

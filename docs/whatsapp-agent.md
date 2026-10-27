@@ -17,7 +17,7 @@ El MVP incluye consultas comerciales, carrito, cotización, preventa y derivaci�
 | Repositorio | Un único repositorio: este. Los servicios se despliegan de manera independiente. |
 | Canal | Meta Cloud API. Cada `phone_number_id` corresponde a una organización activa. |
 | Rhinos | Next desplegado en Vercel: panel, APIs internas y webhook. |
-| Worker | `services/whatsapp-agent`, servicio Node persistente desplegado en Railway. |
+| Worker | `services/whatsapp-agent`, servicio Node persistente desplegado en Vercel Daemons (Railway como alternativa). |
 | Datos | El proyecto Supabase actual es la fuente de verdad comercial y conversacional. |
 | Aislamiento | El número receptor resuelve la organización; el modelo nunca elige ni recibe un `organization_id` arbitrario. |
 | Operaciones | El agente usa herramientas comerciales de Rhinos; no tiene SQL libre ni acceso administrativo general a Supabase. |
@@ -28,7 +28,7 @@ flowchart LR
   M --> W[Webhook Rhinos / Next]
   W --> S[(Supabase)]
   W --> J[agent_jobs]
-  J --> A[Worker whatsapp-agent\nRailway]
+  J --> A[Worker whatsapp-agent\nVercel Daemons]
   A --> T[API/MCP interna de Rhinos]
   T --> S
   A -->|respuesta saliente| M
@@ -51,16 +51,19 @@ Incorporar `src/modules/whatsapp` y rutas bajo `/org/[orgSlug]/whatsapp`.
 
 El webhook verifica la firma, deduplica, persiste el mensaje, encola un trabajo durable y responde `200`. Si no existe una integración activa para el número, no encola automatización.
 
+La configuración permite establecer días y franjas semanales, zona horaria y un rango de demora aleatoria (0–120 minutos). Si un mensaje llega fuera de horario, el trabajo queda en la cola hasta la próxima apertura; el agente vuelve a comprobar el horario antes de procesarlo. La instrucción compartida con el simulador y el worker prohíbe el uso de emojis.
+
 ### Worker `services/whatsapp-agent`
 
 El worker reclama trabajos pendientes, obtiene el contexto autorizado y opera el asistente:
 
 1. Reclama un trabajo de forma exclusiva.
-2. Lee conversación, últimos mensajes, carrito y configuración permitida.
-3. Ejecuta el modelo y sus herramientas comerciales.
-4. Registra la ejecución y cada llamada de herramienta.
-5. Envía la respuesta por Meta o deriva a atención manual.
-6. Termina el trabajo o programa un reintento transitorio.
+2. Consulta el horario y la demora configurados; si corresponde, difiere el trabajo en la cola durable.
+3. Lee conversación, últimos mensajes, carrito y configuración permitida.
+4. Ejecuta el modelo y sus herramientas comerciales.
+5. Registra la ejecución y cada llamada de herramienta.
+6. Envía la respuesta por Meta o deriva a atención manual.
+7. Termina el trabajo o programa un reintento transitorio.
 
 No procesa conversaciones en atención manual, pausadas ni asociadas a una integración inactiva.
 
@@ -126,12 +129,47 @@ Restricciones e índices mínimos:
 | Ruta | Contenido |
 | --- | --- |
 | `/org/[orgSlug]/whatsapp/conversaciones` | Inbox, filtros, historial, carrito, preventa y respuesta manual. |
+| `/org/[orgSlug]/whatsapp/simulador` | Sandbox con clientes, catálogo, precios y stock reales; sin enviar mensajes a Meta. |
 | `/org/[orgSlug]/whatsapp/metricas` | Conversaciones, respuesta, preventas, conversión, abandono, derivaciones, intervención humana, productos y faltantes. |
 | `/org/[orgSlug]/whatsapp/configuracion` | Meta, lista de precios, vendedor, horario, activación y reglas de derivación. |
+
+El sandbox usa el mismo ciclo del modelo y herramientas comerciales del worker
+(`services/whatsapp-agent/src/agent-core.ts`). Consulta datos reales de la empresa,
+guarda conversaciones y carritos de prueba y puede crear **preventas reales en
+borrador** tras confirmación explícita y con permiso `sales.manage`. No factura,
+no reserva stock y nunca envía mensajes a Meta. Requiere `OPENAI_API_KEY` en
+Vercel; no requiere Railway ni credenciales de Meta.
+
+Superadmin controla dos flags independientes en
+`/admin/organizacion/[orgSlug]` → Configuración de Módulos:
+`whatsapp_enabled` y `whatsapp_sandbox_enabled`. Ambos son `false` por defecto
+para empresas existentes y nuevas. Los permisos de usuario siguen siendo
+necesarios después de habilitar un módulo. La navegación, rutas, acciones,
+herramientas internas, RLS, ingesta y reclamo de trabajos respetan el opt-in.
+Los jobs pendientes de una empresa deshabilitada dejan de reclamarse y pueden
+reanudar cuando se habilita nuevamente; los webhooks recibidos mientras está
+apagada se ignoran. El envío vuelve a comprobar la habilitación tras ejecutar el
+modelo; un envío ya aceptado por Meta no se puede retirar.
+
+Para el procedimiento de publicación, variables por servicio, migraciones,
+pruebas y reversión, ver [Deploy de WhatsApp](whatsapp-deploy.md).
 
 Los permisos del módulo distinguen lectura de inbox, atención de conversaciones, administración de configuración y lectura de métricas.
 
 ## Backlog
+
+### Estado actual — 26 de octubre de 2026
+
+| Fase | Estado | Alcance disponible en código |
+| --- | --- | --- |
+| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable, horarios semanales, zona horaria, demora aleatoria y derivación. Flags de disponibilidad configurables desde superadmin. Las credenciales de Meta todavía son variables globales del servicio; no hay provisionamiento de secretos por integración. |
+| 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta y el daemon de Vercel. |
+| 3 — Asistente comercial | En curso | Worker con Responses API, herramientas comerciales acotadas, carrito persistente, cotización, confirmación explícita, preventa idempotente y auditoría. Falta una prueba end-to-end contra Meta y el proveedor de modelo. |
+| 4 — Operación humana | En curso | Inbox inicial, respuesta manual, derivación y pausa/reactivación explícita. Faltan asignación, alertas y vista detallada de historial. |
+| 5 — Métricas y tesis | Pendiente | Sin dashboard ni protocolo comparativo implementados. |
+
+La integración debe conservarse inactiva hasta que estén configuradas sus
+credenciales de producción y se complete una prueba real de punta a punta.
 
 ### Fase 1 — Fundación
 
@@ -145,7 +183,7 @@ Los permisos del módulo distinguen lectura de inbox, atención de conversacione
 
 - Implementar verificación y recepción del webhook de Meta Cloud API.
 - Persistir mensajes de forma idempotente y crear trabajos durables.
-- Crear el worker Railway con reclamación, reintentos y registro de errores.
+- Crear el worker en Vercel Daemons con reclamación, reintentos y registro de errores.
 - Implementar mensajes salientes y estado de entrega.
 
 **Salida:** cada mensaje queda trazado y se procesa una sola vez aunque Meta lo reintente.
@@ -211,3 +249,42 @@ Comparar flujo manual y asistido por período, organización y canal:
 - Costo medio de procesamiento por conversación.
 
 La evaluación debe diferenciar automatización total de asistencia supervisada: el objetivo del MVP es reducir carga operativa sin eliminar la revisión comercial humana.
+
+## Ciclo de pedidos recurrentes
+
+Una conversación es permanente para la pareja integración/teléfono. Puede tener
+muchos carritos históricos y preventas; sólo uno queda pendiente. Confirmar una
+preventa convierte su carrito, sin cerrar ni vaciar el chat. Un saludo, un
+agradecimiento y el paso del tiempo no crean ni abandonan pedidos.
+
+| Decisión | Comportamiento |
+| --- | --- |
+| Consulta informativa | Lee catálogo/precio/stock sin crear carrito. |
+| Compra nueva | Abre un carrito nuevo; un sí repetido no inicia otra compra. |
+| Pedido pendiente | Se conserva; al volver otro día con intención ambigua, pregunta si lo retoma o empieza otro. |
+| Cambios antes de confirmar | Actualiza o quita productos e invalida la cotización. |
+| Descartar o reemplazar | Pregunta, guarda la acción pendiente y exige confirmación posterior. |
+| Confirmar compra | Valida la versión y el mensaje donde se presentó la cotización; recalcula precio, disponibilidad e impuestos. Si cambia, vuelve a preguntar. |
+| Consultar pedido anterior | Lee preventas del mismo chat; presenta una selección si hay ambigüedad. |
+| Repetir compra | Copia productos/cantidades, revisa condiciones actuales y pregunta por diferencias o faltantes antes de una cotización nueva. No sustituye productos. |
+| Cambiar o cancelar preventa creada | Deriva a una persona sin modificarla. |
+| Atención humana | Sigue pausada hasta la reactivación manual; descarta autorizaciones antiguas, conservando datos. |
+
+`get_commercial_state` entrega el carrito pendiente, su versión, última preventa,
+acción pendiente y mensaje de origen. Worker y sandbox usan el mismo motor y los
+últimos 32 mensajes en orden cronológico. El agente puede paginar mensajes y
+pedidos anteriores de ese chat, sin perfiles de preferencias ni acceso a otra
+integración (incluido otro sandbox).
+
+Las mutaciones reciben carrito/versión y mensaje de origen. Una RPC bloquea la
+conversación, valida que el mensaje siga vigente y aplica cada transición. La
+conversión inserta cabecera, productos, impuestos y vínculos en una transacción;
+el índice único por carrito devuelve la misma preventa completa ante reintentos.
+Los cálculos fiscales reutilizan el servicio comercial de preventas, sin cobrar,
+facturar ni reservar stock.
+
+Las preguntas de confirmación se generan en el servidor con el total calculado
+y se vinculan al mensaje saliente realmente registrado. Un sí para descartar no
+puede confirmar una compra. Una modificación condicionada nunca cuenta como sí.
+La bandeja muestra el carrito pendiente y las preventas vinculadas; el sandbox
+permite varias compras sin Reiniciar y ofrece reactivación manual del bot.

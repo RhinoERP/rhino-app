@@ -1,5 +1,74 @@
 import { z } from "zod";
-import { WHATSAPP_INTEGRATION_STATUSES } from "./types";
+import {
+  DEFAULT_WHATSAPP_BUSINESS_HOURS,
+  DEFAULT_WHATSAPP_RESPONSE_DELAY,
+  WHATSAPP_INTEGRATION_STATUSES,
+  WHATSAPP_WEEKDAYS,
+} from "./types";
+
+const businessHoursDaySchema = z.object({
+  enabled: z.boolean(),
+  start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Usá el formato HH:MM"),
+  end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Usá el formato HH:MM"),
+});
+
+const businessHoursSchema = z
+  .object({
+    enabled: z.boolean().default(DEFAULT_WHATSAPP_BUSINESS_HOURS.enabled),
+    timezone: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .default(DEFAULT_WHATSAPP_BUSINESS_HOURS.timezone),
+    weeklySchedule: z
+      .object(
+        Object.fromEntries(
+          WHATSAPP_WEEKDAYS.map((day) => [day, businessHoursDaySchema])
+        ) as Record<
+          (typeof WHATSAPP_WEEKDAYS)[number],
+          typeof businessHoursDaySchema
+        >
+      )
+      .default(DEFAULT_WHATSAPP_BUSINESS_HOURS.weeklySchedule),
+  })
+  .default(DEFAULT_WHATSAPP_BUSINESS_HOURS)
+  .superRefine((hours, ctx) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: hours.timezone });
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "La zona horaria no es válida (por ejemplo, America/Argentina/Buenos_Aires)",
+        path: ["timezone"],
+      });
+    }
+
+    if (!hours.enabled) {
+      return;
+    }
+    const hasEnabledDay = WHATSAPP_WEEKDAYS.some(
+      (day) => hours.weeklySchedule[day].enabled
+    );
+    if (!hasEnabledDay) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Activá al menos un día de atención",
+        path: ["weeklySchedule"],
+      });
+    }
+    for (const day of WHATSAPP_WEEKDAYS) {
+      const schedule = hours.weeklySchedule[day];
+      if (schedule.enabled && schedule.start >= schedule.end) {
+        ctx.addIssue({
+          code: "custom",
+          message: "La hora de cierre debe ser posterior a la de apertura",
+          path: ["weeklySchedule", day, "end"],
+        });
+      }
+    }
+  });
 
 export const whatsappIntegrationConfigurationSchema = z
   .object({
@@ -22,7 +91,19 @@ export const whatsappIntegrationConfigurationSchema = z
       .string()
       .uuid("El vendedor responsable es inválido")
       .nullable(),
-    businessHours: z.record(z.string(), z.unknown()).default({}),
+    businessHours: businessHoursSchema,
+    responseDelayMinMinutes: z
+      .number()
+      .int()
+      .min(0)
+      .max(120)
+      .default(DEFAULT_WHATSAPP_RESPONSE_DELAY.minMinutes),
+    responseDelayMaxMinutes: z
+      .number()
+      .int()
+      .min(0)
+      .max(120)
+      .default(DEFAULT_WHATSAPP_RESPONSE_DELAY.maxMinutes),
     commercialRules: z.record(z.string(), z.unknown()).default({}),
     handoffMessage: z
       .string()
@@ -31,6 +112,14 @@ export const whatsappIntegrationConfigurationSchema = z
       .nullable(),
   })
   .superRefine((value, ctx) => {
+    if (value.responseDelayMinMinutes > value.responseDelayMaxMinutes) {
+      ctx.addIssue({
+        code: "custom",
+        message: "La demora mínima no puede superar la máxima",
+        path: ["responseDelayMaxMinutes"],
+      });
+    }
+
     if (value.status !== "ACTIVE") {
       return;
     }

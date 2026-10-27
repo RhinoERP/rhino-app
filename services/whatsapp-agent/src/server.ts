@@ -1,5 +1,10 @@
 import { createServer } from "node:http";
 import { hostname } from "node:os";
+import {
+  createCommercialJobProcessor,
+  getMissingCommercialEnvironment,
+  isCommercialAgentConfigured,
+} from "./commercial-agent.js";
 import { createWorkerSupabaseClient, WhatsAppWorker } from "./worker.js";
 
 const port = Number(process.env.PORT ?? "3002");
@@ -9,16 +14,12 @@ const pollIntervalMs = Number(
 const workerId =
   process.env.WHATSAPP_AGENT_WORKER_ID ?? `${hostname()}-${process.pid}`;
 
-function acknowledgeTransportJob(): Promise<void> {
-  // La fase 3 sustituye este procesador por la ejecución del asistente.
-  return Promise.resolve();
-}
-
+const supabase = createWorkerSupabaseClient();
+const isConfigured = isCommercialAgentConfigured();
 const worker = new WhatsAppWorker({
   workerId,
-  supabase: createWorkerSupabaseClient(),
-  // La fase 2 deja el transporte listo y termina el trabajo de forma segura.
-  process: acknowledgeTransportJob,
+  supabase,
+  process: createCommercialJobProcessor(supabase),
 });
 
 let running = false;
@@ -31,7 +32,7 @@ async function poll(): Promise<void> {
   try {
     if (!running) {
       running = true;
-      while (await worker.runOnce()) {
+      while (!stopped && (await worker.runOnce())) {
         // Drenar los trabajos disponibles antes de volver a esperar.
       }
     }
@@ -48,11 +49,17 @@ async function poll(): Promise<void> {
   }
 }
 
-createServer((request, response) => {
+const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(
-      JSON.stringify({ ok: true, service: "whatsapp-agent", workerId })
+      JSON.stringify({
+        ok: true,
+        configured: isConfigured,
+        missingConfiguration: getMissingCommercialEnvironment(),
+        service: "whatsapp-agent",
+        workerId,
+      })
     );
     return;
   }
@@ -60,13 +67,21 @@ createServer((request, response) => {
   response.end();
 }).listen(port, () => {
   console.log(`[whatsapp-agent] escuchando en ${port}`);
-  poll().catch((error: unknown) => {
-    console.error("[whatsapp-agent] no se pudo iniciar el polling", error);
-  });
+  if (isConfigured) {
+    console.log("[whatsapp-agent] worker configurado; iniciando polling");
+    poll().catch((error: unknown) => {
+      console.error("[whatsapp-agent] no se pudo iniciar el polling", error);
+    });
+  } else {
+    console.warn(
+      `[whatsapp-agent] faltan variables comerciales: ${getMissingCommercialEnvironment().join(", ")}; el worker no reclamará trabajos. Guardarlas en Production y crear un nuevo deployment; reiniciar el daemon no actualiza su entorno.`
+    );
+  }
 });
 
 function shutdown(): void {
   stopped = true;
+  server.close();
 }
 
 process.on("SIGTERM", shutdown);

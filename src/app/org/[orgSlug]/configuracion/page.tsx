@@ -64,6 +64,7 @@ export default async function ConfigurationPage({
           accountingEnabled={organization.accounting_enabled === true}
           orgSlug={orgSlug}
           posEnabled={organization.pos_enabled ?? true}
+          whatsappEnabled={organization.whatsapp_enabled === true}
         />
       </div>
     </div>

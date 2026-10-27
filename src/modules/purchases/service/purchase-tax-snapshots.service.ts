@@ -253,6 +253,7 @@ export async function persistPurchaseFiscalState(params: {
     unit_quantity: number | null;
     unit_cost: number;
     subtotal: number;
+    discount_percentage?: number;
     variant_stocks?: unknown;
     tax_override?: ItemTaxInput[] | null;
   }>;
@@ -317,6 +318,7 @@ export function buildPurchaseFiscalPayload(params: {
     unit_quantity: number | null;
     unit_cost: number;
     subtotal: number;
+    discount_percentage?: number;
     variant_stocks?: unknown;
     tax_override?: ItemTaxInput[] | null;
   }>;
@@ -335,6 +337,7 @@ export function buildPurchaseFiscalPayload(params: {
     items: params.items.map((item) => ({
       ...item,
       variant_stocks: item.variant_stocks ?? null,
+      discount_percentage: item.discount_percentage ?? 0,
       tax_override: item.tax_override ?? null,
     })),
     item_taxes: params.plan.itemTaxes.map((tax) => ({

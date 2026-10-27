@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "daemons": {
+    "whatsapp-agent": {
+      "root": "services/whatsapp-agent",
+      "entrypoint": "Dockerfile",
+      "instances": { "iad1": 0 },
+      "resources": { "requests": { "memory": "1Gi" } },
+      "terminationGracePeriodSeconds": 120
+    }
+  }
+}

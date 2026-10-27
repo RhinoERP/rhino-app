@@ -8,9 +8,13 @@ export type AgentJob = {
   source_message_id: string;
   attempts: number;
   max_attempts: number;
+  human_delay_applied: boolean;
 };
 
-export type AgentJobProcessor = (job: AgentJob) => Promise<void>;
+export type AgentJobProcessorResult = undefined | { deferUntil: string };
+export type AgentJobProcessor = (
+  job: AgentJob
+) => Promise<AgentJobProcessorResult>;
 
 export type WhatsAppWorkerOptions = {
   workerId: string;
@@ -53,7 +57,23 @@ export class WhatsAppWorker {
     }
 
     try {
-      await this.options.process(job);
+      const result = await this.options.process(job);
+      if (result && "deferUntil" in result) {
+        const { error: deferError } = await this.options.supabase.rpc(
+          "defer_whatsapp_agent_job",
+          {
+            p_job_id: job.id,
+            p_worker_id: this.options.workerId,
+            p_available_at: result.deferUntil,
+          }
+        );
+        if (deferError) {
+          throw new Error(
+            `No se pudo programar la respuesta: ${deferError.message}`
+          );
+        }
+        return true;
+      }
     } catch (processError) {
       const { error: retryError } = await this.options.supabase.rpc(
         "finish_whatsapp_agent_job",
