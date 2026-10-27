@@ -62,11 +62,9 @@ const formSchema = z.object({
   paymentMethod: z.enum([
     "efectivo",
     "transferencia",
-    "cheque",
     "tarjeta_de_credito",
     "tarjeta_de_debito",
     "deposito",
-    "e-cheq",
   ] as const),
   paymentDate: z.date(),
   referenceNumber: z.string().optional(),
@@ -378,7 +376,6 @@ export function BulkPaymentDialog({
                           <SelectItem value="transferencia">
                             Transferencia
                           </SelectItem>
-                          <SelectItem value="cheque">Cheque</SelectItem>
                           <SelectItem value="tarjeta_de_credito">
                             Tarjeta de Crédito
                           </SelectItem>
@@ -386,7 +383,6 @@ export function BulkPaymentDialog({
                             Tarjeta de Débito
                           </SelectItem>
                           <SelectItem value="deposito">Depósito</SelectItem>
-                          <SelectItem value="e-cheq">E-Cheq</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
