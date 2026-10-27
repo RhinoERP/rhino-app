@@ -22,7 +22,6 @@ import {
   restoreSupplierCreditBalances,
   rollbackCustomerCreditApplications,
 } from "@/modules/collections/service/credit-restoration.service";
-import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import {
   assertPaymentExchangeRate,
   type PaymentCurrencyFields,
@@ -712,6 +711,7 @@ async function createReceivablePaymentWithAccounting(params: {
       payment,
       customerId: params.receivable.customer_id,
       paymentMethod: params.paymentMethod,
+      faceAmountArs: params.currencyFields.amountArs,
       receivedCheckData: params.receivedCheckData,
     });
     if (!receivedCheckResult.success) {
@@ -779,6 +779,7 @@ async function persistReceivedCheckForPayment(params: {
   payment: PaymentInsertRow;
   customerId: string;
   paymentMethod: PaymentMethod;
+  faceAmountArs: number;
   receivedCheckData: NonNullable<RegisterPaymentInput["receivedCheckData"]>;
 }): Promise<
   | { success: true }
@@ -789,7 +790,7 @@ async function persistReceivedCheckForPayment(params: {
       orgId: params.orgId,
       numeroCheque: params.receivedCheckData.numeroCheque,
       bancoEmisor: params.receivedCheckData.bancoEmisor,
-      importe: truncateMoney(params.payment.amount).toFixed(4),
+      importe: truncateMoney(params.faceAmountArs).toFixed(4),
       fechaEmision: params.receivedCheckData.fechaEmision,
       fechaVencimiento: params.receivedCheckData.fechaVencimiento,
       tipo: params.paymentMethod === "e-cheq" ? "ECH" : "CDF",
@@ -834,7 +835,7 @@ async function persistIssuedCheckForPayment(params: {
   orgId: string;
   payment: PaymentInsertRow;
   supplierId: string;
-  amount: number;
+  faceAmountArs: number;
   paymentMethod: PaymentMethod;
   issuedCheckData: NonNullable<RegisterPaymentInput["issuedCheckData"]>;
 }): Promise<
@@ -846,7 +847,7 @@ async function persistIssuedCheckForPayment(params: {
       orgId: params.orgId,
       cuentaBancariaId: params.issuedCheckData.cuentaBancariaId,
       numeroCheque: params.issuedCheckData.numeroCheque,
-      importe: truncateMoney(params.amount).toFixed(4),
+      importe: truncateMoney(params.faceAmountArs).toFixed(4),
       fechaEmision: params.issuedCheckData.fechaEmision,
       fechaDebito: params.issuedCheckData.fechaDebito,
       beneficiario: params.issuedCheckData.beneficiario,
@@ -952,7 +953,7 @@ async function createPayablePaymentWithAccounting(params: {
       orgId: params.orgId,
       payment,
       supplierId: params.payableAccount.supplier_id,
-      amount: params.amount,
+      faceAmountArs: params.currencyFields.amountArs,
       paymentMethod: params.paymentMethod,
       issuedCheckData: params.issuedCheckData,
     });
@@ -1056,18 +1057,6 @@ async function applyReceivablePayment({
       success: false,
       error: "Cuenta por cobrar no encontrada",
       code: "account_not_found",
-    };
-  }
-
-  const checkCurrencyError = validateCheckCurrency(
-    input.paymentMethod,
-    receivable.currency
-  );
-  if (checkCurrencyError) {
-    return {
-      success: false,
-      error: checkCurrencyError,
-      code: "invalid_payment_method",
     };
   }
 
@@ -1516,18 +1505,6 @@ async function applyPayablePayment({
 
   const payableAccount = payable as PayableAccountRow;
 
-  const checkCurrencyError = validateCheckCurrency(
-    input.paymentMethod,
-    payableAccount.currency
-  );
-  if (checkCurrencyError) {
-    return {
-      success: false,
-      error: checkCurrencyError,
-      code: "invalid_payment_method",
-    };
-  }
-
   if (input.paymentMethod === "cheque_endosado") {
     return applyEndorsedPayablePayment({
       orgId,
@@ -1602,19 +1579,6 @@ export async function markPaymentAccountingJournalAction(input: {
           : "Error al marcar el asiento contable",
     };
   }
-}
-
-function validateCheckCurrency(
-  paymentMethod: PaymentMethod,
-  currency: string | null | undefined
-): string | null {
-  if (!isCheckPaymentMethod(paymentMethod)) {
-    return null;
-  }
-
-  return (currency ?? "ARS") === "ARS"
-    ? null
-    : "Los cheques y e-cheqs solo están disponibles para deudas en pesos.";
 }
 
 function validatePaymentAmounts(
@@ -1727,6 +1691,10 @@ function validateEndorsedChecks(input: RegisterPaymentInput): string | null {
 function mapEndorsementErrorCode(error: string): RegisterPaymentErrorCode {
   const normalized = error.toLowerCase();
 
+  if (normalized.includes("factura de compra registrada con cotización")) {
+    return "exchange_rate_required";
+  }
+
   if (normalized.includes("crédito insuficiente")) {
     return "insufficient_credit";
   }
@@ -1821,7 +1789,7 @@ async function createEndorsedCheckPayablePaymentWithAccounting(params: {
         id: endorsement.paymentId,
         organization_id: params.orgId,
         account_payable_id: params.payableAccount.id,
-        amount: Number(endorsement.paymentAmount),
+        amount: Number(endorsement.paymentAmountArs),
         payment_method: "cheque",
         payment_date: params.paymentDate,
         reference_number: buildEndorsedChecksAccountingReference(
@@ -1835,6 +1803,13 @@ async function createEndorsedCheckPayablePaymentWithAccounting(params: {
       },
       {
         bancoAccountCode: "VALORES_A_DEPOSITAR",
+        ...(endorsement.currency === "USD"
+          ? {
+              moneda: "USD" as const,
+              tipoCambio: endorsement.exchangeRate,
+              montoUSD: endorsement.paymentAmount,
+            }
+          : {}),
       }
     );
 

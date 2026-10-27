@@ -88,6 +88,7 @@ export function CheckDepositSlipDialog({
     soloActivas: true,
     enabled: open,
   });
+  const cuentasArs = cuentas.filter((cuenta) => cuenta.moneda === "ARS");
   const { data: cheques = [], isLoading: loadingCheques } = useChequesRecibidos(
     orgId,
     "EN_CARTERA",
@@ -202,7 +203,7 @@ export function CheckDepositSlipDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {cuentas.map((c) => (
+                        {cuentasArs.map((c) => (
                           <SelectItem key={c.id} value={c.id}>
                             {c.nombre} — {c.banco}
                           </SelectItem>

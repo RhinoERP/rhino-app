@@ -2734,7 +2734,8 @@ export async function calculateBulkSupplierPaymentDistribution(
  */
 export async function getSupplierCredits(
   orgSlug: string,
-  supplierId: string
+  supplierId: string,
+  currency?: "ARS" | "USD"
 ): Promise<
   Array<{
     id: string;
@@ -2751,13 +2752,16 @@ export async function getSupplierCredits(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("supplier_credits" as never)
     .select("id, amount, remaining_amount, notes, created_at")
     .eq("organization_id", org.id)
     .eq("supplier_id", supplierId)
-    .gt("remaining_amount", 0)
-    .order("created_at", { ascending: true });
+    .gt("remaining_amount", 0);
+  if (currency) {
+    query = query.eq("currency", currency);
+  }
+  const { data, error } = await query.order("created_at", { ascending: true });
 
   if (error || !data) {
     console.error("Error fetching supplier credits:", error);
@@ -2784,9 +2788,10 @@ export async function getSupplierCredits(
  */
 export async function getSupplierCreditBalance(
   orgSlug: string,
-  supplierId: string
+  supplierId: string,
+  currency?: "ARS" | "USD"
 ): Promise<number> {
-  const credits = await getSupplierCredits(orgSlug, supplierId);
+  const credits = await getSupplierCredits(orgSlug, supplierId, currency);
   return credits.reduce(
     (sum, credit) =>
       truncateMoney(sum + truncateMoney(credit.remaining_amount)),

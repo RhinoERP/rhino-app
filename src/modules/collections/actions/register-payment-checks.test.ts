@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const createClient = vi.fn();
 const createChequeRecibidoServer = vi.fn();
 const createChequeEmitidoServer = vi.fn();
+const endorseReceivedChecksForPayableServer = vi.fn();
+const buildOrdenPago = vi.fn();
+const isAccountingIntegrationEnabled = vi.fn(async () => false);
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({
@@ -11,7 +14,7 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/supabase/auth", () => ({ requireAuth: vi.fn() }));
 vi.mock("@/lib/accounting-client", () => ({
   buildCobro: vi.fn(),
-  buildOrdenPago: vi.fn(),
+  buildOrdenPago: (...args: unknown[]) => buildOrdenPago(...args),
 }));
 vi.mock("@/lib/accounting-server", () => ({
   confirmAccountingEvent: vi.fn(),
@@ -19,11 +22,12 @@ vi.mock("@/lib/accounting-server", () => ({
     createChequeEmitidoServer(...args),
   createChequeRecibidoServer: (...args: unknown[]) =>
     createChequeRecibidoServer(...args),
-  endorseReceivedChecksForPayableServer: vi.fn(),
+  endorseReceivedChecksForPayableServer: (...args: unknown[]) =>
+    endorseReceivedChecksForPayableServer(...args),
   previewAccountingEvent: vi.fn(),
 }));
 vi.mock("@/modules/accounting/service/accounting-integration.service", () => ({
-  isAccountingIntegrationEnabled: vi.fn(async () => false),
+  isAccountingIntegrationEnabled: () => isAccountingIntegrationEnabled(),
 }));
 vi.mock("@/modules/collections/service/collections.service", () => ({
   deriveReceivableCreditSupplier: vi.fn(),
@@ -149,24 +153,140 @@ const payment = {
   reference_number: null,
 };
 
-describe("validación de moneda para cheques", () => {
+describe("nominal ARS de cheques aplicados a deudas USD", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("rechaza un cheque recibido para una deuda USD", async () => {
-    const from = vi.fn(() =>
-      makeQuery({
-        ...receivable,
-        currency: "USD",
-      })
-    );
+  it.each([
+    "cheque",
+    "e-cheq",
+  ] as const)("registra un %s recibido por el equivalente ARS sin cambiar el pago USD", async (paymentMethod) => {
+    const insertedPayments: unknown[] = [];
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery({
+          ...receivable,
+          sales_order_id: "sale-1",
+          currency: "USD",
+        });
+      }
+      if (table === "sales_orders") {
+        return makeQuery({ exchange_rate: 1200, arca_request_json: null });
+      }
+      if (table === "receivable_payments") {
+        return {
+          insert: (values: unknown) => {
+            insertedPayments.push(values);
+            return makeQuery({ ...payment, amount: 50 });
+          },
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
     createClient.mockResolvedValue({ from });
 
     const result = await registerPaymentAction({
       orgSlug: "org",
       accountId: "ar-1",
-      amount: 100,
+      amount: 50,
+      paymentMethod,
+      paymentDate: "2026-01-01",
+      receivedCheckData,
+      type: "receivable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(insertedPayments).toEqual([
+      expect.objectContaining({
+        amount: 50,
+        amount_ars: 60_000,
+        currency: "USD",
+        exchange_rate: 1200,
+      }),
+    ]);
+    expect(createChequeRecibidoServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importe: "60000.0000",
+        receivablePaymentId: "payment-1",
+        tipo: paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      })
+    );
+  });
+
+  it.each([
+    "cheque",
+    "e-cheq",
+  ] as const)("registra un %s propio por el equivalente ARS sin cambiar el pago USD", async (paymentMethod) => {
+    const insertedPayments: unknown[] = [];
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_payable") {
+        return makeQuery({
+          ...payable,
+          currency: "USD",
+          exchange_rate: 1200,
+        });
+      }
+      if (table === "payable_payments") {
+        return {
+          insert: (values: unknown) => {
+            insertedPayments.push(values);
+            return makeQuery({ ...payment, account_payable_id: "ap-1" });
+          },
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ap-1",
+      amount: 50,
+      paymentMethod,
+      paymentDate: "2026-01-01",
+      issuedCheckData,
+      type: "payable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(insertedPayments).toEqual([
+      expect.objectContaining({
+        amount: 50,
+        amount_ars: 60_000,
+        currency: "USD",
+        exchange_rate: 1200,
+      }),
+    ]);
+    expect(createChequeEmitidoServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importe: "60000.0000",
+        referenciaPagoId: "payment-1",
+        tipo: paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      })
+    );
+  });
+
+  it("rechaza un cheque USD si la deuda no tiene cotización de factura", async () => {
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery({
+          ...receivable,
+          sales_order_id: "sale-1",
+          currency: "USD",
+        });
+      }
+      if (table === "sales_orders") {
+        return makeQuery({ exchange_rate: null, arca_request_json: null });
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ar-1",
+      amount: 50,
       paymentMethod: "cheque",
       paymentDate: "2026-01-01",
       receivedCheckData,
@@ -175,34 +295,57 @@ describe("validación de moneda para cheques", () => {
 
     expect(result).toMatchObject({
       success: false,
-      code: "invalid_payment_method",
+      code: "exchange_rate_required",
     });
-    expect(from).toHaveBeenCalledTimes(1);
+    expect(createChequeRecibidoServer).not.toHaveBeenCalled();
   });
 
-  it("rechaza un cheque emitido para una deuda USD", async () => {
+  it("endosa cheques ARS a una deuda USD y contabiliza el valor en ARS", async () => {
     const from = vi.fn(() =>
       makeQuery({
         ...payable,
         currency: "USD",
+        exchange_rate: 1200,
       })
     );
     createClient.mockResolvedValue({ from });
+    isAccountingIntegrationEnabled.mockResolvedValueOnce(true);
+    endorseReceivedChecksForPayableServer.mockResolvedValue({
+      paymentId: "payment-1",
+      paymentAmount: "50.0000",
+      paymentAmountArs: "60000.0000",
+      currency: "USD",
+      exchangeRate: "1200.0000",
+      newPendingBalance: "50.0000",
+      newStatus: "PARTIAL",
+      endorsedChecks: [{ numeroCheque: "123" }],
+    });
+    buildOrdenPago.mockReturnValue({ tipoEvento: "ORDEN_PAGO" });
 
     const result = await registerPaymentAction({
       orgSlug: "org",
       accountId: "ap-1",
-      amount: 100,
-      paymentMethod: "cheque",
+      amount: 50,
+      paymentMethod: "cheque_endosado",
       paymentDate: "2026-01-01",
-      issuedCheckData,
+      receivedCheckIds: ["check-1"],
       type: "payable",
     });
 
-    expect(result).toMatchObject({
-      success: false,
-      code: "invalid_payment_method",
-    });
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(endorseReceivedChecksForPayableServer).toHaveBeenCalledWith(
+      expect.objectContaining({ receivedCheckIds: ["check-1"] })
+    );
+    expect(buildOrdenPago).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 60_000 }),
+      expect.anything(),
+      expect.objectContaining({
+        bancoAccountCode: "VALORES_A_DEPOSITAR",
+        moneda: "USD",
+        tipoCambio: "1200.0000",
+        montoUSD: "50.0000",
+      })
+    );
     expect(from).toHaveBeenCalledTimes(1);
   });
 });

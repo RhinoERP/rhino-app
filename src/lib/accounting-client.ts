@@ -1649,6 +1649,9 @@ export type EndorseReceivedChecksForPayableInput = {
 export type EndorseReceivedChecksForPayableResult = {
   paymentId: string;
   paymentAmount: string;
+  paymentAmountArs: string;
+  currency: "ARS" | "USD";
+  exchangeRate: string | null;
   creditApplied: string;
   newPendingBalance: string;
   newStatus: "PENDING" | "PARTIAL" | "PAID";
