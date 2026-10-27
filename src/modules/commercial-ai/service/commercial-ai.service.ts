@@ -33,6 +33,7 @@ import {
 } from "../types";
 import { commercialAiModel, isAiEnabled } from "./ai-client";
 import { loadProspectingSnapshot } from "./prospecting.service";
+import { getUsageSummary } from "./usage.service";
 
 /** Estados de venta que cuentan como venta real (no preventa ni cancelada). */
 const SOLD_STATUSES = ["CONFIRMED", "DISPATCH", "DELIVERED", "INCOMPLETE"];
@@ -798,6 +799,9 @@ export async function getCommercialAiSnapshot(
       doneAt: task.done_at,
     }));
 
+  const usagePromise = isManager
+    ? getUsageSummary(access.organizationId)
+    : Promise.resolve(null);
   const prospecting = await loadProspectingSnapshot({
     admin,
     access,
@@ -811,6 +815,7 @@ export async function getCommercialAiSnapshot(
 
   return {
     orgSlug,
+    organizationId: access.organizationId,
     orgName: access.organizationName,
     role: access.role,
     currentUserId: access.userId,
@@ -842,5 +847,6 @@ export async function getCommercialAiSnapshot(
       analyzedOrders: orders.length,
     },
     prospecting,
+    usage: await usagePromise,
   };
 }

@@ -178,6 +178,12 @@ export async function askAssistant(
   }
 
   const result = await createAiMessage({
+    meter: {
+      organizationId: snapshot.organizationId,
+      userId: snapshot.currentUserId,
+      userName: snapshot.currentUserName,
+      feature: "asistente",
+    },
     system: `${systemPrompt(snapshot)}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`,
     messages: trimmed,
     maxTokens: 4000,

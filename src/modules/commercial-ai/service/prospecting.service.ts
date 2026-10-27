@@ -30,6 +30,7 @@ import {
 import { createAiMessage, isAiEnabled } from "./ai-client";
 import type { CommercialAiAccess } from "./commercial-ai.service";
 import { isGooglePlacesEnabled, searchPlaces } from "./places.service";
+import { AiBudgetExceededError, type AiMeter } from "./usage.service";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -412,6 +413,7 @@ const ASK_FOR_AI: Record<CampaignView["ask"], string> = {
 };
 
 async function scoreWithAi(params: {
+  meter: AiMeter;
   candidates: RawProspect[];
   campaign: CampaignView;
   icp: IcpView | null;
@@ -440,6 +442,7 @@ Para cada candidato devolvé:
     .join("\n");
 
   const result = await createAiMessage({
+    meter: params.meter,
     system,
     messages: [{ role: "user", content: `Candidatos:\n${list}` }],
     maxTokens: 16_000,
@@ -581,13 +584,26 @@ export async function runCampaign(params: {
     let usedAi = false;
     let aiScores: Map<number, AiScore> | null = null;
     if (isAiEnabled() && toScore.length) {
-      aiScores = await scoreWithAi({
-        candidates: toScore,
-        campaign,
-        icp,
-        orgName: access.organizationName,
-        sellerName: params.sellerName,
-      });
+      try {
+        aiScores = await scoreWithAi({
+          meter: {
+            organizationId: access.organizationId,
+            userId: access.userId,
+            userName: access.userName,
+            feature: "campana",
+          },
+          candidates: toScore,
+          campaign,
+          icp,
+          orgName: access.organizationName,
+          sellerName: params.sellerName,
+        });
+      } catch (failure) {
+        if (!(failure instanceof AiBudgetExceededError)) {
+          throw failure;
+        }
+        log.push(`IA no usada: ${failure.message}`);
+      }
       usedAi = aiScores !== null;
       log.push(
         usedAi

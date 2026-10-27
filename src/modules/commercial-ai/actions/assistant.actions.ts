@@ -12,6 +12,7 @@ import {
   getCommercialAiSnapshot,
   requireCommercialAiAccess,
 } from "../service/commercial-ai.service";
+import { AiBudgetExceededError } from "../service/usage.service";
 
 const historySchema = z
   .array(
@@ -57,21 +58,56 @@ export async function askAssistantAction(
     const text = await askAssistant(snapshot, parsed.data);
     return { success: true, text, source: "ai" };
   } catch (error) {
-    if (rules) {
-      return { success: true, text: rules, source: "rules" };
-    }
-    if (error instanceof Anthropic.RateLimitError) {
-      return {
-        success: false,
-        error: "Muchas consultas seguidas. Esperá un rato y probá de nuevo.",
-      };
-    }
-    console.error("IA Comercial: error del asistente", error);
+    return assistantFailure(error, rules);
+  }
+}
+
+function connectionErrorMessage(error: unknown): string {
+  if (error instanceof AiBudgetExceededError) {
+    return error.message;
+  }
+  if (error instanceof Anthropic.AuthenticationError) {
+    return "La clave de Anthropic no es válida.";
+  }
+  if (error instanceof Anthropic.PermissionDeniedError) {
+    return "La clave no tiene permiso para ese modelo.";
+  }
+  if (error instanceof Anthropic.RateLimitError) {
+    return "Límite de uso alcanzado. Revisá el crédito o los límites en console.anthropic.com.";
+  }
+  if (error instanceof Anthropic.APIError) {
+    return `Anthropic respondió ${error.status}: ${error.message}`;
+  }
+  return "No pudimos conectar con Anthropic.";
+}
+
+function assistantFailure(
+  error: unknown,
+  rules: string | null
+): AssistantActionResult {
+  if (error instanceof AiBudgetExceededError) {
+    return rules
+      ? {
+          success: true,
+          text: `${rules}\n\n(${error.message} Te respondí con reglas.)`,
+          source: "rules",
+        }
+      : { success: false, error: error.message };
+  }
+  if (rules) {
+    return { success: true, text: rules, source: "rules" };
+  }
+  if (error instanceof Anthropic.RateLimitError) {
     return {
       success: false,
-      error: "No pude responder ahora. Probá de nuevo en un momento.",
+      error: "Muchas consultas seguidas. Esperá un rato y probá de nuevo.",
     };
   }
+  console.error("IA Comercial: error del asistente", error);
+  return {
+    success: false,
+    error: "No pude responder ahora. Probá de nuevo en un momento.",
+  };
 }
 
 export type AiConnectionResult =
@@ -82,8 +118,9 @@ export type AiConnectionResult =
 export async function testAiConnectionAction(
   orgSlug: string
 ): Promise<AiConnectionResult> {
+  let access: Awaited<ReturnType<typeof requireCommercialAiAccess>>;
   try {
-    await requireCommercialAiAccess(orgSlug, "manage");
+    access = await requireCommercialAiAccess(orgSlug, "manage");
   } catch (error) {
     return {
       success: false,
@@ -99,6 +136,12 @@ export async function testAiConnectionAction(
   const started = Date.now();
   try {
     const result = await createAiMessage({
+      meter: {
+        organizationId: access.organizationId,
+        userId: access.userId,
+        userName: access.userName,
+        feature: "prueba",
+      },
       system: "Respondé solo con la palabra: listo",
       messages: [{ role: "user", content: "¿Estás?" }],
       maxTokens: 50,
@@ -113,28 +156,6 @@ export async function testAiConnectionAction(
       reply: result.text,
     };
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError) {
-      return { success: false, error: "La clave de Anthropic no es válida." };
-    }
-    if (error instanceof Anthropic.PermissionDeniedError) {
-      return {
-        success: false,
-        error: "La clave no tiene permiso para ese modelo.",
-      };
-    }
-    if (error instanceof Anthropic.RateLimitError) {
-      return {
-        success: false,
-        error:
-          "Límite de uso alcanzado. Revisá el crédito o los límites en console.anthropic.com.",
-      };
-    }
-    if (error instanceof Anthropic.APIError) {
-      return {
-        success: false,
-        error: `Anthropic respondió ${error.status}: ${error.message}`,
-      };
-    }
-    return { success: false, error: "No pudimos conectar con Anthropic." };
+    return { success: false, error: connectionErrorMessage(error) };
   }
 }

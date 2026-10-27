@@ -1,3 +1,5 @@
+import type { UsageSummary } from "./service/usage.service";
+
 export type CommercialAiRole = "gerente" | "vendedor";
 
 export type OpportunityType = "riesgo" | "reactivar" | "faltante" | "cross";
@@ -241,6 +243,7 @@ export type MonthPlanView = {
 
 export type CommercialAiSnapshot = {
   orgSlug: string;
+  organizationId: string;
   orgName: string;
   role: CommercialAiRole;
   currentUserId: string;
@@ -258,6 +261,8 @@ export type CommercialAiSnapshot = {
   aiModel: string;
   stats: { analyzedCustomers: number; analyzedOrders: number };
   prospecting: ProspectingSnapshot;
+  /** Consumo de IA del mes (solo gerentes y admins). */
+  usage: UsageSummary | null;
 };
 
 /* ============ Fase 2: rutas, prospección y aprendizajes ============ */

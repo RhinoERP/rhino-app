@@ -16,6 +16,7 @@ import {
 } from "@/modules/commercial-ai/types";
 import { IcpSection, RouteSettingsSection } from "./settings-prospecting";
 import { TypeBadge, useCommercialAi } from "./shared";
+import { UsagePanel } from "./usage-panel";
 
 type NumberKey = {
   [K in keyof CommercialAiConfig]: CommercialAiConfig[K] extends number
@@ -30,9 +31,10 @@ type BooleanKey = {
 }[keyof CommercialAiConfig];
 
 export function SettingsTab() {
-  const [section, setSection] = useState<"cartera" | "rutas" | "prospeccion">(
-    "cartera"
-  );
+  const { snapshot } = useCommercialAi();
+  const [section, setSection] = useState<
+    "cartera" | "rutas" | "prospeccion" | "consumo"
+  >("cartera");
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -46,6 +48,7 @@ export function SettingsTab() {
             <TabsTrigger value="cartera">Análisis de cartera</TabsTrigger>
             <TabsTrigger value="rutas">Rutas</TabsTrigger>
             <TabsTrigger value="prospeccion">Prospección</TabsTrigger>
+            <TabsTrigger value="consumo">Consumo IA</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -53,6 +56,7 @@ export function SettingsTab() {
       {section === "cartera" ? <AnalysisSettings /> : null}
       {section === "rutas" ? <RouteSettingsSection /> : null}
       {section === "prospeccion" ? <IcpSection /> : null}
+      {section === "consumo" ? <UsagePanel usage={snapshot.usage} /> : null}
     </div>
   );
 }

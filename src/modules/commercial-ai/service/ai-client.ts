@@ -1,6 +1,7 @@
 import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
+import { type AiMeter, assertWithinBudget, recordUsage } from "./usage.service";
 
 /** Modelo por defecto del módulo; se cambia con COMMERCIAL_AI_MODEL sin tocar código. */
 export const DEFAULT_COMMERCIAL_AI_MODEL = "claude-haiku-5-5";
@@ -22,6 +23,8 @@ export function isAiEnabled(): boolean {
 }
 
 type MessageInput = {
+  /** Quién consume: se chequea el tope antes y se registra el gasto después. */
+  meter: AiMeter;
   system: string;
   messages: Anthropic.Beta.BetaMessageParam[];
   maxTokens: number;
@@ -35,6 +38,7 @@ export type AiResult =
   | { ok: false; reason: "refusal" };
 
 export async function createAiMessage(input: MessageInput): Promise<AiResult> {
+  await assertWithinBudget(input.meter);
   const client = new Anthropic();
   const model = commercialAiModel();
   const useFallbacks = SERVER_FALLBACK_MODELS.has(model);
@@ -62,6 +66,13 @@ export async function createAiMessage(input: MessageInput): Promise<AiResult> {
       },
     ],
     messages: input.messages,
+  });
+
+  await recordUsage(input.meter, response.model, {
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
   });
 
   if (response.stop_reason === "refusal") {
