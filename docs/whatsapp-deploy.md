@@ -347,3 +347,24 @@ Las pruebas locales adicionales cubren actualización desde datos históricos,
 rechazo de datos inconsistentes, repetición del bundle con varias preventas por
 chat, versiones antiguas, confirmaciones condicionadas, reversión completa ante
 fallos de impuestos y separación de organización/conversación/integración.
+
+### Sandbox: “La conversación no está disponible para automatización”
+
+Si aparece apenas enviar el primer mensaje después de desplegar pedidos
+recurrentes, comprobar el esquema antes de cambiar tokens, números o el daemon:
+
+```sql
+select pending_order_action, automation_resumed_at from public.whatsapp_conversations limit 0;
+select version, quote_snapshot, last_source_message_id from public.conversation_carts limit 0;
+select whatsapp_cart_id from public.sales_orders limit 0;
+```
+
+Si alguna columna no existe, falta completar la migración de este release.
+Aplicar el procedimiento de actualización de pedidos recurrentes anterior,
+con el daemon temporalmente en 0 y el webhook recibiendo mensajes. Luego usar
+**Reiniciar** en el simulador y volver a elegir cliente/lista de precios.
+El sandbox no usa el daemon para responder; encenderlo no crea las columnas.
+
+El simulador comprueba el esquema antes de guardar una sesión o un mensaje.
+Si falta la actualización, informa que un administrador debe completar el
+despliegue y deja el detalle técnico en logs del servidor.
