@@ -25,6 +25,7 @@ export function InlinePriceEdit({
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const formattedValue = (() => {
@@ -57,6 +58,9 @@ export function InlinePriceEdit({
   }, []);
 
   const handleSave = async () => {
+    if (savingRef.current) {
+      return;
+    }
     const normalized = inputValue.replace(",", ".");
     const parsed = Number.parseFloat(normalized);
 
@@ -65,27 +69,20 @@ export function InlinePriceEdit({
       return;
     }
 
-    if (parsed === 0 && onDelete && type !== "percentage") {
-      setSaving(true);
-      try {
-        const result = await onDelete();
-        if (!result.success) {
-          return;
-        }
-        setEditing(false);
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-
+    savingRef.current = true;
     setSaving(true);
     try {
-      const result = await onSave(parsed);
+      const result =
+        parsed === 0 && onDelete && type !== "percentage"
+          ? await onDelete()
+          : await onSave(parsed);
       if (result.success) {
         setEditing(false);
       }
+    } catch {
+      // La mutación muestra el error; conservar el input para poder corregirlo.
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
