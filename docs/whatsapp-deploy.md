@@ -308,7 +308,7 @@ Referencias oficiales: [Vercel Daemons](https://vercel.com/docs/daemons),
 
 ## Actualización a pedidos recurrentes
 
-1. Si WhatsApp ya está instalado, aplicar **sólo**
+1. Si WhatsApp ya está instalado, preparar y revisar **sólo**
    `supabase/migrations/20261027000000_whatsapp_recurring_orders.sql`, dentro de
    `BEGIN;` y `COMMIT;`. Son 275 líneas de migración; el bundle completo de unas
    1400 líneas incluye la instalación y actualizaciones anteriores y no hace
