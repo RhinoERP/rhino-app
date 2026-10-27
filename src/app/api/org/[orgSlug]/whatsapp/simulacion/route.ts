@@ -4,6 +4,7 @@ import { createClient as createServerSupabaseClient } from "@/lib/supabase/serve
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { executeCommercialTool } from "@/modules/whatsapp/server/commercial-tools";
+import { assertWhatsAppOrderSchema } from "@/modules/whatsapp/server/order-schema";
 import {
   createLocalSimulatorSession,
   getSimulationMessages,
@@ -127,6 +128,7 @@ async function runSimulationTurn(params: {
   input: z.infer<typeof requestSchema>;
 }) {
   const actorId = await currentActorId();
+  await assertWhatsAppOrderSchema();
   let state: SimulationState;
   if (params.input.state) {
     state = params.input.state;

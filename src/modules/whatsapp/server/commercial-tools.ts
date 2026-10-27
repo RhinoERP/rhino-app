@@ -7,6 +7,7 @@ import {
   isPurchaseRequest,
   isRepeatRequest,
 } from "./order-policy";
+import { throwIfWhatsAppSchemaError } from "./order-schema";
 import { isLocalSimulatorIntegration } from "./simulation";
 import { createWhatsAppAdminClient } from "./supabase-admin";
 
@@ -248,6 +249,9 @@ async function verifyContext(
       .in("status", allowHandoff ? ["ACTIVE", "HANDOFF"] : ["ACTIVE"])
       .maybeSingle(),
   ]);
+
+  throwIfWhatsAppSchemaError(integrationError);
+  throwIfWhatsAppSchemaError(conversationError);
 
   const isSimulator =
     context.mode === "LOCAL_SIMULATOR" &&

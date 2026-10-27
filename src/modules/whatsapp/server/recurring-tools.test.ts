@@ -503,4 +503,38 @@ describe("recurring commercial tools", () => {
       p_payload: { confirmStart: false },
     });
   });
+  it("sandbox works with only its own module enabled and a DRAFT integration", async () => {
+    testDb.tables.organizations[0].whatsapp_enabled = false;
+    testDb.tables.whatsapp_integrations[0].status = "DRAFT";
+    testDb.tables.whatsapp_integrations[0].phone_number_id =
+      "rhinos-local-simulator:test";
+    testDb.tables.whatsapp_conversations[0].customer_phone =
+      "SIMULACIÓN LOCAL · test";
+    const state = (await executeCommercialTool(
+      { ...context, mode: "LOCAL_SIMULATOR" },
+      "get_commercial_state",
+      {}
+    )) as { cart: unknown };
+    expect(state.cart).toBeNull();
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+  it("a live worker cannot use a sandbox integration", async () => {
+    testDb.tables.whatsapp_integrations[0].status = "DRAFT";
+    testDb.tables.whatsapp_integrations[0].phone_number_id =
+      "rhinos-local-simulator:test";
+    testDb.tables.whatsapp_conversations[0].customer_phone =
+      "SIMULACIÓN LOCAL · test";
+    await expect(
+      executeCommercialTool(context, "get_commercial_state", {})
+    ).rejects.toThrow("automatización");
+  });
+  it("a sandbox context cannot use a live integration", async () => {
+    await expect(
+      executeCommercialTool(
+        { ...context, mode: "LOCAL_SIMULATOR" },
+        "get_commercial_state",
+        {}
+      )
+    ).rejects.toThrow("automatización");
+  });
 });
