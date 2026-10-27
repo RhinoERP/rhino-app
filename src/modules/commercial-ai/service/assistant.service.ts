@@ -1,5 +1,6 @@
 import "server-only";
 
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   OPEN_STAGES,
   OPPORTUNITY_TYPES,
@@ -8,7 +9,8 @@ import {
 } from "../constants";
 import { formatMoneyShort } from "../engine/analysis";
 import type { CommercialAiSnapshot } from "../types";
-import { createAiMessage } from "./ai-client";
+import { createAiTurn, responseText } from "./ai-client";
+import { ASSISTANT_TOOLS, runAssistantTool } from "./assistant-tools";
 
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_CONTEXT_OPPORTUNITIES = 40;
@@ -162,10 +164,14 @@ export function buildAssistantContext(snapshot: CommercialAiSnapshot) {
 function systemPrompt(snapshot: CommercialAiSnapshot): string {
   return `Sos el asistente comercial de ${snapshot.orgName} dentro de Rhinos, el sistema de gestión de la distribuidora. Ayudás a ${snapshot.role === "gerente" ? "un gerente comercial a seguir al equipo" : "un vendedor a decidir a quién llamar, qué ofrecer y qué escribir"}.
 Respondés en español rioplatense, con voseo, directo y breve: hasta unas 120 palabras salvo que pidan más detalle.
-Usá solo los datos del JSON de abajo. Si algo no está, decilo y sugerí dónde mirarlo en Rhinos. No inventes números ni clientes.
+Hoy es ${snapshot.today}. El JSON de abajo es un resumen. Para cualquier dato de ventas que no esté ahí (facturación de un cliente en un período, rankings, productos, ventas por vendedor, comparaciones entre meses o años) usá las herramientas: consultan las ventas reales de Rhinos. Si no tenés el id del cliente, primero usá buscar_clientes. "Este año" va del 1 de enero a hoy; "el mes pasado" es el mes calendario anterior.
+Facturación = ventas confirmadas, despachadas, entregadas o incompletas; no cuentan preventas ni canceladas. Si el usuario pregunta por montos, aclaralo en una línea si hace falta.
+Nunca inventes números ni clientes: si una herramienta no devuelve el dato, decilo.
 Cuando nombres un cliente escribilo así: [[cli:CID|Nombre]]; una oportunidad: [[opp:ID|Nombre del cliente]]; un prospecto: [[pro:ID|Nombre]]. Así el usuario lo abre con un toque.
 Montos en pesos argentinos abreviados ($1,2M, $350k). Podés usar viñetas con "- " y **negrita** para lo clave. Si te piden un mensaje para un cliente, escribilo listo para WhatsApp.`;
 }
+
+const MAX_TOOL_ROUNDS = 6;
 
 export async function askAssistant(
   snapshot: CommercialAiSnapshot,
@@ -177,25 +183,48 @@ export async function askAssistant(
     trimmed.shift();
   }
 
-  const result = await createAiMessage({
-    meter: {
-      organizationId: snapshot.organizationId,
-      userId: snapshot.currentUserId,
-      userName: snapshot.currentUserName,
-      feature: "asistente",
-    },
-    system: `${systemPrompt(snapshot)}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`,
-    messages: trimmed,
-    maxTokens: 4000,
-  });
+  const meter = {
+    organizationId: snapshot.organizationId,
+    userId: snapshot.currentUserId,
+    userName: snapshot.currentUserName,
+    feature: "asistente" as const,
+  };
+  const system = `${systemPrompt(snapshot)}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`;
+  const messages: Anthropic.Beta.BetaMessageParam[] = [...trimmed];
 
-  if (!result.ok) {
-    return "No puedo ayudarte con eso. Probá preguntarme por tus clientes, oportunidades o la meta del mes.";
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+    const response = await createAiTurn({
+      meter,
+      system,
+      messages,
+      maxTokens: 4000,
+      tools: ASSISTANT_TOOLS,
+    });
+
+    if (response.stop_reason === "refusal") {
+      return "No puedo ayudarte con eso. Probá preguntarme por tus clientes, ventas, oportunidades o la meta del mes.";
+    }
+    if (response.stop_reason !== "tool_use") {
+      const text = responseText(response);
+      if (response.stop_reason === "max_tokens") {
+        return `${text}\n\n(La respuesta quedó cortada: pedime menos a la vez.)`;
+      }
+      return text || "No tengo una respuesta para eso.";
+    }
+
+    // Se devuelve el turno completo del modelo, sin tocarlo, y todas las respuestas juntas.
+    messages.push({ role: "assistant", content: response.content });
+    const toolUses = response.content.filter(
+      (block): block is Anthropic.Beta.BetaToolUseBlock =>
+        block.type === "tool_use"
+    );
+    const results = await Promise.all(
+      toolUses.map((block) => runAssistantTool({ snapshot }, block))
+    );
+    messages.push({ role: "user", content: results });
   }
-  if (result.truncated) {
-    return `${result.text}\n\n(La respuesta quedó cortada: pedime menos a la vez.)`;
-  }
-  return result.text || "No tengo una respuesta para eso.";
+
+  return "Necesité demasiadas consultas para responder. Probá con una pregunta más concreta.";
 }
 
 /* ============ Respuestas con reglas (sin IA) ============ */

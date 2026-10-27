@@ -31,13 +31,18 @@ type MessageInput = {
   effort?: "low" | "medium" | "high";
   /** JSON Schema para obligar una respuesta estructurada. */
   schema?: Record<string, unknown>;
+  /** Herramientas que el modelo puede pedir (consultas a la base). */
+  tools?: Anthropic.Beta.BetaToolUnion[];
 };
 
 export type AiResult =
   | { ok: true; text: string; truncated: boolean }
   | { ok: false; reason: "refusal" };
 
-export async function createAiMessage(input: MessageInput): Promise<AiResult> {
+/** Un turno del modelo: chequea el tope, llama y registra el consumo. */
+export async function createAiTurn(
+  input: MessageInput
+): Promise<Anthropic.Beta.BetaMessage> {
   await assertWithinBudget(input.meter);
   const client = new Anthropic();
   const model = commercialAiModel();
@@ -58,6 +63,7 @@ export async function createAiMessage(input: MessageInput): Promise<AiResult> {
         ? { format: { type: "json_schema" as const, schema: input.schema } }
         : {}),
     },
+    ...(input.tools?.length ? { tools: input.tools } : {}),
     system: [
       {
         type: "text",
@@ -74,16 +80,27 @@ export async function createAiMessage(input: MessageInput): Promise<AiResult> {
     cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
     cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
   });
+  return response;
+}
 
-  if (response.stop_reason === "refusal") {
-    return { ok: false, reason: "refusal" };
-  }
-  const text = response.content
+export function responseText(response: Anthropic.Beta.BetaMessage): string {
+  return response.content
     .filter(
       (block): block is Anthropic.Beta.BetaTextBlock => block.type === "text"
     )
     .map((block) => block.text)
     .join("\n")
     .trim();
-  return { ok: true, text, truncated: response.stop_reason === "max_tokens" };
+}
+
+export async function createAiMessage(input: MessageInput): Promise<AiResult> {
+  const response = await createAiTurn(input);
+  if (response.stop_reason === "refusal") {
+    return { ok: false, reason: "refusal" };
+  }
+  return {
+    ok: true,
+    text: responseText(response),
+    truncated: response.stop_reason === "max_tokens",
+  };
 }
