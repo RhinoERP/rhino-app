@@ -4,6 +4,8 @@ Revisado el 26 de octubre de 2026. El PR publica código; las operaciones de est
 guía se ejecutan en los entornos correspondientes después de revisar el SQL.
 No se aplicaron cambios a la base productiva durante esta revisión.
 
+**Si el daemon ya está activo, seguir primero [Actualización a pedidos recurrentes](#actualización-a-pedidos-recurrentes): bajarlo a 0 antes de aplicar SQL o integrar este PR.**
+
 ## 1. Base de datos antes del frontend
 
 **Aplicar primero la base y después desplegar Vercel.** Las consultas compartidas
@@ -48,10 +50,11 @@ El SQL usa una transacción e incluye, en orden:
    existe ninguna de las ocho tablas del módulo. Si la fundación es parcial,
    aborta para permitir inspeccionarla antes de continuar.
 2. RPCs del canal `20260902010000_add_whatsapp_channel_functions.sql`.
-3. Índice de preventa única por conversación `20260907000000_prevent_duplicate_whatsapp_pre_sales.sql`.
+3. Índice histórico de preventa por conversación, sólo antes de instalar pedidos recurrentes. El generador no vuelve a crearlo sobre el esquema nuevo.
 4. Horarios y demoras `20261017010000_whatsapp_business_hours_and_response_delay.sql`.
 5. Opt-in, protección de flags, políticas restrictivas y RPCs con bloqueo por
    empresa `20261026000000_gate_whatsapp_modules.sql`.
+6. Pedidos recurrentes `20261027000000_whatsapp_recurring_orders.sql`: múltiples carritos y preventas por chat, una preventa por carrito, confirmaciones versionadas y conversión transaccional.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones
@@ -59,15 +62,10 @@ originales quedan versionadas; la reconciliación de las versiones duplicadas de
 repositorio debe hacerse por separado. Conservar el SQL ejecutado y el commit del
 release como registro del despliegue manual.
 
-Si el índice único falla por datos previos, la transacción se revierte completa.
-Inspeccionar las duplicaciones, sin borrar ventas automáticamente:
-
-```sql
-select organization_id, conversation_id, count(*)
-from public.sales_orders
-where conversation_id is not null
-group by organization_id, conversation_id having count(*) > 1;
-```
+La migración vincula cada preventa histórica con su carrito y conserva sus IDs.
+Si una preventa histórica no tiene exactamente un carrito identificable, aborta
+la transacción. Inspeccionar el caso; no borrar ni reasignar ventas a ciegas.
+Varias preventas por conversación son válidas desde este release.
 
 Después de aplicar, comprobar que los flags estén apagados en todas las empresas
 que no se habilitaron expresamente:
@@ -307,3 +305,45 @@ Referencias oficiales: [Vercel Daemons](https://vercel.com/docs/daemons),
 [Supabase migrations](https://supabase.com/docs/guides/deployment/database-migrations),
 [Supabase db push](https://supabase.com/docs/reference/cli/supabase-db-push),
 [Meta Webhooks](https://www.postman.com/meta/whatsapp-business-platform/folder/lboq68h/webhooks).
+
+## Actualización a pedidos recurrentes
+
+1. Antes del merge, generar y revisar `/tmp/whatsapp-release.sql` desde el commit
+   del PR. No ejecutar el nuevo worker contra el esquema anterior.
+2. En Vercel → Daemons → whatsapp-agent → Scale, poner temporalmente **0**
+   instancias. Esperar a que termine la instancia: el webhook sigue desplegado,
+   recibe mensajes y los guarda en la cola. No pausar la integración de Meta ni
+   deshabilitar la empresa, porque eso impide la ingesta.
+3. Ejecutar el SQL completo generado, en una transacción, en el Supabase correcto.
+4. Integrar el PR y esperar un deployment Production **Ready**, con la aplicación
+   y la imagen nueva del daemon. No mezclar un worker anterior con este esquema.
+5. Volver a **1** instancia. Los overrides de Scale persisten entre deployments;
+   verificar la imagen y los logs de la instancia nueva.
+6. Probar en sandbox: crear dos preventas sin Reiniciar, consultar la anterior,
+   quitar un producto de un carrito pendiente y repetir un pedido. Probar una
+   derivación: los mensajes nuevos no reactivan el bot; usar **Reactivar bot**.
+7. Repetir una compra con el número de prueba de Meta y revisar en Rhinos que
+   haya dos preventas DRAFT diferentes dentro del mismo chat.
+
+No hay nuevas variables de entorno ni cambios en credenciales. Los flags de
+superadmin mantienen sus valores actuales. Las empresas no habilitadas siguen
+sin acceso.
+
+Si falla el deployment, mantener el daemon en 0 y corregir hacia adelante. No
+volver a ejecutar una imagen antigua ni restaurar el índice único por chat:
+pueden existir varias preventas legítimas en esa conversación.
+
+Para auditar la conversión:
+
+```sql
+select s.id, s.conversation_id, s.whatsapp_cart_id, s.status, c.status as cart_status
+from public.sales_orders s
+join public.conversation_carts c on c.id = s.whatsapp_cart_id
+where s.source = 'WHATSAPP'
+order by s.created_at desc limit 20;
+```
+
+Las pruebas locales adicionales cubren actualización desde datos históricos,
+rechazo de datos inconsistentes, repetición del bundle con varias preventas por
+chat, versiones antiguas, confirmaciones condicionadas, reversión completa ante
+fallos de impuestos y separación de organización/conversación/integración.

@@ -135,7 +135,7 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
       .single(),
     supabase
       .from("whatsapp_conversations")
-      .select("customer_phone")
+      .select("customer_phone, automation_resumed_at")
       .eq("id", job.conversation_id)
       .eq("organization_id", job.organization_id)
       .eq("integration_id", job.integration_id)
@@ -143,12 +143,13 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
       .single(),
     supabase
       .from("whatsapp_messages")
-      .select("direction, content, created_at")
+      .select("id, direction, content, created_at")
       .eq("conversation_id", job.conversation_id)
       .eq("organization_id", job.organization_id)
       .eq("integration_id", job.integration_id)
       .order("created_at", { ascending: false })
-      .limit(16),
+      .order("id", { ascending: false })
+      .limit(32),
   ]);
 
   if (
@@ -162,7 +163,13 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
       "No se pudo cargar el contexto comercial de la conversación"
     );
   }
+  const latestInbound = (messages ?? []).find(
+    (message) => message.direction === "INBOUND"
+  );
+  const superseded =
+    !latestInbound || latestInbound.id !== job.source_message_id;
   return {
+    superseded,
     businessName: organization.name as string,
     phoneNumberId: integration.phone_number_id as string,
     recipient: conversation.customer_phone as string,
@@ -225,6 +232,9 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
   let run: AgentRun | null = null;
   try {
     const jobContext = await loadJobContext(supabase, job);
+    if (jobContext.superseded) {
+      return;
+    }
     const now = new Date();
     const responseAt = job.human_delay_applied
       ? getNextBusinessOpening(now, jobContext.businessHours)
@@ -244,13 +254,28 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
         organizationId: job.organization_id,
         integrationId: job.integration_id,
         conversationId: job.conversation_id,
+        sourceMessageId: job.source_message_id,
       },
       messages: jobContext.messages,
       audit: toolCalls,
       requestModel,
       callTool: callCommercialTool,
     });
-    const text = response.output_text?.trim();
+    const rendered = (await callCommercialTool(
+      {
+        organizationId: job.organization_id,
+        integrationId: job.integration_id,
+        conversationId: job.conversation_id,
+        sourceMessageId: job.source_message_id,
+      },
+      {
+        type: "function_call",
+        call_id: "render-order",
+        name: "render_order_response",
+        arguments: JSON.stringify({ text: response.output_text?.trim() || "" }),
+      }
+    )) as { text: string; orderPrompt: boolean };
+    const text = rendered.text?.trim();
     if (!text) {
       throw new Error("El asistente no produjo una respuesta para el cliente");
     }
@@ -260,6 +285,8 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
       phoneNumberId: jobContext.phoneNumberId,
       recipient: jobContext.recipient,
       text,
+      sourceMessageId: job.source_message_id,
+      orderPrompt: rendered.orderPrompt,
     });
     await recordAgentRun(supabase, run.id, {
       status: "SUCCEEDED",

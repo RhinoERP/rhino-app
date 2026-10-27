@@ -33,7 +33,8 @@ type ToolCall = { name: string; arguments: unknown };
 
 async function postSimulation(params: {
   orgSlug: string;
-  message: string;
+  message?: string;
+  resume?: boolean;
   customerId?: string;
   priceListId?: string;
   state: SimulationState | undefined;
@@ -45,6 +46,7 @@ async function postSimulation(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: params.message,
+        resume: params.resume,
         customerId: params.customerId,
         priceListId: params.priceListId,
         state: params.state,
@@ -62,6 +64,31 @@ async function postSimulation(params: {
     throw new Error(result.error ?? "No se pudo procesar el mensaje");
   }
   return result;
+}
+
+function ResumeBotButton({
+  snapshot,
+  busy,
+  onResume,
+}: {
+  snapshot: SimulationSnapshot | null;
+  busy: boolean;
+  onResume: () => void;
+}) {
+  if (!snapshot || snapshot.conversationStatus === "ACTIVE") {
+    return null;
+  }
+  return (
+    <Button
+      disabled={busy}
+      onClick={onResume}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      Reactivar bot
+    </Button>
+  );
 }
 
 export function WhatsAppAgentSimulator({
@@ -130,6 +157,24 @@ export function WhatsAppAgentSimulator({
     }
   }
 
+  async function resumeAutomation() {
+    if (!state || busy) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await postSimulation({ orgSlug, state, resume: true });
+      setSnapshot(result.snapshot ?? null);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "No se pudo reactivar el bot"
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function reset() {
     setMessages([]);
     setState(undefined);
@@ -173,7 +218,18 @@ export function WhatsAppAgentSimulator({
                 Usa las herramientas comerciales reales de esta organización.
               </CardDescription>
             </div>
-            <Button onClick={reset} size="sm" type="button" variant="outline">
+            <ResumeBotButton
+              busy={busy}
+              onResume={resumeAutomation}
+              snapshot={snapshot}
+            />
+            <Button
+              disabled={busy}
+              onClick={reset}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
               <ArrowClockwiseIcon className="mr-2 size-4" /> Reiniciar
             </Button>
           </CardHeader>

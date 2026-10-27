@@ -65,6 +65,14 @@ type TrustedPreSaleExecution = {
   organizationId: string;
   actorId: string;
   conversationId?: string;
+  prepareOnly?: (payload: PreparedWhatsAppPreSale) => void;
+};
+
+export type PreparedWhatsAppPreSale = {
+  order: Record<string, unknown>;
+  items: Record<string, unknown>[];
+  itemTaxes: Record<string, unknown>[];
+  taxes: Record<string, unknown>[];
 };
 
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
@@ -2986,6 +2994,27 @@ export async function createPreSaleOrder(
     status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
     created_by: userId,
   };
+  if (trustedExecution?.prepareOnly) {
+    const saleOrderId = randomUUID();
+    trustedExecution.prepareOnly({
+      order: { ...orderValues, id: saleOrderId },
+      items: items.map((item) => ({
+        ...createPreSaleItemPayload(item, org.id, saleOrderId),
+        product_variant_id: item.productVariantId ?? null,
+      })),
+      itemTaxes: buildSalesOrderItemTaxesPayload({
+        orgId: org.id,
+        saleOrderId,
+        taxPlan,
+      }),
+      taxes: buildSalesOrderTaxesPayload({
+        orgId: org.id,
+        saleOrderId,
+        taxPlan,
+      }),
+    });
+    return saleOrderId;
+  }
   const { data: order, error: orderError } = await supabase
     .from("sales_orders")
     .insert(
@@ -3081,41 +3110,33 @@ export async function createPreSaleOrder(
 }
 
 /**
- * Crea una preventa originada por WhatsApp. Sólo debe invocarse desde las
- * herramientas internas del agente, después de validar una confirmación
- * explícita del cliente y el contexto de conversación.
+ * Prepara importes, productos e impuestos con las mismas reglas del alta manual,
+ * sin persistir. Las herramientas de WhatsApp cotizan este resultado y lo
+ * convierten transaccionalmente sólo después de la confirmación de esa versión.
  */
-export async function createWhatsAppPreSaleOrder(params: {
+export async function prepareWhatsAppPreSaleOrder(params: {
   organizationId: string;
   conversationId: string;
   sellerId: string;
   input: Omit<CreatePreSaleOrderInput, "sellerId">;
-}): Promise<string> {
-  const supabase = createAdminClient() as unknown as SupabaseServerClient;
-  try {
-    return await createPreSaleOrder(
-      { ...params.input, sellerId: params.sellerId },
-      {
-        supabase,
-        organizationId: params.organizationId,
-        actorId: params.sellerId,
-        conversationId: params.conversationId,
-      }
-    );
-  } catch (error) {
-    // El índice único por conversación resuelve dos confirmaciones simultáneas.
-    // Recuperar la fila ganadora preserva la idempotencia del agente.
-    const { data: existing } = await supabase
-      .from("sales_orders")
-      .select("id")
-      .eq("organization_id", params.organizationId)
-      .eq("conversation_id" as never, params.conversationId)
-      .maybeSingle();
-    if (existing?.id) {
-      return existing.id;
+}): Promise<PreparedWhatsAppPreSale> {
+  let prepared: PreparedWhatsAppPreSale | undefined;
+  await createPreSaleOrder(
+    { ...params.input, sellerId: params.sellerId },
+    {
+      supabase: createAdminClient() as unknown as SupabaseServerClient,
+      organizationId: params.organizationId,
+      actorId: params.sellerId,
+      conversationId: params.conversationId,
+      prepareOnly: (payload) => {
+        prepared = payload;
+      },
     }
-    throw error;
+  );
+  if (!prepared) {
+    throw new Error("No se pudo preparar la preventa");
   }
+  return prepared;
 }
 
 type ProductStockMetadata = {

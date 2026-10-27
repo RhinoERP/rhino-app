@@ -14,6 +14,7 @@ const requestSchema = z.object({
     organizationId: z.string().uuid(),
     integrationId: z.string().uuid(),
     conversationId: z.string().uuid(),
+    sourceMessageId: z.string().uuid(),
   }),
   arguments: z.unknown(),
 });

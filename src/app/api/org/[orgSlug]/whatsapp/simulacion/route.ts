@@ -13,6 +13,7 @@ import {
   type SimulationState,
   verifyLocalSimulatorSession,
 } from "@/modules/whatsapp/server/simulation";
+import { createWhatsAppAdminClient } from "@/modules/whatsapp/server/supabase-admin";
 import {
   type ConversationMessage,
   type ModelFunctionCall,
@@ -35,12 +36,20 @@ const stateSchema = z
 
 const requestSchema = z
   .object({
-    message: z.string().trim().min(1).max(2000),
+    message: z.string().trim().min(1).max(2000).optional(),
+    resume: z.boolean().optional(),
     customerId: z.string().uuid().optional(),
     priceListId: z.string().uuid().optional(),
     state: stateSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (input) => (input.resume ? Boolean(input.state) : Boolean(input.message)),
+    {
+      message:
+        "Para reactivar elegí una sesión; para conversar escribí un mensaje",
+    }
+  );
 
 function selectedModel(): string {
   return process.env.WHATSAPP_AGENT_OPENAI_MODEL?.trim() || "gpt-5-mini";
@@ -91,6 +100,27 @@ async function currentActorId(): Promise<string> {
   return data.user.id;
 }
 
+async function resumeSimulation(state: SimulationState, actorId: string) {
+  const { error } = await createWhatsAppAdminClient().rpc(
+    "set_whatsapp_automation",
+    {
+      p_organization_id: state.organizationId,
+      p_conversation_id: state.conversationId,
+      p_enabled: true,
+      p_actor_id: actorId,
+    }
+  );
+  if (error) {
+    throw new Error(error.message);
+  }
+  return {
+    state,
+    snapshot: await getSimulationSnapshot(state),
+    toolCalls: [],
+    simulated: true,
+  };
+}
+
 async function runSimulationTurn(params: {
   orgSlug: string;
   organization: { id: string; name: string };
@@ -116,7 +146,13 @@ async function runSimulationTurn(params: {
     });
   }
 
-  await recordSimulationMessage({
+  if (params.input.resume) {
+    return resumeSimulation(state, actorId);
+  }
+  if (!params.input.message) {
+    throw new Error("Escribí un mensaje para continuar");
+  }
+  const sourceMessageId = await recordSimulationMessage({
     state,
     direction: "INBOUND",
     content: params.input.message,
@@ -127,8 +163,19 @@ async function runSimulationTurn(params: {
     organizationId: params.organization.id,
     integrationId: state.integrationId,
     conversationId: state.conversationId,
+    sourceMessageId,
     mode: "LOCAL_SIMULATOR" as const,
   };
+  const before = await getSimulationSnapshot(state);
+  if (before.conversationStatus !== "ACTIVE") {
+    return {
+      response:
+        "La conversación está en atención humana. Reactivá el bot desde Rhinos para continuar.",
+      state,
+      snapshot: before,
+      toolCalls: audit,
+    };
+  }
   const response = await runCommercialModel({
     model: selectedModel(),
     businessName: params.organization.name,
@@ -156,7 +203,12 @@ async function runSimulationTurn(params: {
       }
     },
   });
-  const text = response.output_text?.trim();
+  const rendered = (await executeCommercialTool(
+    context,
+    "render_order_response",
+    { text: response.output_text?.trim() || "" }
+  )) as { text: string; orderPrompt: boolean };
+  const text = rendered.text?.trim();
   if (!text) {
     throw new Error("El asistente no produjo una respuesta para la simulación");
   }
@@ -165,6 +217,8 @@ async function runSimulationTurn(params: {
     state,
     direction: "OUTBOUND",
     content: text,
+    sourceMessageId,
+    orderPrompt: rendered.orderPrompt,
   });
   return {
     response: text,

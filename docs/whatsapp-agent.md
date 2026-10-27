@@ -249,3 +249,42 @@ Comparar flujo manual y asistido por período, organización y canal:
 - Costo medio de procesamiento por conversación.
 
 La evaluación debe diferenciar automatización total de asistencia supervisada: el objetivo del MVP es reducir carga operativa sin eliminar la revisión comercial humana.
+
+## Ciclo de pedidos recurrentes
+
+Una conversación es permanente para la pareja integración/teléfono. Puede tener
+muchos carritos históricos y preventas; sólo uno queda pendiente. Confirmar una
+preventa convierte su carrito, sin cerrar ni vaciar el chat. Un saludo, un
+agradecimiento y el paso del tiempo no crean ni abandonan pedidos.
+
+| Decisión | Comportamiento |
+| --- | --- |
+| Consulta informativa | Lee catálogo/precio/stock sin crear carrito. |
+| Compra nueva | Abre un carrito nuevo; un sí repetido no inicia otra compra. |
+| Pedido pendiente | Se conserva; al volver otro día con intención ambigua, pregunta si lo retoma o empieza otro. |
+| Cambios antes de confirmar | Actualiza o quita productos e invalida la cotización. |
+| Descartar o reemplazar | Pregunta, guarda la acción pendiente y exige confirmación posterior. |
+| Confirmar compra | Valida la versión y el mensaje donde se presentó la cotización; recalcula precio, disponibilidad e impuestos. Si cambia, vuelve a preguntar. |
+| Consultar pedido anterior | Lee preventas del mismo chat; presenta una selección si hay ambigüedad. |
+| Repetir compra | Copia productos/cantidades, revisa condiciones actuales y pregunta por diferencias o faltantes antes de una cotización nueva. No sustituye productos. |
+| Cambiar o cancelar preventa creada | Deriva a una persona sin modificarla. |
+| Atención humana | Sigue pausada hasta la reactivación manual; descarta autorizaciones antiguas, conservando datos. |
+
+`get_commercial_state` entrega el carrito pendiente, su versión, última preventa,
+acción pendiente y mensaje de origen. Worker y sandbox usan el mismo motor y los
+últimos 32 mensajes en orden cronológico. El agente puede paginar mensajes y
+pedidos anteriores de ese chat, sin perfiles de preferencias ni acceso a otra
+integración (incluido otro sandbox).
+
+Las mutaciones reciben carrito/versión y mensaje de origen. Una RPC bloquea la
+conversación, valida que el mensaje siga vigente y aplica cada transición. La
+conversión inserta cabecera, productos, impuestos y vínculos en una transacción;
+el índice único por carrito devuelve la misma preventa completa ante reintentos.
+Los cálculos fiscales reutilizan el servicio comercial de preventas, sin cobrar,
+facturar ni reservar stock.
+
+Las preguntas de confirmación se generan en el servidor con el total calculado
+y se vinculan al mensaje saliente realmente registrado. Un sí para descartar no
+puede confirmar una compra. Una modificación condicionada nunca cuenta como sí.
+La bandeja muestra el carrito pendiente y las preventas vinculadas; el sandbox
+permite varias compras sin Reiniciar y ofrece reactivación manual del bot.

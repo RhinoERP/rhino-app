@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { assertWhatsAppEnabled } from "../server/access";
+import { isLocalSimulatorIntegration } from "../server/simulation";
 import { createWhatsAppAdminClient } from "../server/supabase-admin";
 
 const inputSchema = z.object({
@@ -22,7 +23,6 @@ export async function setWhatsAppConversationAutomationAction(
     return { success: false, error: "La conversación no es válida" };
   }
   try {
-    await ensure("whatsapp.manage", parsed.data.orgSlug);
     const [organization, sessionClient] = await Promise.all([
       getOrganizationBySlug(parsed.data.orgSlug),
       createClient(),
@@ -36,27 +36,36 @@ export async function setWhatsAppConversationAutomationAction(
     if (!user) {
       return { success: false, error: "No autenticado" };
     }
-    await assertWhatsAppEnabled(organization.id);
     const supabase = createWhatsAppAdminClient();
-    const { error } = await supabase
+    const { data: conversation } = await supabase
       .from("whatsapp_conversations")
-      .update(
-        parsed.data.enabled
-          ? {
-              status: "ACTIVE",
-              handoff_reason: null,
-              bot_paused_at: null,
-              bot_paused_by: null,
-            }
-          : {
-              status: "PAUSED",
-              bot_paused_at: new Date().toISOString(),
-              bot_paused_by: user.id,
-            }
-      )
+      .select("integration_id")
       .eq("id", parsed.data.conversationId)
       .eq("organization_id", organization.id)
-      .in("status", ["ACTIVE", "PAUSED", "HANDOFF"]);
+      .single();
+    if (!conversation) {
+      return { success: false, error: "La conversación no está disponible" };
+    }
+    const { data: integration } = await supabase
+      .from("whatsapp_integrations")
+      .select("phone_number_id")
+      .eq("id", conversation.integration_id)
+      .eq("organization_id", organization.id)
+      .single();
+    if (!integration) {
+      return { success: false, error: "La integración no está disponible" };
+    }
+    const mode = isLocalSimulatorIntegration(integration.phone_number_id)
+      ? "whatsapp_sandbox"
+      : "whatsapp";
+    await ensure("whatsapp.manage", parsed.data.orgSlug, mode);
+    await assertWhatsAppEnabled(organization.id, mode);
+    const { error } = await supabase.rpc("set_whatsapp_automation", {
+      p_organization_id: organization.id,
+      p_conversation_id: parsed.data.conversationId,
+      p_enabled: parsed.data.enabled,
+      p_actor_id: user.id,
+    });
     if (error) {
       return {
         success: false,

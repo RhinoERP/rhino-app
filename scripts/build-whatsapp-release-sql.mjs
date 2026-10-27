@@ -17,7 +17,12 @@ const subsequent = [
   "20260907000000_prevent_duplicate_whatsapp_pre_sales.sql",
   "20261017010000_whatsapp_business_hours_and_response_delay.sql",
   "20261026000000_gate_whatsapp_modules.sql",
-].map(migration);
+  "20261027000000_whatsapp_recurring_orders.sql",
+].map((name) =>
+  name === "20260907000000_prevent_duplicate_whatsapp_pre_sales.sql"
+    ? `DO $legacy_unique$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sales_orders' AND column_name='whatsapp_cart_id') THEN ${migration(name)} END IF; END $legacy_unique$;`
+    : migration(name)
+);
 
 process.stdout.write(`-- WhatsApp release: run as postgres in the intended project.
 -- Review this generated SQL before executing; it never enables a tenant.

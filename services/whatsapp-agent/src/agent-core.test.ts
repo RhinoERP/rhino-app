@@ -103,3 +103,72 @@ describe("runCommercialModel", () => {
     expect(callTool).not.toHaveBeenCalled();
   });
 });
+
+describe("persistent order context", () => {
+  const context = {
+    organizationId: "org",
+    integrationId: "integration",
+    conversationId: "conversation",
+    sourceMessageId: "source",
+  };
+  const messages = [
+    {
+      direction: "INBOUND",
+      content: "Hola",
+      created_at: "2026-10-27T12:00:00Z",
+    },
+  ];
+  it("asks about an ambiguous pending order without letting the model mutate it", async () => {
+    const callTool = vi.fn().mockResolvedValue({
+      clarification: "¿Seguimos con el pedido pendiente o querés empezar otro?",
+    });
+    const requestModel = vi.fn();
+    const result = await runCommercialModel({
+      model: "test",
+      context,
+      messages,
+      audit: [],
+      callTool,
+      requestModel,
+    });
+    expect(result.output_text).toContain("pedido pendiente");
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(callTool.mock.calls[0][0].sourceMessageId).toBe("source");
+    expect(requestModel).not.toHaveBeenCalled();
+  });
+  it("never executes a queued confirmation sent before manual reactivation", async () => {
+    const callTool = vi.fn().mockResolvedValue({ requiresFreshMessage: true });
+    const requestModel = vi.fn();
+    const result = await runCommercialModel({
+      model: "test",
+      context,
+      messages: [{ ...messages[0], content: "Sí" }],
+      audit: [],
+      callTool,
+      requestModel,
+    });
+    expect(result.output_text).toContain("nueva confirmación");
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(requestModel).not.toHaveBeenCalled();
+  });
+  it("includes persisted order state and accepts a request to repeat the last purchase", async () => {
+    const callTool = vi
+      .fn()
+      .mockResolvedValue({ cart: null, lastPreSale: { id: "previous-sale" } });
+    const requestModel = vi.fn().mockResolvedValue({
+      id: "response",
+      output_text: "Reviso el pedido anterior.",
+    });
+    await runCommercialModel({
+      model: "test",
+      context,
+      messages: [{ ...messages[0], content: "Lo mismo que la última vez" }],
+      audit: [],
+      callTool,
+      requestModel,
+    });
+    expect(requestModel).toHaveBeenCalledTimes(1);
+    expect(requestModel.mock.calls[0][0].input).toContain("previous-sale");
+    expect(requestModel.mock.calls[0][0].store).toBe(false);
+  });
+});
