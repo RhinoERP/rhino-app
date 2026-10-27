@@ -149,24 +149,140 @@ const payment = {
   reference_number: null,
 };
 
-describe("validación de moneda para cheques", () => {
+describe("nominal ARS de cheques aplicados a deudas USD", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("rechaza un cheque recibido para una deuda USD", async () => {
-    const from = vi.fn(() =>
-      makeQuery({
-        ...receivable,
-        currency: "USD",
-      })
-    );
+  it.each([
+    "cheque",
+    "e-cheq",
+  ] as const)("registra un %s recibido por el equivalente ARS sin cambiar el pago USD", async (paymentMethod) => {
+    const insertedPayments: unknown[] = [];
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery({
+          ...receivable,
+          sales_order_id: "sale-1",
+          currency: "USD",
+        });
+      }
+      if (table === "sales_orders") {
+        return makeQuery({ exchange_rate: 1200, arca_request_json: null });
+      }
+      if (table === "receivable_payments") {
+        return {
+          insert: (values: unknown) => {
+            insertedPayments.push(values);
+            return makeQuery({ ...payment, amount: 50 });
+          },
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
     createClient.mockResolvedValue({ from });
 
     const result = await registerPaymentAction({
       orgSlug: "org",
       accountId: "ar-1",
-      amount: 100,
+      amount: 50,
+      paymentMethod,
+      paymentDate: "2026-01-01",
+      receivedCheckData,
+      type: "receivable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(insertedPayments).toEqual([
+      expect.objectContaining({
+        amount: 50,
+        amount_ars: 60_000,
+        currency: "USD",
+        exchange_rate: 1200,
+      }),
+    ]);
+    expect(createChequeRecibidoServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importe: "60000.0000",
+        receivablePaymentId: "payment-1",
+        tipo: paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      })
+    );
+  });
+
+  it.each([
+    "cheque",
+    "e-cheq",
+  ] as const)("registra un %s propio por el equivalente ARS sin cambiar el pago USD", async (paymentMethod) => {
+    const insertedPayments: unknown[] = [];
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_payable") {
+        return makeQuery({
+          ...payable,
+          currency: "USD",
+          exchange_rate: 1200,
+        });
+      }
+      if (table === "payable_payments") {
+        return {
+          insert: (values: unknown) => {
+            insertedPayments.push(values);
+            return makeQuery({ ...payment, account_payable_id: "ap-1" });
+          },
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ap-1",
+      amount: 50,
+      paymentMethod,
+      paymentDate: "2026-01-01",
+      issuedCheckData,
+      type: "payable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(insertedPayments).toEqual([
+      expect.objectContaining({
+        amount: 50,
+        amount_ars: 60_000,
+        currency: "USD",
+        exchange_rate: 1200,
+      }),
+    ]);
+    expect(createChequeEmitidoServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importe: "60000.0000",
+        referenciaPagoId: "payment-1",
+        tipo: paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      })
+    );
+  });
+
+  it("rechaza un cheque USD si la deuda no tiene cotización de factura", async () => {
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery({
+          ...receivable,
+          sales_order_id: "sale-1",
+          currency: "USD",
+        });
+      }
+      if (table === "sales_orders") {
+        return makeQuery({ exchange_rate: null, arca_request_json: null });
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ar-1",
+      amount: 50,
       paymentMethod: "cheque",
       paymentDate: "2026-01-01",
       receivedCheckData,
@@ -175,12 +291,12 @@ describe("validación de moneda para cheques", () => {
 
     expect(result).toMatchObject({
       success: false,
-      code: "invalid_payment_method",
+      code: "exchange_rate_required",
     });
-    expect(from).toHaveBeenCalledTimes(1);
+    expect(createChequeRecibidoServer).not.toHaveBeenCalled();
   });
 
-  it("rechaza un cheque emitido para una deuda USD", async () => {
+  it("mantiene bloqueado el endoso para pagar una deuda USD", async () => {
     const from = vi.fn(() =>
       makeQuery({
         ...payable,
@@ -193,9 +309,9 @@ describe("validación de moneda para cheques", () => {
       orgSlug: "org",
       accountId: "ap-1",
       amount: 100,
-      paymentMethod: "cheque",
+      paymentMethod: "cheque_endosado",
       paymentDate: "2026-01-01",
-      issuedCheckData,
+      receivedCheckIds: ["check-1"],
       type: "payable",
     });
 

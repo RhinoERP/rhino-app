@@ -102,7 +102,8 @@ export function IssuedCheckFormDialog({
     soloActivas: true,
     enabled: open,
   });
-  const hasActiveAccounts = cuentas.length > 0;
+  const cuentasArs = cuentas.filter((cuenta) => cuenta.moneda === "ARS");
+  const hasActiveAccounts = cuentasArs.length > 0;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -179,7 +180,7 @@ export function IssuedCheckFormDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {cuentas.map((cuenta) => (
+                      {cuentasArs.map((cuenta) => (
                         <SelectItem key={cuenta.id} value={cuenta.id}>
                           {cuenta.nombre} — {cuenta.banco} ({cuenta.moneda})
                         </SelectItem>
@@ -188,7 +189,8 @@ export function IssuedCheckFormDialog({
                   </Select>
                   {hasActiveAccounts ? null : (
                     <p className="text-muted-foreground text-sm">
-                      No hay cuentas bancarias activas para emitir cheques.
+                      No hay cuentas bancarias activas en ARS para emitir
+                      cheques.
                     </p>
                   )}
                   <FormMessage />

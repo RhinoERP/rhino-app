@@ -260,6 +260,12 @@ async function loadPayableForEndorsement(
     throw AppError.notFound("Cuenta por pagar no encontrada");
   }
 
+  if (payable.currency === "USD") {
+    throw AppError.unprocessable(
+      "Los cheques endosados todavía no se admiten para deudas en USD"
+    );
+  }
+
   if (payable.supplier_id !== input.supplierId) {
     throw AppError.conflict(
       "La cuenta por pagar no corresponde al proveedor indicado"
@@ -944,6 +950,29 @@ export function createReceivedCheckService(input: CreateReceivedCheckInput) {
   });
 }
 
+function getLinkedCheckFaceAmount(payment: {
+  amount: string;
+  amount_ars: string | null;
+  currency: string;
+  exchange_rate: string | null;
+}): Decimal {
+  if (payment.currency === "ARS") {
+    return new Decimal(payment.amount);
+  }
+  if (
+    payment.currency !== "USD" ||
+    !payment.amount_ars ||
+    !payment.exchange_rate ||
+    new Decimal(payment.exchange_rate).lte(0) ||
+    new Decimal(payment.amount_ars).lte(0)
+  ) {
+    throw AppError.unprocessable(
+      "El pago en USD requiere cotización y equivalente en pesos válidos"
+    );
+  }
+  return new Decimal(payment.amount_ars);
+}
+
 async function validateReceivedCheckPaymentLink(params: {
   trx: DbExecutor;
   input: CreateReceivedCheckInput;
@@ -963,8 +992,10 @@ async function validateReceivedCheckPaymentLink(params: {
       "id",
       "account_receivable_id",
       "amount",
+      "amount_ars",
       "payment_method",
       "currency",
+      "exchange_rate",
     ])
     .where("id", "=", receivablePaymentId)
     .where("organization_id", "=", input.orgId)
@@ -981,14 +1012,9 @@ async function validateReceivedCheckPaymentLink(params: {
       "Solo se pueden vincular cheques con cobranzas pagadas con cheque o e-cheq"
     );
   }
-  if (payment.currency !== "ARS") {
+  if (!getLinkedCheckFaceAmount(payment).eq(normalizedAmount)) {
     throw AppError.unprocessable(
-      "Solo se pueden vincular cheques a cobranzas en pesos"
-    );
-  }
-  if (!new Decimal(payment.amount).eq(normalizedAmount)) {
-    throw AppError.unprocessable(
-      "El importe del cheque debe coincidir con el importe de la cobranza"
+      "El importe en pesos del cheque debe coincidir con el equivalente en pesos de la cobranza"
     );
   }
   if ((input.tipo === "ECH") !== (payment.payment_method === "e-cheq")) {
@@ -999,13 +1025,87 @@ async function validateReceivedCheckPaymentLink(params: {
 
   const receivable = await trx
     .selectFrom("public.accounts_receivable")
-    .select("customer_id")
+    .select(["customer_id", "currency"])
     .where("id", "=", payment.account_receivable_id)
     .where("organization_id", "=", input.orgId)
     .executeTakeFirst();
   if (!receivable || receivable.customer_id !== input.libradorId) {
     throw AppError.unprocessable(
       "El librador vinculado no coincide con el cliente de la cobranza"
+    );
+  }
+  if (receivable.currency !== payment.currency) {
+    throw AppError.unprocessable(
+      "La moneda de la cobranza no coincide con la moneda de la deuda"
+    );
+  }
+}
+
+async function validateIssuedCheckPaymentLink(params: {
+  trx: DbExecutor;
+  input: CreateIssuedCheckInput;
+  normalizedAmount: string;
+}): Promise<void> {
+  const { trx, input, normalizedAmount } = params;
+  if (
+    !input.referenciaPagoId ||
+    input.referenciaPagoTabla !== "payable_payments"
+  ) {
+    throw AppError.unprocessable(
+      "El cheque propio solo puede vincularse a un pago a proveedor"
+    );
+  }
+
+  const payment = await trx
+    .selectFrom("public.payable_payments")
+    .select([
+      "account_payable_id",
+      "amount",
+      "amount_ars",
+      "currency",
+      "exchange_rate",
+      "payment_method",
+    ])
+    .where("id", "=", input.referenciaPagoId)
+    .where("organization_id", "=", input.orgId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!payment) {
+    throw AppError.notFound("El pago vinculado al cheque propio no existe");
+  }
+  if (
+    payment.payment_method !== "cheque" &&
+    payment.payment_method !== "e-cheq"
+  ) {
+    throw AppError.unprocessable(
+      "Solo se pueden vincular cheques propios con pagos por cheque o e-cheq"
+    );
+  }
+  if ((input.tipo === "ECH") !== (payment.payment_method === "e-cheq")) {
+    throw AppError.unprocessable(
+      "El tipo de cheque propio no coincide con el medio de pago"
+    );
+  }
+  if (!getLinkedCheckFaceAmount(payment).eq(normalizedAmount)) {
+    throw AppError.unprocessable(
+      "El importe en pesos del cheque propio no coincide con el equivalente en pesos del pago"
+    );
+  }
+
+  const payable = await trx
+    .selectFrom("public.accounts_payable")
+    .select(["currency", "supplier_id"])
+    .where("id", "=", payment.account_payable_id)
+    .where("organization_id", "=", input.orgId)
+    .executeTakeFirst();
+  if (!payable || payable.currency !== payment.currency) {
+    throw AppError.unprocessable(
+      "La moneda del pago no coincide con la moneda de la deuda del proveedor"
+    );
+  }
+  if (input.beneficiarioId && input.beneficiarioId !== payable.supplier_id) {
+    throw AppError.unprocessable(
+      "El beneficiario del cheque no coincide con el proveedor del pago"
     );
   }
 }
@@ -1206,11 +1306,19 @@ export function createIssuedCheckService(input: CreateIssuedCheckInput) {
       return check;
     },
     execute: async (trx, operationId) => {
-      await loadBankAccountForMutation(
+      const bankAccount = await loadBankAccountForMutation(
         input.cuentaBancariaId,
         input.orgId,
         trx
       );
+      if (bankAccount.moneda !== "ARS") {
+        throw AppError.unprocessable(
+          "Los cheques propios solo pueden emitirse desde cuentas en pesos"
+        );
+      }
+      if (input.referenciaPagoId) {
+        await validateIssuedCheckPaymentLink({ trx, input, normalizedAmount });
+      }
       const check = await createIssuedCheck(
         { ...input, importe: normalizedAmount },
         operationId,
@@ -1565,6 +1673,11 @@ export function createCheckDepositSlipService(
         input.orgId,
         trx
       );
+      if (cuenta.moneda !== "ARS") {
+        throw AppError.unprocessable(
+          "Los cheques recibidos solo pueden depositarse en cuentas en pesos"
+        );
+      }
       const checks = await listReceivedChecksByIdsForUpdate(
         sortedCheckIds,
         input.orgId,

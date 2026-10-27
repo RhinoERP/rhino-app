@@ -545,6 +545,9 @@ export function RegisterPaymentDialog({
     soloActivas: true,
     enabled: type === "payable" && open && !!orgId,
   });
+  const cuentasBancariasArs = cuentasBancarias.filter(
+    (cuenta) => cuenta.moneda === "ARS"
+  );
   const [selectedReceivedCheckIds, setSelectedReceivedCheckIds] = useState<
     string[]
   >([]);
@@ -579,9 +582,14 @@ export function RegisterPaymentDialog({
   );
 
   const availablePaymentMethodOptions = useMemo(() => {
-    if (isEditMode || currency === "USD") {
+    if (isEditMode) {
       return paymentMethodOptions.filter(
         (option) => !isCheckPaymentMethod(option.value)
+      );
+    }
+    if (currency === "USD") {
+      return paymentMethodOptions.filter(
+        (option) => option.value !== "cheque_endosado"
       );
     }
     if (type !== "payable") {
@@ -631,6 +639,13 @@ export function RegisterPaymentDialog({
     }
     return truncateMoney(parsedAmount * parsedRate);
   }, [amount, exchangeRate]);
+  const nominalChequeArs = isUsdDebt
+    ? equivalenteARS
+    : truncateMoney(Number(amount));
+  const nominalChequeLabel =
+    nominalChequeArs === null
+      ? "Pendiente de cotización"
+      : formatCurrency(nominalChequeArs, "ARS");
 
   const renderRateStatus = () => {
     if (rateQuery.isLoading) {
@@ -658,7 +673,7 @@ export function RegisterPaymentDialog({
           </p>
           {equivalenteARS !== null ? (
             <p className="text-muted-foreground text-xs">
-              Recibís:{" "}
+              Equivalente en pesos:{" "}
               <span className="font-medium text-foreground">
                 {formatCurrency(equivalenteARS, "ARS")}
               </span>
@@ -1624,7 +1639,7 @@ export function RegisterPaymentDialog({
 
               <div className="space-y-3">
                 <div className="grid gap-2">
-                  <Label htmlFor="amount">Monto</Label>
+                  <Label htmlFor="amount">Monto ({currency})</Label>
                   <Input
                     id="amount"
                     inputMode="decimal"
@@ -1650,6 +1665,15 @@ export function RegisterPaymentDialog({
                     <Label>Tipo de cambio (USD → ARS)</Label>
                     {renderRateStatus()}
                   </div>
+                ) : null}
+
+                {!isEditMode && isCheckMethod ? (
+                  <p className="text-muted-foreground text-sm">
+                    Valor nominal del cheque:{" "}
+                    <span className="font-medium text-foreground">
+                      {nominalChequeLabel}
+                    </span>
+                  </p>
                 ) : null}
 
                 {showCreditSection ? (
@@ -1790,7 +1814,7 @@ export function RegisterPaymentDialog({
                       <Label htmlFor="chequeCuentaBancaria">
                         Cuenta bancaria propia *
                       </Label>
-                      {cuentasBancarias.length > 0 ? (
+                      {cuentasBancariasArs.length > 0 ? (
                         <Select
                           onValueChange={setChequeCuentaBancariaId}
                           value={chequeCuentaBancariaId}
@@ -1799,7 +1823,7 @@ export function RegisterPaymentDialog({
                             <SelectValue placeholder="Selecciona una cuenta" />
                           </SelectTrigger>
                           <SelectContent>
-                            {cuentasBancarias.map((c) => (
+                            {cuentasBancariasArs.map((c) => (
                               <SelectItem key={c.id} value={c.id}>
                                 {c.nombre} — {c.banco}
                               </SelectItem>
@@ -1808,7 +1832,7 @@ export function RegisterPaymentDialog({
                         </Select>
                       ) : (
                         <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
-                          No hay cuentas bancarias activas. Crea una en
+                          No hay cuentas bancarias activas en ARS. Crea una en
                           Tesorería antes de emitir el cheque.
                         </p>
                       )}
