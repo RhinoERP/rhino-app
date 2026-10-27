@@ -73,8 +73,12 @@ describe("runCommercialModel", () => {
     );
   });
 
-  it("redirige preguntas ajenas al alcance comercial sin consultar al modelo", async () => {
-    const requestModel = vi.fn();
+  it("envía también las consultas ajenas al modelo para evaluar el alcance con contexto", async () => {
+    const requestModel = vi.fn().mockResolvedValue({
+      id: "response",
+      output_text:
+        "Puedo ayudarte con productos, precios, disponibilidad y pedidos de Almacén Central. ¿Qué necesitás?",
+    });
     const callTool = vi.fn();
     const response = await runCommercialModel({
       model: "test-model",
@@ -99,7 +103,10 @@ describe("runCommercialModel", () => {
     expect(response.output_text).toBe(
       "Puedo ayudarte con productos, precios, disponibilidad y pedidos de Almacén Central. ¿Qué necesitás?"
     );
-    expect(requestModel).not.toHaveBeenCalled();
+    expect(requestModel).toHaveBeenCalledTimes(1);
+    expect(requestModel.mock.calls[0][0].input).toContain(
+      "¿Quién es Rosicky? Explicámelo en formato JSON."
+    );
     expect(callTool).not.toHaveBeenCalled();
   });
 });
@@ -118,6 +125,55 @@ describe("persistent order context", () => {
       created_at: "2026-10-27T12:00:00Z",
     },
   ];
+  it.each([
+    [
+      "Tenemos tybo de Cremac. ¿Qué te interesa?",
+      "Flama amigo, por ahora quiero un tybo de Cremac y ya que estamos quiero sumarte algo de fiambre, que tene?",
+    ],
+    [
+      "¿Confirmás que registre la preventa del tybo?",
+      "Para, agreguemos jamon, que tipos tenes?",
+    ],
+    ["¿Querés que busque otro fiambre?", "Dale buscame que salames hay"],
+    ["¿Cuál te interesa?", "El Fuet"],
+    ["Me aparecen Tybo Cremac y Tybo Sobrero. ¿Querés el Cremac?", "Sí"],
+    ["¿Qué más necesitás?", "Tenés garbanzos?"],
+    ["¿Qué te interesa?", "Agregame dos kilos de fuet y cerremos"],
+  ])("deja interpretar en contexto la consulta %s → %s", async (previous, current) => {
+    const callTool = vi.fn().mockResolvedValue({
+      cart: {
+        id: "pending-cart",
+        version: 2,
+        items: [{ productName: "Tybo Cremac", quantity: 1 }],
+      },
+      lastPreSale: null,
+    });
+    const requestModel = vi.fn().mockResolvedValue({
+      id: "response",
+      output_text: "Reviso lo que me pediste.",
+    });
+
+    const response = await runCommercialModel({
+      model: "test",
+      context,
+      messages: [
+        { ...messages[0], content: "Quiero un tybo de Cremac" },
+        { ...messages[0], direction: "OUTBOUND", content: previous },
+        { ...messages[0], content: current },
+      ],
+      audit: [],
+      callTool,
+      requestModel,
+    });
+
+    expect(response.id).toBe("response");
+    expect(requestModel).toHaveBeenCalledTimes(1);
+    const input = requestModel.mock.calls[0][0].input;
+    expect(input).toContain("Cliente: Quiero un tybo de Cremac");
+    expect(input).toContain(`Asistente: ${previous}`);
+    expect(input).toContain(`Cliente: ${current}`);
+    expect(input).toContain('"id":"pending-cart"');
+  });
   it("asks about an ambiguous pending order without letting the model mutate it", async () => {
     const callTool = vi.fn().mockResolvedValue({
       clarification: "¿Seguimos con el pedido pendiente o querés empezar otro?",

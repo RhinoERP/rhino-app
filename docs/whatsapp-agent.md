@@ -276,6 +276,15 @@ acción pendiente y mensaje de origen. Worker y sandbox usan el mismo motor y lo
 pedidos anteriores de ese chat, sin perfiles de preferencias ni acceso a otra
 integración (incluido otro sandbox).
 
+El modelo evalúa el alcance comercial con el mensaje completo y el historial;
+no hay una lista fija de palabras o productos que bloquee consultas antes de
+interpretarlas. Al cambiar de producto conserva el pedido pendiente, busca las
+nuevas opciones y pregunta sólo por datos faltantes. Si un mensaje combina una
+elección con otra consulta, atiende ambas. Un sí a una selección de producto no
+confirma una preventa: esa confirmación requiere una cotización y su acción
+pendiente vigente. Las consultas ajenas al negocio reciben la redirección
+comercial indicada en el prompt; también pasan por el modelo.
+
 Las mutaciones reciben carrito/versión y mensaje de origen. Una RPC bloquea la
 conversación, valida que el mensaje siga vigente y aplica cada transición. La
 conversión inserta cabecera, productos, impuestos y vínculos en una transacción;
