@@ -47,7 +47,11 @@ import {
   updateWholesalePriceAction,
 } from "@/modules/inventory/actions/pricing-grid.actions";
 import type { ProductPricingItem } from "@/modules/inventory/types";
-import { calculateSalePriceFromCostAndMargin } from "@/modules/inventory/utils/price-calculations";
+import {
+  calculateMarginFromCostAndPrice,
+  calculateSalePriceFromCostAndMargin,
+  roundMargin,
+} from "@/modules/inventory/utils/price-calculations";
 import {
   applySalesPriceListAdjustment,
   createColumns,
@@ -289,10 +293,13 @@ export function PricingGridDataTable({
           }
           const costPrice = item.cost_price;
           if (costPrice != null && costPrice > 0) {
-            const newMargin = (newPrice / costPrice - 1) * 100;
+            const newMargin = calculateMarginFromCostAndPrice(
+              costPrice,
+              truncateMoney(newPrice)
+            );
             return {
               ...item,
-              calculated_sale_price: newPrice,
+              calculated_sale_price: truncateMoney(newPrice),
               profit_margin: newMargin,
             };
           }
@@ -334,7 +341,7 @@ export function PricingGridDataTable({
           }
           const costPrice = item.cost_price;
           if (costPrice != null && costPrice > 0) {
-            const persistedMargin = truncateMoney(newMargin);
+            const persistedMargin = roundMargin(newMargin);
             const newPrice = calculateSalePriceFromCostAndMargin(
               costPrice,
               persistedMargin
@@ -420,7 +427,7 @@ export function PricingGridDataTable({
           if (costPrice != null && costPrice > 0) {
             const newPrice = calculateSalePriceFromCostAndMargin(
               costPrice,
-              truncateMoney(newMargin)
+              roundMargin(newMargin)
             );
             return { ...item, direct_sale_price: newPrice };
           }

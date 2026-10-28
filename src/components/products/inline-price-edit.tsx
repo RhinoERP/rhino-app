@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { formatMarginForEdit } from "@/modules/inventory/utils/price-calculations";
 
 type InlinePriceEditProps = {
   value: number | null;
@@ -16,6 +17,7 @@ type InlinePriceEditProps = {
 
 export function InlinePriceEdit({
   value,
+  costPrice,
   onSave,
   onDelete,
   disabled = false,
@@ -26,6 +28,7 @@ export function InlinePriceEdit({
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const initialInputValueRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const formattedValue = (() => {
@@ -48,7 +51,15 @@ export function InlinePriceEdit({
     if (disabled || saving) {
       return;
     }
-    setInputValue(value != null ? String(value) : "");
+    let initialValue = "";
+    if (value != null) {
+      initialValue =
+        type === "percentage"
+          ? formatMarginForEdit(value, costPrice)
+          : String(value);
+    }
+    initialInputValueRef.current = initialValue;
+    setInputValue(initialValue);
     setEditing(true);
   };
 
@@ -56,6 +67,11 @@ export function InlinePriceEdit({
     setEditing(false);
     setInputValue("");
   }, []);
+
+  const saveValue = (parsed: number) =>
+    parsed === 0 && onDelete && type !== "percentage"
+      ? onDelete()
+      : onSave(parsed);
 
   const handleSave = async () => {
     if (savingRef.current) {
@@ -69,13 +85,15 @@ export function InlinePriceEdit({
       return;
     }
 
+    if (type === "percentage" && inputValue === initialInputValueRef.current) {
+      handleCancel();
+      return;
+    }
+
     savingRef.current = true;
     setSaving(true);
     try {
-      const result =
-        parsed === 0 && onDelete && type !== "percentage"
-          ? await onDelete()
-          : await onSave(parsed);
+      const result = await saveValue(parsed);
       if (result.success) {
         setEditing(false);
       }

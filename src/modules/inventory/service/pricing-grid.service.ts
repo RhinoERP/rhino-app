@@ -1,5 +1,10 @@
-import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import {
+  calculateMarginFromCostAndPrice,
+  calculateSalePriceFromCostAndMargin,
+  roundMargin,
+} from "@/modules/inventory/utils/price-calculations";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ProductPricingItem } from "../types";
 
@@ -188,13 +193,23 @@ export async function updateWholesalePrice(
     throw new Error("El producto no tiene un precio de costo asignado");
   }
 
-  const newMargin = truncateToDecimals(
-    (newPrice / product.cost_price - 1) * 100,
-    4
+  const targetPrice = truncateMoney(newPrice);
+  const newMargin = calculateMarginFromCostAndPrice(
+    product.cost_price,
+    targetPrice
   );
 
   if (newMargin < 0) {
     throw new Error("El precio de venta no puede ser menor al precio de costo");
+  }
+
+  if (
+    calculateSalePriceFromCostAndMargin(product.cost_price, newMargin) !==
+    targetPrice
+  ) {
+    throw new Error(
+      "No se puede representar ese precio con el margen disponible"
+    );
   }
 
   const { error: updateError } = await supabase
@@ -228,7 +243,7 @@ export async function updateWholesaleMargin(
     {
       p_org_id: org.id,
       p_product_id: productId,
-      p_margin: truncateMoney(newMargin),
+      p_margin: roundMargin(newMargin),
     }
   );
 
@@ -254,7 +269,7 @@ export async function updateDirectMargin(
     {
       p_org_id: org.id,
       p_product_id: productId,
-      p_margin: truncateMoney(newMargin),
+      p_margin: roundMargin(newMargin),
     }
   );
 
