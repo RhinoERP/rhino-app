@@ -14,6 +14,7 @@ import {
   previewAtomicReceiptFiscalState,
 } from "../service/purchases.service";
 import type { ReceivePurchaseActionInput } from "../types";
+import { hasPendingPurchaseReceipt } from "../utils/receipt-progress";
 
 type IncomingItem = ReceivePurchaseActionInput["receivedItems"][number];
 
@@ -210,7 +211,17 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
       throw new Error("Falta identificar la recepción");
     }
 
-    const itemsToProcess = receivedItems.filter((item) => item.received);
+    const itemsToProcess = receivedItems.filter((item) => {
+      if (!item.received) {
+        return false;
+      }
+      const update = buildItemUpdates([item])[0];
+      return hasPendingPurchaseReceipt({
+        newItem: item.newItem,
+        quantity: update.quantity,
+        unitQuantity: update.unitQuantity,
+      });
+    });
 
     if (itemsToProcess.length === 0) {
       return {

@@ -3,6 +3,7 @@ import {
   appendReceiptProgress,
   calculateReceiptProgress,
   groupReceiptItems,
+  hasPendingPurchaseReceipt,
   hasUnreceivedPurchaseQuantities,
   hasUnreceivedVariantQuantities,
   pendingReceiptUnitQuantity,
@@ -10,6 +11,21 @@ import {
 } from "./receipt-progress";
 
 describe("entregas acumuladas de una OC", () => {
+  it("excluye líneas completamente recibidas y mantiene las líneas extra seleccionables", () => {
+    expect(hasPendingPurchaseReceipt({ quantity: 0, unitQuantity: 0 })).toBe(
+      false
+    );
+    expect(hasPendingPurchaseReceipt({ quantity: 2, unitQuantity: 0 })).toBe(
+      true
+    );
+    expect(hasPendingPurchaseReceipt({ quantity: 0, unitQuantity: 1.5 })).toBe(
+      true
+    );
+    expect(
+      hasPendingPurchaseReceipt({ newItem: true, quantity: 0, unitQuantity: 0 })
+    ).toBe(true);
+  });
+
   it("previsualiza una entrega adicional sin alterar las entregas ya registradas", () => {
     const progress = calculateReceiptProgress([
       {

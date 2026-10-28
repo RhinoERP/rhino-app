@@ -33,6 +33,7 @@ import {
   getPurchaseUnitShortLabel,
   isMeasuredUnit,
 } from "@/modules/purchases/utils/purchase-units";
+import { hasPendingPurchaseReceipt } from "@/modules/purchases/utils/receipt-progress";
 import type {
   ReceiptFormValues,
   ReceivedItemForm,
@@ -353,6 +354,13 @@ export function PurchaseReceiptItems({
   onVariantStockChange,
 }: PurchaseReceiptItemsProps) {
   const items = watch("items");
+  const receivableCount = items.filter((item) =>
+    hasPendingPurchaseReceipt({
+      newItem: item.newItem,
+      quantity: item.orderedQuantity,
+      unitQuantity: item.orderedUnitQuantity,
+    })
+  ).length;
 
   // Load variant data eagerly for all variant products with prefilled stocks
   useEffect(() => {
@@ -428,6 +436,11 @@ export function PurchaseReceiptItems({
       : assignedUnitQuantity;
     const subtotal = effectiveQty * unitCost;
     const unitCostStr = `${formatCurrency(item.unitCost, currency)}/${unitLabel}`;
+    const hasPendingQuantity = hasPendingPurchaseReceipt({
+      newItem: item.newItem,
+      quantity: item.orderedQuantity,
+      unitQuantity: item.orderedUnitQuantity,
+    });
     const orderQtyDetail =
       isWeightBased && item.orderedUnitQuantity > 0
         ? ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
@@ -448,8 +461,9 @@ export function PurchaseReceiptItems({
             name={`items.${itemIndex}.received`}
             render={({ field: f }) => (
               <Checkbox
-                checked={f.value}
+                checked={hasPendingQuantity && f.value}
                 className="mt-1"
+                disabled={!hasPendingQuantity}
                 onCheckedChange={(checked) => f.onChange(Boolean(checked))}
               />
             )}
@@ -457,7 +471,9 @@ export function PurchaseReceiptItems({
           <div className="flex-1 space-y-1">
             <p className="font-medium">{productDisplay}</p>
             <p className="text-muted-foreground text-sm">
-              Pedido: {item.orderedQuantity} unidades
+              {hasPendingQuantity
+                ? `Pendiente de recibir: ${item.orderedQuantity} unidades`
+                : "Ya recibido"}
               {orderQtyDetail}
               {" · "}
               {unitCostStr}
@@ -517,7 +533,7 @@ export function PurchaseReceiptItems({
               <Checkbox
                 checked={
                   allSelected ||
-                  (selectedCount > 0 && selectedCount < itemFields.length
+                  (selectedCount > 0 && selectedCount < receivableCount
                     ? "indeterminate"
                     : false)
                 }

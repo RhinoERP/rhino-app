@@ -32,6 +32,7 @@ import {
   isMeasuredUnit,
 } from "@/modules/purchases/utils/purchase-units";
 import {
+  hasPendingPurchaseReceipt,
   hasUnreceivedPurchaseQuantities,
   hasUnreceivedVariantQuantities,
   pendingReceiptUnitQuantity,
@@ -536,7 +537,15 @@ export function PurchaseReceipt({
 
   const handleToggleAll = (checked: boolean) => {
     for (const [index] of items.entries()) {
-      form.setValue(`items.${index}.received`, checked);
+      form.setValue(
+        `items.${index}.received`,
+        checked &&
+          hasPendingPurchaseReceipt({
+            newItem: items[index]?.newItem,
+            quantity: items[index]?.orderedQuantity ?? 0,
+            unitQuantity: items[index]?.orderedUnitQuantity ?? 0,
+          })
+      );
     }
   };
 
@@ -585,7 +594,15 @@ export function PurchaseReceipt({
   const handleReceive = form.handleSubmit(async (values) => {
     setError(null);
 
-    const itemsToReceive = values.items.filter((item) => item.received);
+    const itemsToReceive = values.items.filter(
+      (item) =>
+        item.received &&
+        hasPendingPurchaseReceipt({
+          newItem: item.newItem,
+          quantity: item.orderedQuantity,
+          unitQuantity: item.orderedUnitQuantity,
+        })
+    );
 
     if (itemsToReceive.length === 0) {
       setError("Debe marcar al menos un producto como recibido");
@@ -645,15 +662,30 @@ export function PurchaseReceipt({
     setError(null);
 
     const values = form.getValues();
-    const itemsToReceive = values.items.filter((item) => item.received);
+    const itemsToReceive = values.items.filter(
+      (item) =>
+        item.received &&
+        hasPendingPurchaseReceipt({
+          newItem: item.newItem,
+          quantity: item.orderedQuantity,
+          unitQuantity: item.orderedUnitQuantity,
+        })
+    );
     await submitReceive(itemsToReceive, closePurchase);
 
     setIsConfirming(false);
     setConfirmModalOpen(false);
   };
 
-  const receivedCount = items.filter((item) => item.received).length;
-  const totalItems = items.length;
+  const receivableItems = items.filter((item) =>
+    hasPendingPurchaseReceipt({
+      newItem: item.newItem,
+      quantity: item.orderedQuantity,
+      unitQuantity: item.orderedUnitQuantity,
+    })
+  );
+  const receivedCount = receivableItems.filter((item) => item.received).length;
+  const totalItems = receivableItems.length;
   const allSelected = totalItems > 0 && receivedCount === totalItems;
   let confirmLabel = "Confirmar recepción";
   if (isConfirming) {
