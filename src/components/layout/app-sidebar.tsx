@@ -161,6 +161,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           module: "wholesale",
         },
         {
+          title: "Cotizador competitivo",
+          url: `/org/${orgSlug}/solicitudes-venta/nueva`,
+          icon: <ClipboardTextIcon weight="duotone" />,
+          requiredPermission: ["sales.manage", "sales.manage.all"],
+        },
+        {
           title: "Anticipos",
           url: `/org/${orgSlug}/anticipos`,
           icon: <HandCoinsIcon weight="duotone" />,
