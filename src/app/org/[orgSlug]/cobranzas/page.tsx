@@ -10,6 +10,7 @@ import {
   getCreditOnlyCustomers,
   getPayablesMetrics,
   getPayablesPaginated,
+  getReceivableSupplierOptions,
   getReceivablesMetrics,
   getReceivablesPaginated,
 } from "@/modules/collections/service/collections.service";
@@ -110,6 +111,7 @@ export default async function CollectionsPage({
   let receivableCustomerIds = new Set<string>();
   let creditOnlyCustomers: Awaited<ReturnType<typeof getCreditOnlyCustomers>> =
     [];
+  let receivableSupplierOptions: Array<{ value: string; label: string }> = [];
 
   if (currentTab === "receivables") {
     const paginated = await getReceivablesPaginated(orgSlug, {
@@ -122,6 +124,7 @@ export default async function CollectionsPage({
       dispatchedAt,
       customerIds,
       sellerIds,
+      supplierIds,
       statusFilter,
       accountId: paymentAccountId,
     });
@@ -132,6 +135,9 @@ export default async function CollectionsPage({
       totalCount: paginated.totalCount,
     };
     fullReceivables = paginated.data;
+    receivableSupplierOptions = await getReceivableSupplierOptions(
+      layoutData.currentOrganization.id
+    );
   } else if (currentTab === "payables") {
     const paginated = await getPayablesPaginated(orgSlug, {
       page,
@@ -199,6 +205,7 @@ export default async function CollectionsPage({
         orgSlug={orgSlug}
         paginatedData={paginatedData}
         paymentAccountId={paymentAccountId}
+        receivableSupplierOptions={receivableSupplierOptions}
         wholesaleEnabled={wholesaleEnabled}
       />
     </div>
