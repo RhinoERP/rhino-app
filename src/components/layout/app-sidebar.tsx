@@ -37,6 +37,7 @@ import {
   isOrganizationModuleEnabled,
   type OrganizationModule,
 } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { AppLogo } from "./app-logo";
 import { NavMain } from "./nav-main";
 import { OrganizationSwitcher } from "./organization-switcher";
@@ -424,9 +425,9 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       items: [
         {
           title: "IA Comercial",
-          url: "#",
+          url: `/org/${orgSlug}/ia-comercial`,
           icon: <SparkleIcon weight="duotone" />,
-          comingSoon: true,
+          requiredPermission: READ_PERMISSIONS.commercial_ai,
         },
       ],
     },

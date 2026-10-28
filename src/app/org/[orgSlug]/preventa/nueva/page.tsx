@@ -15,10 +15,15 @@ type PreSalePageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{ customerId?: string }>;
 };
 
-export default async function PreSalePage({ params }: PreSalePageProps) {
+export default async function PreSalePage({
+  params,
+  searchParams,
+}: PreSalePageProps) {
   const { orgSlug } = await params;
+  const { customerId: initialCustomerId } = await searchParams;
   const accessContext = await getSalesAccessContext(orgSlug);
 
   if (!accessContext.canManage) {
@@ -54,6 +59,7 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
   return (
     <PreSaleForm
       customers={visibleCustomers}
+      initialCustomerId={initialCustomerId}
       initialSellerId={accessContext.userId ?? undefined}
       organization={{ name: organization.name, cuit: organization.cuit }}
       orgSlug={orgSlug}

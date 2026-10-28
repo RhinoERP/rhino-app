@@ -49,4 +49,5 @@ export const READ_PERMISSIONS: Record<string, string[]> = {
   commissions: ["commissions.read"],
   accounting: ["accounting.read", "accounting.manage"],
   whatsapp: ["whatsapp.read", "whatsapp.manage"],
+  commercial_ai: ["commercial_ai.read", "commercial_ai.manage"],
 };
