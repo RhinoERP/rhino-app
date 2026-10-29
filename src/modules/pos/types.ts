@@ -99,6 +99,7 @@ export const createPosTerminalSchema = z.object({
 export const openPosSessionSchema = z.object({
   orgSlug: idSchema,
   terminalId: idSchema,
+  warehouseId: z.uuid().optional(),
   startingCash: nonNegativeNumberSchema,
 });
 

@@ -2073,6 +2073,7 @@ export async function getPosSaleById(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Product search aggregates stock totals and product metadata from multiple sources.
 export async function searchPosProductsForTerminal(params: {
   orgSlug: string;
+  terminalId?: string;
   q?: string;
   barcode?: string;
   limit?: number;
@@ -2091,15 +2092,22 @@ export async function searchPosProductsForTerminal(params: {
 
   const supabase = await createClient();
   const operatorId = await getCurrentUserId(supabase);
-  const { data: searchSession, error: searchSessionError } = await supabase
+  let searchSessionQuery = supabase
     .from("pos_sessions")
     .select("warehouse_id")
     .eq("organization_id", org.id)
     .eq("user_id", operatorId)
     .eq("status", "OPEN")
     .order("opened_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
+  if (params.terminalId) {
+    searchSessionQuery = searchSessionQuery.eq(
+      "terminal_id",
+      params.terminalId
+    );
+  }
+  const { data: searchSession, error: searchSessionError } =
+    await searchSessionQuery.maybeSingle();
   if (searchSessionError || !searchSession?.warehouse_id) {
     throw new Error("Abrí una caja con depósito antes de buscar productos");
   }
