@@ -499,7 +499,7 @@ export async function getUserOrganizations(): Promise<Organization[]> {
   const { data: memberships, error } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled, whatsapp_enabled, whatsapp_sandbox_enabled)"
+      "organization:organizations!organization_members_organization_id_fkey(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled, whatsapp_enabled, whatsapp_sandbox_enabled)"
     )
     .eq("user_id", user.id);
 
@@ -523,14 +523,21 @@ export async function getUserOrganizations(): Promise<Organization[]> {
  * - 0 orgs -> /no-org
  * - no user -> /auth/login (or public landing page)
  */
+
 export async function resolveUserRedirect(): Promise<string> {
   const supabase = await createClient();
 
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
 
   if (!user) {
+    console.error("[auth.redirect] getUser failed", {
+      code: authError?.code,
+      message: authError?.message,
+      status: authError?.status,
+    });
     return "/auth/login";
   }
 
@@ -542,12 +549,18 @@ export async function resolveUserRedirect(): Promise<string> {
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled, whatsapp_enabled, whatsapp_sandbox_enabled)"
+      "organization:organizations!organization_members_organization_id_fkey(slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled, whatsapp_enabled, whatsapp_sandbox_enabled)"
     )
     .eq("user_id", user.id)
     .eq("is_active", true);
 
   if (membershipsError) {
+    console.error("[auth.redirect] Membership lookup failed", {
+      code: membershipsError.code,
+      message: membershipsError.message,
+      details: membershipsError.details,
+      hint: membershipsError.hint,
+    });
     return "/auth/login";
   }
 
@@ -573,12 +586,21 @@ export async function resolveUserRedirect(): Promise<string> {
     return "/no-org";
   }
 
-  const { data: permissions } = await supabase.rpc(
+  const { data: permissions, error: permissionsError } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
     {
       target_org_slug: firstOrgSlug,
     }
   );
+
+  if (permissionsError) {
+    console.error("[auth.redirect] Permission lookup failed", {
+      code: permissionsError.code,
+      message: permissionsError.message,
+      details: permissionsError.details,
+      hint: permissionsError.hint,
+    });
+  }
 
   const userPermissions = (permissions ?? []) as string[];
 
@@ -653,7 +675,7 @@ export async function getOrganizationLayoutData(
     supabase
       .from("organization_members")
       .select(
-        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled, whatsapp_enabled, whatsapp_sandbox_enabled)"
+        "organization:organizations!organization_members_organization_id_fkey(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, route_sheets_enabled, whatsapp_enabled, whatsapp_sandbox_enabled)"
       )
       .eq("user_id", userId)
       .eq("is_active", true),
