@@ -3264,7 +3264,7 @@ async function buildStockAdjustmentContext(params: {
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
+        "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
       )
       .eq("organization_id", orgId)
       .in("product_id", productIds)
@@ -3321,6 +3321,7 @@ async function buildStockAdjustmentContext(params: {
     (lotsResult.data as Array<{
       id?: string | null;
       product_id?: string | null;
+      warehouse_id: string;
       quantity_available?: number | null;
       unit_quantity_available?: number | null;
       lot_number?: string | null;
@@ -3455,6 +3456,7 @@ async function buildStockAdjustmentContext(params: {
         rollbackLotUpdates.push({
           id: lotId,
           organization_id: orgId,
+          warehouse_id: variantLot.warehouse_id,
           product_id: variantLot.product_id as string,
           lot_number: variantLot.lot_number ?? "DEFAULT",
           expiration_date: variantLot.expiration_date,
@@ -3471,6 +3473,7 @@ async function buildStockAdjustmentContext(params: {
       lotUpdates.push({
         id: lotId,
         organization_id: orgId,
+        warehouse_id: variantLot.warehouse_id,
         product_id: variantLot.product_id as string,
         lot_number: variantLot.lot_number ?? "DEFAULT",
         expiration_date: variantLot.expiration_date,
@@ -3481,6 +3484,7 @@ async function buildStockAdjustmentContext(params: {
       movementPayloads.push({
         organization_id: orgId,
         lot_id: lotId,
+        warehouse_id: variantLot.warehouse_id,
         type: "OUTBOUND",
         quantity: baseToConsume,
         previous_stock: availableQuantity,
@@ -3571,6 +3575,7 @@ async function buildStockAdjustmentContext(params: {
         rollbackLotUpdates.push({
           id: lotId,
           organization_id: orgId,
+          warehouse_id: lot.warehouse_id,
           product_id: lotProductId as string,
           lot_number: lotNumber,
           expiration_date: expirationDate,
@@ -3591,6 +3596,7 @@ async function buildStockAdjustmentContext(params: {
       lotUpdates.push({
         id: lotId,
         organization_id: orgId,
+        warehouse_id: lot.warehouse_id,
         product_id: lotProductId as string,
         lot_number: lotNumber,
         expiration_date: expirationDate,
@@ -3602,6 +3608,7 @@ async function buildStockAdjustmentContext(params: {
       movementPayloads.push({
         organization_id: orgId,
         lot_id: lotId,
+        warehouse_id: lot.warehouse_id,
         type: "OUTBOUND",
         quantity: baseToConsume,
         previous_stock: availableQuantity,
@@ -4001,6 +4008,7 @@ type RestockPayloads = {
 
 type LotRow = {
   id: string | null;
+  warehouse_id: string;
   product_id: string | null;
   lot_number: string | null;
   expiration_date: string | null;
@@ -4039,6 +4047,7 @@ function buildSingleLotRestock(
     lotUpdate: {
       id: lot.id,
       organization_id: ctx.orgId,
+      warehouse_id: lot.warehouse_id,
       product_id: lot.product_id,
       lot_number: lot.lot_number,
       expiration_date: lot.expiration_date,
@@ -4051,6 +4060,7 @@ function buildSingleLotRestock(
     movement: {
       organization_id: ctx.orgId,
       lot_id: lot.id,
+      warehouse_id: lot.warehouse_id,
       type: "INBOUND",
       quantity: net.quantity,
       previous_stock: previousStock,
@@ -4146,7 +4156,7 @@ async function restockFromSale(
   const { data: lots, error: lotsError } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
+      "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
     .in("id", activeLotIds);

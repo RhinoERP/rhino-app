@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { normalizeData, parseExcelFile } from "@/lib/excel-parser";
 import { createClient } from "@/lib/supabase/server";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
 import {
   createProductForOrg,
   createStockMovementForOrg,
@@ -809,10 +810,12 @@ async function upsertProductLot(options: {
     orgSlug,
     createdBy,
   } = options;
+  const warehouseId = await getDefaultWarehouseId(supabase, orgId);
   const { data: existingLots, error: existingLotsError } = await supabase
     .from("product_lots")
     .select("id, quantity_available, unit_quantity_available")
     .eq("organization_id", orgId)
+    .eq("warehouse_id", warehouseId)
     .eq("product_id", productId)
     .eq("lot_number", lotNumber);
 
@@ -853,6 +856,7 @@ async function upsertProductLot(options: {
   const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
     {
       organization_id: orgId,
+      warehouse_id: warehouseId,
       product_id: productId,
       lot_number: lotNumber,
       quantity_available: 0,

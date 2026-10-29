@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
@@ -686,11 +687,13 @@ export async function openPosSession(
   }
 
   const startingCash = truncateMoney(payload.startingCash);
+  const warehouseId = await getDefaultWarehouseId(supabase, org.id);
 
   const { data: createdSession, error: createdSessionError } = await supabase
     .from("pos_sessions")
     .insert({
       organization_id: org.id,
+      warehouse_id: warehouseId,
       terminal_id: payload.terminalId,
       user_id: currentUser.id,
       status:

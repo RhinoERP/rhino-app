@@ -621,6 +621,7 @@ type ReceivableRollback = {
 type LotWithProduct = {
   id: string;
   product_id: string;
+  warehouse_id: string;
   quantity_available: number;
   unit_quantity_available: number | null;
   lot_number: string;
@@ -714,7 +715,7 @@ async function restockReturnedItems(params: {
   const { data: lotsData } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
+      "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
     .in("id", lotIds);
@@ -744,6 +745,7 @@ async function restockReturnedItems(params: {
         {
           id: l.id,
           product_id: l.product_id,
+          warehouse_id: l.warehouse_id,
           quantity_available: Number(l.quantity_available ?? 0),
           unit_quantity_available:
             l.unit_quantity_available != null
@@ -825,6 +827,7 @@ async function applyRestockToLot(params: {
     .insert({
       organization_id: orgId,
       lot_id: lot.id,
+      warehouse_id: lot.warehouse_id,
       type: "INBOUND",
       quantity: lotShare,
       previous_stock: previousStock,

@@ -61,6 +61,7 @@ type ResolvedReturnLine = {
 
 type MutableLotState = {
   id: string;
+  warehouseId: string;
   productId: string;
   lotNumber: string;
   expirationDate: string | null;
@@ -805,7 +806,7 @@ async function buildInboundStockReversalContext(params: {
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
+        "id, product_id, warehouse_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
       )
       .eq("organization_id", orgId)
       .in("id", lotIds),
@@ -839,6 +840,7 @@ async function buildInboundStockReversalContext(params: {
 
     lotsById.set(lot.id, {
       id: lot.id,
+      warehouseId: lot.warehouse_id,
       productId: lot.product_id,
       lotNumber: lot.lot_number,
       expirationDate: lot.expiration_date,
@@ -922,6 +924,7 @@ async function buildInboundStockReversalContext(params: {
       rollbackByLotId.set(lot.id, {
         id: lot.id,
         organization_id: orgId,
+        warehouse_id: lot.warehouseId,
         product_id: lot.productId,
         lot_number: lot.lotNumber,
         expiration_date: lot.expirationDate,
@@ -952,6 +955,7 @@ async function buildInboundStockReversalContext(params: {
     lotUpdatesById.set(lot.id, {
       id: lot.id,
       organization_id: orgId,
+      warehouse_id: lot.warehouseId,
       product_id: lot.productId,
       lot_number: lot.lotNumber,
       expiration_date: lot.expirationDate,
@@ -965,6 +969,7 @@ async function buildInboundStockReversalContext(params: {
     movementPayloads.push({
       organization_id: orgId,
       lot_id: lot.id,
+      warehouse_id: lot.warehouseId,
       created_by: createdBy,
       type: "INBOUND",
       quantity: inboundBaseQuantity,

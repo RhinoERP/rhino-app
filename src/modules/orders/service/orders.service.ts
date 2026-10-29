@@ -1359,6 +1359,7 @@ export async function createOrderAndSaleFromQuote(
       .insert({
         organization_id: org.id,
         quote_id: quoteId,
+        warehouse_id: quoteData?.warehouse_id,
         sales_order_id: salesOrderId,
         order_number: orderNumber,
         status: "PENDING_FINANCE",
@@ -2381,6 +2382,7 @@ export async function validateStockForItems(params: {
 export type StockLotUpdate = {
   id: string;
   organization_id: string;
+  warehouse_id: string;
   product_id: string;
   lot_number: string;
   expiration_date: string | null;
@@ -2392,6 +2394,7 @@ export type StockLotUpdate = {
 type StockMovementPayload = {
   organization_id: string;
   lot_id: string;
+  warehouse_id: string;
   type: Database["public"]["Enums"]["stock_movement_type"];
   quantity: number;
   previous_stock: number;
@@ -2413,6 +2416,7 @@ type DeductionContext = {
 type LotDeduction = {
   id: string | null;
   product_id: string | null;
+  warehouse_id: string;
   quantity_available: number | null;
   unit_quantity_available: number | null;
   lot_number: string | null;
@@ -2453,6 +2457,7 @@ function pushVariantDeduction(
     ctx.rollbackLotUpdates.push({
       id: lotId,
       organization_id: ctx.orgId,
+      warehouse_id: lot.warehouse_id,
       product_id: lot.product_id as string,
       lot_number: lot.lot_number ?? "DEFAULT",
       expiration_date: lot.expiration_date,
@@ -2465,6 +2470,7 @@ function pushVariantDeduction(
   ctx.lotUpdates.push({
     id: lotId,
     organization_id: ctx.orgId,
+    warehouse_id: lot.warehouse_id,
     product_id: lot.product_id as string,
     lot_number: lot.lot_number ?? "DEFAULT",
     expiration_date: lot.expiration_date,
@@ -2475,6 +2481,7 @@ function pushVariantDeduction(
   ctx.movementPayloads.push({
     organization_id: ctx.orgId,
     lot_id: lotId,
+    warehouse_id: lot.warehouse_id,
     type: "OUTBOUND",
     quantity: item.quantity,
     previous_stock: prev,
@@ -2512,6 +2519,7 @@ function pushFifoDeduction(
       ctx.rollbackLotUpdates.push({
         id: lotId,
         organization_id: ctx.orgId,
+        warehouse_id: lot.warehouse_id,
         product_id: lot.product_id as string,
         lot_number: lot.lot_number ?? "DEFAULT",
         expiration_date: lot.expiration_date,
@@ -2526,6 +2534,7 @@ function pushFifoDeduction(
     ctx.lotUpdates.push({
       id: lotId,
       organization_id: ctx.orgId,
+      warehouse_id: lot.warehouse_id,
       product_id: lot.product_id as string,
       lot_number: lot.lot_number ?? "DEFAULT",
       expiration_date: lot.expiration_date,
@@ -2536,6 +2545,7 @@ function pushFifoDeduction(
     ctx.movementPayloads.push({
       organization_id: ctx.orgId,
       lot_id: lotId,
+      warehouse_id: lot.warehouse_id,
       type: "OUTBOUND",
       quantity: toConsume,
       previous_stock: prev,
@@ -2566,7 +2576,7 @@ async function fetchLotData(
   const { data: lots, error: lotsError } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
+      "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
     )
     .eq("organization_id", orgId)
     .in("product_id", productIds)
@@ -2785,6 +2795,7 @@ export async function rollbackStockDeduction(
   const rollbackSnapshots = lotUpdates.map((u) => ({
     id: u.id,
     organization_id: orgId,
+    warehouse_id: u.warehouse_id,
     product_id: u.product_id,
     lot_number: u.lot_number ?? "DEFAULT",
     expiration_date: u.expiration_date,
@@ -2831,7 +2842,7 @@ async function fetchLotsForRestore(
   const { data: lots } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
+      "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
     .in("product_id", productIds)
@@ -2894,6 +2905,7 @@ function buildRestoreLotUpdates(
     lotUpdates.push({
       id: lotToRestore.id,
       organization_id: orgId,
+      warehouse_id: lotToRestore.warehouse_id,
       product_id: lotToRestore.product_id as string,
       lot_number: lotToRestore.lot_number ?? "DEFAULT",
       expiration_date: lotToRestore.expiration_date,
@@ -2904,6 +2916,7 @@ function buildRestoreLotUpdates(
     movementPayloads.push({
       organization_id: orgId,
       lot_id: lotToRestore.id,
+      warehouse_id: lotToRestore.warehouse_id,
       type: "INBOUND",
       quantity: item.quantity,
       previous_stock: prevQuantity,

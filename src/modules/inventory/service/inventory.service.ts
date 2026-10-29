@@ -19,6 +19,7 @@ import type {
   StockPaginatedParams,
 } from "../types";
 import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
+import { getDefaultWarehouseId } from "./default-warehouse.service";
 
 type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   categories?: { id: string; name: string } | null;
@@ -26,6 +27,25 @@ type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+async function linkVariantToLot(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  lotId: string | null,
+  variantId: string
+): Promise<void> {
+  if (!lotId) {
+    throw new Error("La variante creada no tiene lote asociado");
+  }
+  const { error } = await supabase
+    .from("product_lots")
+    .update({ product_variant_id: variantId })
+    .eq("organization_id", orgId)
+    .eq("id", lotId);
+  if (error) {
+    throw new Error(`Error al vincular lote de variante: ${error.message}`);
+  }
+}
 
 type PriceListItemWithList = {
   cost_price: number;
@@ -558,9 +578,11 @@ export async function createProductForOrg(
       );
     }
 
+    const warehouseId = await getDefaultWarehouseId(supabase, org.id);
     const lotsToInsert = talles.flatMap(() =>
       colores.map(() => ({
         organization_id: org.id,
+        warehouse_id: warehouseId,
         product_id: productData.id,
         lot_number: "DEFAULT",
         expiration_date: null,
@@ -594,12 +616,18 @@ export async function createProductForOrg(
       })
     );
 
-    const { error: variantsError } = await supabase
+    const { data: createdVariants, error: variantsError } = await supabase
       .from("product_variants")
-      .insert(variantsToInsert);
+      .insert(variantsToInsert)
+      .select("id, lot_id");
 
-    if (variantsError) {
-      throw new Error(`Error al crear variantes: ${variantsError.message}`);
+    if (variantsError || createdVariants?.length !== variantsToInsert.length) {
+      throw new Error(
+        `Error al crear variantes: ${variantsError?.message ?? "faltan variantes creadas"}`
+      );
+    }
+    for (const variant of createdVariants) {
+      await linkVariantToLot(supabase, org.id, variant.lot_id, variant.id);
     }
   }
   await syncProductTaxAssignments({
@@ -830,8 +858,10 @@ export async function updateProductForOrg(
     }
 
     if (missingCombinations.length > 0) {
+      const warehouseId = await getDefaultWarehouseId(supabase, org.id);
       const lotsToInsert = missingCombinations.map(() => ({
         organization_id: org.id,
+        warehouse_id: warehouseId,
         product_id: productId,
         lot_number: "DEFAULT",
         expiration_date: null,
@@ -857,14 +887,21 @@ export async function updateProductForOrg(
         lot_id: insertedLots[i].id,
       }));
 
-      const { error: variantsError } = await supabase
+      const { data: createdVariants, error: variantsError } = await supabase
         .from("product_variants")
-        .insert(variantsToInsert);
+        .insert(variantsToInsert)
+        .select("id, lot_id");
 
-      if (variantsError) {
+      if (
+        variantsError ||
+        createdVariants?.length !== variantsToInsert.length
+      ) {
         throw new Error(
-          `Error al crear nuevas variantes: ${variantsError.message}`
+          `Error al crear nuevas variantes: ${variantsError?.message ?? "faltan variantes creadas"}`
         );
+      }
+      for (const variant of createdVariants) {
+        await linkVariantToLot(supabase, org.id, variant.lot_id, variant.id);
       }
     }
   }
@@ -2319,10 +2356,12 @@ export async function createProductLotForOrg(
   }
 
   const resolvedExpiration = finalExpirationDate ?? NO_EXPIRATION_FALLBACK;
+  const warehouseId = await getDefaultWarehouseId(supabase, org.id);
 
   const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
     {
       organization_id: org.id,
+      warehouse_id: warehouseId,
       product_id: productId,
       lot_number: lotNumber.trim(),
       expiration_date: resolvedExpiration,
@@ -2747,7 +2786,7 @@ export async function createStockMovementForOrg(
   const { data: lot, error: lotError } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, organization_id, quantity_available, unit_quantity_available"
+      "id, product_id, organization_id, warehouse_id, quantity_available, unit_quantity_available"
     )
     .eq("id", lotId)
     .eq("organization_id", org.id)
@@ -2865,6 +2904,7 @@ export async function createStockMovementForOrg(
 
   const movementPayload = {
     organization_id: org.id,
+    warehouse_id: lot.warehouse_id,
     lot_id: lotId,
     type,
     quantity: movementQuantity,
@@ -2878,9 +2918,7 @@ export async function createStockMovementForOrg(
 
   const { data: movement, error: movementError } = await supabase
     .from("stock_movements")
-    .insert(
-      movementPayload as Database["public"]["Tables"]["stock_movements"]["Insert"]
-    )
+    .insert(movementPayload)
     .select("*")
     .maybeSingle();
 
@@ -3065,6 +3103,7 @@ export async function getVariantCurrentStock(
  * Creates new variants with DEFAULT lots, deactivates removed ones,
  * and reactivates previously deactivated variants whose combination is back.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Reactivation, deactivation and initial lot linkage share the same variant matrix.
 export async function updateProductVariantsForOrg(
   orgSlug: string,
   productId: string,
@@ -3141,11 +3180,13 @@ export async function updateProductVariantsForOrg(
     }
   }
 
+  const warehouseId = await getDefaultWarehouseId(supabase, org.id);
   for (const { talle, color } of newCombinations) {
     const { data: lot, error: lotError } = await supabase
       .from("product_lots")
       .insert({
         organization_id: org.id,
+        warehouse_id: warehouseId,
         product_id: productId,
         lot_number: "DEFAULT",
         quantity_available: 0,
@@ -3158,7 +3199,7 @@ export async function updateProductVariantsForOrg(
       throw new Error(`Error al crear lote DEFAULT: ${lotError?.message}`);
     }
 
-    const { error: insertError } = await supabase
+    const { data: variant, error: insertError } = await supabase
       .from("product_variants")
       .insert({
         organization_id: org.id,
@@ -3166,11 +3207,16 @@ export async function updateProductVariantsForOrg(
         talle,
         color,
         lot_id: lot.id,
-      });
+      })
+      .select("id")
+      .single();
 
-    if (insertError) {
-      throw new Error(`Error al insertar variante: ${insertError.message}`);
+    if (insertError || !variant) {
+      throw new Error(
+        `Error al insertar variante: ${insertError?.message ?? "sin datos"}`
+      );
     }
+    await linkVariantToLot(supabase, org.id, lot.id, variant.id);
   }
 }
 

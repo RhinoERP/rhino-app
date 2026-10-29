@@ -1,6 +1,7 @@
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { requireAuth } from "@/lib/supabase/auth";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type {
@@ -274,6 +275,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
   if (!organization?.id) {
     throw new Error("Organización no encontrada");
   }
+  const warehouseId = await getDefaultWarehouseId(supabase, organization.id);
 
   const totals = await buildQuoteTotals({
     supabase,
@@ -294,6 +296,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     .insert(
       buildQuoteInsertPayload({
         organizationId: organization.id,
+        warehouseId,
         input,
         userId,
         totals,
@@ -328,17 +331,20 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
 
 function buildQuoteInsertPayload({
   organizationId,
+  warehouseId,
   input,
   userId,
   totals,
 }: {
   organizationId: string;
+  warehouseId: string;
   input: CreateQuoteInput;
   userId: string;
   totals: Awaited<ReturnType<typeof buildQuoteTotals>>;
 }) {
   return {
     organization_id: organizationId,
+    warehouse_id: warehouseId,
     customer_id: input.customerId,
     status: "DRAFT",
     total_amount: totals.totalAmount,
@@ -1116,6 +1122,9 @@ export async function convertQuoteToSalesOrder(
     .from("sales_orders")
     .insert({
       organization_id: organization.id,
+      warehouse_id:
+        quote.warehouse_id ??
+        (await getDefaultWarehouseId(supabase, organization.id)),
       customer_id: quote.customer_id,
       user_id: userId,
       sale_date: saleDate,
