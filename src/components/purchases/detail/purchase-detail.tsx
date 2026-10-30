@@ -79,6 +79,7 @@ type PurchaseDetailProps = {
   receivedProgress: Record<string, { quantity: number }>;
   receiptHistory: Array<{
     id: string;
+    warehouseName: string | null;
     receivedAt: string;
     closePurchase: boolean;
     itemCount: number;
@@ -602,6 +603,7 @@ export function PurchaseDetail({
                       {receipt.closePurchase
                         ? "Cierre de compra"
                         : "Compra abierta"}
+                      {receipt.warehouseName && ` · ${receipt.warehouseName}`}
                     </span>
                     <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
                   </summary>

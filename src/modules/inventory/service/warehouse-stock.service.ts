@@ -44,7 +44,7 @@ async function resolveWarehouseContext(orgSlug: string) {
 /** Operational choices only: active, channel-compatible and assigned. */
 export async function getAvailableWarehouses(
   orgSlug: string,
-  channel: WarehouseChannel
+  channel?: WarehouseChannel
 ): Promise<Warehouse[]> {
   const context = await resolveWarehouseContext(orgSlug);
   const { supabase, orgId, userId, isAdmin } = context;
@@ -53,12 +53,14 @@ export async function getAvailableWarehouses(
     .select("*")
     .eq("organization_id", orgId)
     .eq("is_active", true)
-    .eq(
-      channel === "wholesale" ? "wholesale_enabled" : "direct_sale_enabled",
-      true
-    )
     .order("is_default", { ascending: false })
     .order("name");
+  if (channel) {
+    query = query.eq(
+      channel === "wholesale" ? "wholesale_enabled" : "direct_sale_enabled",
+      true
+    );
+  }
   if (!isAdmin) {
     const { data: assignments, error: assignmentError } = await supabase
       .from("warehouse_user_assignments")
