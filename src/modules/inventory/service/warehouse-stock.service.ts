@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requireAuth } from "@/lib/supabase/auth";
+import type { SupabaseServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 
@@ -84,6 +85,38 @@ export async function getAvailableWarehouses(
   return data;
 }
 
+export async function resolveWholesaleWarehouseId(
+  orgSlug: string,
+  requestedId?: string
+): Promise<string> {
+  const warehouses = await getAvailableWarehouses(orgSlug, "wholesale");
+  const id =
+    requestedId ?? (warehouses.length === 1 ? warehouses[0].id : undefined);
+  const selected = warehouses.find((warehouse) => warehouse.id === id);
+  if (!selected) {
+    throw new Error(
+      "Seleccioná un depósito mayorista habilitado para tu usuario"
+    );
+  }
+  return selected.id;
+}
+
+export async function assertWholesaleWarehouseForOrganization(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  warehouseId: string
+): Promise<void> {
+  const { data: org, error } = await supabase
+    .from("organizations")
+    .select("slug")
+    .eq("id", orgId)
+    .single();
+  if (error || !org?.slug) {
+    throw new Error("Organización no encontrada");
+  }
+  await resolveWholesaleWarehouseId(org.slug, warehouseId);
+}
+
 /** Stock validation callers must pass the same warehouse used for deduction. */
 export async function getWarehouseProductLots(params: {
   orgSlug: string;
@@ -102,21 +135,30 @@ export async function getWarehouseProductLots(params: {
   if (!params.productIds.length) {
     return [];
   }
-  const { data, error } = await supabase
-    .from("product_lots")
-    .select("*")
-    .eq("organization_id", orgId)
-    .eq("warehouse_id", params.warehouseId)
-    .in("product_id", [...new Set(params.productIds)])
-    .order("expiration_date", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: true })
-    .order("id");
-  if (error) {
-    throw new Error(
-      `No se pudo consultar el stock del depósito: ${error.message}`
-    );
+  const result: WarehouseStockLot[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from("product_lots")
+      .select("*")
+      .eq("organization_id", orgId)
+      .eq("warehouse_id", params.warehouseId)
+      .in("product_id", [...new Set(params.productIds)])
+      .order("expiration_date", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true })
+      .order("id")
+      .range(offset, offset + pageSize - 1);
+    if (error) {
+      throw new Error(
+        `No se pudo consultar el stock del depósito: ${error.message}`
+      );
+    }
+    result.push(...data);
+    if (data.length < pageSize) {
+      break;
+    }
   }
-  return data;
+  return result;
 }
 
 /** Includes inactive warehouses in history; operational selectors exclude them. */

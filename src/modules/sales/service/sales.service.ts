@@ -10,6 +10,8 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
+import { assertWholesaleWarehouseForOrganization } from "@/modules/inventory/service/warehouse-stock.service";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { findAlreadyDeductedItemIds } from "@/modules/orders/service/orders.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
@@ -2975,6 +2977,7 @@ export async function createPreSaleOrder(
 
   const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] = {
     organization_id: org.id,
+    warehouse_id: await getDefaultWarehouseId(supabase, org.id),
     customer_id: customerId,
     user_id: resolvedSellerId as string,
     sale_date: saleDate,
@@ -3141,6 +3144,7 @@ export async function prepareWhatsAppPreSaleOrder(params: {
 
 type ProductStockMetadata = {
   id: string;
+  hasVariants: boolean;
   name: string;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
@@ -3230,14 +3234,34 @@ function resolveWeightRequirement(
   return Math.max(0, item.quantity);
 }
 
+async function getSaleWarehouseId(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<string> {
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select("warehouse_id")
+    .eq("organization_id", orgId)
+    .eq("id", saleId)
+    .single();
+  if (error || !data) {
+    throw new Error("No se pudo resolver el depósito de la venta");
+  }
+  return data.warehouse_id;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Stock allocation across lots requires several guarded branches
 async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   items: ConfirmSaleItemInput[];
   movementReason: string;
 }): Promise<StockAdjustmentContext> {
   const { supabase, orgId, items, movementReason } = params;
+  const warehouseId = await getSaleWarehouseId(supabase, orgId, params.saleId);
+  await assertWholesaleWarehouseForOrganization(supabase, orgId, warehouseId);
 
   const productIds = Array.from(
     new Set(
@@ -3258,15 +3282,18 @@ async function buildStockAdjustmentContext(params: {
   const [productsResult, lotsResult] = await Promise.all([
     supabase
       .from("products")
-      .select("id, name, unit_of_measure, tracks_stock_units, weight_per_unit")
+      .select(
+        "id, name, unit_of_measure, tracks_stock_units, weight_per_unit, has_variants"
+      )
       .eq("organization_id", orgId)
       .in("id", productIds),
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
+        "id, product_id, product_variant_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
       )
       .eq("organization_id", orgId)
+      .eq("warehouse_id", warehouseId)
       .in("product_id", productIds)
       .order("expiration_date", { ascending: true })
       .order("created_at", { ascending: true }),
@@ -3284,50 +3311,9 @@ async function buildStockAdjustmentContext(params: {
     );
   }
 
-  // --- Fetch variant lot mappings (for variant products) ---
-  const variantIds = items
-    .map((item) => item.productVariantId)
-    .filter((id): id is string => Boolean(id));
+  const products = productsResult.data ?? [];
 
-  const variantLotMap = new Map<string, string>();
-  if (variantIds.length > 0) {
-    const { data: variantData, error: variantError } = await supabase
-      .from("product_variants")
-      .select("id, lot_id")
-      .eq("organization_id", orgId)
-      .in("id", variantIds);
-
-    if (variantError) {
-      throw new Error(`Error obteniendo variantes: ${variantError.message}`);
-    }
-
-    for (const v of variantData ?? []) {
-      if (v.id && v.lot_id) {
-        variantLotMap.set(v.id, v.lot_id);
-      }
-    }
-  }
-
-  const products =
-    (productsResult.data as Array<{
-      id?: string | null;
-      name?: string | null;
-      unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"];
-      tracks_stock_units?: boolean | null;
-      weight_per_unit?: number | null;
-    }>) ?? [];
-
-  const lots =
-    (lotsResult.data as Array<{
-      id?: string | null;
-      product_id?: string | null;
-      warehouse_id: string;
-      quantity_available?: number | null;
-      unit_quantity_available?: number | null;
-      lot_number?: string | null;
-      expiration_date?: string | null;
-      created_at?: string | null;
-    }>) ?? [];
+  const lots = lotsResult.data ?? [];
 
   const productsById = new Map<string, ProductStockMetadata>();
 
@@ -3338,6 +3324,7 @@ async function buildStockAdjustmentContext(params: {
 
     productsById.set(product.id, {
       id: product.id,
+      hasVariants: product.has_variants,
       name: product.name ?? "Producto sin nombre",
       unitOfMeasure:
         (product.unit_of_measure as SaleProduct["unitOfMeasure"]) || "UN",
@@ -3353,10 +3340,6 @@ async function buildStockAdjustmentContext(params: {
   }
 
   const lotsByProduct = new Map<string, typeof lots>();
-  const totalsByProduct = new Map<
-    string,
-    { totalQuantity: number; totalUnits: number | null }
-  >();
 
   for (const lot of lots) {
     if (!lot.product_id) {
@@ -3366,27 +3349,11 @@ async function buildStockAdjustmentContext(params: {
     const lotList = lotsByProduct.get(lot.product_id) ?? [];
     lotList.push(lot);
     lotsByProduct.set(lot.product_id, lotList);
-
-    const currentTotals = totalsByProduct.get(lot.product_id) ?? {
-      totalQuantity: 0,
-      totalUnits: null as number | null,
-    };
-
-    const nextTotalUnits =
-      currentTotals.totalUnits !== null || lot.unit_quantity_available !== null
-        ? (currentTotals.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
-        : null;
-
-    totalsByProduct.set(lot.product_id, {
-      totalQuantity:
-        currentTotals.totalQuantity + (lot.quantity_available ?? 0),
-      totalUnits: nextTotalUnits,
-    });
   }
 
   const lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][] =
     [];
-  const rollbackLotUpdates: Database["public"]["Tables"]["product_lots"]["Update"][] =
+  const rollbackLotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][] =
     [];
   const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
     [];
@@ -3403,106 +3370,30 @@ async function buildStockAdjustmentContext(params: {
     if (!product) {
       throw new Error("Producto no encontrado para descontar stock.");
     }
-
-    // ============= PRODUCTOS CON VARIANTES =============
-    if (item.productVariantId) {
-      const variantLotId = variantLotMap.get(item.productVariantId);
-      if (!variantLotId) {
-        throw new Error(
-          `No se encontró el lote de la variante para ${product.name}.`
-        );
-      }
-
-      const variantLot = lots.find((l) => l.id === variantLotId);
-      if (!variantLot) {
-        throw new Error(
-          `No hay lote de stock para la variante de ${product.name}.`
-        );
-      }
-
-      const weightUnit = isWeightOrVolumeUnit(product.unitOfMeasure);
-      const variantTotals = {
-        totalQuantity: variantLot.quantity_available ?? 0,
-        totalUnits: variantLot.unit_quantity_available ?? null,
-      };
-      const requiredBase = weightUnit
-        ? resolveWeightRequirement(item, product, variantTotals)
-        : item.quantity;
-
-      if (requiredBase > variantTotals.totalQuantity) {
-        throw new Error(
-          `No hay stock suficiente para la variante de ${product.name}. Disponible: ${variantTotals.totalQuantity}`
-        );
-      }
-
-      const availableQuantity = Math.max(0, variantLot.quantity_available ?? 0);
-      const baseToConsume = Math.min(availableQuantity, requiredBase);
-
-      if (baseToConsume <= 0) {
-        throw new Error(
-          `No se pudo asignar stock para la variante de ${product.name}.`
-        );
-      }
-
-      const lotId = variantLot.id;
-      if (!lotId) {
-        throw new Error(
-          `El lote de la variante de ${product.name} no tiene ID.`
-        );
-      }
-
-      if (!rollbackSnapshotByLot.has(lotId)) {
-        rollbackSnapshotByLot.add(lotId);
-        rollbackLotUpdates.push({
-          id: lotId,
-          organization_id: orgId,
-          warehouse_id: variantLot.warehouse_id,
-          product_id: variantLot.product_id as string,
-          lot_number: variantLot.lot_number ?? "DEFAULT",
-          expiration_date: variantLot.expiration_date,
-          quantity_available: availableQuantity,
-          ...(variantLot.unit_quantity_available !== null
-            ? { unit_quantity_available: variantLot.unit_quantity_available }
-            : {}),
-          updated_at: timestamp,
-        });
-      }
-
-      const nextQuantity = Math.max(0, availableQuantity - baseToConsume);
-
-      lotUpdates.push({
-        id: lotId,
-        organization_id: orgId,
-        warehouse_id: variantLot.warehouse_id,
-        product_id: variantLot.product_id as string,
-        lot_number: variantLot.lot_number ?? "DEFAULT",
-        expiration_date: variantLot.expiration_date,
-        quantity_available: nextQuantity,
-        updated_at: timestamp,
-      });
-
-      movementPayloads.push({
-        organization_id: orgId,
-        lot_id: lotId,
-        warehouse_id: variantLot.warehouse_id,
-        type: "OUTBOUND",
-        quantity: baseToConsume,
-        previous_stock: availableQuantity,
-        new_stock: nextQuantity,
-        reason: movementReason,
-      });
-
-      continue;
+    if (product.hasVariants !== Boolean(item.productVariantId)) {
+      throw new Error(
+        `Seleccioná la variante correspondiente de ${product.name}`
+      );
     }
 
-    // ============= PRODUCTOS SIN VARIANTES (FIFO existente) =============
-    const productLots = [...(lotsByProduct.get(item.productId) ?? [])].sort(
-      compareLotsForFifo
+    const productLots = (lotsByProduct.get(item.productId) ?? [])
+      .filter(
+        (lot) => lot.product_variant_id === (item.productVariantId ?? null)
+      )
+      .sort(compareLotsForFifo);
+    const totals = productLots.reduce(
+      (acc, lot) => ({
+        totalQuantity: acc.totalQuantity + lot.quantity_available,
+        totalUnits:
+          acc.totalUnits !== null || lot.unit_quantity_available !== null
+            ? (acc.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
+            : null,
+      }),
+      {
+        totalQuantity: 0,
+        totalUnits: null as number | null,
+      }
     );
-    const totals = totalsByProduct.get(item.productId) ?? {
-      totalQuantity: 0,
-      totalUnits: null as number | null,
-    };
 
     if (!productLots.length || totals.totalQuantity <= 0) {
       throw new Error(`No hay stock disponible para ${product.name}.`);
@@ -3593,6 +3484,12 @@ async function buildStockAdjustmentContext(params: {
           ? Math.max(0, (lot.unit_quantity_available ?? 0) - unitsToConsume)
           : null;
 
+      // Keep subsequent lines from allocating the same pre-deduction balance.
+      lot.quantity_available = nextQuantity;
+      if (nextUnits !== null) {
+        lot.unit_quantity_available = nextUnits;
+      }
+
       lotUpdates.push({
         id: lotId,
         organization_id: orgId,
@@ -3630,10 +3527,10 @@ async function buildStockAdjustmentContext(params: {
   }
 
   return {
-    lotUpdates,
+    lotUpdates: [...new Map(lotUpdates.map((lot) => [lot.id, lot])).values()],
     rollbackLotUpdates,
     movementPayloads,
-  } as StockAdjustmentContext;
+  };
 }
 
 async function getSaleReasonMetadata(
@@ -3825,6 +3722,7 @@ export async function confirmIncompleteSaleWithStockDeduction(
     movementContext = await buildStockAdjustmentContext({
       supabase,
       orgId,
+      saleId,
       items,
       movementReason,
     });
@@ -4225,6 +4123,11 @@ export async function validateStockBeforeSaleConfirmation(
       "Solo las preventas en borrador o incompletas pueden confirmarse"
     );
   }
+  await assertWholesaleWarehouseForOrganization(
+    supabase,
+    org.id,
+    await getSaleWarehouseId(supabase, org.id, input.saleId)
+  );
 
   // An incomplete sale has already had its stock deducted. An ARCA-authorized
   // preventa uses its persisted lines rather than the editable form payload.
@@ -4274,6 +4177,7 @@ export async function validateStockBeforeSaleConfirmation(
   await buildStockAdjustmentContext({
     supabase,
     orgId: org.id,
+    saleId: input.saleId,
     items,
     movementReason: "Validación de stock antes de confirmar venta",
   });
@@ -4316,7 +4220,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage, warehouse_id"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4333,6 +4237,11 @@ export async function confirmSaleOrder(
   }
 
   assertCanManageSale(accessContext, existingSale.user_id ?? null);
+  await assertWholesaleWarehouseForOrganization(
+    supabase,
+    org.id,
+    existingSale.warehouse_id
+  );
 
   if (
     input.commercialExchangeRate !== undefined &&
@@ -4464,6 +4373,7 @@ export async function confirmSaleOrder(
     ? await buildStockAdjustmentContext({
         supabase,
         orgId: org.id,
+        saleId,
         items,
         movementReason: saleMovementReason,
       })
@@ -5746,6 +5656,7 @@ async function resolveSaleStockImpactContext(params: {
 async function applySaleStockUpdate(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   items: ConfirmSaleItemInput[];
   movementReason: string;
 }): Promise<{
@@ -5755,6 +5666,7 @@ async function applySaleStockUpdate(params: {
   const stockContext = await buildStockAdjustmentContext({
     supabase: params.supabase,
     orgId: params.orgId,
+    saleId: params.saleId,
     items: params.items ?? [],
     movementReason: params.movementReason,
   });
@@ -5770,6 +5682,7 @@ async function applySaleStockUpdate(params: {
 async function restorePreviousStockAfterEditFailure(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   items: ConfirmSaleItemInput[];
   movementReason: string;
 }): Promise<void> {
@@ -5777,6 +5690,7 @@ async function restorePreviousStockAfterEditFailure(params: {
     const rollbackContext = await buildStockAdjustmentContext({
       supabase: params.supabase,
       orgId: params.orgId,
+      saleId: params.saleId,
       items: params.items ?? [],
       movementReason: params.movementReason,
     });
@@ -5834,6 +5748,7 @@ async function updateSaleStockIfNeeded(params: {
     const { stockContext, appliedMovementIds } = await applySaleStockUpdate({
       supabase: params.supabase,
       orgId: params.orgId,
+      saleId: params.saleId,
       items: impactContext.newStockItems,
       movementReason: impactContext.movementReason,
     });
@@ -5851,6 +5766,7 @@ async function updateSaleStockIfNeeded(params: {
       await restorePreviousStockAfterEditFailure({
         supabase: params.supabase,
         orgId: params.orgId,
+        saleId: params.saleId,
         items: impactContext.previousStockItems,
         movementReason: impactContext.previousMovementReason,
       });
@@ -6309,6 +6225,11 @@ async function createInformalAdvanceDocument(params: {
     .from("sales_orders")
     .insert({
       organization_id: params.orgId,
+      warehouse_id: await getSaleWarehouseId(
+        params.supabase,
+        params.orgId,
+        params.parentSaleId
+      ),
       customer_id: params.customerId,
       user_id: params.userId,
       sale_date: new Date().toISOString().slice(0, 10),
@@ -6843,6 +6764,7 @@ async function updateReceivableForSaleUpdate(params: {
 async function rollbackSaleUpdateStock(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   state: SaleStockUpdateState;
 }): Promise<void> {
   if (params.state.stockNeedsRollback && params.state.stockContext) {
@@ -6859,6 +6781,7 @@ async function rollbackSaleUpdateStock(params: {
       const rollbackContext = await buildStockAdjustmentContext({
         supabase: params.supabase,
         orgId: params.orgId,
+        saleId: params.saleId,
         items: params.state.previousStockItems ?? [],
         movementReason: params.state.previousMovementReason,
       });
@@ -7102,6 +7025,7 @@ export async function updateSaleOrder(
     await rollbackSaleUpdateStock({
       supabase,
       orgId: org.id,
+      saleId,
       state: stockState,
     });
 

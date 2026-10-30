@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
+import { getQuoteWarehouseVariantsAction } from "@/modules/quotes/actions/quote-warehouse.actions";
 import type { QuoteItemVariantFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 
@@ -19,6 +20,7 @@ type ProductVariantsGridDialogProps = {
   onOpenChange: (open: boolean) => void;
   product: SaleProduct | null;
   orgSlug: string;
+  warehouseId?: string;
   onConfirm: (variants: QuoteItemVariantFormValues[]) => void;
   initialQuantities?: Record<string, Record<string, number>>;
 };
@@ -28,6 +30,7 @@ export function ProductVariantsGridDialog({
   onOpenChange,
   product,
   orgSlug,
+  warehouseId,
   onConfirm,
   initialQuantities,
 }: ProductVariantsGridDialogProps) {
@@ -48,10 +51,21 @@ export function ProductVariantsGridDialog({
 
   const enabled = isOpen && !!product;
 
-  const { data: variants, isLoading } = useProductVariants(
-    orgSlug,
-    product?.id ?? ""
-  );
+  const {
+    data: variants,
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["quote-variants-stock", orgSlug, warehouseId, product?.id],
+    queryFn: () =>
+      getQuoteWarehouseVariantsAction({
+        orgSlug,
+        warehouseId: warehouseId ?? "",
+        productId: product?.id ?? "",
+      }),
+    enabled: enabled && Boolean(warehouseId),
+    staleTime: 0,
+  });
 
   const talles = useMemo(() => {
     if (!variants || variants.length === 0) {
@@ -136,6 +150,23 @@ export function ProductVariantsGridDialog({
         <DialogHeader>
           <DialogTitle>Seleccionar variantes para {product.name}</DialogTitle>
         </DialogHeader>
+        {isError && (
+          <p className="text-destructive text-sm">
+            No se pudo consultar la disponibilidad.
+          </p>
+        )}
+        {!warehouseId && (
+          <p className="text-sm">
+            Seleccioná un depósito antes de agregar variantes.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2 text-muted-foreground text-xs">
+          {variants?.map((variant) => (
+            <span key={variant.id}>
+              {variant.talle} / {variant.color}: {variant.stock} disponibles
+            </span>
+          ))}
+        </div>
         <VariantStockMatrix
           colores={colores}
           editable
@@ -150,7 +181,12 @@ export function ProductVariantsGridDialog({
             <Button onClick={() => onOpenChange(false)} variant="outline">
               Cancelar
             </Button>
-            <Button disabled={totalQuantity === 0} onClick={handleConfirm}>
+            <Button
+              disabled={
+                totalQuantity === 0 || isLoading || isError || !warehouseId
+              }
+              onClick={handleConfirm}
+            >
               Confirmar
             </Button>
           </div>

@@ -944,6 +944,7 @@ function useLoadStockForItems({
     getStockForOrderAction(
       orgSlug,
       validItems.map((i) => ({
+        quoteItemId: i.id,
         productId: i.product_id,
         quantityNeeded: i.quantity,
         productVariantId: i.product_variant_id,
