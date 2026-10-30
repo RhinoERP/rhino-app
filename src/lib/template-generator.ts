@@ -18,6 +18,11 @@ export type ProductTemplateRow = {
 };
 
 export type StockTemplateRow = {
+  deposito?: string;
+  id_deposito?: string;
+  talle?: string;
+  color?: string;
+  id_lote?: string;
   sku: string;
   proveedor: string;
   cantidad_kg_lt: string;
@@ -270,6 +275,18 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
   ],
   stock: [
     {
+      header: "Depósito",
+      description:
+        "Nombre exacto del depósito habilitado. Obligatorio si hay varios; todas las cantidades son saldos de este depósito, no del total de la organización.",
+      required: false,
+    },
+    {
+      header: "ID de depósito",
+      description:
+        "ID del depósito, opcional. Usalo si hay nombres repetidos; si completás nombre e ID deben coincidir.",
+      required: false,
+    },
+    {
       header: "SKU",
       description: "Código SKU del producto (obligatorio).",
       required: true,
@@ -294,12 +311,31 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
     {
       header: "Número de lote",
-      description: "Número de lote (opcional).",
+      description:
+        "Número de lote. Obligatorio para productos simples; DEFAULT por defecto para variantes.",
       required: false,
     },
     {
       header: "Fecha de vencimiento",
       description: "Fecha de vencimiento en formato DD/MM/AAAA (opcional).",
+      required: false,
+    },
+    {
+      header: "Talle",
+      description:
+        "Talle exacto, obligatorio para productos con variantes. Dejar vacío para productos simples.",
+      required: false,
+    },
+    {
+      header: "Color",
+      description:
+        "Color exacto, obligatorio para productos con variantes. Dejar vacío para productos simples.",
+      required: false,
+    },
+    {
+      header: "ID de lote",
+      description:
+        "ID de la existencia. Obligatorio si depósito, producto, variante, lote y vencimiento identifican más de una fila. No se elige el primer lote automáticamente.",
       required: false,
     },
   ],

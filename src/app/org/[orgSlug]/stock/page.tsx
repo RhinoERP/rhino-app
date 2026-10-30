@@ -1,5 +1,7 @@
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { StockMetricsCards } from "@/components/stock/stock-metrics";
+import { StockTransferHistoryDialog } from "@/components/stock/stock-transfer-history-dialog";
+import { WarehouseStockBreakdownDialog } from "@/components/stock/warehouse-stock-breakdown-dialog";
 import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
@@ -106,7 +108,9 @@ export default async function StockPage({
           </p>
         </div>
         {!isMercadoLibreOnly && (
-          <div className="w-full md:w-auto">
+          <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
+            <WarehouseStockBreakdownDialog orgSlug={orgSlug} />
+            <StockTransferHistoryDialog orgSlug={orgSlug} />
             <AddProductDialog
               categories={categories}
               isAccountingEnabled={isAccountingEnabled}

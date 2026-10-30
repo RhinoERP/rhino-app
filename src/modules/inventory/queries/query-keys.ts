@@ -4,5 +4,5 @@ export const productVariantsQueryKey = (orgSlug: string, productId: string) =>
 export const stockMovementsByVariantQueryKey = (
   orgSlug: string,
   productId: string,
-  lotId: string
-) => ["org", orgSlug, "stock", productId, "movements", lotId] as const;
+  variantId: string
+) => ["org", orgSlug, "stock", productId, "movements", variantId] as const;

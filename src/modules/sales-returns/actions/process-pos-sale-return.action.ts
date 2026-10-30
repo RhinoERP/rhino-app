@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isStockReentryFallbackRequired } from "@/modules/inventory/utils/stock-reentry";
 import { processPosSaleReturn } from "@/modules/sales-returns/service/sales-returns.service";
 import {
   type ProcessPosSaleReturnInput,
@@ -12,6 +13,7 @@ export type ProcessPosSaleReturnActionResult = {
   success: boolean;
   data?: ProcessPosSaleReturnResult;
   error?: string;
+  requiresDefaultFallback?: boolean;
 };
 
 export async function processPosSaleReturnAction(
@@ -44,6 +46,7 @@ export async function processPosSaleReturnAction(
 
     return {
       success: false,
+      requiresDefaultFallback: isStockReentryFallbackRequired(error),
       error:
         error instanceof Error
           ? error.message

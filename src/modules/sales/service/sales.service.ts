@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   asentarInformalEntry,
   cancelInformalEntry,
@@ -11,7 +11,14 @@ import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
-import { assertWholesaleWarehouseForOrganization } from "@/modules/inventory/service/warehouse-stock.service";
+import {
+  applyStockReentries,
+  undoStockReentries,
+} from "@/modules/inventory/service/stock-reentry.service";
+import {
+  assertWholesaleWarehouseForOrganization,
+  resolveWholesaleWarehouseId,
+} from "@/modules/inventory/service/warehouse-stock.service";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { findAlreadyDeductedItemIds } from "@/modules/orders/service/orders.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
@@ -52,8 +59,12 @@ import {
   computeDueDate,
   computeReceivableDueDateFromDispatch,
 } from "../utils/date";
+import { getSaleStockOriginLedger } from "./sale-stock-origin.service";
 import { applySalesDateFilters } from "./sales-filters";
-import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
+import {
+  getAuthorizedSaleFiscalUpdateFields,
+  shouldUpdateSaleWarehouse,
+} from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -1507,7 +1518,8 @@ function addLotToStockTotals(
 async function fetchStockTotals(
   supabase: SupabaseServerClient,
   orgId: string,
-  productIds: string[]
+  productIds: string[],
+  warehouseId?: string
 ) {
   const stockTotals = new Map<string, StockTotals>();
   const idChunks = chunkItems(
@@ -1516,11 +1528,14 @@ async function fetchStockTotals(
   );
 
   for (const ids of idChunks) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("product_lots")
       .select("product_id, quantity_available, unit_quantity_available")
-      .eq("organization_id", orgId)
-      .in("product_id", ids);
+      .eq("organization_id", orgId);
+    if (warehouseId) {
+      query = query.eq("warehouse_id", warehouseId);
+    }
+    const { data, error } = await query.in("product_id", ids);
 
     if (error) {
       throw new Error(`Error obteniendo stock: ${error.message}`);
@@ -1603,7 +1618,10 @@ function resolveSalesProductAccountingAccountCode(params: {
   return accountingRuleByCategoryId.get(categoryId) ?? null;
 }
 
-export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
+export async function getSaleProducts(
+  orgSlug: string,
+  warehouseId?: string
+): Promise<SaleProduct[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -1611,6 +1629,9 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   }
 
   const supabase = await createClient();
+  const resolvedWarehouseId = warehouseId
+    ? await resolveWholesaleWarehouseId(orgSlug, warehouseId)
+    : undefined;
   const products = await fetchActiveProductsForOrg(supabase, org.id);
 
   if (!products.length) {
@@ -1629,7 +1650,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const [productSettings, stockTotals, productTaxes, categoryRules] =
     await Promise.all([
       fetchProductStockSettingsMap(supabase, org.id, productIds),
-      fetchStockTotals(supabase, org.id, productIds),
+      fetchStockTotals(supabase, org.id, productIds, resolvedWarehouseId),
       getProductTaxAssignments({
         supabase,
         orgId: org.id,
@@ -2975,9 +2996,16 @@ export async function createPreSaleOrder(
     input.creditDays
   );
 
+  const warehouseId = trustedExecution
+    ? await getDefaultWarehouseId(supabase, org.id)
+    : await resolveWholesaleWarehouseId(
+        orgSlug,
+        input.warehouseId ?? undefined
+      );
+
   const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] = {
     organization_id: org.id,
-    warehouse_id: await getDefaultWarehouseId(supabase, org.id),
+    warehouse_id: warehouseId,
     customer_id: customerId,
     user_id: resolvedSellerId as string,
     sale_date: saleDate,
@@ -3837,6 +3865,7 @@ type StockMovementRow = {
   lot_id: string | null;
   quantity: number | null;
   unit_quantity: number | null;
+  reentry_source_lot_id?: string | null;
 };
 
 type NetLot = { quantity: number; unit_quantity: number | null };
@@ -3867,15 +3896,16 @@ function subtractPreviousReingresos(
   reingresos: StockMovementRow[]
 ): void {
   for (const m of reingresos) {
-    if (!m.lot_id) {
+    const sourceLotId = m.reentry_source_lot_id ?? m.lot_id;
+    if (!sourceLotId) {
       continue;
     }
-    const current = netByLot.get(m.lot_id);
+    const current = netByLot.get(sourceLotId);
     if (!current) {
       continue;
     }
     const uq = m.unit_quantity != null ? Math.abs(m.unit_quantity) : null;
-    netByLot.set(m.lot_id, {
+    netByLot.set(sourceLotId, {
       quantity: current.quantity - (m.quantity ?? 0),
       unit_quantity:
         uq != null && current.unit_quantity != null
@@ -3930,7 +3960,7 @@ function buildSingleLotRestock(
   net: NetLot,
   ctx: RestockContext
 ): LotRestockEntry | null {
-  if (!(lot.id && lot.product_id && lot.lot_number && lot.expiration_date)) {
+  if (!(lot.id && lot.product_id && lot.lot_number)) {
     return null;
   }
   const previousStock = lot.quantity_available ?? 0;
@@ -4003,8 +4033,9 @@ function buildRestockPayloads(
 async function restockFromSale(
   supabase: SupabaseServerClient,
   orgId: string,
-  saleId: string
-) {
+  saleId: string,
+  allowDefaultFallback = false
+): Promise<string[]> {
   const saleReason = await getSaleReasonMetadata(supabase, orgId, saleId);
 
   const reingresReason = formatSaleMovementReason({
@@ -4015,40 +4046,27 @@ async function restockFromSale(
     prefix: "Reingreso ",
   });
 
-  const [outboundsResult, inboundsResult] = await Promise.all([
-    supabase
-      .from("stock_movements")
-      .select("lot_id, quantity, unit_quantity")
-      .eq("organization_id", orgId)
-      .eq("type", "OUTBOUND")
-      .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]),
-    supabase
-      .from("stock_movements")
-      .select("lot_id, quantity, unit_quantity")
-      .eq("organization_id", orgId)
-      .eq("type", "INBOUND")
-      .eq("reason", reingresReason),
-  ]);
-
-  if (outboundsResult.error) {
-    throw new Error(
-      `No se pudieron obtener los movimientos de la venta para reingresar stock: ${outboundsResult.error.message}`
-    );
-  }
-
-  const outbounds = outboundsResult.data ?? [];
+  const ledger = await getSaleStockOriginLedger({
+    supabase,
+    orgId,
+    saleId,
+    saleNumber: saleReason.saleNumber,
+    invoiceNumber: saleReason.invoiceNumber,
+    reentryReason: reingresReason,
+  });
+  const outbounds = ledger.outgoing;
   if (!outbounds.length) {
-    return;
+    return [];
   }
 
-  const netByLot = buildNetByLot(outbounds, inboundsResult.data ?? []);
+  const netByLot = buildNetByLot(outbounds, ledger.inbound);
 
   const activeLotIds = Array.from(netByLot.entries())
     .filter(([, net]) => net.quantity > 0)
     .map(([lotId]) => lotId);
 
   if (!activeLotIds.length) {
-    return;
+    return [];
   }
 
   const { data: lots, error: lotsError } = await supabase
@@ -4064,34 +4082,37 @@ async function restockFromSale(
       `No se pudieron obtener los lotes para reingresar stock: ${lotsError.message}`
     );
   }
+  if (lots?.length !== activeLotIds.length) {
+    throw new Error("No se encontró un lote original para el reingreso");
+  }
 
-  const { lotUpdates, movements } = buildRestockPayloads(lots ?? [], netByLot, {
+  const { movements } = buildRestockPayloads(lots ?? [], netByLot, {
     orgId,
     reingresReason,
     timestamp: new Date().toISOString(),
   });
 
-  if (lotUpdates.length) {
-    const { error: updateError } = await supabase
-      .from("product_lots")
-      .upsert(lotUpdates);
-    if (updateError) {
-      throw new Error(
-        `No se pudo reingresar el stock de la venta: ${updateError.message}`
-      );
-    }
-  }
-
-  if (movements.length) {
-    const { error: movementInsertError } = await supabase
-      .from("stock_movements")
-      .insert(movements);
-    if (movementInsertError) {
-      throw new Error(
-        `No se pudo registrar el reingreso de stock: ${movementInsertError.message}`
-      );
-    }
-  }
+  const operationId = createHash("sha256")
+    .update(
+      outbounds
+        .map((movement) => movement.id)
+        .sort()
+        .join(":")
+    )
+    .digest("hex")
+    .slice(0, 32);
+  return applyStockReentries({
+    supabase,
+    orgId,
+    allowDefaultFallback,
+    entries: movements.map((movement) => ({
+      sourceLotId: movement.lot_id,
+      quantity: movement.quantity,
+      unitQuantity: movement.unit_quantity,
+      reason: reingresReason,
+      operationKey: `sale-reentry:${saleId}:${operationId}:${movement.lot_id}`,
+    })),
+  });
 }
 
 export async function validateStockBeforeSaleConfirmation(
@@ -4744,7 +4765,8 @@ async function assertAuthorizedPreventaCanBeCancelled(params: {
 
 export async function cancelSaleOrder(
   orgSlug: string,
-  saleId: string
+  saleId: string,
+  allowDefaultFallback = false
 ): Promise<{
   status: Database["public"]["Enums"]["order_status"];
   wasUpdated: boolean;
@@ -4803,9 +4825,9 @@ export async function cancelSaleOrder(
     sale.status === "DISPATCH" ||
     sale.status === "DELIVERED";
 
-  if (shouldRestock) {
-    await restockFromSale(supabase, org.id, saleId);
-  }
+  const reentryIds = shouldRestock
+    ? await restockFromSale(supabase, org.id, saleId, allowDefaultFallback)
+    : [];
 
   const { error: updateError } = await supabase
     .from("sales_orders")
@@ -4817,6 +4839,11 @@ export async function cancelSaleOrder(
     .eq("organization_id", org.id);
 
   if (updateError) {
+    await undoStockReentries({
+      supabase,
+      orgId: org.id,
+      movementIds: reentryIds,
+    });
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
   }
 
@@ -5020,12 +5047,13 @@ async function validateSaleForUpdate(
   invoiceType: Database["public"]["Enums"]["invoice_type"] | null;
   customerId: string | null;
   userId: string | null;
+  warehouseId: string | null;
   advancePaymentPercentage: number | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status, advance_payment_percentage, document_type"
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, warehouse_id, arca_status, advance_payment_percentage, document_type"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -5088,11 +5116,46 @@ async function validateSaleForUpdate(
         : null,
     userId:
       typeof existingSale.user_id === "string" ? existingSale.user_id : null,
+    warehouseId:
+      typeof existingSale.warehouse_id === "string"
+        ? existingSale.warehouse_id
+        : null,
     advancePaymentPercentage:
       typeof existingSale.advance_payment_percentage === "number"
         ? existingSale.advance_payment_percentage
         : null,
   };
+}
+
+function resolveSaleWarehouseUpdate(
+  orgSlug: string,
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  requestedWarehouseId: string | undefined
+): Promise<string | undefined> | undefined {
+  const params = {
+    status: existingSale.status,
+    currentWarehouseId: existingSale.warehouseId,
+    requestedWarehouseId,
+  };
+  if (!shouldUpdateSaleWarehouse(params)) {
+    return;
+  }
+  return resolveWholesaleWarehouseId(orgSlug, params.requestedWarehouseId);
+}
+
+async function applySaleWarehouseUpdate(
+  orgSlug: string,
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  input: UpdateSaleOrderInput
+): Promise<void> {
+  if (input.warehouseId === undefined) {
+    return;
+  }
+  input.warehouseId = await resolveSaleWarehouseUpdate(
+    orgSlug,
+    existingSale,
+    input.warehouseId
+  );
 }
 
 function buildSaleUpdateData(
@@ -5143,6 +5206,9 @@ function buildSaleUpdateData(
   }
   if (input.priceLevelId !== undefined) {
     updateData.price_level_id = input.priceLevelId;
+  }
+  if (input.warehouseId !== undefined) {
+    updateData.warehouse_id = input.warehouseId;
   }
 
   return updateData;
@@ -6939,6 +7005,7 @@ export async function updateSaleOrder(
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
+  await applySaleWarehouseUpdate(orgSlug, existingSale, input);
   await assertEditedItemsIncludeExtras(supabase, org.id, saleId, input.items);
   assertNoAuthorizedSaleFiscalChanges(existingSale, input);
   if (

@@ -21,12 +21,12 @@ export const productVariantsClientQueryOptions = (
 export const stockMovementsByVariantClientQueryOptions = (
   orgSlug: string,
   productId: string,
-  lotId: string
+  variantId: string
 ) => ({
-  queryKey: stockMovementsByVariantQueryKey(orgSlug, productId, lotId),
+  queryKey: stockMovementsByVariantQueryKey(orgSlug, productId, variantId),
   queryFn: async (): Promise<StockMovementWithLot[]> => {
     const res = await fetch(
-      `/api/org/${orgSlug}/stock/${productId}/movements?lotId=${encodeURIComponent(lotId)}`
+      `/api/org/${orgSlug}/stock/${productId}/movements?variantId=${encodeURIComponent(variantId)}`
     );
     if (!res.ok) {
       throw new Error("Error al cargar movimientos");

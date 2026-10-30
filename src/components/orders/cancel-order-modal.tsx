@@ -3,6 +3,7 @@
 import { XCircleIcon } from "@phosphor-icons/react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -42,6 +43,7 @@ export function CancelOrderModal({
   onSuccess,
 }: CancelOrderModalProps) {
   const [notes, setNotes] = useState("");
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const config =
@@ -95,13 +97,18 @@ export function CancelOrderModal({
     );
   })();
 
-  function handleConfirm() {
+  function handleConfirm(allowDefaultFallback = false) {
     if (!notes.trim()) {
       return;
     }
 
     startTransition(async () => {
-      const result = await cancelOrderAction(orgSlug, orderId, notes);
+      const result = await cancelOrderAction(
+        orgSlug,
+        orderId,
+        notes,
+        allowDefaultFallback
+      );
 
       if (result.success) {
         const label = config?.label ?? orderStatus;
@@ -110,6 +117,10 @@ export function CancelOrderModal({
         onOpenChange(false);
         onSuccess?.();
       } else {
+        if (result.requiresDefaultFallback) {
+          setFallbackOpen(true);
+          return;
+        }
         toast.error(result.error ?? "Error al cancelar pedido");
       }
     });
@@ -148,7 +159,7 @@ export function CancelOrderModal({
           </Button>
           <Button
             disabled={!notes.trim() || isPending}
-            onClick={handleConfirm}
+            onClick={() => handleConfirm()}
             variant="destructive"
           >
             <XCircleIcon className="size-4" />
@@ -156,6 +167,15 @@ export function CancelOrderModal({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <StockReentryFallbackDialog
+        onConfirm={() => {
+          setFallbackOpen(false);
+          handleConfirm(true);
+        }}
+        onOpenChange={setFallbackOpen}
+        open={fallbackOpen}
+        pending={isPending}
+      />
     </Dialog>
   );
 }

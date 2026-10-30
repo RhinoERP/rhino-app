@@ -7,15 +7,15 @@ import type { StockMovementWithLot } from "../types";
 export function useStockMovementsByVariant(
   orgSlug: string,
   productId: string,
-  lotId: string | null,
+  variantId: string | null,
   enabled?: boolean
 ) {
   return useQuery<StockMovementWithLot[]>({
     ...stockMovementsByVariantClientQueryOptions(
       orgSlug,
       productId,
-      lotId ?? ""
+      variantId ?? ""
     ),
-    enabled: enabled !== false && !!lotId,
+    enabled: enabled !== false && !!variantId,
   });
 }

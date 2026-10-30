@@ -1,5 +1,10 @@
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import {
+  applyStockReentries,
+  checkReentryOrigins,
+  undoStockReentries,
+} from "@/modules/inventory/service/stock-reentry.service";
 import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -941,7 +946,7 @@ async function buildInboundStockReversalContext(params: {
 
     const previousUnitStock = lot.unitQuantityAvailable;
     const movementUnitQuantity =
-      inboundUnitQuantity !== null && previousUnitStock !== null
+      inboundUnitQuantity !== null
         ? truncateQuantity(inboundUnitQuantity)
         : null;
     const newUnitStock =
@@ -989,42 +994,25 @@ async function buildInboundStockReversalContext(params: {
 
 async function applyInboundStockAdjustments(
   supabase: SupabaseServerClient,
-  context: StockReversalContext
+  context: StockReversalContext,
+  options: { returnId: string; orgId: string; allowDefaultFallback?: boolean }
 ): Promise<string[]> {
   if (!context.lotUpdates.length) {
     return [];
   }
 
-  const { error: lotUpdateError } = await supabase
-    .from("product_lots")
-    .upsert(context.lotUpdates);
-
-  if (lotUpdateError) {
-    throw new Error(
-      `No se pudo reingresar stock en lotes: ${lotUpdateError.message}`
-    );
-  }
-
-  if (!context.movementPayloads.length) {
-    return [];
-  }
-
-  const { data: insertedMovements, error: movementError } = await supabase
-    .from("stock_movements")
-    .insert(context.movementPayloads)
-    .select("id");
-
-  if (movementError) {
-    await supabase.from("product_lots").upsert(context.rollbackLotUpdates);
-
-    throw new Error(
-      `No se pudo registrar movimientos de reingreso de stock: ${movementError.message}`
-    );
-  }
-
-  return (insertedMovements ?? [])
-    .map((movement) => movement.id)
-    .filter((id): id is string => Boolean(id));
+  return await applyStockReentries({
+    supabase,
+    orgId: options.orgId,
+    allowDefaultFallback: options.allowDefaultFallback,
+    entries: context.movementPayloads.map((movement, index) => ({
+      sourceLotId: movement.lot_id,
+      quantity: movement.quantity,
+      unitQuantity: movement.unit_quantity,
+      reason: movement.reason ?? "Devolución POS",
+      operationKey: `pos-return:${options.returnId}:${movement.lot_id}:${index}`,
+    })),
+  });
 }
 
 async function rollbackInboundStockAdjustments(params: {
@@ -1033,33 +1021,7 @@ async function rollbackInboundStockAdjustments(params: {
   context: StockReversalContext;
   movementIds: string[];
 }) {
-  const { supabase, orgId, context, movementIds } = params;
-
-  if (movementIds.length) {
-    try {
-      await supabase
-        .from("stock_movements")
-        .delete()
-        .in("id", movementIds)
-        .eq("organization_id", orgId);
-    } catch (error) {
-      console.error(
-        "No se pudieron revertir movimientos de stock de devolución POS",
-        error
-      );
-    }
-  }
-
-  if (context.rollbackLotUpdates.length) {
-    try {
-      await supabase.from("product_lots").upsert(context.rollbackLotUpdates);
-    } catch (error) {
-      console.error(
-        "No se pudo revertir actualización de lotes de devolución POS",
-        error
-      );
-    }
-  }
+  await undoStockReentries(params);
 }
 
 async function createCustomerCreditRecord(params: {
@@ -1475,6 +1437,16 @@ export async function processPosSaleReturn(
   const returnDateTime = toReturnDateTime(payload.returnDate);
   const normalizedReason = sanitizeText(payload.reason);
   const financialNotePrefix = `Devolución POS ${saleReference}`;
+  if (payload.restock) {
+    await checkReentryOrigins({
+      supabase,
+      orgId: org.id,
+      lotIds: resolvedLines
+        .map((line) => line.lotId)
+        .filter((id): id is string => Boolean(id)),
+      allowDefaultFallback: payload.allowDefaultFallback,
+    });
+  }
 
   let posSaleReturnId: string | null = null;
   let customerCreditId: string | null = null;
@@ -1557,7 +1529,12 @@ export async function processPosSaleReturn(
 
       stockMovementIds = await applyInboundStockAdjustments(
         supabase,
-        stockContext
+        stockContext,
+        {
+          orgId: org.id,
+          returnId: posSaleReturnId,
+          allowDefaultFallback: payload.allowDefaultFallback,
+        }
       );
     }
 

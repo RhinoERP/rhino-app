@@ -1,7 +1,14 @@
 "use client";
 
-import { PencilSimple, WarningCircle, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ArrowsLeftRight,
+  PencilSimple,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,12 +28,16 @@ import {
   getProductVariantsAction,
   updateProductVariantsAction,
 } from "@/modules/inventory/actions/product.actions";
+import { useInventoryWarehouse } from "@/modules/inventory/hooks/use-inventory-warehouse";
 import type { ProductVariantRow } from "@/modules/inventory/service/inventory.service";
+import type { Product, ProductLotWithStatus } from "@/modules/inventory/types";
 import {
   normalizeTalleValue,
   normalizeVariantValue,
   sortTalles,
 } from "@/modules/inventory/utils/variant-utils";
+import { InventoryWarehouseSelector } from "./inventory-warehouse-selector";
+import { StockTransferDialog } from "./stock-transfer-dialog";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +47,8 @@ type ProductVariantsStockCardProps = {
   productId: string;
   orgSlug: string;
   minStock?: number;
+  lots: ProductLotWithStatus[];
+  product: Product;
 };
 
 type StockMap = Record<string, Record<string, number>>;
@@ -86,6 +99,19 @@ function hasLowStock(
   );
 }
 
+function getTransferableLots(
+  lots: ProductLotWithStatus[],
+  warehouseId: string | undefined
+) {
+  const transferable = lots.filter((lot) => lot.quantity_available > 0);
+  return {
+    lots: transferable,
+    initialLotId:
+      transferable.find((lot) => lot.warehouse_id === warehouseId)?.id ??
+      transferable[0]?.id,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -93,36 +119,41 @@ export function ProductVariantsStockCard({
   productId,
   orgSlug,
   minStock = 0,
+  lots,
+  product,
 }: ProductVariantsStockCardProps) {
+  const router = useRouter();
   const { can } = usePermissions();
   const canManageInventory = can("inventory.manage");
+  const [transferOpen, setTransferOpen] = useState(false);
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const [variants, setVariants] = useState<ProductVariantRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const fetchVariants = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const data = await getProductVariantsAction(orgSlug, productId);
-      setVariants(data);
-    } catch {
-      setLoadError("No se pudieron cargar las variantes.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [orgSlug, productId]);
-
-  useEffect(() => {
-    fetchVariants();
-  }, [fetchVariants]);
+  const warehouse = useInventoryWarehouse(orgSlug);
+  const {
+    data: variants = [],
+    isPending: isLoading,
+    isFetching,
+    error: variantsLoadError,
+    refetch: fetchVariants,
+  } = useQuery({
+    queryKey: [
+      "inventory-variant-stock",
+      orgSlug,
+      productId,
+      warehouse.warehouseId,
+    ],
+    queryFn: () =>
+      getProductVariantsAction(orgSlug, productId, warehouse.warehouseId),
+    staleTime: 0,
+  });
+  const loadError = variantsLoadError?.message ?? null;
 
   const talles = getUniques(variants, "talle");
   const colores = getUniques(variants, "color");
   const stockMap = buildStockMap(variants);
   const variantIdMap = buildVariantIdMap(variants);
+  const { lots: transferableLots, initialLotId: initialTransferLotId } =
+    getTransferableLots(lots, warehouse.warehouseId);
   const showWarning =
     minStock > 0 && hasLowStock(stockMap, colores, talles, minStock);
 
@@ -176,7 +207,8 @@ export function ProductVariantsStockCard({
 
     const result = await adjustMultipleVariantsStockAction(
       orgSlug,
-      adjustments
+      adjustments,
+      warehouse.warehouseId
     );
 
     if (!result.success) {
@@ -288,6 +320,20 @@ export function ProductVariantsStockCard({
                   Editar variantes
                 </Button>
                 <Button
+                  disabled={
+                    isFetching ||
+                    !warehouse.warehouseId ||
+                    transferableLots.length === 0
+                  }
+                  onClick={() => setTransferOpen(true)}
+                  size="sm"
+                  variant="outline"
+                >
+                  <ArrowsLeftRight className="mr-1.5 h-4 w-4" />
+                  Transferir
+                </Button>
+                <Button
+                  disabled={isFetching || !warehouse.warehouseId}
                   id="adjust-stock-btn"
                   onClick={openAdjustModal}
                   size="sm"
@@ -300,6 +346,19 @@ export function ProductVariantsStockCard({
         </CardHeader>
 
         <CardContent>
+          <InventoryWarehouseSelector
+            control={warehouse.form.control}
+            disabled={isSavingStock}
+            error={warehouse.query.isError}
+            isLoading={warehouse.query.isPending}
+            warehouses={warehouse.query.data}
+          />
+          {!warehouse.warehouseId && (
+            <p className="text-muted-foreground text-sm">
+              Stock total de la organización. Elegí un depósito para ajustar sus
+              existencias.
+            </p>
+          )}
           <VariantStockMatrix
             colores={colores}
             errorMessage={loadError}
@@ -358,6 +417,20 @@ export function ProductVariantsStockCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <StockTransferDialog
+        initialLotId={initialTransferLotId}
+        lots={lots}
+        onOpenChange={setTransferOpen}
+        onTransferred={() => {
+          router.refresh();
+          fetchVariants();
+        }}
+        open={transferOpen}
+        orgSlug={orgSlug}
+        product={product}
+        variants={variants}
+      />
 
       {/* ── Edit Variants Modal ──────────────────────────────────────────── */}
       <Dialog onOpenChange={setEditOpen} open={editOpen}>

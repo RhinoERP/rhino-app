@@ -44,7 +44,8 @@ async function resolveWarehouseContext(orgSlug: string) {
 /** Operational choices only: active, channel-compatible and assigned. */
 export async function getAvailableWarehouses(
   orgSlug: string,
-  channel?: WarehouseChannel
+  channel?: WarehouseChannel,
+  options?: { includeInactive?: boolean }
 ): Promise<Warehouse[]> {
   const context = await resolveWarehouseContext(orgSlug);
   const { supabase, orgId, userId, isAdmin } = context;
@@ -52,9 +53,11 @@ export async function getAvailableWarehouses(
     .from("warehouses")
     .select("*")
     .eq("organization_id", orgId)
-    .eq("is_active", true)
     .order("is_default", { ascending: false })
     .order("name");
+  if (!options?.includeInactive) {
+    query = query.eq("is_active", true);
+  }
   if (channel) {
     query = query.eq(
       channel === "wholesale" ? "wholesale_enabled" : "direct_sale_enabled",
@@ -85,6 +88,45 @@ export async function getAvailableWarehouses(
     throw new Error(`No se pudieron consultar los depósitos: ${error.message}`);
   }
   return data;
+}
+
+/**
+ * Validates access to a warehouse even when it is inactive, so stock can be
+ * drained after deactivation. Destinations that receive stock must stay active.
+ */
+export async function assertWarehouseAccess(
+  orgSlug: string,
+  warehouseId: string,
+  options?: { requireActive?: boolean }
+): Promise<Warehouse> {
+  z.uuid().parse(warehouseId);
+  const { supabase, orgId, userId, isAdmin } =
+    await resolveWarehouseContext(orgSlug);
+  const { data: warehouse, error } = await supabase
+    .from("warehouses")
+    .select("*")
+    .eq("organization_id", orgId)
+    .eq("id", warehouseId)
+    .maybeSingle();
+  if (error || !warehouse) {
+    throw new Error("Depósito no encontrado en esta organización");
+  }
+  if (options?.requireActive !== false && !warehouse.is_active) {
+    throw new Error("El depósito está inactivo");
+  }
+  if (!isAdmin) {
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("warehouse_user_assignments")
+      .select("warehouse_id")
+      .eq("organization_id", orgId)
+      .eq("warehouse_id", warehouseId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (assignmentError || !assignment) {
+      throw new Error("No tenés acceso al depósito seleccionado");
+    }
+  }
+  return warehouse;
 }
 
 export async function resolveWholesaleWarehouseId(
@@ -162,6 +204,10 @@ export async function getWarehouseProductLots(params: {
   }
   return result;
 }
+
+export type WarehouseTransferRecord = Awaited<
+  ReturnType<typeof getWarehouseTransfers>
+>[number];
 
 /** Includes inactive warehouses in history; operational selectors exclude them. */
 export async function getWarehouseTransfers(

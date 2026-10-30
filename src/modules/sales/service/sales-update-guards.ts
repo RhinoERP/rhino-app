@@ -21,3 +21,24 @@ export function getAuthorizedSaleFiscalUpdateFields(
     (field) => input[field] !== undefined
   );
 }
+
+export function shouldUpdateSaleWarehouse(params: {
+  status: string;
+  currentWarehouseId: string | null;
+  requestedWarehouseId: string | undefined;
+}): params is {
+  status: "DRAFT";
+  currentWarehouseId: string | null;
+  requestedWarehouseId: string;
+} {
+  const { status, currentWarehouseId, requestedWarehouseId } = params;
+  if (!requestedWarehouseId || requestedWarehouseId === currentWarehouseId) {
+    return false;
+  }
+  if (status !== "DRAFT") {
+    throw new Error(
+      "Solo se puede cambiar el depósito de una preventa en borrador"
+    );
+  }
+  return true;
+}

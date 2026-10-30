@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { truncateMoney } from "@/lib/decimal";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
+import { checkReentryWarehouse } from "@/modules/inventory/service/stock-reentry.service";
 import { resolveWholesaleWarehouseId } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
@@ -39,6 +40,7 @@ import {
 } from "../types";
 import { splitQuoteItemAmounts } from "../utils/split-quote-item-amounts";
 import { buildSplitQuoteItemExtras } from "../utils/split-quote-item-extras";
+import { restoreOriginalOrderStock } from "./order-stock-reentry.service";
 import { getQuoteItemsWarehouseId } from "./order-warehouse.service";
 
 type OrdersScope = "all" | "own";
@@ -2791,163 +2793,18 @@ export async function rollbackStockDeduction(
   }
 }
 
-async function fetchLotsForRestore(
-  supabase: SupabaseClient<Database>,
-  orgId: string,
-  productIds: string[],
-  warehouseId: string
-): Promise<{
-  lotsByProduct: Map<string, LotDeduction[]>;
-}> {
-  const { data: lots } = await supabase
-    .from("product_lots")
-    .select(
-      "id, product_id, product_variant_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
-    )
-    .eq("organization_id", orgId)
-    .eq("warehouse_id", warehouseId)
-    .in("product_id", productIds)
-    .order("created_at", { ascending: true });
-
-  const lotsByProduct = new Map<string, LotDeduction[]>();
-  for (const lot of lots ?? []) {
-    if (!lot.product_id) {
-      continue;
-    }
-    const list = lotsByProduct.get(lot.product_id) ?? [];
-    list.push(lot);
-    lotsByProduct.set(lot.product_id, list);
-  }
-
-  return { lotsByProduct };
-}
-
-function buildRestoreLotUpdates(
-  stockItems: Array<{
-    product_id: string;
-    product_variant_id: string | null;
-    quantity: number;
-    description: string | null;
-  }>,
-  options: {
-    lotsByProduct: Map<string, LotDeduction[]>;
-    orgId: string;
-    movementReason: string;
-  }
-): { lotUpdates: StockLotUpdate[]; movementPayloads: StockMovementPayload[] } {
-  const { lotsByProduct, orgId, movementReason } = options;
-  const lotUpdates: StockLotUpdate[] = [];
-  const movementPayloads: StockMovementPayload[] = [];
-  const timestamp = new Date().toISOString();
-
-  for (const item of stockItems) {
-    const lotToRestore = lotsByProduct
-      .get(item.product_id)
-      ?.find((lot) => lot.product_variant_id === item.product_variant_id);
-
-    if (!lotToRestore?.id) {
-      continue;
-    }
-
-    const prevQuantity = Math.max(0, lotToRestore.quantity_available ?? 0);
-    const newQuantity = prevQuantity + item.quantity;
-
-    lotUpdates.push({
-      id: lotToRestore.id,
-      organization_id: orgId,
-      warehouse_id: lotToRestore.warehouse_id,
-      product_id: lotToRestore.product_id as string,
-      lot_number: lotToRestore.lot_number ?? "DEFAULT",
-      expiration_date: lotToRestore.expiration_date,
-      quantity_available: newQuantity,
-      updated_at: timestamp,
-    });
-
-    movementPayloads.push({
-      organization_id: orgId,
-      lot_id: lotToRestore.id,
-      warehouse_id: lotToRestore.warehouse_id,
-      type: "INBOUND",
-      quantity: item.quantity,
-      previous_stock: prevQuantity,
-      new_stock: newQuantity,
-      reason: movementReason,
-    });
-  }
-
-  return { lotUpdates, movementPayloads };
-}
-
 export async function restoreStockForOrderItems(
   supabase: SupabaseClient<Database>,
   orgId: string,
   quoteItemIds: string[],
-  movementReason: string
+  options: string | { reason: string; allowDefaultFallback?: boolean }
 ): Promise<void> {
-  const { data: items, error: itemsError } = await supabase
-    .from("quote_items")
-    .select("id, product_id, product_variant_id, quantity, description")
-    .in("id", quoteItemIds);
-
-  if (itemsError) {
-    throw new Error(
-      `Error al consultar items para restauración: ${itemsError.message}`
-    );
-  }
-
-  if (!items || items.length === 0) {
-    return;
-  }
-
-  const stockItems = items.filter(
-    (i): i is (typeof items)[number] & { product_id: string } =>
-      i.product_id !== null
-  );
-  if (stockItems.length === 0) {
-    return;
-  }
-
-  const productIds = [...new Set(stockItems.map((i) => i.product_id))];
-
-  const warehouseId = await getQuoteItemsWarehouseId({
+  await restoreOriginalOrderStock({
     supabase,
     orgId,
     quoteItemIds,
+    ...(typeof options === "string" ? { reason: options } : options),
   });
-  const { lotsByProduct } = await fetchLotsForRestore(
-    supabase,
-    orgId,
-    productIds,
-    warehouseId
-  );
-
-  const { lotUpdates, movementPayloads } = buildRestoreLotUpdates(stockItems, {
-    lotsByProduct,
-    orgId,
-    movementReason,
-  });
-
-  if (lotUpdates.length === 0) {
-    return;
-  }
-
-  const { error: lotError } = await supabase
-    .from("product_lots")
-    .upsert(lotUpdates);
-
-  if (lotError) {
-    throw new Error(`Error al restaurar stock: ${lotError.message}`);
-  }
-
-  const { error: movementError } = await supabase
-    .from("stock_movements")
-    .insert(movementPayloads);
-
-  if (movementError) {
-    throw new Error(
-      `Error al registrar restauración de stock: ${movementError.message}`
-    );
-  }
 }
 
 async function cleanupSourceOrderIfEmpty(
@@ -4344,6 +4201,7 @@ const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = ["DISPATCHED", "DELIVERED"];
 async function cancelChildOrder(
   supabase: SupabaseClient<Database>,
   params: {
+    allowDefaultFallback?: boolean;
     orderId: string;
     orgId: string;
     userId: string;
@@ -4428,12 +4286,10 @@ async function cancelChildOrder(
 
       const itemIds = (items ?? []).map((i) => i.id);
       if (itemIds.length > 0) {
-        await restoreStockForOrderItems(
-          supabase,
-          orgId,
-          itemIds,
-          `Cancelación de sub-pedido ${orderId}`
-        );
+        await restoreStockForOrderItems(supabase, orgId, itemIds, {
+          reason: `Cancelación de sub-pedido ${orderId}`,
+          allowDefaultFallback: params.allowDefaultFallback,
+        });
       }
     }
   }
@@ -4473,6 +4329,7 @@ async function cancelChildOrder(
 async function cancelSingleOrder(
   supabase: SupabaseClient<Database>,
   params: {
+    allowDefaultFallback?: boolean;
     orderId: string;
     orgId: string;
     userId: string;
@@ -4547,12 +4404,10 @@ async function cancelSingleOrder(
 
         const unassignedIds = (items ?? []).map((i) => i.id);
         if (unassignedIds.length > 0) {
-          await restoreStockForOrderItems(
-            supabase,
-            orgId,
-            unassignedIds,
-            `Cancelación de pedido ${orderId}`
-          );
+          await restoreStockForOrderItems(supabase, orgId, unassignedIds, {
+            reason: `Cancelación de pedido ${orderId}`,
+            allowDefaultFallback: params.allowDefaultFallback,
+          });
         }
       }
     }
@@ -4577,6 +4432,7 @@ async function cancelSingleOrder(
 async function cancelActiveChildren(
   supabase: SupabaseClient<Database>,
   params: {
+    allowDefaultFallback?: boolean;
     children: Array<{ id: string; status: string }>;
     orgId: string;
     userId: string;
@@ -4596,6 +4452,7 @@ async function cancelActiveChildren(
       notes: "Cancelación por pedido padre cancelado",
       currentStatus: child.status as OrderFlowStatus,
       parentOrderId,
+      allowDefaultFallback: params.allowDefaultFallback,
     });
     if (!result.success) {
       return result.error ?? "Error al cancelar hijo";
@@ -4608,6 +4465,7 @@ async function cancelActiveChildren(
 async function restoreAndCleanSaleItems(
   supabase: SupabaseClient<Database>,
   params: {
+    allowDefaultFallback?: boolean;
     orgId: string;
     orderId: string;
     salesOrderId: string;
@@ -4637,12 +4495,10 @@ async function restoreAndCleanSaleItems(
 
       const unassignedIds = (items ?? []).map((i) => i.id);
       if (unassignedIds.length > 0) {
-        await restoreStockForOrderItems(
-          supabase,
-          orgId,
-          unassignedIds,
-          `Cancelación de pedido ${orderId}`
-        );
+        await restoreStockForOrderItems(supabase, orgId, unassignedIds, {
+          reason: `Cancelación de pedido ${orderId}`,
+          allowDefaultFallback: params.allowDefaultFallback,
+        });
       }
     }
   }
@@ -4660,6 +4516,7 @@ async function restoreAndCleanSaleItems(
 async function cancelParentWithChildren(
   supabase: SupabaseClient<Database>,
   params: {
+    allowDefaultFallback?: boolean;
     orderId: string;
     orgId: string;
     userId: string;
@@ -4680,6 +4537,7 @@ async function cancelParentWithChildren(
 
   // 2. Cancel each active child
   const childError = await cancelActiveChildren(supabase, {
+    allowDefaultFallback: params.allowDefaultFallback,
     children: (children ?? []) as Array<{ id: string; status: string }>,
     orgId,
     userId,
@@ -4692,6 +4550,7 @@ async function cancelParentWithChildren(
   // 3. Restore stock and delete remaining sales order items
   if (salesOrderId) {
     const restoreError = await restoreAndCleanSaleItems(supabase, {
+      allowDefaultFallback: params.allowDefaultFallback,
       orgId,
       orderId,
       salesOrderId,
@@ -4798,6 +4657,7 @@ async function getAuthorizedSaleCancelError(
 export async function cancelOrder(
   supabase: SupabaseClient<Database>,
   params: {
+    allowDefaultFallback?: boolean;
     orgSlug: string;
     orgId: string;
     userId: string;
@@ -4816,11 +4676,20 @@ export async function cancelOrder(
   );
   const { data: orderForCheck } = await supabase
     .from("orders")
-    .select("created_by")
+    .select("created_by, warehouse_id")
     .eq("id", orderId)
     .eq("organization_id", params.orgId)
     .single();
   assertCanManageOrder(accessContext, orderForCheck?.created_by ?? null);
+  if (!orderForCheck) {
+    throw new Error("Pedido no encontrado");
+  }
+  await checkReentryWarehouse({
+    supabase,
+    orgId: params.orgId,
+    warehouseId: orderForCheck.warehouse_id,
+    allowDefaultFallback: params.allowDefaultFallback,
+  });
 
   if (NON_CANCELLABLE_STATUSES.includes(currentStatus)) {
     return {

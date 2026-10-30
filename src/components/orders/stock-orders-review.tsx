@@ -20,6 +20,7 @@ import {
   useTransition,
 } from "react";
 import { toast } from "sonner";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -290,6 +291,9 @@ function StockOrderCard({
   const [pendingDirectTransition, setPendingDirectTransition] = useState(false);
   const [directConfirmPending, setDirectConfirmPending] = useState(false);
   const [isReleasePending, setIsReleasePending] = useState(false);
+  const [releaseFallbackChildId, setReleaseFallbackChildId] = useState<
+    string | null
+  >(null);
 
   const prevChildrenLenRef = useRef(order.children.length);
   useEffect(() => {
@@ -603,16 +607,20 @@ function StockOrderCard({
   }, [submitCreateChild]);
 
   const handleReleaseReservation = useCallback(
-    async (childId: string) => {
+    async (childId: string, allowDefaultFallback = false) => {
       setIsReleasePending(true);
       const result = await revertOrderStatusAction(
         orgSlug,
         childId,
         "Liberar reserva de stock",
-        "undo_creation"
+        { type: "undo_creation", allowDefaultFallback }
       );
       setIsReleasePending(false);
       if (!result.success) {
+        if (result.requiresDefaultFallback) {
+          setReleaseFallbackChildId(childId);
+          return;
+        }
         toast.error(result.error ?? "Error al liberar la reserva");
         return;
       }
@@ -632,6 +640,22 @@ function StockOrderCard({
 
   return (
     <Card className="overflow-hidden transition-shadow">
+      <StockReentryFallbackDialog
+        onConfirm={() => {
+          if (releaseFallbackChildId) {
+            const id = releaseFallbackChildId;
+            setReleaseFallbackChildId(null);
+            return handleReleaseReservation(id, true);
+          }
+        }}
+        onOpenChange={(next) => {
+          if (!next) {
+            setReleaseFallbackChildId(null);
+          }
+        }}
+        open={releaseFallbackChildId !== null}
+        pending={isReleasePending}
+      />
       <CardHeader
         className={cn(
           "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",

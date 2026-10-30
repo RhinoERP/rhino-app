@@ -8,9 +8,19 @@ import type {
   CreateCreditNoteSourceDocumentInput,
   CreateCreditNoteTaxInput,
 } from "@/modules/credit-notes/types";
+import {
+  applyStockReentries,
+  checkReentryWarehouse,
+  undoStockReentries,
+} from "@/modules/inventory/service/stock-reentry.service";
+import type { StockReentryEntry } from "@/modules/inventory/utils/stock-reentry";
 import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
+import {
+  getOutstandingStockBySource,
+  getSaleStockOriginLedger,
+} from "./sale-stock-origin.service";
 import {
   deriveSaleCreditSupplier,
   formatSaleMovementReason,
@@ -36,6 +46,7 @@ export type SaleReturnItemInput = {
   restock?: boolean;
   itemCondition?: ReturnedItemCondition;
   unitQuantity?: number;
+  productVariantId?: string | null;
 };
 
 export type CreateSaleReturnInput = {
@@ -48,6 +59,7 @@ export type CreateSaleReturnInput = {
   requireCreditNote?: boolean;
   additionalCreditAmount?: number;
   generateCredit?: boolean;
+  allowDefaultFallback?: boolean;
 };
 
 export type CreateSaleReturnResult = {
@@ -622,17 +634,16 @@ type LotWithProduct = {
   id: string;
   product_id: string;
   warehouse_id: string;
+  product_variant_id: string | null;
   quantity_available: number;
   unit_quantity_available: number | null;
   lot_number: string;
-  expiration_date: string;
+  expiration_date: string | null;
 };
 
 type RestockRollback = {
   movementId: string;
-  lotId: string;
-  previousStock: number;
-  previousUnitQuantityAvailable: number | null;
+  orgId: string;
 };
 
 async function restockReturnedItems(params: {
@@ -642,6 +653,7 @@ async function restockReturnedItems(params: {
   returnId: string;
   items: SaleReturnItemInput[];
   restockReason: string;
+  allowDefaultFallback?: boolean;
 }): Promise<RestockRollback[]> {
   const { supabase, orgId, saleId, restockReason, items } = params;
 
@@ -670,40 +682,37 @@ async function restockReturnedItems(params: {
   const customerName =
     customer?.fantasy_name?.trim() || customer?.business_name?.trim() || null;
 
-  const reasonText = formatSaleMovementReason({
+  const reentryReason = formatSaleMovementReason({
     saleId,
     saleNumber: saleNum,
     invoiceNumber: invoiceNum,
     customerName,
+    prefix: "Reingreso ",
   });
-  const legacyReason = `Venta confirmada ${saleId}`;
-
-  // Build a robust filter: exact match first, then ILIKE by sale number/invoice
-  // prefix to survive customer renames after the sale was confirmed.
-  let outboundsQuery = supabase
-    .from("stock_movements")
-    .select("lot_id, quantity, unit_quantity")
-    .eq("organization_id", orgId)
-    .eq("type", "OUTBOUND");
-
-  if (saleNum !== null) {
-    const prefix = `Venta N${saleNum}`;
-    outboundsQuery = outboundsQuery.or(
-      `reason.ilike.${prefix} %,reason.eq.${prefix},reason.eq.${legacyReason}`
-    );
-  } else if (invoiceNum) {
-    const prefix = `Venta ${invoiceNum.trim()}`;
-    outboundsQuery = outboundsQuery.or(
-      `reason.ilike.${prefix} %,reason.eq.${prefix},reason.eq.${legacyReason}`
-    );
-  } else {
-    outboundsQuery = outboundsQuery.in("reason", [reasonText, legacyReason]);
-  }
-
-  const { data: outbounds } = await outboundsQuery;
+  const ledger = await getSaleStockOriginLedger({
+    supabase,
+    orgId,
+    saleId,
+    saleNumber: saleNum,
+    invoiceNumber: invoiceNum,
+    reentryReason,
+  });
+  const outstanding = getOutstandingStockBySource(
+    ledger.outgoing,
+    ledger.inbound
+  );
+  const outbounds = [...outstanding]
+    .filter(([, balance]) => balance.quantity > 0)
+    .map(([lot_id, balance]) => ({
+      lot_id,
+      quantity: balance.quantity,
+      unit_quantity: balance.unitQuantity,
+    }));
 
   if (!outbounds?.length) {
-    return [];
+    throw new Error(
+      "No se encontraron salidas originales para reingresar stock"
+    );
   }
 
   const lotIds = [
@@ -712,69 +721,48 @@ async function restockReturnedItems(params: {
     ),
   ];
 
-  const { data: lotsData } = await supabase
+  const { data: lotsData, error: lotsError } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
+      "id, product_id, product_variant_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
     .in("id", lotIds);
+  if (lotsError) {
+    throw new Error(
+      `No se pudieron consultar los lotes originales: ${lotsError.message}`
+    );
+  }
 
-  if (!lotsData?.length) {
-    return [];
+  if (!lotsData || lotsData.length !== lotIds.length) {
+    throw new Error("No se encontró un lote original para el reingreso");
   }
 
   const lotsById = new Map<string, LotWithProduct>(
-    lotsData
-      .filter(
-        (
-          l
-        ): l is LotWithProduct & {
-          id: string;
-          product_id: string;
-          lot_number: string;
-          expiration_date: string;
-        } =>
-          l.id != null &&
-          l.product_id != null &&
-          l.lot_number != null &&
-          l.expiration_date != null
-      )
-      .map((l) => [
-        l.id,
-        {
-          id: l.id,
-          product_id: l.product_id,
-          warehouse_id: l.warehouse_id,
-          quantity_available: Number(l.quantity_available ?? 0),
-          unit_quantity_available:
-            l.unit_quantity_available != null
-              ? Number(l.unit_quantity_available)
-              : null,
-          lot_number: l.lot_number,
-          expiration_date: l.expiration_date,
-        },
-      ])
+    lotsData.map((lot) => [lot.id, lot])
   );
 
-  const timestamp = new Date().toISOString();
-  const rollbacks: RestockRollback[] = [];
+  const entries: StockReentryEntry[] = [];
 
   for (const item of items) {
-    rollbacks.push(
-      ...(await restockSingleItem({
-        supabase,
-        orgId,
+    entries.push(
+      ...planSaleReturnStockForItem({
         lotsById,
         outbounds,
         item,
         restockReason,
-        timestamp,
-      }))
+        returnId: params.returnId,
+      })
     );
   }
 
-  return rollbacks;
+  const ids = await applyStockReentries({
+    supabase,
+    orgId,
+    entries,
+    allowDefaultFallback: params.allowDefaultFallback,
+  });
+  return ids.map((movementId) => ({ movementId, orgId }));
 }
 
 function computeLotShare(params: {
@@ -800,89 +788,8 @@ function computeLotShare(params: {
   return Math.min(remaining, integer ? Math.round(raw) : raw);
 }
 
-async function applyRestockToLot(params: {
-  supabase: SupabaseServerClient;
-  orgId: string;
-  lot: LotWithProduct;
-  lotShare: number;
-  unitShare: number | null;
-  restockReason: string;
-  timestamp: string;
-}): Promise<RestockRollback> {
-  const {
-    supabase,
-    orgId,
-    lot,
-    lotShare,
-    unitShare,
-    restockReason,
-    timestamp,
-  } = params;
-  const previousStock = lot.quantity_available;
-  const previousUnitQuantityAvailable = lot.unit_quantity_available;
-  const newStock = previousStock + lotShare;
-
-  const { data: movement, error: movErr } = await supabase
-    .from("stock_movements")
-    .insert({
-      organization_id: orgId,
-      lot_id: lot.id,
-      warehouse_id: lot.warehouse_id,
-      type: "INBOUND",
-      quantity: lotShare,
-      previous_stock: previousStock,
-      new_stock: newStock,
-      unit_quantity: unitShare,
-      reason: restockReason,
-    })
-    .select("id")
-    .single();
-
-  if (movErr || !movement?.id) {
-    throw new Error(
-      `No se pudo registrar el reingreso de stock: ${movErr?.message ?? "error desconocido"}`
-    );
-  }
-
-  const updateData: Record<string, unknown> = {
-    quantity_available: newStock,
-    updated_at: timestamp,
-  };
-  if (unitShare !== null && lot.unit_quantity_available !== null) {
-    updateData.unit_quantity_available =
-      (lot.unit_quantity_available ?? 0) + unitShare;
-  }
-
-  const { error: lotErr } = await supabase
-    .from("product_lots")
-    .update(updateData)
-    .eq("id", lot.id);
-
-  if (lotErr) {
-    await supabase.from("stock_movements").delete().eq("id", movement.id);
-    throw new Error(
-      `No se pudo actualizar el lote de stock: ${lotErr.message}`
-    );
-  }
-
-  lot.quantity_available = newStock;
-  if (unitShare !== null && lot.unit_quantity_available !== null) {
-    lot.unit_quantity_available =
-      (lot.unit_quantity_available ?? 0) + unitShare;
-  }
-
-  return {
-    movementId: movement.id,
-    lotId: lot.id,
-    previousStock,
-    previousUnitQuantityAvailable,
-  };
-}
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates proportional multi-lot restock intentionally
-async function restockSingleItem(params: {
-  supabase: SupabaseServerClient;
-  orgId: string;
+export function planSaleReturnStockForItem(params: {
   lotsById: Map<string, LotWithProduct>;
   outbounds: Array<{
     lot_id: string | null;
@@ -891,25 +798,40 @@ async function restockSingleItem(params: {
   }>;
   item: SaleReturnItemInput;
   restockReason: string;
-  timestamp: string;
-}): Promise<RestockRollback[]> {
-  const {
-    supabase,
-    orgId,
-    lotsById,
-    outbounds,
-    item,
-    restockReason,
-    timestamp,
-  } = params;
+  returnId: string;
+}): StockReentryEntry[] {
+  const { lotsById, outbounds, item, restockReason, returnId } = params;
 
-  const itemOutbounds = outbounds.filter(
+  const matching = outbounds.filter(
     (m) =>
-      m.lot_id != null && lotsById.get(m.lot_id)?.product_id === item.productId
+      m.lot_id != null &&
+      lotsById.get(m.lot_id)?.product_id === item.productId &&
+      lotsById.get(m.lot_id)?.product_variant_id ===
+        (item.productVariantId ?? null)
   );
+  const grouped = new Map<
+    string,
+    { lot_id: string; quantity: number; unit_quantity: number }
+  >();
+  for (const movement of matching) {
+    if (!movement.lot_id) {
+      continue;
+    }
+    const current = grouped.get(movement.lot_id) ?? {
+      lot_id: movement.lot_id,
+      quantity: 0,
+      unit_quantity: 0,
+    };
+    current.quantity += movement.quantity ?? 0;
+    current.unit_quantity += Math.abs(movement.unit_quantity ?? 0);
+    grouped.set(movement.lot_id, current);
+  }
+  const itemOutbounds = [...grouped.values()];
 
   if (!itemOutbounds.length) {
-    return [];
+    throw new Error(
+      "No se encontró una salida original del producto y variante devueltos"
+    );
   }
 
   const totalOutbound = itemOutbounds.reduce(
@@ -917,7 +839,14 @@ async function restockSingleItem(params: {
     0
   );
   if (totalOutbound <= 0) {
-    return [];
+    throw new Error(
+      "La salida original ya no tiene cantidades pendientes de reingreso"
+    );
+  }
+  if (item.quantity - totalOutbound > 0.000_001) {
+    throw new Error(
+      "La cantidad a reingresar supera el saldo pendiente de las salidas originales"
+    );
   }
 
   const totalUnitOutbound = itemOutbounds.reduce(
@@ -932,7 +861,7 @@ async function restockSingleItem(params: {
 
   let remaining = item.quantity;
   let remainingUnits = totalUnitsToReturn;
-  const rollbacks: RestockRollback[] = [];
+  const entries: StockReentryEntry[] = [];
 
   for (let i = 0; i < itemOutbounds.length; i++) {
     if (remaining <= 0) {
@@ -948,13 +877,16 @@ async function restockSingleItem(params: {
     }
 
     const isLast = i === itemOutbounds.length - 1;
-    const lotShare = computeLotShare({
-      lotOutboundQty: m.quantity ?? 0,
-      totalOutboundQty: totalOutbound,
-      totalToReturn: item.quantity,
-      remaining,
-      isLast,
-    });
+    const lotShare = item.productVariantId
+      ? Math.min(remaining, m.quantity)
+      : computeLotShare({
+          lotOutboundQty: m.quantity ?? 0,
+          totalOutboundQty: totalOutbound,
+          totalToReturn: item.quantity,
+          remaining,
+          isLast,
+          integer: Boolean(item.productVariantId),
+        });
 
     if (lotShare <= 0) {
       continue;
@@ -963,55 +895,57 @@ async function restockSingleItem(params: {
     let unitShare: number | null = null;
     if (totalUnitsToReturn !== null && remainingUnits !== null) {
       unitShare = computeLotShare({
-        lotOutboundQty: m.unit_quantity ?? 0,
-        totalOutboundQty: totalUnitOutbound,
+        lotOutboundQty: totalUnitOutbound > 0 ? m.unit_quantity : m.quantity,
+        totalOutboundQty:
+          totalUnitOutbound > 0 ? totalUnitOutbound : totalOutbound,
         totalToReturn: totalUnitsToReturn,
         remaining: remainingUnits,
         isLast,
-        integer: true,
+        integer: false,
       });
       remainingUnits -= unitShare;
     }
 
-    rollbacks.push(
-      await applyRestockToLot({
-        supabase,
-        orgId,
-        lot,
-        lotShare,
-        unitShare,
-        restockReason,
-        timestamp,
-      })
-    );
+    entries.push({
+      sourceLotId: lot.id,
+      quantity: lotShare,
+      unitQuantity: unitShare,
+      reason: restockReason,
+      operationKey: `sale-return:${returnId}:${item.salesOrderItemId}:${lot.id}`,
+    });
+    const source = outbounds.find((row) => row.lot_id === lot.id);
+    if (source && source.quantity != null) {
+      source.quantity -= lotShare;
+      if (source.unit_quantity != null && unitShare != null) {
+        source.unit_quantity = Math.max(
+          0,
+          Math.abs(source.unit_quantity) - unitShare
+        );
+      }
+    }
     remaining -= lotShare;
   }
 
-  return rollbacks;
+  if (remaining > 0.000_001) {
+    throw new Error(
+      "No se pudo reconstruir la cantidad devuelta en los lotes originales"
+    );
+  }
+
+  return entries;
 }
 
 async function cleanupRestock(params: {
   supabase: SupabaseServerClient;
   restockRollbacks: RestockRollback[];
 }): Promise<void> {
-  for (const rollback of params.restockRollbacks.toReversed()) {
-    await params.supabase
-      .from("stock_movements")
-      .delete()
-      .eq("id", rollback.movementId);
-
-    const updateData: Record<string, unknown> = {
-      quantity_available: rollback.previousStock,
-    };
-    if (rollback.previousUnitQuantityAvailable !== null) {
-      updateData.unit_quantity_available =
-        rollback.previousUnitQuantityAvailable;
-    }
-
-    await params.supabase
-      .from("product_lots")
-      .update(updateData)
-      .eq("id", rollback.lotId);
+  const first = params.restockRollbacks[0];
+  if (first) {
+    await undoStockReentries({
+      supabase: params.supabase,
+      orgId: first.orgId,
+      movementIds: params.restockRollbacks.map((row) => row.movementId),
+    });
   }
 }
 
@@ -1210,6 +1144,7 @@ export async function createSaleReturn(
     .select(
       `
       id,
+      warehouse_id,
       status,
       customer_id,
       total_amount,
@@ -1290,6 +1225,14 @@ export async function createSaleReturn(
     returnItems,
     previouslyReturnedByItemId,
   });
+  if (resolvedLines.some((line) => line.restock)) {
+    await checkReentryWarehouse({
+      supabase,
+      orgId: org.id,
+      warehouseId: saleData.warehouse_id,
+      allowDefaultFallback: input.allowDefaultFallback,
+    });
+  }
   const returnedNetAmount = truncateMoney(
     resolvedLines.reduce((acc, line) => acc + line.netAmount, 0)
   );
@@ -1367,6 +1310,7 @@ export async function createSaleReturn(
         unitPrice: line.unitPrice,
         restock: true,
         unitQuantity: line.unitQuantity,
+        productVariantId: line.saleItem.product_variant_id,
       }));
     if (itemsToRestock.length > 0) {
       restockRollbacks = await restockReturnedItems({
@@ -1376,6 +1320,7 @@ export async function createSaleReturn(
         returnId,
         items: itemsToRestock,
         restockReason,
+        allowDefaultFallback: input.allowDefaultFallback,
       });
     }
 

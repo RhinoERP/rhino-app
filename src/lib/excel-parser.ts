@@ -112,6 +112,13 @@ export function normalizeFieldName(spanishName: string): string {
     Impuestos: "taxes",
 
     // Stock
+    Depósito: "warehouse",
+    Deposito: "warehouse",
+    "ID de depósito": "warehouse_id",
+    "ID de deposito": "warehouse_id",
+    "ID de lote": "lot_id",
+    Talle: "talle",
+    Color: "color",
     SKU: "sku",
     Cantidad: "quantity",
     "Cantidad (kg/lt)": "quantity",

@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { checkReentryWarehouse } from "@/modules/inventory/service/stock-reentry.service";
+import { isStockReentryFallbackRequired } from "@/modules/inventory/utils/stock-reentry";
 import { createRevertOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -18,6 +20,7 @@ export type RevertOrderStatusResult = {
   previousStatus?: string;
   previousStatusLabel?: string;
   error?: string;
+  requiresDefaultFallback?: boolean;
 };
 
 type QuoteItemWithParent = Pick<
@@ -60,7 +63,7 @@ async function validateAndFetchOrder(
   const { data: currentOrder, error: fetchError } = await supabase
     .from("orders")
     .select(
-      "id, status, parent_order_id, sales_order_id, order_number, quote_id"
+      "id, status, parent_order_id, sales_order_id, order_number, quote_id, warehouse_id"
     )
     .eq("id", orderId)
     .eq("organization_id", org.id)
@@ -210,13 +213,13 @@ async function undoPendingStockChild(
 async function undoCreatedChild(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
+    allowDefaultFallback?: boolean;
     orderId: string;
     orgId: string;
     userId: string;
     orgSlug: string;
     parentOrderId: string | null;
     currentStatus: OrderFlowStatus;
-    allItemIds: string[];
     regularItemIds: string[];
   }
 ): Promise<RevertOrderStatusResult> {
@@ -227,27 +230,10 @@ async function undoCreatedChild(
     orgSlug,
     parentOrderId,
     currentStatus,
-    allItemIds,
     regularItemIds,
   } = params;
 
   await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
-
-  if (allItemIds.length > 0 && shouldRestockOnRevert(currentStatus)) {
-    const { data: childOrder } = await supabase
-      .from("orders")
-      .select("order_number")
-      .eq("id", orderId)
-      .single();
-
-    const orderLabel = childOrder?.order_number ?? orderId;
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      allItemIds,
-      `Reversión de sub-pedido ${orderLabel}`
-    );
-  }
 
   if (regularItemIds.length > 0) {
     const { error: unassignError } = await supabase
@@ -310,6 +296,7 @@ async function undoCreatedChild(
 async function undoChildCreation(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
+    allowDefaultFallback?: boolean;
     orderId: string;
     orgId: string;
     userId: string;
@@ -333,21 +320,23 @@ async function undoChildCreation(
   const regularItems =
     childItems?.filter((i) => i.parent_quote_item_id == null) ?? [];
 
+  if (childItems?.length && shouldRestockOnRevert(currentStatus)) {
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      childItems.map((item) => item.id),
+      {
+        reason: `Reversión de sub-pedido ${orderId}`,
+        allowDefaultFallback: params.allowDefaultFallback,
+      }
+    );
+  }
+
   if (splitItems.length > 0) {
-    const splitItemIds = splitItems.map((i) => i.id);
-    if (shouldRestockOnRevert(currentStatus)) {
-      await restoreStockForOrderItems(
-        supabase,
-        orgId,
-        splitItemIds,
-        "Reversión de sub-pedido - stock restaurado"
-      );
-    }
     await mergeSplitItemsBack(supabase, splitItems);
   }
 
   const regularItemIds = regularItems.map((i) => i.id);
-  const allItemIds = regularItemIds;
 
   if (currentStatus === "PENDING_STOCK") {
     return undoPendingStockChild(supabase, {
@@ -360,13 +349,13 @@ async function undoChildCreation(
   }
 
   return undoCreatedChild(supabase, {
+    allowDefaultFallback: params.allowDefaultFallback,
     orderId,
     orgId,
     userId,
     orgSlug,
     parentOrderId,
     currentStatus,
-    allItemIds,
     regularItemIds,
   });
 }
@@ -400,6 +389,7 @@ async function checkNoChildren(
 async function cancelAllChildrenAndRestoreStock(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
+    allowDefaultFallback?: boolean;
     children: { id: string }[];
     orgId: string;
     userId: string;
@@ -441,34 +431,18 @@ async function cancelAllChildrenAndRestoreStock(
     );
   };
 
-  if (splitItems.length > 0) {
-    const restoreSplitItems = splitItems.filter((i) =>
-      shouldRestoreForChild(i.assigned_order_id)
-    );
-    if (restoreSplitItems.length > 0) {
-      const splitItemIds = restoreSplitItems.map((i) => i.id);
-      await restoreStockForOrderItems(
-        supabase,
-        orgId,
-        splitItemIds,
-        "Reversión de pedido padre - stock restaurado"
-      );
-    }
-    await mergeSplitItemsBack(supabase, splitItems);
+  const restoreIds = (allAssignedItems ?? [])
+    .filter((item) => shouldRestoreForChild(item.assigned_order_id))
+    .map((item) => item.id);
+  if (restoreIds.length) {
+    await restoreStockForOrderItems(supabase, orgId, restoreIds, {
+      reason: "Reversión de pedido padre - stock restaurado",
+      allowDefaultFallback: params.allowDefaultFallback,
+    });
   }
 
-  const restoreRegularItems = regularItems.filter((i) =>
-    shouldRestoreForChild(i.assigned_order_id)
-  );
-  const assignedItemIds = restoreRegularItems.map((i) => i.id);
-
-  if (assignedItemIds.length > 0) {
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      assignedItemIds,
-      "Reversión de pedido padre - stock restaurado"
-    );
+  if (splitItems.length > 0) {
+    await mergeSplitItemsBack(supabase, splitItems);
   }
 
   if (regularItems.length > 0) {
@@ -530,6 +504,7 @@ async function cancelAllChildrenAndRestoreStock(
 async function cascadeRevertParent(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
+    allowDefaultFallback?: boolean;
     orgSlug: string;
     orderId: string;
     notes: string;
@@ -557,6 +532,7 @@ async function cascadeRevertParent(
 
   if (children && children.length > 0) {
     const cancelResult = await cancelAllChildrenAndRestoreStock(supabase, {
+      allowDefaultFallback: params.allowDefaultFallback,
       children,
       orgId,
       userId,
@@ -793,12 +769,23 @@ async function applyNormalRevert(
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: permission, history and cascade dispatch remain guarded before operational reversion.
 export async function revertOrderStatusAction(
   orgSlug: string,
   orderId: string,
   notes: string,
-  revertType: "normal" | "undo_creation" | "cascade_revert" = "normal"
+  revert:
+    | "normal"
+    | "undo_creation"
+    | "cascade_revert"
+    | {
+        type: "normal" | "undo_creation" | "cascade_revert";
+        allowDefaultFallback?: boolean;
+      } = "normal"
 ): Promise<RevertOrderStatusResult> {
+  const revertType = typeof revert === "string" ? revert : revert.type;
+  const allowDefaultFallback =
+    typeof revert === "string" ? false : revert.allowDefaultFallback;
   try {
     const permissionByStatus: Record<string, string> = {
       PENDING_FINANCE: "orders.finance_review",
@@ -836,6 +823,12 @@ export async function revertOrderStatusAction(
     }
 
     const { supabase, org, user, currentOrder } = validation;
+    await checkReentryWarehouse({
+      supabase,
+      orgId: org.id,
+      warehouseId: currentOrder.warehouse_id,
+      allowDefaultFallback,
+    });
     const currentStatus = currentOrder.status as OrderFlowStatus;
 
     if (currentStatus === "GOODS_RECEIVED") {
@@ -855,6 +848,7 @@ export async function revertOrderStatusAction(
 
     if (revertType === "undo_creation") {
       result = await undoChildCreation(supabase, {
+        allowDefaultFallback,
         orderId,
         orgId: org.id,
         userId: user.id,
@@ -867,6 +861,7 @@ export async function revertOrderStatusAction(
 
     if (revertType === "cascade_revert") {
       result = await cascadeRevertParent(supabase, {
+        allowDefaultFallback,
         orgSlug,
         orderId,
         notes,
@@ -905,6 +900,10 @@ export async function revertOrderStatusAction(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error desconocido al revertir";
-    return { success: false, error: message };
+    return {
+      success: false,
+      error: message,
+      requiresDefaultFallback: isStockReentryFallbackRequired(error),
+    };
   }
 }

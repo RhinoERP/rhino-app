@@ -6,6 +6,7 @@ import { getArcaSaleInvoiceReadiness } from "@/modules/arca/server/sale-invoicin
 import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getDebitNotesBySaleId } from "@/modules/debit-notes/service/debit-notes.service";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrderIdBySaleId } from "@/modules/orders/service/orders.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
@@ -65,6 +66,7 @@ export default async function SaleDetailPage({
     organization,
     relatedOrder,
     isFullAdvanceQuote,
+    warehouses,
   ] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
@@ -79,6 +81,7 @@ export default async function SaleDetailPage({
     getOrganizationBySlug(orgSlug),
     getOrderIdBySaleId(orgSlug, saleId),
     isFullAdvanceQuoteForSale({ orgSlug, finalSalesOrderId: saleId }),
+    getAvailableWarehouses(orgSlug, "wholesale"),
   ]);
 
   if (!(sale && organization)) {
@@ -111,6 +114,7 @@ export default async function SaleDetailPage({
         }
         sellers={sellers}
         taxes={taxes}
+        warehouses={warehouses.map(({ id, name }) => ({ id, name }))}
       />
       <DebitNotesCard debitNotes={debitNotes} orgSlug={orgSlug} />
     </div>

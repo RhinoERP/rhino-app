@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
+import {
+  getAuthorizedSaleFiscalUpdateFields,
+  shouldUpdateSaleWarehouse,
+} from "./sales-update-guards";
 
 describe("getAuthorizedSaleFiscalUpdateFields", () => {
   it("permite actualizaciones internas en ventas ARCA autorizadas", () => {
@@ -35,5 +38,40 @@ describe("getAuthorizedSaleFiscalUpdateFields", () => {
         commercialExchangeRate: 1535,
       })
     ).toContain("commercialExchangeRate");
+  });
+
+  it("no actualiza el depósito cuando no se envía o es el mismo", () => {
+    expect(
+      shouldUpdateSaleWarehouse({
+        status: "DRAFT",
+        currentWarehouseId: "warehouse-a",
+        requestedWarehouseId: undefined,
+      })
+    ).toBe(false);
+    expect(
+      shouldUpdateSaleWarehouse({
+        status: "DRAFT",
+        currentWarehouseId: "warehouse-a",
+        requestedWarehouseId: "warehouse-a",
+      })
+    ).toBe(false);
+  });
+
+  it("permite cambiar el depósito solo en preventas en borrador", () => {
+    expect(
+      shouldUpdateSaleWarehouse({
+        status: "DRAFT",
+        currentWarehouseId: "warehouse-a",
+        requestedWarehouseId: "warehouse-b",
+      })
+    ).toBe(true);
+
+    expect(() =>
+      shouldUpdateSaleWarehouse({
+        status: "CONFIRMED",
+        currentWarehouseId: "warehouse-a",
+        requestedWarehouseId: "warehouse-b",
+      })
+    ).toThrow("Solo se puede cambiar el depósito");
   });
 });

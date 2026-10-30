@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -715,6 +716,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
   const [additionalCreditAmount, setAdditionalCreditAmount] = useState(0);
   const [generateCredit, setGenerateCredit] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
 
   const returnTotal = useMemo(
     () =>
@@ -846,7 +848,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     }));
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(allowDefaultFallback = false) {
     if (!(hasAnyReturn && reason.trim())) {
       return;
     }
@@ -867,6 +869,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
               ? (st?.unitQuantity ?? 0)
               : undefined,
             itemCondition: st?.itemCondition ?? "GOOD",
+            restock: st?.restock ?? true,
           };
         })
         .filter((i) => i.quantity > 0);
@@ -880,9 +883,14 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         emitCreditNote,
         additionalCreditAmount,
         generateCredit,
+        allowDefaultFallback,
       });
 
       if (!result.success) {
+        if (result.requiresDefaultFallback) {
+          setFallbackOpen(true);
+          return;
+        }
         toast.error(result.error);
         return;
       }
@@ -905,6 +913,15 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
 
   return (
     <div className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
+      <StockReentryFallbackDialog
+        onConfirm={() => {
+          setFallbackOpen(false);
+          return handleSubmit(true);
+        }}
+        onOpenChange={setFallbackOpen}
+        open={fallbackOpen}
+        pending={isSubmitting}
+      />
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button asChild size="icon" variant="ghost">
@@ -1068,7 +1085,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         </Button>
         <Button
           disabled={!(hasAnyReturn && reason.trim()) || isSubmitting}
-          onClick={handleSubmit}
+          onClick={() => handleSubmit()}
         >
           <ArrowUDownLeftIcon className="mr-2 size-4" />
           {isSubmitting ? "Registrando..." : "Registrar devolución"}
