@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requireAuth } from "@/lib/supabase/auth";
 import type { SupabaseServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import type { Database } from "@/types/supabase";
 
 export type Warehouse = Database["public"]["Tables"]["warehouses"]["Row"];
@@ -217,7 +218,14 @@ export async function getWarehouseTransfers(
   z.uuid().parse(warehouseId);
   const { supabase, orgId, isAdmin, permissions, userId } =
     await resolveWarehouseContext(orgSlug);
-  if (!(isAdmin || permissions?.includes("inventory.read"))) {
+  if (
+    !(
+      isAdmin ||
+      READ_PERMISSIONS.inventory.some((permission) =>
+        permissions?.includes(permission)
+      )
+    )
+  ) {
     throw new Error("No tenés permiso para consultar el historial de stock");
   }
   if (!isAdmin) {

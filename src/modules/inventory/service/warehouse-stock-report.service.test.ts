@@ -50,13 +50,13 @@ describe("stock por depósito", () => {
           warehouse_id: warehouseA.id,
           product_id: productKg.id,
           quantity_available: 5,
-          unit_quantity_available: 5,
+          unit_quantity_available: 17,
         },
         {
           warehouse_id: warehouseA.id,
           product_id: productLt.id,
           quantity_available: 2,
-          unit_quantity_available: 2,
+          unit_quantity_available: 9,
         },
         {
           warehouse_id: warehouseB.id,
@@ -129,6 +129,62 @@ describe("stock por depósito", () => {
       productCount: 0,
       lotCount: 0,
       totalUnits: 0,
+    });
+  });
+
+  it("clasifica KG/LT sin control de piezas por su unidad de medida", () => {
+    const result = buildWarehouseStockBreakdown(
+      [warehouseA],
+      [
+        {
+          warehouse_id: warehouseA.id,
+          product_id: productKg.id,
+          quantity_available: 12.5,
+          unit_quantity_available: null,
+        },
+        {
+          warehouse_id: warehouseA.id,
+          product_id: productLt.id,
+          quantity_available: 8.2,
+          unit_quantity_available: null,
+        },
+      ],
+      [
+        { ...productKg, tracks_stock_units: false },
+        { ...productLt, tracks_stock_units: false },
+      ]
+    );
+    expect(result[0]).toMatchObject({
+      totalUnits: 0,
+      totalKg: 12.5,
+      totalLt: 8.2,
+    });
+  });
+
+  it("suma cantidades medidas de varios lotes sin sustituirlas por piezas", () => {
+    const result = buildWarehouseStockBreakdown(
+      [warehouseA],
+      [
+        {
+          warehouse_id: warehouseA.id,
+          product_id: productKg.id,
+          quantity_available: 12.5,
+          unit_quantity_available: 3,
+        },
+        {
+          warehouse_id: warehouseA.id,
+          product_id: productKg.id,
+          quantity_available: 7.5,
+          unit_quantity_available: null,
+        },
+      ],
+      [productKg]
+    );
+    expect(result[0]).toMatchObject({
+      productCount: 1,
+      lotCount: 2,
+      totalUnits: 0,
+      totalKg: 20,
     });
   });
 

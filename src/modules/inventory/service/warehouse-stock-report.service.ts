@@ -1,5 +1,6 @@
 import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getStockMeasureTotals } from "../utils/stock-measure-totals";
 import { getAvailableWarehouses } from "./warehouse-stock.service";
 
 type BreakdownWarehouse = {
@@ -36,7 +37,6 @@ export type WarehouseStockBreakdown = {
 
 type ProductAccumulator = {
   quantity: number;
-  units: number | null;
 };
 
 type WarehouseAccumulator = {
@@ -58,12 +58,8 @@ function addLot(
   current.lotCount += 1;
   const product = current.products.get(lot.product_id) ?? {
     quantity: 0,
-    units: null,
   };
   product.quantity += lot.quantity_available;
-  if (lot.unit_quantity_available !== null) {
-    product.units = (product.units ?? 0) + lot.unit_quantity_available;
-  }
   current.products.set(lot.product_id, product);
   accumulators.set(lot.warehouse_id, current);
 }
@@ -84,14 +80,13 @@ function aggregateWarehouse(
       continue;
     }
     productCount += 1;
-    const unitStock = totals.units ?? totals.quantity;
-    if (product.tracks_stock_units && product.unit_of_measure === "KG") {
-      totalKg += unitStock;
-    } else if (product.tracks_stock_units && product.unit_of_measure === "LT") {
-      totalLt += unitStock;
-    } else {
-      totalUnits += totals.quantity;
-    }
+    const measures = getStockMeasureTotals(
+      totals.quantity,
+      product.unit_of_measure
+    );
+    totalUnits += measures.units;
+    totalKg += measures.kg;
+    totalLt += measures.lt;
   }
 
   return {

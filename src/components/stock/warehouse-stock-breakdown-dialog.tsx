@@ -47,12 +47,21 @@ export function WarehouseStockBreakdownDialog({
   orgSlug,
 }: WarehouseStockBreakdownDialogProps) {
   const [open, setOpen] = useState(false);
-  const { data = [], isPending } = useQuery({
+  const {
+    data = [],
+    isPending,
+    isSuccess,
+    isError,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["warehouse-stock-breakdown", orgSlug],
     queryFn: () => getWarehouseStockBreakdownAction(orgSlug),
     enabled: open,
     staleTime: 0,
   });
+  const hasData = isSuccess && data.length > 0;
+  const isEmpty = isSuccess && data.length === 0;
 
   const totals = data.reduce(
     (accumulator, row) => ({
@@ -111,10 +120,26 @@ export function WarehouseStockBreakdownDialog({
         <DialogHeader>
           <DialogTitle>Stock por depósito</DialogTitle>
           <DialogDescription>
-            El total de la organización es la suma de cada depósito. Las
-            transferencias no duplican existencias.
+            Stock de los depósitos a los que tenés acceso. Las transferencias no
+            duplican existencias; un producto puede figurar en varios depósitos.
           </DialogDescription>
         </DialogHeader>
+
+        {isError && (
+          <div className="space-y-2 text-sm" role="alert">
+            <p className="text-destructive">
+              No se pudo cargar el stock por depósito.
+            </p>
+            <Button
+              disabled={isFetching}
+              onClick={() => refetch()}
+              size="sm"
+              variant="outline"
+            >
+              Reintentar
+            </Button>
+          </div>
+        )}
 
         <div className="max-h-[55vh] overflow-auto rounded-md border">
           <Table>
@@ -139,7 +164,7 @@ export function WarehouseStockBreakdownDialog({
                   </TableCell>
                 </TableRow>
               )}
-              {!isPending && data.length === 0 && (
+              {isEmpty && (
                 <TableRow>
                   <TableCell
                     className="py-8 text-center text-muted-foreground"
@@ -149,7 +174,7 @@ export function WarehouseStockBreakdownDialog({
                   </TableCell>
                 </TableRow>
               )}
-              {!isPending &&
+              {hasData &&
                 data.map((row) => (
                   <TableRow key={row.warehouseId}>
                     <TableCell>
@@ -178,10 +203,12 @@ export function WarehouseStockBreakdownDialog({
                   </TableRow>
                 ))}
             </TableBody>
-            {!isPending && data.length > 0 && (
+            {hasData && (
               <TableFooter>
                 <TableRow>
-                  <TableCell className="font-medium">Total</TableCell>
+                  <TableCell className="font-medium">
+                    Suma por depósito
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatQuantity(totals.products)}
                   </TableCell>
@@ -205,7 +232,7 @@ export function WarehouseStockBreakdownDialog({
 
         <DialogFooter>
           <Button
-            disabled={isPending || data.length === 0}
+            disabled={!hasData || isFetching}
             onClick={handleExport}
             size="sm"
             variant="outline"

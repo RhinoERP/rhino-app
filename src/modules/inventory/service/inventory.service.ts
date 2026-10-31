@@ -20,12 +20,14 @@ import type {
   StockPaginatedParams,
 } from "../types";
 import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
+import { getStockMeasureTotals } from "../utils/stock-measure-totals";
 import { getDefaultWarehouseId } from "./default-warehouse.service";
 import {
   applyWarehouseStockMovement,
   resolveInventoryWarehouseId,
   setWarehouseStockBalance,
 } from "./stock-maintenance.service";
+import { createVariantsWithInitialBalances } from "./variant-balances.service";
 
 type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   categories?: { id: string; name: string } | null;
@@ -46,25 +48,6 @@ const stockMovementSourceSchema = z
     "SYSTEM",
   ])
   .catch("SYSTEM");
-
-async function linkVariantToLot(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  lotId: string | null,
-  variantId: string
-): Promise<void> {
-  if (!lotId) {
-    throw new Error("La variante creada no tiene lote asociado");
-  }
-  const { error } = await supabase
-    .from("product_lots")
-    .update({ product_variant_id: variantId })
-    .eq("organization_id", orgId)
-    .eq("id", lotId);
-  if (error) {
-    throw new Error(`Error al vincular lote de variante: ${error.message}`);
-  }
-}
 
 type PriceListItemWithList = {
   cost_price: number;
@@ -595,56 +578,15 @@ export async function createProductForOrg(
     }
 
     const warehouseId = await getDefaultWarehouseId(supabase, org.id);
-    const lotsToInsert = talles.flatMap(() =>
-      colores.map(() => ({
-        organization_id: org.id,
-        warehouse_id: warehouseId,
-        product_id: productData.id,
-        lot_number: "DEFAULT",
-        expiration_date: null,
-        quantity_available: 0,
-      }))
-    );
-
-    const { data: insertedLots, error: lotsError } = await supabase
-      .from("product_lots")
-      .insert(lotsToInsert)
-      .select("id");
-
-    if (lotsError || !insertedLots) {
-      throw new Error(
-        `Error al crear lotes para variantes: ${lotsError?.message}`
-      );
-    }
-
-    let i = 0;
-    const variantsToInsert = talles.flatMap((talle) =>
-      colores.map((color) => {
-        const lotId = insertedLots[i].id;
-        i += 1;
-        return {
-          organization_id: org.id,
-          product_id: productData.id,
-          talle,
-          color,
-          lot_id: lotId,
-        };
-      })
-    );
-
-    const { data: createdVariants, error: variantsError } = await supabase
-      .from("product_variants")
-      .insert(variantsToInsert)
-      .select("id, lot_id");
-
-    if (variantsError || createdVariants?.length !== variantsToInsert.length) {
-      throw new Error(
-        `Error al crear variantes: ${variantsError?.message ?? "faltan variantes creadas"}`
-      );
-    }
-    for (const variant of createdVariants) {
-      await linkVariantToLot(supabase, org.id, variant.lot_id, variant.id);
-    }
+    await createVariantsWithInitialBalances({
+      supabase,
+      orgId: org.id,
+      productId: productData.id,
+      warehouseId,
+      combinations: talles.flatMap((talle) =>
+        colores.map((color) => ({ talle, color }))
+      ),
+    });
   }
   await syncProductTaxAssignments({
     supabase,
@@ -875,50 +817,13 @@ export async function updateProductForOrg(
 
     if (missingCombinations.length > 0) {
       const warehouseId = await getDefaultWarehouseId(supabase, org.id);
-      const lotsToInsert = missingCombinations.map(() => ({
-        organization_id: org.id,
-        warehouse_id: warehouseId,
-        product_id: productId,
-        lot_number: "DEFAULT",
-        expiration_date: null,
-        quantity_available: 0,
-      }));
-
-      const { data: insertedLots, error: lotsError } = await supabase
-        .from("product_lots")
-        .insert(lotsToInsert)
-        .select("id");
-
-      if (lotsError || !insertedLots) {
-        throw new Error(
-          `Error al crear lotes para nuevas variantes: ${lotsError?.message}`
-        );
-      }
-
-      const variantsToInsert = missingCombinations.map((comb, i) => ({
-        organization_id: org.id,
-        product_id: productId,
-        talle: comb.talle,
-        color: comb.color,
-        lot_id: insertedLots[i].id,
-      }));
-
-      const { data: createdVariants, error: variantsError } = await supabase
-        .from("product_variants")
-        .insert(variantsToInsert)
-        .select("id, lot_id");
-
-      if (
-        variantsError ||
-        createdVariants?.length !== variantsToInsert.length
-      ) {
-        throw new Error(
-          `Error al crear nuevas variantes: ${variantsError?.message ?? "faltan variantes creadas"}`
-        );
-      }
-      for (const variant of createdVariants) {
-        await linkVariantToLot(supabase, org.id, variant.lot_id, variant.id);
-      }
+      await createVariantsWithInitialBalances({
+        supabase,
+        orgId: org.id,
+        productId,
+        warehouseId,
+        combinations: missingCombinations,
+      });
     }
   }
 
@@ -1222,7 +1127,6 @@ type AggregationContext = {
   costById: Map<string, number>;
   minStockById: Map<string, number>;
   stockById: Map<string, number>;
-  unitTotals: Map<string, number>;
   variantTotals: Map<string, number>;
 };
 
@@ -1248,21 +1152,10 @@ function aggregateProduct(
   }
 
   const value = totalStock * (ctx.costById.get(product) ?? 0);
-  const unitStock = ctx.unitTotals.get(product) ?? totalStock;
-  const tracksUnits = meta?.tracks_stock_units ?? false;
-  const uom = meta?.unit_of_measure;
-
-  let units = 0;
-  let kg = 0;
-  let lt = 0;
-
-  if (tracksUnits && uom === "KG") {
-    kg = unitStock;
-  } else if (tracksUnits && uom === "LT") {
-    lt = unitStock;
-  } else {
-    units = totalStock;
-  }
+  const { units, kg, lt } = getStockMeasureTotals(
+    totalStock,
+    meta?.unit_of_measure
+  );
 
   const minStock = ctx.minStockById.get(product);
   const isLow = minStock != null && totalStock <= minStock;
@@ -1317,17 +1210,17 @@ async function computeStockAggregates(args: {
     }
   }
 
-  const [unitTotals, variantTotals] = await Promise.all([
-    fetchUnitTotalsByProductId(args.supabase, args.orgId, metaById),
-    fetchVariantTotalsByProductId(args.supabase, args.orgId, metaById),
-  ]);
+  const variantTotals = await fetchVariantTotalsByProductId(
+    args.supabase,
+    args.orgId,
+    metaById
+  );
 
   return buildStockAggregation(productIds, {
     metaById,
     costById: args.costById,
     minStockById,
     stockById: stockByProductId,
-    unitTotals,
     variantTotals,
   });
 }
@@ -2854,7 +2747,6 @@ export async function getProductVariantsByProductId(
  * Creates new variants with DEFAULT lots, deactivates removed ones,
  * and reactivates previously deactivated variants whose combination is back.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Reactivation, deactivation and initial lot linkage share the same variant matrix.
 export async function updateProductVariantsForOrg(
   orgSlug: string,
   productId: string,
@@ -2931,42 +2823,15 @@ export async function updateProductVariantsForOrg(
     }
   }
 
-  const warehouseId = await getDefaultWarehouseId(supabase, org.id);
-  for (const { talle, color } of newCombinations) {
-    const { data: lot, error: lotError } = await supabase
-      .from("product_lots")
-      .insert({
-        organization_id: org.id,
-        warehouse_id: warehouseId,
-        product_id: productId,
-        lot_number: "DEFAULT",
-        quantity_available: 0,
-        unit_quantity_available: 0,
-      })
-      .select("id")
-      .single();
-
-    if (lotError || !lot) {
-      throw new Error(`Error al crear lote DEFAULT: ${lotError?.message}`);
-    }
-
-    const { data: variant, error: insertError } = await supabase
-      .from("product_variants")
-      .insert({
-        organization_id: org.id,
-        product_id: productId,
-        talle,
-        color,
-      })
-      .select("id")
-      .single();
-
-    if (insertError || !variant) {
-      throw new Error(
-        `Error al insertar variante: ${insertError?.message ?? "sin datos"}`
-      );
-    }
-    await linkVariantToLot(supabase, org.id, lot.id, variant.id);
+  if (newCombinations.length > 0) {
+    const warehouseId = await getDefaultWarehouseId(supabase, org.id);
+    await createVariantsWithInitialBalances({
+      supabase,
+      orgId: org.id,
+      productId,
+      warehouseId,
+      combinations: newCombinations,
+    });
   }
 }
 
