@@ -1,11 +1,13 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getProductVariantsAction } from "@/modules/inventory/actions/product.actions";
+import {
+  getReceiptVariantsAction,
+  getReceiptWarehousesAction,
+} from "@/modules/purchases/actions/get-receipt-warehouses.action";
 import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
 import {
   purchaseOrderQueryKey,
@@ -38,12 +43,14 @@ import {
   pendingReceiptUnitQuantity,
   remainingVariantStocks,
 } from "@/modules/purchases/utils/receipt-progress";
+import { resolveReceiptWarehouseId } from "@/modules/purchases/utils/receipt-warehouse";
 import type {
   ItemTaxInput,
   ItemTaxSource,
 } from "@/modules/taxes/item-tax-calculations";
 import { PurchaseReceiptItems } from "./purchase-receipt-items";
 import { PurchaseReceiptSummary } from "./purchase-receipt-summary";
+import { ReceiptWarehouseSelector } from "./receipt-warehouse-selector";
 
 export type LotEntryForm = {
   /** Client-side unique key for useFieldArray */
@@ -72,9 +79,39 @@ export type ReceivedItemForm = {
   lots: LotEntryForm[];
 };
 
-export type ReceiptFormValues = {
-  items: ReceivedItemForm[];
-};
+const receiptFormSchema = z.object({
+  warehouseId: z.uuid("Seleccioná un depósito válido").optional(),
+  items: z.array(
+    z.object({
+      itemId: z.string(),
+      productId: z.string(),
+      newItem: z.boolean().optional(),
+      product_name: z.string().optional(),
+      received: z.boolean(),
+      orderedQuantity: z.number().nonnegative(),
+      orderedUnitQuantity: z.number().nonnegative(),
+      unitCost: z.number().nonnegative(),
+      unit_of_measure: z.string().nullable().optional(),
+      weight_per_unit: z.number().nullable().optional(),
+      has_variants: z.boolean().optional(),
+      variant_stocks: z
+        .record(z.string(), z.record(z.string(), z.number()))
+        .nullable()
+        .optional(),
+      lots: z.array(
+        z.object({
+          _key: z.string(),
+          lotNumber: z.string(),
+          expirationDate: z.date().optional(),
+          quantity: z.number().nonnegative(),
+          unitQuantity: z.number().nonnegative(),
+        })
+      ),
+    })
+  ),
+});
+
+export type ReceiptFormValues = z.infer<typeof receiptFormSchema>;
 
 type PurchaseReceiptProps = {
   purchaseOrder: PurchaseOrder & {
@@ -241,6 +278,7 @@ function buildActionInput(input: {
   orgSlug: string;
   purchaseOrderId: string;
   receiptId: string;
+  warehouseId: string;
   closePurchase: boolean;
   itemsToReceive: ReceivedItemForm[];
   variantData: Record<string, VariantProductData>;
@@ -250,6 +288,7 @@ function buildActionInput(input: {
     orgSlug,
     purchaseOrderId,
     receiptId,
+    warehouseId,
     closePurchase,
     itemsToReceive,
     variantData,
@@ -260,6 +299,7 @@ function buildActionInput(input: {
     orgSlug,
     purchaseOrderId,
     receiptId,
+    warehouseId,
     closePurchase,
     receivedItems: itemsToReceive.map((item) => {
       const base = {
@@ -398,6 +438,7 @@ export function PurchaseReceipt({
   const queryClient = useQueryClient();
 
   const form = useForm<ReceiptFormValues>({
+    resolver: zodResolver(receiptFormSchema),
     defaultValues: {
       items: buildInitialItems(purchaseOrder, receivedProgress),
     },
@@ -416,7 +457,28 @@ export function PurchaseReceipt({
   const [isConfirming, setIsConfirming] = useState(false);
   const [newProductId, setNewProductId] = useState("");
   const [hasPending, setHasPending] = useState(false);
-  const receiptIdRef = useRef<string | null>(null);
+  const receiptAttemptRef = useRef<{
+    receiptId: string;
+    warehouseId: string;
+    closePurchase: boolean;
+  } | null>(null);
+  const [isWarehouseFrozen, setIsWarehouseFrozen] = useState(false);
+  const warehouseQuery = useQuery({
+    queryKey: ["purchase-receipt-warehouses", orgSlug, purchaseOrder.id],
+    queryFn: () => getReceiptWarehousesAction(orgSlug, purchaseOrder.id),
+    staleTime: 0,
+  });
+  useEffect(() => {
+    if (receiptAttemptRef.current || !warehouseQuery.data) {
+      return;
+    }
+    const { lockedWarehouse, warehouses } = warehouseQuery.data;
+    if (lockedWarehouse) {
+      form.setValue("warehouseId", lockedWarehouse.id);
+    } else if (warehouses.length === 1 && !form.getValues("warehouseId")) {
+      form.setValue("warehouseId", warehouses[0].id);
+    }
+  }, [form, warehouseQuery.data]);
 
   const [variantData, setVariantData] = useState<
     Record<string, VariantProductData>
@@ -437,7 +499,7 @@ export function PurchaseReceipt({
       loadingVariantsRef.current.add(productId);
 
       try {
-        const variants = await getProductVariantsAction(orgSlug, productId);
+        const variants = await getReceiptVariantsAction(orgSlug, productId);
 
         const sizes = [...new Set(variants.map((v) => v.talle))].sort();
         const colors = [...new Set(variants.map((v) => v.color))].sort();
@@ -549,6 +611,30 @@ export function PurchaseReceipt({
     }
   };
 
+  const getReceiptAttempt = (closePurchase: boolean) => {
+    if (!receiptAttemptRef.current) {
+      if (!warehouseQuery.data) {
+        throw new Error("Esperá a que se carguen los depósitos de recepción");
+      }
+      const warehouseId = resolveReceiptWarehouseId(
+        warehouseQuery.data,
+        form.getValues("warehouseId")
+      );
+      receiptAttemptRef.current = {
+        receiptId: crypto.randomUUID(),
+        warehouseId,
+        closePurchase,
+      };
+      setIsWarehouseFrozen(true);
+    }
+    if (receiptAttemptRef.current.closePurchase !== closePurchase) {
+      throw new Error(
+        "El reintento debe conservar la decisión de cierre original"
+      );
+    }
+    return receiptAttemptRef.current;
+  };
+
   const submitReceive = async (
     itemsToReceive: ReceivedItemForm[],
     closePurchase: boolean
@@ -558,40 +644,46 @@ export function PurchaseReceipt({
       setError(validationError);
       return;
     }
-
-    if (!receiptIdRef.current) {
-      receiptIdRef.current = crypto.randomUUID();
-    }
-    const result = await receivePurchaseAction(
-      buildActionInput({
-        orgSlug,
-        purchaseOrderId: purchaseOrder.id,
-        receiptId: receiptIdRef.current,
-        closePurchase,
-        itemsToReceive,
-        variantData,
-        variantStockValues,
-      })
-    );
-
-    if (result.success) {
-      const keysToInvalidate = result.invalidatedQueryKeys ?? [
-        purchasesQueryKey(orgSlug),
-        purchaseOrderQueryKey(orgSlug, purchaseOrder.id),
-      ];
-      await Promise.all(
-        keysToInvalidate.map((queryKey) =>
-          queryClient.invalidateQueries({ queryKey: [...queryKey] })
-        )
+    try {
+      const attempt = getReceiptAttempt(closePurchase);
+      const result = await receivePurchaseAction(
+        buildActionInput({
+          orgSlug,
+          purchaseOrderId: purchaseOrder.id,
+          receiptId: attempt.receiptId,
+          warehouseId: attempt.warehouseId,
+          closePurchase,
+          itemsToReceive,
+          variantData,
+          variantStockValues,
+        })
       );
-      router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}`);
-      router.refresh();
-    } else {
-      setError(result.error ?? "Error al recibir el pedido");
+
+      if (result.success) {
+        const keysToInvalidate = result.invalidatedQueryKeys ?? [
+          purchasesQueryKey(orgSlug),
+          purchaseOrderQueryKey(orgSlug, purchaseOrder.id),
+        ];
+        await Promise.all(
+          keysToInvalidate.map((queryKey) =>
+            queryClient.invalidateQueries({ queryKey: [...queryKey] })
+          )
+        );
+        router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}`);
+        router.refresh();
+      } else {
+        setError(result.error ?? "Error al recibir el pedido");
+      }
+    } catch (receiveError) {
+      setError(
+        receiveError instanceof Error
+          ? receiveError.message
+          : "No se pudo confirmar la recepción. Reintentá con el mismo depósito."
+      );
     }
   };
 
-  const handleReceive = form.handleSubmit(async (values) => {
+  const prepareReceipt = async (values: ReceiptFormValues) => {
     setError(null);
 
     const itemsToReceive = values.items.filter(
@@ -655,6 +747,9 @@ export function PurchaseReceipt({
     }
 
     await submitReceive(itemsToReceive, true);
+  };
+  const handleReceive = form.handleSubmit(prepareReceipt, () => {
+    setError("Revisá las cantidades, los costos y el depósito de la recepción");
   });
 
   const handleConfirmReceive = async (closePurchase: boolean) => {
@@ -720,6 +815,14 @@ export function PurchaseReceipt({
           <p className="text-red-900 text-sm">{error}</p>
         </div>
       )}
+      <ReceiptWarehouseSelector
+        context={warehouseQuery.data}
+        control={form.control}
+        disabled={isReceiving || isConfirming || warehouseQuery.isFetching}
+        error={warehouseQuery.error?.message ?? null}
+        frozen={isWarehouseFrozen}
+        isLoading={warehouseQuery.isPending}
+      />
       <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
         <label htmlFor="extra-received-product">
           Producto adicional recibido

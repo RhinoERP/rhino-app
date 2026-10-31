@@ -1,8 +1,10 @@
+import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import type { Database } from "@/types/supabase";
 import type { LotInput } from "../types";
 import {
   calculateReceiptProgress,
@@ -176,7 +178,7 @@ export async function getPurchaseReceiptById(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("purchase_receipts")
-    .select("id, close_purchase")
+    .select("id, close_purchase, warehouse_id")
     .eq("id", receiptId)
     .eq("organization_id", org.id)
     .eq("purchase_order_id", purchaseOrderId)
@@ -198,6 +200,8 @@ export type PurchaseReceiptHistoryItem = {
 
 export type PurchaseReceiptHistoryEntry = {
   id: string;
+  warehouseId: string | null;
+  warehouseName: string | null;
   receivedAt: string;
   closePurchase: boolean;
   itemCount: number;
@@ -216,7 +220,9 @@ export async function getPurchaseReceiptHistory(
   const [receiptsResult, linesResult] = await Promise.all([
     supabase
       .from("purchase_receipts")
-      .select("id, received_at, close_purchase")
+      .select(
+        "id, received_at, close_purchase, warehouse_id, warehouse:warehouses!purchase_receipts_warehouse_org_fk(name)"
+      )
       .eq("organization_id", org.id)
       .eq("purchase_order_id", purchaseOrderId)
       .order("received_at", { ascending: true }),
@@ -243,6 +249,8 @@ export async function getPurchaseReceiptHistory(
     }));
     return {
       id: receipt.id,
+      warehouseId: receipt.warehouse_id,
+      warehouseName: receipt.warehouse?.name ?? null,
       receivedAt: receipt.received_at,
       closePurchase: receipt.close_purchase,
       itemCount: items.length,
@@ -255,6 +263,7 @@ export async function applyAtomicPurchaseReceipt(params: {
   orgSlug: string;
   purchaseOrderId: string;
   receiptId: string;
+  warehouseId: string;
   lines: ReceiptLine[];
   closePurchase: boolean;
   actorId: string;
@@ -265,28 +274,35 @@ export async function applyAtomicPurchaseReceipt(params: {
     throw new Error("Organización no encontrada");
   }
   const supabase = createAdminClient();
-  const { data, error } = await supabase.rpc("apply_atomic_purchase_receipt", {
-    p_org_id: org.id,
-    p_purchase_order_id: params.purchaseOrderId,
-    p_receipt_id: params.receiptId,
-    p_close: params.closePurchase,
-    p_fiscal: params.fiscal,
-    p_items: params.lines.map((line) => ({
-      item_id: line.itemId,
-      new_item: line.newItem ?? false,
-      actor_id: params.actorId,
-      product_id: line.productId,
-      quantity: line.quantity,
-      unit_quantity: line.unitQuantity,
-      unit_cost: line.unitCost,
-      variant_stocks: line.variantStocks,
-      lots: line.lots,
-    })),
-  });
+  const args: Database["public"]["Functions"]["apply_warehouse_purchase_receipt"]["Args"] =
+    {
+      p_org_id: org.id,
+      p_purchase_order_id: params.purchaseOrderId,
+      p_receipt_id: params.receiptId,
+      p_warehouse_id: params.warehouseId,
+      p_close: params.closePurchase,
+      // Mirror JSON transport: omit optional undefined fields before validation.
+      p_fiscal: z.json().parse(JSON.parse(JSON.stringify(params.fiscal))),
+      p_items: params.lines.map((line) => ({
+        item_id: line.itemId,
+        new_item: line.newItem ?? false,
+        actor_id: params.actorId,
+        product_id: line.productId,
+        quantity: line.quantity,
+        unit_quantity: line.unitQuantity,
+        unit_cost: line.unitCost,
+        variant_stocks: line.variantStocks,
+        lots: line.lots,
+      })),
+    };
+  const { data, error } = await supabase.rpc(
+    "apply_warehouse_purchase_receipt",
+    args
+  );
   if (error) {
     throw new Error(
       `No se pudo confirmar la entrega atómica: ${error.message}`
     );
   }
-  return data as boolean;
+  return z.boolean().parse(data);
 }

@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
@@ -12,6 +13,7 @@ import {
   type PosCashControlTerminal,
   type PosSessionSummary,
 } from "../types";
+import { resolveSessionWarehouseId } from "../utils/session-warehouse";
 import {
   ClosePosSessionValidationError,
   validateCloseSessionDifferenceJustification,
@@ -686,11 +688,20 @@ export async function openPosSession(
   }
 
   const startingCash = truncateMoney(payload.startingCash);
+  const warehouses = await getAvailableWarehouses(
+    payload.orgSlug,
+    "direct_sale"
+  );
+  const warehouseId = resolveSessionWarehouseId(
+    warehouses,
+    payload.warehouseId
+  );
 
   const { data: createdSession, error: createdSessionError } = await supabase
     .from("pos_sessions")
     .insert({
       organization_id: org.id,
+      warehouse_id: warehouseId,
       terminal_id: payload.terminalId,
       user_id: currentUser.id,
       status:

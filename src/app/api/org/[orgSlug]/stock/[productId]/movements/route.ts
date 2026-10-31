@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { orgSlug, productId } = await context.params;
     const searchParams = request.nextUrl.searchParams;
-    const lotId = searchParams.get("lotId") ?? undefined;
+    const variantId = searchParams.get("variantId") ?? undefined;
     const rawLimit = searchParams.get("limit");
     const limit = rawLimit ? Number.parseInt(rawLimit, 10) : 50;
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       orgSlug,
       productId,
       limit,
-      lotId
+      variantId
     );
     return NextResponse.json(movements);
   } catch (error) {

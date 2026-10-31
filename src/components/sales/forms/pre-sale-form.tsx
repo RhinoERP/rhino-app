@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -87,6 +87,7 @@ import {
 import type { PriceLevel } from "@/modules/price-levels/types";
 import { getPriceListItemsBatchAction } from "@/modules/price-lists/actions/get-price-list-items-batch.action";
 import type { PriceListItemBasic } from "@/modules/price-lists/service/price-lists.service";
+import { getSaleProductsByWarehouseAction } from "@/modules/sales/actions/get-sale-products-by-warehouse.action";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import { INVOICE_TYPE_OPTIONS } from "@/modules/sales/invoice-type-utils";
 import type {
@@ -122,11 +123,13 @@ type PreSaleFormProps = {
     cuit: string | null;
   };
   initialSellerId?: string;
+  initialWarehouseId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
   taxes: Tax[];
   priceLevels: PriceLevel[];
+  warehouses: Array<{ id: string; name: string }>;
 };
 
 type ItemState = {
@@ -574,14 +577,22 @@ export function PreSaleForm({
   orgSlug,
   organization,
   initialSellerId,
+  initialWarehouseId,
   customers,
   sellers,
-  products,
+  products: initialProducts,
   taxes,
   priceLevels,
+  warehouses,
 }: PreSaleFormProps) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
+  const [warehouseId, setWarehouseId] = useState<string>(
+    initialWarehouseId ?? warehouses[0]?.id ?? ""
+  );
+  const [products, setProducts] = useState<SaleProduct[]>(initialProducts);
+  const [isLoadingWarehouseStock, setIsLoadingWarehouseStock] = useState(false);
+  const warehouseRequestRef = useRef(0);
   const [sellerId, setSellerId] = useState<string>("");
   const [selectedPriceLevelId, setSelectedPriceLevelId] = useState<string>("");
   const [productPrices, setProductPrices] = useState<Map<string, number>>(
@@ -1471,7 +1482,11 @@ export function PreSaleForm({
   };
 
   const canSubmit =
-    Boolean(customerId) && Boolean(sellerId) && items.length > 0;
+    Boolean(customerId) &&
+    Boolean(sellerId) &&
+    Boolean(warehouseId) &&
+    !isLoadingWarehouseStock &&
+    items.length > 0;
   const isSaving = createPreSale.isPending;
 
   const ensureActiveSessionForSave = async () => {
@@ -1524,6 +1539,7 @@ export function PreSaleForm({
       const payload = {
         customerId,
         sellerId,
+        warehouseId,
         saleDate: saleDateString,
         expirationDate: expirationDateString || null,
         creditDays: normalizedExpirationDays,
@@ -1611,6 +1627,39 @@ export function PreSaleForm({
       ) {
         setCustomerId("");
         setSelectedPriceLevelId("");
+      }
+    }
+  };
+
+  const handleWarehouseSelect = async (nextWarehouseId: string) => {
+    const requestId = warehouseRequestRef.current + 1;
+    warehouseRequestRef.current = requestId;
+    setWarehouseId(nextWarehouseId);
+    setError(null);
+    setIsLoadingWarehouseStock(true);
+
+    try {
+      const nextProducts = await getSaleProductsByWarehouseAction(
+        orgSlug,
+        nextWarehouseId
+      );
+      if (warehouseRequestRef.current !== requestId) {
+        return;
+      }
+      setProducts(nextProducts);
+    } catch (warehouseError) {
+      if (warehouseRequestRef.current !== requestId) {
+        return;
+      }
+      setProducts([]);
+      setError(
+        warehouseError instanceof Error
+          ? warehouseError.message
+          : "No se pudo cargar el stock del depósito"
+      );
+    } finally {
+      if (warehouseRequestRef.current === requestId) {
+        setIsLoadingWarehouseStock(false);
       }
     }
   };
@@ -1951,6 +2000,35 @@ export function PreSaleForm({
                   </Popover>
                   <p className="text-muted-foreground text-xs">
                     Usamos los usuarios de la organización como vendedores.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="warehouse">Depósito *</Label>
+                  <Select
+                    disabled={
+                      warehouses.length === 0 ||
+                      isSaving ||
+                      isLoadingWarehouseStock
+                    }
+                    onValueChange={handleWarehouseSelect}
+                    value={warehouseId}
+                  >
+                    <SelectTrigger className="w-full" id="warehouse">
+                      <SelectValue placeholder="Seleccioná un depósito" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehouses.map((warehouse) => (
+                        <SelectItem key={warehouse.id} value={warehouse.id}>
+                          {warehouse.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    {isLoadingWarehouseStock
+                      ? "Actualizando stock del depósito..."
+                      : "El stock mostrado corresponde a este depósito."}
                   </p>
                 </div>
               </div>

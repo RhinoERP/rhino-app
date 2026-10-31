@@ -22,7 +22,9 @@ async function resolveArcaInvoicesRedirect(): Promise<string> {
 
   const { data: memberships, error } = await supabase
     .from("organization_members")
-    .select("organization:organizations(slug, is_active)")
+    .select(
+      "organization:organizations!organization_members_organization_id_fkey(slug, is_active)"
+    )
     .eq("user_id", userId)
     .eq("is_active", true);
 

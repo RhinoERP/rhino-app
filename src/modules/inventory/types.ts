@@ -7,7 +7,7 @@ export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type ProductVariant =
   Database["public"]["Tables"]["product_variants"]["Row"];
 export type ProductVariantWithStock = ProductVariant & {
-  product_lots?: { id: string; quantity_available: number } | null;
+  product_lots?: { quantity_available: number } | null;
 };
 export type DirectSalePrice =
   Database["public"]["Tables"]["direct_sale_prices"]["Row"];

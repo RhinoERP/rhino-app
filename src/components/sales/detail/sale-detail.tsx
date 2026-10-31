@@ -235,6 +235,7 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
+  warehouses: Array<{ id: string; name: string }>;
   initialMode?: "default" | "return";
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
@@ -851,6 +852,7 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
+  warehouses,
   initialMode,
   relatedOrder,
   remittanceSettings,
@@ -945,6 +947,9 @@ export function SaleDetail({
   );
   const [customerId, setCustomerId] = useState<string>(
     sale.customer?.id ?? sale.customer_id
+  );
+  const [warehouseId, setWarehouseId] = useState<string>(
+    sale.warehouse_id ?? ""
   );
   const [sellerId, setSellerId] = useState<string>(sale.user_id ?? "");
   const [saleDate, setSaleDate] = useState<Date>(() => {
@@ -1899,6 +1904,7 @@ export function SaleDetail({
     const internalPayload = {
       orgSlug,
       saleId: sale.id,
+      warehouseId,
       remittanceNumber: remittanceNumber || null,
       observations: observations || null,
     };
@@ -1909,10 +1915,22 @@ export function SaleDetail({
 
     return {
       ...buildFiscalSaleMutationPayload(),
+      warehouseId,
       remittanceNumber: remittanceNumber || null,
       advancePaymentPercentage:
         invoiceType === "NOTA_DE_VENTA" ? saleAdvancePercentage : null,
     };
+  };
+
+  const persistWarehouseChangeIfNeeded = async () => {
+    if (!(isDraftSale && warehouseId) || warehouseId === sale.warehouse_id) {
+      return;
+    }
+    await updateSale.mutateAsync({
+      orgSlug,
+      saleId: sale.id,
+      warehouseId,
+    });
   };
 
   const handleAccountingConfirm = async (informalEntryId: string) => {
@@ -1959,6 +1977,17 @@ export function SaleDetail({
 
     setError(null);
     setSuccessMessage(null);
+
+    try {
+      await persistWarehouseChangeIfNeeded();
+    } catch (warehouseError) {
+      setError(
+        warehouseError instanceof Error
+          ? warehouseError.message
+          : "No se pudo actualizar el depósito de la venta."
+      );
+      return;
+    }
 
     if (!accountingIntegrationEnabled) {
       try {
@@ -2998,6 +3027,35 @@ export function SaleDetail({
                     )}
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="warehouse">Depósito</Label>
+                <Select
+                  disabled={
+                    !(canEditInternalFields && isDraftSale) ||
+                    Boolean(relatedOrder) ||
+                    warehouses.length === 0
+                  }
+                  onValueChange={setWarehouseId}
+                  value={warehouseId}
+                >
+                  <SelectTrigger className="w-full md:w-72" id="warehouse">
+                    <SelectValue placeholder="Seleccioná un depósito" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((warehouse) => (
+                      <SelectItem key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-muted-foreground text-xs">
+                  {relatedOrder
+                    ? "El depósito se hereda del pedido y no puede cambiarse."
+                    : "Podés cambiarlo mientras la preventa siga en borrador."}
+                </p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">

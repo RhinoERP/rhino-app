@@ -1,6 +1,7 @@
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { requireAuth } from "@/lib/supabase/auth";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { resolveWholesaleWarehouseId } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type {
@@ -274,6 +275,10 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
   if (!organization?.id) {
     throw new Error("Organización no encontrada");
   }
+  const warehouseId = await resolveWholesaleWarehouseId(
+    input.orgSlug,
+    input.warehouseId
+  );
 
   const totals = await buildQuoteTotals({
     supabase,
@@ -294,10 +299,11 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     .insert(
       buildQuoteInsertPayload({
         organizationId: organization.id,
+        warehouseId,
         input,
         userId,
         totals,
-      }) as unknown as Database["public"]["Tables"]["quotes"]["Insert"]
+      })
     )
     .select("id")
     .maybeSingle();
@@ -328,17 +334,20 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
 
 function buildQuoteInsertPayload({
   organizationId,
+  warehouseId,
   input,
   userId,
   totals,
 }: {
   organizationId: string;
+  warehouseId: string;
   input: CreateQuoteInput;
   userId: string;
   totals: Awaited<ReturnType<typeof buildQuoteTotals>>;
-}) {
+}): Database["public"]["Tables"]["quotes"]["Insert"] {
   return {
     organization_id: organizationId,
+    warehouse_id: warehouseId,
     customer_id: input.customerId,
     status: "DRAFT",
     total_amount: totals.totalAmount,
@@ -603,6 +612,7 @@ async function createCancelledVersion(
     .from("quotes")
     .insert({
       organization_id: context.orgId,
+      warehouse_id: original.warehouse_id,
       customer_id: original.customer_id,
       created_by: context.userId,
       status: "CANCELLED",
@@ -775,6 +785,7 @@ function buildUpdatePayload(
   existing: QuoteRow
 ): Record<string, unknown> {
   return {
+    warehouse_id: input.warehouseId ?? existing.warehouse_id,
     customer_id: input.customerId ?? undefined,
     currency: input.currency ?? undefined,
     exchange_rate:
@@ -815,6 +826,7 @@ function hasMetadataChanged(
 ): boolean {
   const raw = existing as unknown as Record<string, unknown>;
   const checks: Array<{ inputVal: unknown; dbVal: unknown }> = [
+    { inputVal: input.warehouseId, dbVal: existing.warehouse_id },
     { inputVal: input.paymentCondition, dbVal: existing.payment_condition },
     { inputVal: input.observations, dbVal: existing.observations },
     {
@@ -933,6 +945,10 @@ export async function updateQuote(
     supabase,
     quoteId,
     organization.id
+  );
+  await resolveWholesaleWarehouseId(
+    input.orgSlug,
+    input.warehouseId ?? existing.warehouse_id
   );
 
   const metadataChanged = hasMetadataChanged(input, existing);
@@ -1116,6 +1132,10 @@ export async function convertQuoteToSalesOrder(
     .from("sales_orders")
     .insert({
       organization_id: organization.id,
+      warehouse_id: await resolveWholesaleWarehouseId(
+        orgSlug,
+        quote.warehouse_id
+      ),
       customer_id: quote.customer_id,
       user_id: userId,
       sale_date: saleDate,

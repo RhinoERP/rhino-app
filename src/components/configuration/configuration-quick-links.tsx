@@ -10,6 +10,7 @@ import {
   ShoppingCartSimpleIcon,
   UserGearIcon,
   UsersIcon,
+  WarehouseIcon,
   WhatsappLogo,
 } from "@phosphor-icons/react";
 import Link from "next/link";
@@ -43,6 +44,13 @@ export function ConfigurationQuickLinks({
   whatsappEnabled,
 }: ConfigurationQuickLinksProps) {
   const quickLinks: QuickLink[] = [
+    {
+      title: "Administrar Depósitos",
+      description:
+        "Creá depósitos, definí sus canales y asigná el acceso de los usuarios",
+      icon: WarehouseIcon,
+      href: `/org/${orgSlug}/configuracion/depositos`,
+    },
     {
       title: "Gestionar Miembros",
       description:

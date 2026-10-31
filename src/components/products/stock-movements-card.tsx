@@ -46,11 +46,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatDateOnly } from "@/lib/format";
 import { formatDateTime } from "@/lib/utils";
 import {
   createProductLotAction,
   createStockMovementAction,
 } from "@/modules/inventory/actions/stock.actions";
+import { useInventoryWarehouse } from "@/modules/inventory/hooks/use-inventory-warehouse";
 import { useStockMovementsByVariant } from "@/modules/inventory/hooks/use-stock-movements-by-variant";
 import type { ProductVariantRow } from "@/modules/inventory/service/inventory.service";
 import type {
@@ -60,6 +62,7 @@ import type {
   StockMovementType,
   StockMovementWithLot,
 } from "@/modules/inventory/types";
+import { InventoryWarehouseSelector } from "./inventory-warehouse-selector";
 
 const leadingZerosRegex = /^0+/;
 
@@ -114,6 +117,21 @@ const sourceLabels = {
   SYSTEM: "Sistema",
 } as const;
 
+function getMovementLotLabel(
+  lot: ProductLotWithStatus,
+  variants: ProductVariantRow[]
+): string {
+  const variant = variants.find((row) => row.id === lot.product_variant_id);
+  return [
+    lot.lot_number,
+    variant ? `${variant.talle} / ${variant.color}` : null,
+    lot.expiration_date ? formatDateOnly(lot.expiration_date) : "Sin fecha",
+    lot.id,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 const formatChange = (
   previous: number | null | undefined,
   next: number | null | undefined
@@ -139,6 +157,11 @@ export function StockMovementsCard({
   const { can } = usePermissions();
   const canManageInventory = can("inventory.manage");
   const [open, setOpen] = useState(false);
+  const warehouse = useInventoryWarehouse(orgSlug, open);
+  const warehouseLots = useMemo(
+    () => lots.filter((lot) => lot.warehouse_id === warehouse.warehouseId),
+    [lots, warehouse.warehouseId]
+  );
   const [selectedLotId, setSelectedLotId] = useState<string>(lots[0]?.id ?? "");
   const [type, setType] = useState<StockMovementType>("INBOUND");
   const [quantity, setQuantity] = useState("");
@@ -170,12 +193,16 @@ export function StockMovementsCard({
   }
 
   useEffect(() => {
-    if (lots.length > 0 && !selectedLotId) {
-      setSelectedLotId(lots[0].id);
-    }
-  }, [lots, selectedLotId]);
+    setSelectedLotId((current) =>
+      warehouseLots.some((lot) => lot.id === current)
+        ? current
+        : (warehouseLots[0]?.id ?? "")
+    );
+  }, [warehouseLots]);
 
-  const canCreateMovement = type === "INBOUND" || lots.length > 0;
+  const createsLot = type === "INBOUND" && !product.has_variants;
+  const canCreateMovement =
+    Boolean(warehouse.warehouseId) && (createsLot || warehouseLots.length > 0);
 
   const normalizeNumericInput = (value: string) => {
     const cleaned = value.replace(",", ".");
@@ -193,6 +220,10 @@ export function StockMovementsCard({
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: branching for validation is easier to read inline
   const handleSubmit = () => {
     setError(null);
+    if (!warehouse.warehouseId) {
+      setError("Seleccioná el depósito del movimiento");
+      return;
+    }
     const parsedQuantity = Number.parseFloat(quantity);
     const normalizedQuantity =
       Number.isFinite(parsedQuantity) &&
@@ -214,14 +245,14 @@ export function StockMovementsCard({
       return;
     }
 
-    if (type !== "INBOUND" && !selectedLotId) {
+    if (!(createsLot || selectedLotId)) {
       setError("Selecciona un lote para registrar el movimiento");
       return;
     }
 
     let expirationToUse: string | null = null;
 
-    if (type === "INBOUND") {
+    if (createsLot) {
       if (!inboundLotNumber.trim()) {
         setError("Ingresa el número de lote");
         return;
@@ -264,7 +295,11 @@ export function StockMovementsCard({
       return;
     }
 
-    if (type === "ADJUSTMENT" && normalizedQuantity === 0) {
+    if (
+      type === "ADJUSTMENT" &&
+      normalizedQuantity === 0 &&
+      (!tracksUnits || normalizedUnitQuantity === 0)
+    ) {
       setError("La cantidad del ajuste no puede ser 0");
       return;
     }
@@ -287,9 +322,10 @@ export function StockMovementsCard({
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async branching kept together
     startTransition(async () => {
-      if (type === "INBOUND") {
+      if (createsLot) {
         const lotResult = await createProductLotAction({
           orgSlug,
+          warehouseId: warehouse.warehouseId,
           productId,
           lotNumber: inboundLotNumber,
           expirationDate: expirationToUse,
@@ -304,6 +340,7 @@ export function StockMovementsCard({
 
         const movementResult = await createStockMovementAction({
           orgSlug,
+          warehouseId: warehouse.warehouseId,
           productId,
           lotId: lotResult.lotId,
           type,
@@ -321,6 +358,7 @@ export function StockMovementsCard({
       } else {
         const result = await createStockMovementAction({
           orgSlug,
+          warehouseId: warehouse.warehouseId,
           productId,
           lotId: selectedLotId,
           type,
@@ -435,7 +473,7 @@ export function StockMovementsCard({
     useStockMovementsByVariant(
       orgSlug,
       productId,
-      selectedVariant?.lotId ?? null,
+      selectedVariant?.id ?? null,
       hasVariantFilter
     );
 
@@ -537,14 +575,23 @@ export function StockMovementsCard({
                     </DialogDescription>
                   </DialogHeader>
 
-                  {type !== "INBOUND" && lots.length === 0 ? (
+                  <InventoryWarehouseSelector
+                    control={warehouse.form.control}
+                    disabled={isPending}
+                    error={warehouse.query.isError}
+                    isLoading={warehouse.query.isPending}
+                    warehouses={warehouse.query.data}
+                  />
+
+                  {!createsLot && warehouseLots.length === 0 ? (
                     <div className="rounded-md bg-muted p-4 text-muted-foreground text-sm">
-                      Agrega un lote antes de registrar movimientos.
+                      No hay lotes en el depósito elegido. Para variantes,
+                      ingresá el saldo inicial desde su grilla.
                     </div>
                   ) : (
                     <div className="space-y-4 py-2">
                       <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                        {type === "INBOUND" ? (
+                        {createsLot ? (
                           <div className="grid gap-2">
                             <Label>Lote</Label>
                             <Input
@@ -569,9 +616,9 @@ export function StockMovementsCard({
                                 <SelectValue placeholder="Seleccionar lote" />
                               </SelectTrigger>
                               <SelectContent>
-                                {lots.map((lot) => (
+                                {warehouseLots.map((lot) => (
                                   <SelectItem key={lot.id} value={lot.id}>
-                                    {lot.lot_number}
+                                    {getMovementLotLabel(lot, variants)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -600,7 +647,7 @@ export function StockMovementsCard({
                         </div>
                       </div>
 
-                      {type === "INBOUND" && (
+                      {createsLot && (
                         <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
                           <div className="grid gap-2">
                             <Label>Vencimiento</Label>

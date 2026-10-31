@@ -55,6 +55,7 @@ export type CreateQuoteItemInput = {
 
 export type CreateQuoteInput = {
   orgSlug: string;
+  warehouseId?: string;
   customerId: string;
   currency?: string;
   exchangeRate?: number | null;
@@ -93,6 +94,7 @@ export type QuotePaginationParams = {
 
 export type UpdateQuoteInput = {
   orgSlug: string;
+  warehouseId?: string;
   customerId?: string;
   status?: QuoteStatus;
   currency?: string;
@@ -180,6 +182,7 @@ export const QUOTE_INVOICE_TYPES = [
 
 export const quoteFormSchema = z
   .object({
+    warehouseId: z.uuid("Seleccioná un depósito válido").optional(),
     customerId: z.string().min(1, "Debe seleccionar un cliente."),
 
     salesPriceListId: z.string(),

@@ -118,6 +118,7 @@ import type { Tax } from "@/modules/taxes/types";
 import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
+import { QuoteWarehouseField } from "./quote-warehouse-field";
 
 const NO_PRICE_LIST = "none";
 
@@ -1109,6 +1110,7 @@ export function QuoteForm({
       <div className="flex flex-col gap-6 lg:col-span-9">
         <Form {...form}>
           <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
+            <QuoteWarehouseField orgSlug={orgSlug} />
             {/* Detalles principales del presupuesto */}
             <Card>
               <CardHeader>
@@ -1650,7 +1652,9 @@ export function QuoteForm({
                       ) ?? null
                     }
                     onSelectProduct={handleProductSelect}
+                    orgSlug={orgSlug}
                     products={products}
+                    warehouseId={form.watch("warehouseId")}
                   />
 
                   {/* Tabla de ítems seleccionados */}
@@ -2148,6 +2152,7 @@ export function QuoteForm({
         onOpenChange={handleGridOpenChange}
         orgSlug={orgSlug}
         product={selectedProduct}
+        warehouseId={form.watch("warehouseId")}
       />
     </div>
   );
