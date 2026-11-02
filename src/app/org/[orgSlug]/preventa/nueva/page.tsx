@@ -68,7 +68,11 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
       products={products}
       sellers={sellers}
       taxes={taxes}
-      warehouses={warehouses.map(({ id, name }) => ({ id, name }))}
+      warehouses={warehouses.map(({ id, name, is_default }) => ({
+        id,
+        name,
+        is_default,
+      }))}
     />
   );
 }

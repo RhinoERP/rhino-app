@@ -20,14 +20,18 @@ import type {
   StockPaginatedParams,
 } from "../types";
 import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
-import { getStockMeasureTotals } from "../utils/stock-measure-totals";
 import { getDefaultWarehouseId } from "./default-warehouse.service";
 import {
   applyWarehouseStockMovement,
   resolveInventoryWarehouseId,
   setWarehouseStockBalance,
 } from "./stock-maintenance.service";
+import {
+  calculateWarehouseStockMetrics,
+  fetchWarehouseBalances,
+} from "./stock-scope.service";
 import { createVariantsWithInitialBalances } from "./variant-balances.service";
+import { assertWarehouseAccess } from "./warehouse-stock.service";
 
 type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   categories?: { id: string; name: string } | null;
@@ -333,104 +337,52 @@ async function fetchProductMetaById(
   return productMetaById;
 }
 
-function getProductsTrackingUnits(
-  productMetaById: Map<string, ProductMeta>
-): string[] {
-  const productIds: string[] = [];
-  for (const [id, meta] of productMetaById.entries()) {
-    if (
-      meta.tracks_stock_units &&
-      (meta.unit_of_measure === "KG" || meta.unit_of_measure === "LT")
-    ) {
-      productIds.push(id);
-    }
-  }
-  return productIds;
-}
-
-async function fetchUnitTotalsByProductId(
+async function buildWarehouseStockItems(
   supabase: SupabaseServerClient,
   orgId: string,
-  productMetaById: Map<string, ProductMeta>
-): Promise<Map<string, number>> {
-  const unitTotalsByProductId = new Map<string, number>();
-  const productsTrackingUnits = getProductsTrackingUnits(productMetaById);
-  if (productsTrackingUnits.length === 0) {
-    return unitTotalsByProductId;
-  }
-
-  const results = await Promise.all(
-    chunkIds(productsTrackingUnits).map((chunk) =>
-      supabase
-        .from("product_lots")
-        .select("product_id, unit_quantity_available")
-        .eq("organization_id", orgId)
-        .in("product_id", chunk)
-    )
+  warehouseId: string | undefined,
+  { data, meta }: { data: StockDetailRow[]; meta: Map<string, ProductMeta> }
+): Promise<StockItem[]> {
+  const balances = await fetchWarehouseBalances(
+    supabase,
+    orgId,
+    warehouseId,
+    meta
   );
-  const lots = results.flatMap((result) => result.data ?? []);
-  const firstError = results.find((result) => result.error);
-
-  if (firstError?.error) {
-    throw new Error(`Error fetching stock units: ${firstError.error.message}`);
-  }
-
-  for (const lot of lots ?? []) {
-    if (!lot.product_id) {
-      continue;
-    }
-    const previous = unitTotalsByProductId.get(lot.product_id) ?? 0;
-    const delta = lot.unit_quantity_available ?? 0;
-    unitTotalsByProductId.set(lot.product_id, previous + delta);
-  }
-
-  return unitTotalsByProductId;
+  const quantities = new Map(
+    [...balances].map(([id, balance]) => [id, balance.quantity])
+  );
+  const units = new Map(
+    [...balances].map(([id, balance]) => [id, balance.units])
+  );
+  return buildStockItems(
+    data.map((row) => ({
+      ...row,
+      total_stock: quantities.get(row.product_id ?? "") ?? 0,
+    })),
+    meta,
+    units,
+    quantities
+  );
 }
 
-async function fetchVariantTotalsByProductId(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  productMetaById: Map<string, ProductMeta>
-): Promise<Map<string, number>> {
-  const variantTotals = new Map<string, number>();
-  const productIds: string[] = [];
-  for (const [id, meta] of productMetaById.entries()) {
-    if (meta.has_variants) {
-      productIds.push(id);
-    }
-  }
-
-  if (productIds.length === 0) {
-    return variantTotals;
-  }
-
-  const results = await Promise.all(
-    chunkIds(productIds).map((chunk) =>
-      supabase
-        .from("product_lots")
-        .select(
-          "product_id, quantity_available, variant:product_variants!product_lots_variant_fk!inner(is_active)"
-        )
-        .eq("organization_id", orgId)
-        .eq("variant.is_active", true)
-        .in("product_id", chunk)
-    )
+async function buildStockItemsForScope({
+  supabase,
+  orgId,
+  data,
+  warehouseId,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  data: StockDetailRow[];
+  warehouseId?: string;
+}): Promise<StockItem[]> {
+  const meta = await fetchProductMetaById(
+    supabase,
+    orgId,
+    extractProductIds(data)
   );
-  const data = results.flatMap((result) => result.data ?? []);
-  const firstError = results.find((result) => result.error);
-
-  if (firstError?.error) {
-    throw new Error(
-      `Error fetching variant stock: ${firstError.error.message}`
-    );
-  }
-
-  for (const row of data ?? []) {
-    const prev = variantTotals.get(row.product_id) ?? 0;
-    const lotStock = row.quantity_available;
-    variantTotals.set(row.product_id, prev + lotStock);
-  }
-  return variantTotals;
+  return buildWarehouseStockItems(supabase, orgId, warehouseId, { data, meta });
 }
 
 function buildStockItems(
@@ -864,29 +816,7 @@ export async function getStockSummary(
     return [];
   }
 
-  const productIds = extractProductIds(data);
-  const productMetaById = await fetchProductMetaById(
-    supabase,
-    org.id,
-    productIds
-  );
-  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-
-  return buildStockItems(
-    data,
-    productMetaById,
-    unitTotalsByProductId,
-    variantTotalsByProductId
-  );
+  return buildStockItemsForScope({ supabase, orgId: org.id, data });
 }
 
 export async function getStockPaginated(
@@ -895,6 +825,11 @@ export async function getStockPaginated(
 ): Promise<PaginatedResult<StockItem>> {
   const page = Math.max(1, params.page);
   const pageSize = Math.min(100, Math.max(1, params.pageSize));
+  if (params.warehouseId) {
+    await assertWarehouseAccess(orgSlug, params.warehouseId, {
+      requireActive: false,
+    });
+  }
 
   const ALLOWED_SORT_COLUMNS: string[] = [
     "product_name",
@@ -947,7 +882,7 @@ export async function getStockPaginated(
     query = query.eq("is_active", activeStatus);
   }
 
-  if (sort && sort.length > 0) {
+  if (sort.length > 0) {
     for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
@@ -970,30 +905,13 @@ export async function getStockPaginated(
     };
   }
 
-  const productIds = extractProductIds(data);
-  const productMetaById = await fetchProductMetaById(
-    supabase,
-    org.id,
-    productIds
-  );
-  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-
   return {
-    data: buildStockItems(
+    data: await buildStockItemsForScope({
+      supabase,
+      orgId: org.id,
       data,
-      productMetaById,
-      unitTotalsByProductId,
-      variantTotalsByProductId
-    ),
+      warehouseId: params.warehouseId,
+    }),
     totalCount: count ?? 0,
     page,
     pageSize,
@@ -1007,8 +925,14 @@ export async function getAllStockForExport(
     category?: string;
     status?: string;
     skuPrefix?: string;
+    warehouseId?: string;
   }
 ): Promise<StockItem[]> {
+  if (filters?.warehouseId) {
+    await assertWarehouseAccess(orgSlug, filters.warehouseId, {
+      requireActive: false,
+    });
+  }
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -1024,7 +948,7 @@ export async function getAllStockForExport(
     .select("*")
     .eq("organization_id", org.id)
     .order("product_name")
-    .limit(10_000);
+    .order("product_id");
 
   if (filters?.skuPrefix) {
     query = query.ilike("sku", `${filters.skuPrefix}%`);
@@ -1046,282 +970,83 @@ export async function getAllStockForExport(
     query = query.eq("is_active", false);
   }
 
-  const { data, error } = await query;
-
-  if (error || !data) {
-    return [];
-  }
-
-  const productIds = extractProductIds(data);
-  const productMetaById = await fetchProductMetaById(
-    supabase,
-    org.id,
-    productIds
-  );
-  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-
-  return buildStockItems(
-    data,
-    productMetaById,
-    unitTotalsByProductId,
-    variantTotalsByProductId
-  );
-}
-
-type StockAggregates = {
-  totalUnits: number;
-  totalKg: number;
-  totalLt: number;
-  totalStockValue: number;
-  lowStockCount: number;
-};
-
-type ProductMetricsRow = {
-  id: string | null;
-  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-  tracks_stock_units: boolean | null;
-  has_variants: boolean | null;
-  is_active: boolean | null;
-  min_stock: number | null;
-};
-
-type StockMetricsRow = {
-  product_id: string | null;
-  total_stock: number | null;
-};
-
-function buildStockMaps(products: ProductMetricsRow[]) {
-  const metaById = new Map<string, ProductMeta>();
-  const minStockById = new Map<string, number>();
-  const productIds: string[] = [];
-
-  for (const p of products) {
-    if (!p.id) {
-      continue;
+  const data: StockDetailRow[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const result = await query.range(offset, offset + 999);
+    if (result.error) {
+      throw new Error(`No se pudo exportar el stock: ${result.error.message}`);
     }
-    productIds.push(p.id);
-    metaById.set(p.id, {
-      unit_of_measure: p.unit_of_measure ?? null,
-      tracks_stock_units: p.tracks_stock_units ?? null,
-      has_variants: p.has_variants ?? null,
-    });
-    if (p.min_stock != null) {
-      minStockById.set(p.id, p.min_stock);
+    data.push(...(result.data ?? []));
+    if ((result.data?.length ?? 0) < 1000) {
+      break;
     }
   }
 
-  return { metaById, minStockById, productIds };
-}
-
-type AggregationContext = {
-  metaById: Map<string, ProductMeta>;
-  costById: Map<string, number>;
-  minStockById: Map<string, number>;
-  stockById: Map<string, number>;
-  variantTotals: Map<string, number>;
-};
-
-function aggregateProduct(
-  product: string,
-  ctx: AggregationContext
-): {
-  units: number;
-  kg: number;
-  lt: number;
-  value: number;
-  isLow: boolean;
-} {
-  const meta = ctx.metaById.get(product);
-  const viewStock = ctx.stockById.get(product) ?? 0;
-  const totalStock =
-    (meta?.has_variants ?? false)
-      ? (ctx.variantTotals.get(product) ?? 0)
-      : viewStock;
-
-  if (totalStock <= 0) {
-    return { units: 0, kg: 0, lt: 0, value: 0, isLow: false };
-  }
-
-  const value = totalStock * (ctx.costById.get(product) ?? 0);
-  const { units, kg, lt } = getStockMeasureTotals(
-    totalStock,
-    meta?.unit_of_measure
-  );
-
-  const minStock = ctx.minStockById.get(product);
-  const isLow = minStock != null && totalStock <= minStock;
-
-  return { units, kg, lt, value, isLow };
-}
-
-function buildStockAggregation(
-  productIds: string[],
-  ctx: AggregationContext
-): StockAggregates {
-  let totalUnits = 0;
-  let totalKg = 0;
-  let totalLt = 0;
-  let totalStockValue = 0;
-  let lowStockCount = 0;
-
-  for (const product of productIds) {
-    const r = aggregateProduct(product, ctx);
-    totalUnits += r.units;
-    totalKg += r.kg;
-    totalLt += r.lt;
-    totalStockValue += r.value;
-    if (r.isLow) {
-      lowStockCount += 1;
-    }
-  }
-
-  return {
-    totalUnits,
-    totalKg: Math.round(totalKg * 10) / 10,
-    totalLt: Math.round(totalLt * 10) / 10,
-    totalStockValue,
-    lowStockCount,
-  };
-}
-
-async function computeStockAggregates(args: {
-  supabase: SupabaseServerClient;
-  orgId: string;
-  products: ProductMetricsRow[];
-  stockRows: StockMetricsRow[];
-  costById: Map<string, number>;
-}): Promise<StockAggregates> {
-  const { metaById, minStockById, productIds } = buildStockMaps(args.products);
-
-  const stockByProductId = new Map<string, number>();
-  for (const row of args.stockRows) {
-    const pid = row.product_id as string;
-    if (pid) {
-      stockByProductId.set(pid, Number(row.total_stock ?? 0));
-    }
-  }
-
-  const variantTotals = await fetchVariantTotalsByProductId(
-    args.supabase,
-    args.orgId,
-    metaById
-  );
-
-  return buildStockAggregation(productIds, {
-    metaById,
-    costById: args.costById,
-    minStockById,
-    stockById: stockByProductId,
-    variantTotals,
-  });
-}
-
-export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    return {
-      totalProducts: 0,
-      activeProducts: 0,
-      inactiveProducts: 0,
-      totalUnits: 0,
-      totalKg: 0,
-      totalLt: 0,
-      totalStockValue: 0,
-      lowStockCount: 0,
-    };
-  }
-
-  const supabase = await createClient();
-
-  const [
-    { count: totalProducts },
-    { count: activeProducts },
-    { count: inactiveProducts },
-    productsResult,
-    costResult,
-    stockResult,
-  ] = await Promise.all([
-    supabase
-      .from("view_stock_detail")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id),
-    supabase
-      .from("view_stock_detail")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id)
-      .eq("is_active", true),
-    supabase
-      .from("view_stock_detail")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id)
-      .eq("is_active", false),
-    supabase
-      .from("products")
-      .select(
-        "id, unit_of_measure, tracks_stock_units, has_variants, is_active, min_stock"
-      )
-      .eq("organization_id", org.id),
-    supabase
-      .from("products_with_price")
-      .select("id, cost_price")
-      .eq("organization_id", org.id),
-    supabase
-      .from("view_stock_detail")
-      .select("product_id, total_stock")
-      .eq("organization_id", org.id)
-      .eq("is_active", true),
-  ]);
-
-  const products = productsResult.data ?? [];
-  const stockRows = stockResult.data ?? [];
-  const costById = new Map<string, number>();
-  for (const row of costResult.data ?? []) {
-    if (row.id) {
-      costById.set(row.id, row.cost_price ?? 0);
-    }
-  }
-
-  if (products.length === 0) {
-    return {
-      totalProducts: totalProducts ?? 0,
-      activeProducts: activeProducts ?? 0,
-      inactiveProducts: inactiveProducts ?? 0,
-      totalUnits: 0,
-      totalKg: 0,
-      totalLt: 0,
-      totalStockValue: 0,
-      lowStockCount: 0,
-    };
-  }
-
-  const aggregates = await computeStockAggregates({
+  return buildStockItemsForScope({
     supabase,
     orgId: org.id,
-    products,
-    stockRows,
-    costById,
+    data,
+    warehouseId: filters?.warehouseId,
   });
+}
 
-  return {
-    totalProducts: totalProducts ?? 0,
-    activeProducts: activeProducts ?? 0,
-    inactiveProducts: inactiveProducts ?? 0,
-    totalUnits: aggregates.totalUnits,
-    totalKg: aggregates.totalKg,
-    totalLt: aggregates.totalLt,
-    totalStockValue: aggregates.totalStockValue,
-    lowStockCount: aggregates.lowStockCount,
-  };
+function addMetricMetadata(
+  maps: { costs: Map<string, number>; minimums: Map<string, number> },
+  prices: { id: string | null; cost_price: number | null }[],
+  products: { id: string; min_stock: number | null }[]
+) {
+  for (const row of prices) {
+    if (row.id) {
+      maps.costs.set(row.id, row.cost_price ?? 0);
+    }
+  }
+  for (const row of products) {
+    if (row.min_stock != null) {
+      maps.minimums.set(row.id, row.min_stock);
+    }
+  }
+}
+
+export async function getStockMetrics(
+  orgSlug: string,
+  warehouseId?: string
+): Promise<StockMetrics> {
+  const items = await getAllStockForExport(orgSlug, { warehouseId });
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org) {
+    throw new Error("Organización no encontrada");
+  }
+  const supabase = await createClient();
+  const costs = new Map<string, number>();
+  const minimums = new Map<string, number>();
+  for (const ids of chunkIds(items.map((item) => item.product_id))) {
+    const [priceResult, productResult] = await Promise.all([
+      supabase
+        .from("products_with_price")
+        .select("id, cost_price")
+        .eq("organization_id", org.id)
+        .in("id", ids),
+      supabase
+        .from("products")
+        .select("id, min_stock")
+        .eq("organization_id", org.id)
+        .in("id", ids),
+    ]);
+    if (priceResult.error || productResult.error) {
+      throw new Error("No se pudieron calcular los indicadores del depósito");
+    }
+    addMetricMetadata(
+      { costs, minimums },
+      priceResult.data ?? [],
+      productResult.data ?? []
+    );
+  }
+  return calculateWarehouseStockMetrics(
+    items,
+    costs,
+    minimums,
+    Boolean(warehouseId)
+  );
 }
 
 /**
@@ -1329,7 +1054,8 @@ export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
  */
 export async function getProductVariantsWithStock(
   orgSlug: string,
-  productId: string
+  productId: string,
+  warehouseId?: string
 ): Promise<ProductVariantWithStock[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1352,7 +1078,11 @@ export async function getProductVariantsWithStock(
     throw new Error(`Error obteniendo variantes: ${error.message}`);
   }
 
-  const balances = await getProductVariantsByProductId(orgSlug, productId);
+  const balances = await getProductVariantsByProductId(
+    orgSlug,
+    productId,
+    warehouseId
+  );
   const stockByVariant = new Map(
     balances.map((variant) => [variant.id, variant.stock])
   );
@@ -2702,7 +2432,7 @@ export async function getProductVariantsByProductId(
   }
 
   if (warehouseId) {
-    await resolveInventoryWarehouseId(orgSlug, warehouseId);
+    await assertWarehouseAccess(orgSlug, warehouseId, { requireActive: false });
   }
 
   const { data, error } = await supabase
@@ -2719,17 +2449,29 @@ export async function getProductVariantsByProductId(
   }
   let lotsQuery = supabase
     .from("product_lots")
-    .select("product_variant_id, quantity_available")
+    .select("id, product_variant_id, quantity_available")
     .eq("organization_id", org.id)
     .eq("product_id", productId);
   if (warehouseId) {
     lotsQuery = lotsQuery.eq("warehouse_id", warehouseId);
   }
-  const { data: lots, error: lotsError } = await lotsQuery;
-  if (lotsError) {
-    throw new Error(
-      `Error al obtener saldos de variantes: ${lotsError.message}`
-    );
+  const lots: {
+    product_variant_id: string | null;
+    quantity_available: number;
+  }[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data: pageLots, error: lotsError } = await lotsQuery
+      .order("id")
+      .range(offset, offset + 999);
+    if (lotsError) {
+      throw new Error(
+        `Error al obtener saldos de variantes: ${lotsError.message}`
+      );
+    }
+    lots.push(...(pageLots ?? []));
+    if ((pageLots?.length ?? 0) < 1000) {
+      break;
+    }
   }
 
   return (data ?? []).map((v) => ({

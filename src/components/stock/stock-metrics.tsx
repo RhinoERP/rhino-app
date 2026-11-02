@@ -43,7 +43,7 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
 
   return (
     <div className="flex flex-wrap gap-4">
-      {metrics.activeProducts > 0 && (
+      {(metrics.activeProducts > 0 || metrics.warehouseScoped) && (
         <Card className="min-w-60 flex-1">
           <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md border">
@@ -53,19 +53,23 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
               />
             </div>
             <CardTitle className="font-medium text-sm">
-              Productos activos
+              {metrics.warehouseScoped
+                ? "Productos activos con stock"
+                : "Productos activos"}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="font-bold text-xl">{metrics.activeProducts}</div>
             <p className="text-muted-foreground text-xs">
-              Productos con stock activo
+              {metrics.warehouseScoped
+                ? "En el depósito seleccionado"
+                : "Productos con stock activo"}
             </p>
           </CardContent>
         </Card>
       )}
 
-      {metrics.totalUnits > 0 && (
+      {(metrics.totalUnits > 0 || metrics.warehouseScoped) && (
         <Card className="min-w-60 flex-1">
           <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md border">
@@ -87,7 +91,7 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
         </Card>
       )}
 
-      {metrics.totalKg > 0 && (
+      {(metrics.totalKg > 0 || metrics.warehouseScoped) && (
         <Card className="min-w-60 flex-1">
           <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md border">
@@ -107,7 +111,7 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
         </Card>
       )}
 
-      {metrics.totalLt > 0 && (
+      {(metrics.totalLt > 0 || metrics.warehouseScoped) && (
         <Card className="min-w-60 flex-1">
           <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md border">
@@ -127,57 +131,58 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
         </Card>
       )}
 
-      {metrics.totalStockValue > 0 && canManageInventory && (
-        <>
-          <Card className="min-w-60 flex-1">
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md border">
-                <CurrencyDollarSimpleIcon
-                  className="h-4 w-4 text-muted-foreground"
-                  weight="duotone"
-                />
-              </div>
-              <CardTitle className="font-medium text-sm">
-                Valor del stock (costo pesos)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="truncate font-bold text-xl">
-                {formatCurrency(metrics.totalStockValue)}
-              </div>
-              <p className="text-muted-foreground text-xs">
-                Valor total del inventario (costo)
-              </p>
-            </CardContent>
-          </Card>
+      {(metrics.totalStockValue > 0 || metrics.warehouseScoped) &&
+        canManageInventory && (
+          <>
+            <Card className="min-w-60 flex-1">
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+                  <CurrencyDollarSimpleIcon
+                    className="h-4 w-4 text-muted-foreground"
+                    weight="duotone"
+                  />
+                </div>
+                <CardTitle className="font-medium text-sm">
+                  Valor del stock (costo pesos)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="truncate font-bold text-xl">
+                  {formatCurrency(metrics.totalStockValue)}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Valor total del inventario (costo)
+                </p>
+              </CardContent>
+            </Card>
 
-          <Card className="min-w-60 flex-1">
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md border">
-                <CurrencyDollarSimpleIcon
-                  className="h-4 w-4 text-muted-foreground"
-                  weight="duotone"
-                />
-              </div>
-              <CardTitle className="font-medium text-sm">
-                Valor del stock (costo dolar)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="truncate font-bold text-xl">
-                {usdRate
-                  ? formatCurrency(metrics.totalStockValue / usdRate, "USD")
-                  : "—"}
-              </div>
-              <p className="text-muted-foreground text-xs">
-                {usdRate
-                  ? `Dólar BNA: ${formatCurrency(usdRate)}`
-                  : "Cotización no disponible"}
-              </p>
-            </CardContent>
-          </Card>
-        </>
-      )}
+            <Card className="min-w-60 flex-1">
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+                  <CurrencyDollarSimpleIcon
+                    className="h-4 w-4 text-muted-foreground"
+                    weight="duotone"
+                  />
+                </div>
+                <CardTitle className="font-medium text-sm">
+                  Valor del stock (costo dolar)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="truncate font-bold text-xl">
+                  {usdRate
+                    ? formatCurrency(metrics.totalStockValue / usdRate, "USD")
+                    : "—"}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {usdRate
+                    ? `Dólar BNA: ${formatCurrency(usdRate)}`
+                    : "Cotización no disponible"}
+                </p>
+              </CardContent>
+            </Card>
+          </>
+        )}
     </div>
   );
 }

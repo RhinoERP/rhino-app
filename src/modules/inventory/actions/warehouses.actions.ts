@@ -7,5 +7,9 @@ import { getAvailableWarehouses } from "../service/warehouse-stock.service";
 export async function getInventoryWarehousesAction(orgSlug: string) {
   await ensure(READ_PERMISSIONS.inventory, orgSlug);
   const warehouses = await getAvailableWarehouses(orgSlug);
-  return warehouses.map(({ id, name }) => ({ id, name }));
+  return warehouses.map(({ id, name, is_default }) => ({
+    id,
+    name,
+    is_default,
+  }));
 }

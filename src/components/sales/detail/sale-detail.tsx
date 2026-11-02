@@ -27,6 +27,7 @@ import { RemittanceMaskPrintModal } from "@/components/sales/remittance-mask-pri
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { RemittancePreviewModal } from "@/components/sales/remittance-preview-modal";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
+import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -91,6 +92,7 @@ import type { CreditNote } from "@/modules/credit-notes/types";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-invoice-email.action";
+import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -235,7 +237,7 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
-  warehouses: Array<{ id: string; name: string }>;
+  warehouses: WarehouseOption[];
   initialMode?: "default" | "return";
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
@@ -3029,34 +3031,21 @@ export function SaleDetail({
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="warehouse">Depósito</Label>
-                <Select
-                  disabled={
-                    !(canEditInternalFields && isDraftSale) ||
-                    Boolean(relatedOrder) ||
-                    warehouses.length === 0
-                  }
-                  onValueChange={setWarehouseId}
-                  value={warehouseId}
-                >
-                  <SelectTrigger className="w-full md:w-72" id="warehouse">
-                    <SelectValue placeholder="Seleccioná un depósito" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map((warehouse) => (
-                      <SelectItem key={warehouse.id} value={warehouse.id}>
-                        {warehouse.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  {relatedOrder
+              <OperationalWarehouseField
+                description={
+                  relatedOrder
                     ? "El depósito se hereda del pedido y no puede cambiarse."
-                    : "Podés cambiarlo mientras la preventa siga en borrador."}
-                </p>
-              </div>
+                    : "Podés cambiarlo mientras la preventa siga en borrador."
+                }
+                id="warehouse"
+                onValueChange={setWarehouseId}
+                readOnly={
+                  !(canEditInternalFields && isDraftSale) ||
+                  Boolean(relatedOrder)
+                }
+                value={warehouseId}
+                warehouses={warehouses}
+              />
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">

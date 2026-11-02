@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowsLeftRightIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -214,24 +214,48 @@ export function StockTransferDialog({
   const stockUnitSuffix = getStockUnitSuffix(product.unit_of_measure);
   const quantityLabel = getQuantityLabel(product.unit_of_measure);
 
+  const initializedRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!open) {
+      initializedRef.current = null;
+      return;
+    }
+    const initializationKey = initialLotId ?? "";
+    if (initializedRef.current === initializationKey) {
       return;
     }
     const preferredLot =
       availableLots.find((lot) => lot.id === initialLotId) ?? availableLots[0];
-    const destination = warehouses.find(
-      (warehouse) =>
-        warehouse.isActive && warehouse.id !== preferredLot?.warehouse_id
-    );
     form.reset({
       sourceLotId: preferredLot?.id ?? "",
-      destinationWarehouseId: destination?.id ?? "",
+      destinationWarehouseId: "",
       quantity: "",
       unitQuantity: "",
       reason: "",
     });
-  }, [open, initialLotId, availableLots, warehouses, form]);
+    initializedRef.current = initializationKey;
+  }, [open, initialLotId, availableLots, form]);
+
+  useEffect(() => {
+    if (!open || warehousesLoading) {
+      return;
+    }
+    if (form.getValues("destinationWarehouseId")) {
+      return;
+    }
+    const sourceWarehouseId = availableLots.find(
+      (lot) => lot.id === form.getValues("sourceLotId")
+    )?.warehouse_id;
+    const destination = warehouses.find(
+      (warehouse) => warehouse.isActive && warehouse.id !== sourceWarehouseId
+    );
+    if (destination) {
+      form.setValue("destinationWarehouseId", destination.id, {
+        shouldValidate: true,
+      });
+    }
+  }, [open, warehousesLoading, warehouses, availableLots, form]);
 
   const submit = form.handleSubmit(async (values) => {
     const validation = validateTransfer(values, sourceLot, tracksUnits);
@@ -254,7 +278,13 @@ export function StockTransferDialog({
           unitQuantity: validation.unitQuantity,
         },
       ],
-    });
+    }).catch((error: unknown) => ({
+      success: false as const,
+      error:
+        error instanceof Error
+          ? error.message
+          : "No se pudo registrar la transferencia",
+    }));
     if (!result.success) {
       form.setError("root", { message: result.error });
       return;

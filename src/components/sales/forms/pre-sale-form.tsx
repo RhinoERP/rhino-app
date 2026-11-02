@@ -16,6 +16,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -78,6 +79,7 @@ import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
+import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import {
@@ -129,7 +131,7 @@ type PreSaleFormProps = {
   products: SaleProduct[];
   taxes: Tax[];
   priceLevels: PriceLevel[];
-  warehouses: Array<{ id: string; name: string }>;
+  warehouses: WarehouseOption[];
 };
 
 type ItemState = {
@@ -2003,34 +2005,19 @@ export function PreSaleForm({
                   </p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="warehouse">Depósito *</Label>
-                  <Select
-                    disabled={
-                      warehouses.length === 0 ||
-                      isSaving ||
-                      isLoadingWarehouseStock
-                    }
-                    onValueChange={handleWarehouseSelect}
-                    value={warehouseId}
-                  >
-                    <SelectTrigger className="w-full" id="warehouse">
-                      <SelectValue placeholder="Seleccioná un depósito" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {warehouses.map((warehouse) => (
-                        <SelectItem key={warehouse.id} value={warehouse.id}>
-                          {warehouse.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-muted-foreground text-xs">
-                    {isLoadingWarehouseStock
+                <OperationalWarehouseField
+                  description={
+                    isLoadingWarehouseStock
                       ? "Actualizando stock del depósito..."
-                      : "El stock mostrado corresponde a este depósito."}
-                  </p>
-                </div>
+                      : "El stock mostrado corresponde a este depósito."
+                  }
+                  disabled={isSaving || isLoadingWarehouseStock}
+                  id="warehouse"
+                  onValueChange={handleWarehouseSelect}
+                  required
+                  value={warehouseId}
+                  warehouses={warehouses}
+                />
               </div>
 
               {priceLevels.length > 0 && (

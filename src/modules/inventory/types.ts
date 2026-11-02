@@ -132,6 +132,7 @@ export type StockMovementSource =
   | "SYSTEM";
 
 export type StockPaginatedParams = {
+  warehouseId?: string;
   page: number;
   pageSize: number;
   sort?: SortParam[];
@@ -142,6 +143,7 @@ export type StockPaginatedParams = {
 };
 
 export type StockMetrics = {
+  warehouseScoped?: boolean;
   totalProducts: number;
   activeProducts: number;
   inactiveProducts: number;

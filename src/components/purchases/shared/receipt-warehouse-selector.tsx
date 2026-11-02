@@ -37,10 +37,7 @@ export function ReceiptWarehouseSelector(props: {
           <>
             {fixedWarehouse &&
             (isLinked || !field.value || field.value === fixedWarehouse.id) ? (
-              <p className="text-sm">
-                {fixedWarehouse.name}
-                {context?.lockedWarehouse && " · Heredado del pedido"}
-              </p>
+              <p className="text-sm">{fixedWarehouse.name}</p>
             ) : (
               <Select
                 disabled={props.disabled || props.frozen}

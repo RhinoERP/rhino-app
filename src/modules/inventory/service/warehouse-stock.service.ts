@@ -4,6 +4,7 @@ import type { SupabaseServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import type { Database } from "@/types/supabase";
+import { WarehouseAccessError } from "../utils/warehouse-access-error";
 
 export type Warehouse = Database["public"]["Tables"]["warehouses"]["Row"];
 export type WarehouseStockLot =
@@ -13,11 +14,11 @@ export type WarehouseChannel = "wholesale" | "direct_sale";
 async function resolveWarehouseContext(orgSlug: string) {
   const auth = await requireAuth();
   if (!auth) {
-    throw new Error("No autorizado");
+    throw new WarehouseAccessError("No autorizado", 401);
   }
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
-    throw new Error("Organización no encontrada");
+    throw new WarehouseAccessError("Organización no encontrada", 404);
   }
   const { supabase, userId } = auth;
   const { data: member, error } = await supabase
@@ -28,7 +29,7 @@ async function resolveWarehouseContext(orgSlug: string) {
     .eq("is_active", true)
     .single();
   if (error || !member) {
-    throw new Error("No tenés acceso a la organización");
+    throw new WarehouseAccessError("No tenés acceso a la organización", 403);
   }
   const { data: permissions, error: permissionError } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
@@ -100,7 +101,9 @@ export async function assertWarehouseAccess(
   warehouseId: string,
   options?: { requireActive?: boolean }
 ): Promise<Warehouse> {
-  z.uuid().parse(warehouseId);
+  if (!z.uuid().safeParse(warehouseId).success) {
+    throw new WarehouseAccessError("Depósito inválido", 400);
+  }
   const { supabase, orgId, userId, isAdmin } =
     await resolveWarehouseContext(orgSlug);
   const { data: warehouse, error } = await supabase
@@ -109,11 +112,17 @@ export async function assertWarehouseAccess(
     .eq("organization_id", orgId)
     .eq("id", warehouseId)
     .maybeSingle();
-  if (error || !warehouse) {
-    throw new Error("Depósito no encontrado en esta organización");
+  if (error) {
+    throw new Error("No se pudo verificar el depósito");
+  }
+  if (!warehouse) {
+    throw new WarehouseAccessError(
+      "Depósito no encontrado en esta organización",
+      404
+    );
   }
   if (options?.requireActive !== false && !warehouse.is_active) {
-    throw new Error("El depósito está inactivo");
+    throw new WarehouseAccessError("El depósito está inactivo", 400);
   }
   if (!isAdmin) {
     const { data: assignment, error: assignmentError } = await supabase
@@ -123,8 +132,14 @@ export async function assertWarehouseAccess(
       .eq("warehouse_id", warehouseId)
       .eq("user_id", userId)
       .maybeSingle();
-    if (assignmentError || !assignment) {
-      throw new Error("No tenés acceso al depósito seleccionado");
+    if (assignmentError) {
+      throw new Error("No se pudo verificar la asignación del depósito");
+    }
+    if (!assignment) {
+      throw new WarehouseAccessError(
+        "No tenés acceso al depósito seleccionado",
+        403
+      );
     }
   }
   return warehouse;
