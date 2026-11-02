@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { searchDirectSaleProducts } from "@/modules/sales/service/direct-sales.service";
@@ -30,6 +31,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const products = await searchDirectSaleProducts({
       orgSlug,
+      terminalId: z
+        .uuid()
+        .optional()
+        .parse(request.nextUrl.searchParams.get("terminalId") ?? undefined),
       q,
       barcode,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,

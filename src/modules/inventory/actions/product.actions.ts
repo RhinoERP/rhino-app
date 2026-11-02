@@ -5,17 +5,19 @@ import { createClient } from "@/lib/supabase/server";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
-  adjustVariantStock,
   type CreateProductInput,
   createProductForOrg,
   getProductVariantsByProductId,
   getProductVariantsWithStock,
-  getVariantCurrentStock,
   type ProductVariantRow,
   type UpdateProductInput,
   updateProductForOrg,
   updateProductVariantsForOrg,
 } from "../service/inventory.service";
+import {
+  resolveInventoryWarehouseId,
+  setVariantWarehouseStock,
+} from "../service/stock-maintenance.service";
 import type { ProductVariantWithStock } from "../types";
 
 export type ProductActionResult = {
@@ -75,11 +77,12 @@ export async function updateProductAction(
 
 export async function getProductVariantsAction(
   orgSlug: string,
-  productId: string
+  productId: string,
+  warehouseId?: string
 ): Promise<ProductVariantRow[]> {
   await ensure(READ_PERMISSIONS.inventory, orgSlug);
   try {
-    return await getProductVariantsByProductId(orgSlug, productId);
+    return await getProductVariantsByProductId(orgSlug, productId, warehouseId);
   } catch {
     return [];
   }
@@ -87,7 +90,8 @@ export async function getProductVariantsAction(
 
 export async function adjustMultipleVariantsStockAction(
   orgSlug: string,
-  adjustments: { variantId: string; newStock: number }[]
+  adjustments: { variantId: string; newStock: number }[],
+  requestedWarehouseId?: string
 ): Promise<ProductActionResult> {
   await ensure("inventory.manage", orgSlug);
   try {
@@ -98,27 +102,19 @@ export async function adjustMultipleVariantsStockAction(
     }
 
     const productIds = new Set<string>();
+    const warehouseId = await resolveInventoryWarehouseId(
+      orgSlug,
+      requestedWarehouseId
+    );
 
     for (const adj of adjustments) {
-      const { productId, currentStock } = await getVariantCurrentStock(
-        adj.variantId
-      );
-
+      const productId = await setVariantWarehouseStock({
+        orgSlug,
+        warehouseId,
+        variantId: adj.variantId,
+        quantity: adj.newStock,
+      });
       productIds.add(productId);
-
-      const delta = adj.newStock - currentStock;
-
-      if (delta !== 0) {
-        await adjustVariantStock({
-          orgSlug,
-          variantId: adj.variantId,
-          type: "ADJUSTMENT",
-          quantity: delta,
-          reason: "Ajuste manual de stock por variante",
-          createdBy: authData.user.id,
-          source: "MANUAL",
-        });
-      }
     }
 
     revalidatePath(`/org/${orgSlug}/stock`);

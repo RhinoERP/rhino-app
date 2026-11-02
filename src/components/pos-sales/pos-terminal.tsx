@@ -658,16 +658,18 @@ export function PosTerminal({
   );
 
   const shouldSearchProducts = deferredSearch.trim().length >= 2;
+  const selectedTerminalId = form.watch("terminalId");
   const { data: products = [], isFetching: isFetchingProducts } =
-    useDirectSaleProductsSearch(
+    useDirectSaleProductsSearch({
       orgSlug,
-      deferredSearch,
-      30,
-      shouldSearchProducts
-    );
+      search: deferredSearch,
+      limit: 30,
+      enabled: shouldSearchProducts && Boolean(selectedTerminalId),
+      terminalId: selectedTerminalId,
+      sessionId: defaultOpenTerminal?.sessionId,
+    });
 
   const selectedCustomerId = form.watch("customerId");
-  const selectedTerminalId = form.watch("terminalId");
   const isConsumerFinalSale = !selectedCustomerId;
   const directSaleMarkupPercentage =
     directSaleConfig?.direct_sale_markup_percentage ?? 0;
@@ -958,6 +960,7 @@ export function PosTerminal({
         const urlParams = new URLSearchParams();
         urlParams.set("barcode", barcode);
         urlParams.set("limit", "1");
+        urlParams.set("terminalId", selectedTerminalId);
 
         const response = await fetch(
           `/api/org/${orgSlug}/venta-directa/productos?${urlParams.toString()}`,
@@ -1010,7 +1013,13 @@ export function PosTerminal({
         playScanErrorBeep();
       }
     },
-    [addProductToCart, orgSlug, playScanErrorBeep, showScanFeedback]
+    [
+      addProductToCart,
+      orgSlug,
+      playScanErrorBeep,
+      selectedTerminalId,
+      showScanFeedback,
+    ]
   );
 
   const {
@@ -1140,6 +1149,7 @@ export function PosTerminal({
         const params = new URLSearchParams({
           barcode: product.barcode ?? product.sku,
           limit: "1",
+          terminalId: selectedTerminalId,
         });
         const response = await fetch(
           `/api/org/${orgSlug}/venta-directa/productos?${params.toString()}`,

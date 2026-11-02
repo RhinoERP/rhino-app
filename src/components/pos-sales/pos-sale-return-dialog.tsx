@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +37,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { isStockReentryFallbackRequired } from "@/modules/inventory/utils/stock-reentry";
 import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import type { DirectSale } from "@/modules/sales/types";
 import { usePosSaleReturnableItems } from "@/modules/sales-returns/hooks/use-pos-sale-returnable-items";
@@ -120,6 +122,7 @@ export function PosSaleReturnDialog({
 }: PosSaleReturnDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const [didHydrateFormForOpen, setDidHydrateFormForOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const hasAssociatedCustomer = Boolean(sale.customer_id ?? sale.customer?.id);
@@ -274,7 +277,10 @@ export function PosSaleReturnDialog({
   );
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Submit validates selected lines and financial constraints before dispatching the action.
-  const handleSubmit = async (values: PosSaleReturnFormValues) => {
+  async function handleSubmit(
+    values: PosSaleReturnFormValues,
+    allowDefaultFallback = false
+  ) {
     setSubmitError(null);
 
     if (!hasAssociatedCustomer && values.resolution === "credit_note") {
@@ -333,6 +339,7 @@ export function PosSaleReturnDialog({
         reason: values.reason ?? null,
         returnDate: new Date().toISOString(),
         restock: values.restock,
+        allowDefaultFallback,
         resolution: values.resolution,
         refundMethod:
           values.resolution === "refund"
@@ -352,6 +359,10 @@ export function PosSaleReturnDialog({
       setOpen(false);
       router.refresh();
     } catch (error) {
+      if (isStockReentryFallbackRequired(error)) {
+        setFallbackOpen(true);
+        return;
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -359,7 +370,7 @@ export function PosSaleReturnDialog({
       setSubmitError(message);
       toast.error(message);
     }
-  };
+  }
 
   const items = returnableItemsQuery.data?.items ?? [];
   const isSubmitting = processPosSaleReturn.isPending;
@@ -436,7 +447,7 @@ export function PosSaleReturnDialog({
           <Form {...form}>
             <form
               className="space-y-4"
-              onSubmit={form.handleSubmit(handleSubmit)}
+              onSubmit={form.handleSubmit((values) => handleSubmit(values))}
             >
               <div className="grid gap-3 rounded-md border p-3 md:grid-cols-3">
                 <div>
@@ -782,6 +793,15 @@ export function PosSaleReturnDialog({
           </Form>
         )}
       </DialogContent>
+      <StockReentryFallbackDialog
+        onConfirm={() => {
+          setFallbackOpen(false);
+          return form.handleSubmit((values) => handleSubmit(values, true))();
+        }}
+        onOpenChange={setFallbackOpen}
+        open={fallbackOpen}
+        pending={isSubmitting}
+      />
     </Dialog>
   );
 }

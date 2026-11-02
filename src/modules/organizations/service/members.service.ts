@@ -248,7 +248,9 @@ export async function getOrganizationMembersBySlug(
 
   const { data: memberData, error: memberError } = await supabase
     .from("organization_members")
-    .select("*, roles(id, key, name, description), organizations!inner(slug)")
+    .select(
+      "*, roles(id, key, name, description), organizations!organization_members_organization_id_fkey!inner(slug)"
+    )
     .eq("user_id", currentUser.id)
     .eq("organizations.slug", orgSlug)
     .maybeSingle();

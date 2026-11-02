@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { CreateHistoricalDebtInput, HistoricalDebtRow } from "../types";
@@ -69,6 +70,7 @@ async function processSingleDebt(
     .from("sales_orders")
     .insert({
       organization_id: orgId,
+      warehouse_id: await getDefaultWarehouseId(supabase, orgId),
       customer_id: row.customerId,
       supplier_id: row.supplierId,
       user_id: row.sellerId ?? userId,

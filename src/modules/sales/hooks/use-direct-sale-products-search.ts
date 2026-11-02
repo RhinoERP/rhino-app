@@ -3,18 +3,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { directSaleProductsClientQueryOptions } from "../queries/queries.client";
 
-export function useDirectSaleProductsSearch(
-  orgSlug: string,
-  search: string,
-  limit = 20,
-  enabled = true
-) {
+export function useDirectSaleProductsSearch(params: {
+  orgSlug: string;
+  search: string;
+  limit?: number;
+  enabled?: boolean;
+  terminalId?: string;
+  sessionId?: string;
+}) {
   return useQuery({
     ...directSaleProductsClientQueryOptions({
-      orgSlug,
-      search,
-      limit,
+      ...params,
     }),
-    enabled,
+    enabled: params.enabled ?? true,
   });
 }

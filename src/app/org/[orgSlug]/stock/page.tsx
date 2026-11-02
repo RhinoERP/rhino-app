@@ -1,5 +1,10 @@
+import { z } from "zod";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { StockMetricsCards } from "@/components/stock/stock-metrics";
+import { StockTransferHistoryDialog } from "@/components/stock/stock-transfer-history-dialog";
+import { StockWarehouseNotice } from "@/components/stock/stock-warehouse-notice";
+import { StockWarehouseScope } from "@/components/stock/stock-warehouse-scope";
+import { WarehouseStockBreakdownDialog } from "@/components/stock/warehouse-stock-breakdown-dialog";
 import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
@@ -7,6 +12,9 @@ import {
   getStockPaginated,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
+import { getStockReadScope } from "@/modules/inventory/utils/stock-read-scope";
+import { WarehouseAccessError } from "@/modules/inventory/utils/warehouse-access-error";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import {
   getOrganizationBySlug,
@@ -28,13 +36,59 @@ type StockPageProps = {
     search?: string;
     categoria?: string;
     status?: string;
+    deposito?: string;
   }>;
 };
 
-export default async function StockPage({
-  params,
-  searchParams,
-}: StockPageProps) {
+async function getPageWarehouseScope(
+  orgSlug: string,
+  isMercadoLibreOnly: boolean,
+  requestedId?: string
+) {
+  if (isMercadoLibreOnly) {
+    return { warehouseId: undefined, warehouses: [] };
+  }
+  const warehouseId = requestedId || undefined;
+  if (warehouseId && !z.uuid().safeParse(warehouseId).success) {
+    throw new WarehouseAccessError(
+      "El identificador del depósito es inválido.",
+      400
+    );
+  }
+  const warehouses = await getAvailableWarehouses(orgSlug, undefined, {
+    includeInactive: true,
+  });
+  if (
+    warehouseId &&
+    !warehouses.some((warehouse) => warehouse.id === warehouseId)
+  ) {
+    throw new WarehouseAccessError(
+      "El depósito no está disponible o ya no tenés acceso a él.",
+      403
+    );
+  }
+  return { warehouseId, warehouses };
+}
+
+export default async function StockPage(props: StockPageProps) {
+  try {
+    return await StockPageContent(props);
+  } catch (error) {
+    if (!(error instanceof WarehouseAccessError)) {
+      throw error;
+    }
+    const { orgSlug } = await props.params;
+    return (
+      <StockWarehouseNotice
+        message={error.message}
+        orgSlug={orgSlug}
+        searchParams={await props.searchParams}
+      />
+    );
+  }
+}
+
+async function StockPageContent({ params, searchParams }: StockPageProps) {
   const { orgSlug } = await params;
   const sp = await searchParams;
 
@@ -43,17 +97,17 @@ export default async function StockPage({
     ...READ_PERMISSIONS.mercadolibre,
   ]);
   const layoutData = await getOrganizationLayoutData(orgSlug);
-  const isMercadoLibreOnly = Boolean(
-    layoutData?.permissions.includes("mercadolibre.access") &&
-      !layoutData.permissions.includes("organization.admin") &&
-      !layoutData.permissions.some((permission) =>
-        READ_PERMISSIONS.inventory.includes(permission)
-      )
-  );
+  const isMercadoLibreOnly =
+    getStockReadScope(layoutData?.permissions ?? []) === "mercadolibre";
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const category = sp.categoria || undefined;
   const status = sp.status || "active";
+  const { warehouseId, warehouses } = await getPageWarehouseScope(
+    orgSlug,
+    isMercadoLibreOnly,
+    sp.deposito
+  );
 
   const [paginated, metrics, suppliers, categoriesData, taxes, org] =
     await Promise.all([
@@ -64,9 +118,12 @@ export default async function StockPage({
         search,
         category,
         status,
+        warehouseId,
         skuPrefix: isMercadoLibreOnly ? "MELI-" : undefined,
       }),
-      isMercadoLibreOnly ? Promise.resolve(null) : getStockMetrics(orgSlug),
+      isMercadoLibreOnly
+        ? Promise.resolve(null)
+        : getStockMetrics(orgSlug, warehouseId),
       isMercadoLibreOnly ? Promise.resolve([]) : getSuppliers(orgSlug),
       isMercadoLibreOnly
         ? Promise.resolve([])
@@ -106,7 +163,9 @@ export default async function StockPage({
           </p>
         </div>
         {!isMercadoLibreOnly && (
-          <div className="w-full md:w-auto">
+          <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
+            <WarehouseStockBreakdownDialog orgSlug={orgSlug} />
+            <StockTransferHistoryDialog orgSlug={orgSlug} />
             <AddProductDialog
               categories={categories}
               isAccountingEnabled={isAccountingEnabled}
@@ -119,19 +178,38 @@ export default async function StockPage({
         )}
       </div>
 
-      {!isMercadoLibreOnly && metrics && (
-        <StockMetricsCards metrics={metrics} />
+      {isMercadoLibreOnly ? (
+        <StockDataTable
+          categories={categories}
+          data={paginated.data}
+          key={orgSlug}
+          orgSlug={orgSlug}
+          pageCount={pageCount}
+          suppliers={suppliers}
+          viewOnly
+        />
+      ) : (
+        <StockWarehouseScope
+          warehouses={warehouses.map(({ id, name, is_active, is_default }) => ({
+            id,
+            name,
+            is_active,
+            is_default,
+          }))}
+        >
+          {metrics && <StockMetricsCards metrics={metrics} />}
+          <StockDataTable
+            categories={categories}
+            data={paginated.data}
+            key={`${orgSlug}:${warehouseId ?? "all"}`}
+            orgSlug={orgSlug}
+            pageCount={pageCount}
+            suppliers={suppliers}
+            viewOnly={isMercadoLibreOnly}
+            warehouseId={warehouseId}
+          />
+        </StockWarehouseScope>
       )}
-
-      <StockDataTable
-        categories={categories}
-        data={paginated.data}
-        key={orgSlug}
-        orgSlug={orgSlug}
-        pageCount={pageCount}
-        suppliers={suppliers}
-        viewOnly={isMercadoLibreOnly}
-      />
     </div>
   );
 }

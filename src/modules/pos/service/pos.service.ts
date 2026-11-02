@@ -5,6 +5,7 @@ import type { EventoVentaPos } from "@/modules/accounting/types";
 import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import type { ArcaSaleInvoiceResult } from "@/modules/arca/types";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
   getDirectSaleConfigByOrgSlug,
@@ -136,6 +137,7 @@ type ProductStockMetadata = {
 
 type LotAllocation = {
   lotId: string;
+  warehouseId: string;
   consumedBase: number;
   consumedUnits: number | null;
   previousBaseStock: number;
@@ -185,6 +187,7 @@ type PosSaleStockMovementInsert = Omit<
 
 type MutableLotState = {
   id: string;
+  warehouseId: string;
   productId: string;
   lotNumber: string;
   expirationDate: string | null;
@@ -896,8 +899,9 @@ async function getOpenSessionForTerminal(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   terminalId: string;
-}): Promise<string> {
-  const { supabase, orgId, terminalId } = params;
+  userId: string;
+}): Promise<{ id: string; warehouse_id: string | null }> {
+  const { supabase, orgId, terminalId, userId } = params;
 
   const { data: terminal, error: terminalError } = await supabase
     .from("pos_terminals")
@@ -924,9 +928,10 @@ async function getOpenSessionForTerminal(params: {
 
   const { data: openSession, error: openSessionError } = await supabase
     .from("pos_sessions")
-    .select("id")
+    .select("id, warehouse_id")
     .eq("organization_id", orgId)
     .eq("terminal_id", terminalId)
+    .eq("user_id", userId)
     .eq(
       "status",
       "OPEN" satisfies Database["public"]["Enums"]["pos_session_status"]
@@ -942,7 +947,7 @@ async function getOpenSessionForTerminal(params: {
   }
 
   if (openSession?.id) {
-    return openSession.id;
+    return openSession;
   }
 
   throw new Error(
@@ -1130,9 +1135,10 @@ function resolveWeightRequirement(params: {
 async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  warehouseId: string;
   items: NormalizedPosSaleItem[];
 }): Promise<StockAdjustmentContext> {
-  const { supabase, orgId, items } = params;
+  const { supabase, orgId, warehouseId, items } = params;
 
   const productIds = Array.from(new Set(items.map((item) => item.productId)));
 
@@ -1155,9 +1161,10 @@ async function buildStockAdjustmentContext(params: {
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
+        "id, product_id, product_variant_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
       )
       .eq("organization_id", orgId)
+      .eq("warehouse_id", warehouseId)
       .in("product_id", productIds)
       .order("expiration_date", { ascending: true })
       .order("created_at", { ascending: true }),
@@ -1181,7 +1188,7 @@ async function buildStockAdjustmentContext(params: {
   const { data: variants, error: variantsError } = variantIds.length
     ? await supabase
         .from("product_variants")
-        .select("id, product_id, lot_id, is_active")
+        .select("id, product_id, is_active")
         .eq("organization_id", orgId)
         .in("id", variantIds)
     : { data: [], error: null };
@@ -1235,6 +1242,7 @@ async function buildStockAdjustmentContext(params: {
 
     const lotState: MutableLotState = {
       id: lotId,
+      warehouseId: row.warehouse_id,
       productId,
       lotNumber,
       expirationDate: expirationDate ?? null,
@@ -1300,13 +1308,15 @@ async function buildStockAdjustmentContext(params: {
 
     const availableLots = [...(lotsByProduct.get(item.productId) ?? [])];
 
-    if (variant && item.lotId && item.lotId !== variant.lot_id) {
-      throw new Error("El lote no pertenece a la variante seleccionada.");
-    }
-    const selectedLotId = variant?.lot_id ?? item.lotId;
-    const scopedLots = selectedLotId
-      ? availableLots.filter((lot) => lot.id === selectedLotId)
-      : availableLots;
+    const matchingLotIds = new Set(
+      (lotsResult.data ?? [])
+        .filter((lot) => lot.product_variant_id === (variant?.id ?? null))
+        .map((lot) => lot.id)
+    );
+    const scopedLots = availableLots.filter(
+      (lot) =>
+        matchingLotIds.has(lot.id) && (!item.lotId || lot.id === item.lotId)
+    );
 
     if (!scopedLots.length) {
       throw new Error(`No hay lotes disponibles para ${product.name}.`);
@@ -1410,6 +1420,7 @@ async function buildStockAdjustmentContext(params: {
         rollbackByLotId.set(lot.id, {
           id: lot.id,
           organization_id: orgId,
+          warehouse_id: lot.warehouseId,
           product_id: lot.productId,
           lot_number: lot.lotNumber,
           expiration_date: lot.expirationDate,
@@ -1441,6 +1452,7 @@ async function buildStockAdjustmentContext(params: {
       lotUpdatesById.set(lot.id, {
         id: lot.id,
         organization_id: orgId,
+        warehouse_id: lot.warehouseId,
         product_id: lot.productId,
         lot_number: lot.lotNumber,
         expiration_date: lot.expirationDate,
@@ -1451,6 +1463,7 @@ async function buildStockAdjustmentContext(params: {
 
       lineAllocations.push({
         lotId: lot.id,
+        warehouseId: lot.warehouseId,
         consumedBase: truncateQuantity(baseToConsume),
         consumedUnits:
           requiredUnits !== null && unitsToConsume > STOCK_EPSILON
@@ -1710,6 +1723,7 @@ function buildPosSaleStockMovementsPayload(params: {
     return {
       organization_id: orgId,
       lot_id: plan.allocation.lotId,
+      warehouse_id: plan.allocation.warehouseId,
       type: "POS_SALE",
       quantity: truncateQuantity(plan.allocation.consumedBase),
       previous_stock: plan.allocation.previousBaseStock,
@@ -2059,6 +2073,7 @@ export async function getPosSaleById(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Product search aggregates stock totals and product metadata from multiple sources.
 export async function searchPosProductsForTerminal(params: {
   orgSlug: string;
+  terminalId?: string;
   q?: string;
   barcode?: string;
   limit?: number;
@@ -2076,6 +2091,35 @@ export async function searchPosProductsForTerminal(params: {
   }
 
   const supabase = await createClient();
+  const operatorId = await getCurrentUserId(supabase);
+  let searchSessionQuery = supabase
+    .from("pos_sessions")
+    .select("warehouse_id")
+    .eq("organization_id", org.id)
+    .eq("user_id", operatorId)
+    .eq("status", "OPEN")
+    .order("opened_at", { ascending: false })
+    .limit(1);
+  if (params.terminalId) {
+    searchSessionQuery = searchSessionQuery.eq(
+      "terminal_id",
+      params.terminalId
+    );
+  }
+  const { data: searchSession, error: searchSessionError } =
+    await searchSessionQuery.maybeSingle();
+  if (searchSessionError || !searchSession?.warehouse_id) {
+    throw new Error("Abrí una caja con depósito antes de buscar productos");
+  }
+  const availableWarehouses = await getAvailableWarehouses(
+    params.orgSlug,
+    "direct_sale"
+  );
+  if (
+    !availableWarehouses.some((row) => row.id === searchSession.warehouse_id)
+  ) {
+    throw new Error("No tenés acceso al depósito de la sesión de caja");
+  }
   const { data: userPermissions, error: permissionsError } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
     { target_org_slug: params.orgSlug }
@@ -2178,8 +2222,11 @@ export async function searchPosProductsForTerminal(params: {
         .in("id", productIds),
       supabase
         .from("product_lots")
-        .select("product_id, quantity_available, unit_quantity_available")
+        .select(
+          "product_id, product_variant_id, quantity_available, unit_quantity_available"
+        )
         .eq("organization_id", org.id)
+        .eq("warehouse_id", searchSession.warehouse_id)
         .in("product_id", productIds),
       supabase
         .from("direct_sale_prices")
@@ -2188,9 +2235,7 @@ export async function searchPosProductsForTerminal(params: {
         .in("product_id", productIds),
       supabase
         .from("product_variants")
-        .select(
-          "id, product_id, talle, color, product_lots(quantity_available)"
-        )
+        .select("id, product_id, talle, color")
         .eq("organization_id", org.id)
         .eq("is_active", true)
         .in("product_id", productIds),
@@ -2226,7 +2271,9 @@ export async function searchPosProductsForTerminal(params: {
       id: variant.id,
       talle: variant.talle,
       color: variant.color,
-      stock: Number(variant.product_lots?.quantity_available ?? 0),
+      stock: (lotsResult.data ?? [])
+        .filter((lot) => lot.product_variant_id === variant.id)
+        .reduce((total, lot) => total + lot.quantity_available, 0),
     });
     variantsByProduct.set(variant.product_id, current);
   }
@@ -2809,11 +2856,27 @@ export async function createPosSale(
 
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
-  const sessionId = await getOpenSessionForTerminal({
+  const session = await getOpenSessionForTerminal({
     supabase,
     orgId: org.id,
     terminalId: payload.terminalId,
+    userId,
   });
+  const warehouses = await getAvailableWarehouses(
+    payload.orgSlug,
+    "direct_sale"
+  );
+  if (
+    !(
+      session.warehouse_id &&
+      warehouses.some((row) => row.id === session.warehouse_id)
+    )
+  ) {
+    throw new Error(
+      "No tenés acceso al depósito de esta caja. Cerrá la sesión y abrí otra caja habilitada."
+    );
+  }
+  const sessionId = session.id;
 
   const items = normalizePosItems(payload.items);
 
@@ -2913,6 +2976,7 @@ export async function createPosSale(
     stockContext = await buildStockAdjustmentContext({
       supabase,
       orgId: org.id,
+      warehouseId: session.warehouse_id,
       items,
     });
 

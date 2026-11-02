@@ -25,6 +25,7 @@ export async function createQuoteAction(
     // Map QuoteFormValues to CreateQuoteInput
     const input: CreateQuoteInput = {
       orgSlug,
+      warehouseId: values.warehouseId,
       customerId: values.customerId,
       currency: values.currency,
       exchangeRate: values.exchangeRate ?? null,
