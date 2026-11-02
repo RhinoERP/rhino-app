@@ -7,6 +7,7 @@ import {
   NO_PAYABLE_INVOICE_RATE_MESSAGE,
   resolvePayableExchangeRate,
 } from "@/modules/collections/utils/payment-rate";
+import { isInvoiceBackedDebtEnabled } from "@/modules/organizations/service/debt-policy.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
@@ -137,6 +138,9 @@ async function syncAccountsPayable(params: {
 }) {
   const { supabase, orgId, supplierId, purchaseOrderId, totalAmount, dueDate } =
     params;
+  if (await isInvoiceBackedDebtEnabled(supabase, orgId)) {
+    return;
+  }
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
   const { data: purchaseOrderData } = await supabase
@@ -446,6 +450,7 @@ export async function createPurchaseOrder(
     .maybeSingle();
 
   const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+  const invoiceBackedDebt = await isInvoiceBackedDebtEnabled(supabase, org.id);
 
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
@@ -463,7 +468,9 @@ export async function createPurchaseOrder(
       global_discount_amount,
       total_amount,
       status: "ORDERED",
-      payable_origin: input.payable_origin ?? "PURCHASE_NOTE",
+      payable_origin: invoiceBackedDebt
+        ? "SUPPLIER_INVOICE"
+        : (input.payable_origin ?? "PURCHASE_NOTE"),
       fallback_taxes: fallbackTaxes ?? [],
       tax_snapshot_initialized: true,
     })

@@ -102,21 +102,25 @@ async function processSingleDebt(
 
   const saleId = sale.id;
 
-  const { error: arError } = await supabase.from("accounts_receivable").insert({
-    organization_id: orgId,
-    customer_id: row.customerId,
-    sales_order_id: saleId,
-    total_amount: totalAmount,
-    pending_balance: totalAmount,
-    due_date: expirationDate,
-    status: "PENDING",
-  });
+  const { data: receivable, error: arError } = await supabase
+    .from("accounts_receivable")
+    .insert({
+      organization_id: orgId,
+      customer_id: row.customerId,
+      sales_order_id: saleId,
+      total_amount: totalAmount,
+      pending_balance: totalAmount,
+      due_date: expirationDate,
+      status: "PENDING",
+    })
+    .select("id")
+    .maybeSingle();
 
-  if (arError) {
+  if (arError || !receivable?.id) {
     await supabase.from("sales_orders").delete().eq("id", saleId);
     return {
       success: false,
-      error: `Error al crear cuenta corriente: ${arError.message}`,
+      error: `Error al crear cuenta corriente: ${arError?.message ?? "No se creó la cuenta por cobrar"}`,
     };
   }
   return { success: true };
