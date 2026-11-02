@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import StockPage from "@/app/org/[orgSlug]/stock/page";
+import { StockProductsTable } from "@/app/org/[orgSlug]/stock/stock-table";
+import { StockTableError } from "@/components/stock/stock-table-error";
 import { StockWarehouseNotice } from "@/components/stock/stock-warehouse-notice";
 import { WarehouseAccessError } from "../utils/warehouse-access-error";
 
@@ -38,6 +40,9 @@ vi.mock("@/components/stock/stock-transfer-history-dialog", () => ({
 vi.mock("@/components/stock/warehouse-stock-breakdown-dialog", () => ({
   WarehouseStockBreakdownDialog: () => null,
 }));
+vi.mock("@/components/stock/stock-metrics-panel", () => ({
+  StockMetricsPanel: () => null,
+}));
 vi.mock("@/app/org/[orgSlug]/stock/data-table", () => ({
   StockDataTable: () => null,
 }));
@@ -47,6 +52,16 @@ const renderPage = (deposito: string) =>
   StockPage({
     params: Promise.resolve({ orgSlug: "org" }),
     searchParams: Promise.resolve({ deposito, search: "shoe", page: "3" }),
+  });
+
+const renderTable = () =>
+  StockProductsTable({
+    orgSlug: "org",
+    params: { page: 3, pageSize: 20, search: "shoe", warehouseId },
+    searchParams: { deposito: warehouseId, search: "shoe", page: "3" },
+    categories: [],
+    suppliers: [],
+    viewOnly: false,
   });
 
 describe("expected warehouse errors in the stock page", () => {
@@ -79,7 +94,7 @@ describe("expected warehouse errors in the stock page", () => {
     mocks.stock.mockRejectedValue(
       new WarehouseAccessError("Acceso revocado", 403)
     );
-    const page = await renderPage(warehouseId);
+    const page = await renderTable();
     expect(page.type).toBe(StockWarehouseNotice);
     expect(page.props.message).toBe("Acceso revocado");
   });
@@ -89,5 +104,37 @@ describe("expected warehouse errors in the stock page", () => {
     await expect(renderPage(warehouseId)).rejects.toThrow(
       "database unavailable"
     );
+  });
+
+  it("renders stock without awaiting the global metrics query", async () => {
+    mocks.warehouses.mockResolvedValue([
+      { id: warehouseId, name: "Principal", is_active: true },
+    ]);
+    mocks.metrics.mockRejectedValue(new Error("metrics timeout"));
+    const page = await renderPage(warehouseId);
+    expect(page.type).not.toBe(StockWarehouseNotice);
+    expect(mocks.stock).not.toHaveBeenCalled();
+    expect(mocks.metrics).not.toHaveBeenCalled();
+  });
+
+  it("handles a table timeout locally without turning it into empty stock or a page failure", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(vi.fn());
+    mocks.stock.mockRejectedValue(new Error("statement timeout"));
+    expect((await renderTable()).type).toBe(StockTableError);
+    expect(mocks.metrics).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("keeps table pagination and search in the streamed table query only", async () => {
+    mocks.stock.mockResolvedValue({ data: [], totalCount: 55 });
+    const table = await renderTable();
+    expect(table.props.pageCount).toBe(3);
+    expect(mocks.stock).toHaveBeenCalledWith("org", {
+      page: 3,
+      pageSize: 20,
+      search: "shoe",
+      warehouseId,
+    });
+    expect(mocks.metrics).not.toHaveBeenCalled();
   });
 });

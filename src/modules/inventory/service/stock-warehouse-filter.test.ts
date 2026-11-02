@@ -5,9 +5,13 @@ import {
   getStockPaginated,
 } from "./inventory.service";
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), access: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  from: vi.fn(),
+  rpc: vi.fn(),
+  access: vi.fn(),
+}));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: mocks.from }),
+  createClient: async () => ({ from: mocks.from, rpc: mocks.rpc }),
 }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
   getOrganizationBySlug: async () => ({ id: "org" }),
@@ -65,20 +69,17 @@ function setup() {
     })),
     error: null,
   });
-  const lots = query();
-  lots.range.mockResolvedValue({
+  mocks.rpc.mockResolvedValue({
     data: [
       {
         product_id: "simple",
         quantity_available: 40,
         unit_quantity_available: null,
-        variant: null,
       },
       {
         product_id: "variant",
         quantity_available: 10,
         unit_quantity_available: null,
-        variant: { is_active: true },
       },
     ],
     error: null,
@@ -90,12 +91,9 @@ function setup() {
     if (table === "products") {
       return products;
     }
-    if (table === "product_lots") {
-      return lots;
-    }
     throw new Error(`Unexpected table: ${table}`);
   });
-  return { view, lots };
+  return { view };
 }
 
 describe("warehouse filter integration", () => {
@@ -105,7 +103,7 @@ describe("warehouse filter integration", () => {
   });
 
   it("replaces global view quantities with warehouse balances and retains zero-stock products and pagination", async () => {
-    const { lots } = setup();
+    setup();
     const result = await getStockPaginated("org", {
       page: 1,
       pageSize: 20,
@@ -116,11 +114,14 @@ describe("warehouse filter integration", () => {
     expect(mocks.access).toHaveBeenCalledWith("org", "warehouse", {
       requireActive: false,
     });
-    expect(lots.eq).toHaveBeenCalledWith("warehouse_id", "warehouse");
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "get_inventory_stock_balances",
+      expect.objectContaining({ p_org_id: "org", p_warehouse_id: "warehouse" })
+    );
   });
 
   it("applies warehouse, search, category and status consistently to full exports", async () => {
-    const { view, lots } = setup();
+    const { view } = setup();
     const result = await getAllStockForExport("org", {
       warehouseId: "warehouse",
       search: "shoe",
@@ -132,12 +133,19 @@ describe("warehouse filter integration", () => {
     );
     expect(view.eq).toHaveBeenCalledWith("category_name", "Shoes");
     expect(view.eq).toHaveBeenCalledWith("is_active", false);
-    expect(lots.eq).toHaveBeenCalledWith("warehouse_id", "warehouse");
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "get_inventory_stock_balances",
+      expect.objectContaining({ p_warehouse_id: "warehouse" })
+    );
     expect(result.map((row) => row.total_stock)).toEqual([40, 10, 0]);
   });
 
   it("rejects unauthorized warehouse IDs before accessing stock in the table, metrics and export", async () => {
     mocks.access.mockRejectedValue(new Error("No tenés acceso"));
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: "42501", message: "denied" },
+    });
     await expect(
       getStockPaginated("org", {
         page: 1,

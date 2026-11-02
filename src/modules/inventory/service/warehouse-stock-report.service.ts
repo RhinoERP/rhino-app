@@ -1,6 +1,7 @@
 import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getStockMeasureTotals } from "../utils/stock-measure-totals";
+import { WarehouseAccessError } from "../utils/warehouse-access-error";
 import { getAvailableWarehouses } from "./warehouse-stock.service";
 
 type BreakdownWarehouse = {
@@ -174,15 +175,25 @@ async function fetchBreakdownProducts(
 }
 
 export async function getWarehouseStockBreakdown(
-  orgSlug: string
+  orgSlug: string,
+  warehouseId?: string
 ): Promise<WarehouseStockBreakdown[]> {
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
-  const warehouses = await getAvailableWarehouses(orgSlug, undefined, {
+  const available = await getAvailableWarehouses(orgSlug, undefined, {
     includeInactive: true,
   });
+  const warehouses = warehouseId
+    ? available.filter((warehouse) => warehouse.id === warehouseId)
+    : available;
+  if (warehouseId && warehouses.length === 0) {
+    throw new WarehouseAccessError(
+      "No tenés acceso al depósito seleccionado",
+      403
+    );
+  }
   if (warehouses.length === 0) {
     return [];
   }

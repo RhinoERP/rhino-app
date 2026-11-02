@@ -36,10 +36,13 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
   const canManageInventory = can("inventory.manage");
 
   useEffect(() => {
+    if (!(metrics.canViewCosts && canManageInventory)) {
+      return;
+    }
     fetchUsdRate()
       .then(setUsdRate)
       .catch(() => setUsdRate(null));
-  }, []);
+  }, [metrics.canViewCosts, canManageInventory]);
 
   return (
     <div className="flex flex-wrap gap-4">
@@ -131,7 +134,8 @@ export function StockMetricsCards({ metrics }: StockMetricsProps) {
         </Card>
       )}
 
-      {(metrics.totalStockValue > 0 || metrics.warehouseScoped) &&
+      {metrics.canViewCosts &&
+        (metrics.totalStockValue > 0 || metrics.warehouseScoped) &&
         canManageInventory && (
           <>
             <Card className="min-w-60 flex-1">

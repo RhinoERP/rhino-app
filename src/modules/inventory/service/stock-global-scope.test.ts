@@ -5,9 +5,13 @@ import {
   getStockPaginated,
 } from "./inventory.service";
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), access: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  from: vi.fn(),
+  rpc: vi.fn(),
+  access: vi.fn(),
+}));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: mocks.from }),
+  createClient: async () => ({ from: mocks.from, rpc: mocks.rpc }),
 }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
   getOrganizationBySlug: async () => ({ id: "org" }),
@@ -16,200 +20,163 @@ vi.mock("./warehouse-stock.service", () => ({
   assertWarehouseAccess: mocks.access,
 }));
 
-type Product = {
-  id: string;
-  unit_of_measure: "UNIT" | "KG" | "LT";
-  is_active: boolean;
-  has_variants: boolean;
-  cost_price: number;
-};
-type Lot = {
-  id: string;
-  product_id: string;
-  warehouse_id: string;
-  quantity_available: number;
-  unit_quantity_available: number | null;
-  variant: { is_active: boolean } | null;
+const metrics = {
+  warehouseScoped: false,
+  canViewCosts: true,
+  totalProducts: 3000,
+  activeProducts: 2500,
+  inactiveProducts: 500,
+  totalUnits: 12_000,
+  totalKg: 15,
+  totalLt: 6,
+  totalStockValue: 100,
+  lowStockCount: 1,
 };
 
-function setup(products: Product[], lots: Lot[]) {
-  const ranges = vi.fn();
-  mocks.from.mockImplementation((table: string) => {
-    let warehouse: string | undefined;
-    let ids: string[] = [];
-    const builder = {
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn((column: string, value: string) => {
-        if (column === "warehouse_id") {
-          warehouse = value;
-        }
-        return builder;
-      }),
-      order: vi.fn().mockReturnThis(),
-      in: vi.fn((_column: string, values: string[]) => {
-        ids = values;
-        if (table === "products" || table === "products_with_price") {
-          return Promise.resolve({
-            data: products.filter((entry) => ids.includes(entry.id)),
-            error: null,
-          });
-        }
-        return builder;
-      }),
-      range: vi.fn((from: number, to: number) => {
-        ranges(table, warehouse, from, to);
-        const data =
-          table === "view_stock_detail"
-            ? products.map((entry) => ({
-                product_id: entry.id,
-                sku: entry.id,
-                product_name: entry.id,
-                total_stock: 999,
-                is_active: entry.is_active,
-              }))
-            : lots.filter(
-                (entry) =>
-                  ids.includes(entry.product_id) &&
-                  (!warehouse || entry.warehouse_id === warehouse)
-              );
-        return Promise.resolve({
-          data: data.slice(from, to + 1),
-          count: data.length,
-          error: null,
-        });
-      }),
-    };
-    return builder;
-  });
-  return ranges;
-}
-
-function product(
-  id: string,
-  overrides: Partial<Omit<Product, "id">> = {}
-): Product {
-  return {
-    id,
+function setupCatalogue(count: number) {
+  const products = Array.from({ length: count }, (_, index) => ({
+    id: `product-${index}`,
+    sku: `SKU-${index}`,
+    name: `Product ${index}`,
     unit_of_measure: "UNIT",
     has_variants: false,
-    is_active: true,
-    cost_price: 2,
-    ...overrides,
-  };
+    tracks_stock_units: false,
+  }));
+  const select = vi.fn().mockReturnThis();
+  const ranges = vi.fn(
+    (
+      from: number,
+      to: number
+    ): Promise<{
+      data: Record<string, unknown>[];
+      error: { message: string } | null;
+      count: number;
+    }> =>
+      Promise.resolve({
+        data: products.slice(from, to + 1).map((product) => ({
+          product_id: product.id,
+          sku: product.sku,
+          product_name: product.name,
+          is_active: true,
+        })),
+        error: null,
+        count,
+      })
+  );
+  mocks.from.mockImplementation((table: string) => {
+    if (table === "view_stock_detail") {
+      return {
+        select,
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        range: ranges,
+      };
+    }
+    if (table === "products") {
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        in: vi.fn((_column: string, ids: string[]) =>
+          Promise.resolve({
+            data: products.filter((product) => ids.includes(product.id)),
+            error: null,
+          })
+        ),
+      };
+    }
+    throw new Error(`Unexpected full-table read: ${table}`);
+  });
+  mocks.rpc.mockImplementation((_name, args) =>
+    Promise.resolve({
+      data: args.p_product_ids.map((id: string) => ({
+        product_id: id,
+        quantity_available: 40,
+        unit_quantity_available: 0,
+      })),
+      error: null,
+    })
+  );
+  return { select, ranges };
 }
 
-function lot(
-  id: string,
-  quantity: number,
-  warehouse = "source",
-  variant: Lot["variant"] = null
-): Lot {
-  return {
-    id: `${warehouse}-${id}`,
-    product_id: id,
-    warehouse_id: warehouse,
-    quantity_available: quantity,
-    unit_quantity_available: 1,
-    variant,
-  };
-}
-
-describe("global and warehouse stock reconciliation", () => {
+describe("optimized stock read boundaries", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.access.mockResolvedValue({});
   });
 
-  it("uses the same lot balances in the table, export and KPIs, excluding inactive products and variants from KPI totals", async () => {
-    const products = [
-      product("simple"),
-      product("variant", { has_variants: true, cost_price: 3 }),
-      product("inactive", {
-        has_variants: true,
-        is_active: false,
-        cost_price: 100,
-      }),
-      product("kg", { unit_of_measure: "KG", cost_price: 10 }),
-      product("lt", { unit_of_measure: "LT", cost_price: 5 }),
-      product("empty"),
-    ];
-    setup(products, [
-      lot("simple", 40),
-      lot("simple", 10, "destination"),
-      lot("variant", 6, "source", { is_active: true }),
-      lot("variant", 4, "destination", { is_active: true }),
-      {
-        ...lot("variant", 1000, "source", { is_active: false }),
-        id: "inactive-variant",
-      },
-      lot("inactive", 13, "source", { is_active: true }),
-      lot("inactive", 7, "destination", { is_active: true }),
-      lot("kg", 2),
-      lot("kg", 3, "destination"),
-      lot("lt", 4),
-      lot("lt", 6, "destination"),
-    ]);
-    const global = await getStockMetrics("org");
-    const source = await getStockMetrics("org", "source");
-    const destination = await getStockMetrics("org", "destination");
-    for (const metric of [
-      "totalUnits",
-      "totalKg",
-      "totalLt",
-      "totalStockValue",
-    ] as const) {
-      expect(global[metric]).toBe(source[metric] + destination[metric]);
-    }
-    expect(global).toMatchObject({
-      totalUnits: 60,
-      totalKg: 5,
-      totalLt: 10,
-      totalStockValue: 230,
-      activeProducts: 5,
-    });
-    expect(source.activeProducts).toBe(4);
-    const table = await getStockPaginated("org", { page: 1, pageSize: 20 });
-    const exported = await getAllStockForExport("org");
-    expect(table.data.map((item) => item.total_stock)).toEqual([
-      50, 10, 20, 5, 10, 0,
-    ]);
-    expect(exported.map((item) => item.total_stock)).toEqual(
-      table.data.map((item) => item.total_stock)
+  it("loads balances only for the current page and never requests the view's calculated stock", async () => {
+    const { select } = setupCatalogue(1000);
+    const result = await getStockPaginated("org", { page: 2, pageSize: 20 });
+    expect(result.data).toHaveLength(20);
+    expect(result.data.every((item) => item.total_stock === 40)).toBe(true);
+    expect(result.totalCount).toBe(1000);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc.mock.calls[0][1].p_product_ids).toEqual(
+      Array.from({ length: 20 }, (_, index) => `product-${index + 20}`)
+    );
+    expect(
+      select.mock.calls[0][0].split(",").map((column: string) => column.trim())
+    ).not.toContain("total_stock");
+    expect(select.mock.calls[0][0]).not.toBe("*");
+    expect(mocks.from.mock.calls.map((call) => call[0])).not.toContain(
+      "product_lots"
     );
   });
 
-  it("reads more than 1000 lots across warehouses instead of truncating global totals", async () => {
-    const lots = Array.from({ length: 1200 }, (_, index) => ({
-      ...lot("simple", 1, index < 600 ? "source" : "destination"),
-      id: `lot-${index}`,
-    }));
-    const ranges = setup([product("simple")], lots);
-    expect((await getStockMetrics("org")).totalUnits).toBe(1200);
-    expect((await getStockMetrics("org", "source")).totalUnits).toBe(600);
-    expect((await getStockMetrics("org", "destination")).totalUnits).toBe(600);
-    expect(ranges).toHaveBeenCalledWith("product_lots", undefined, 1000, 1999);
+  it("exports all result pages with bounded aggregate calls and no individual lots", async () => {
+    const { select, ranges } = setupCatalogue(1001);
+    const result = await getAllStockForExport("org", {
+      warehouseId: "warehouse",
+    });
+    expect(result).toHaveLength(1001);
+    expect(ranges).toHaveBeenCalledWith(1000, 1999);
+    expect(
+      mocks.rpc.mock.calls.map((call) => call[1].p_product_ids.length)
+    ).toEqual([500, 500, 1]);
+    expect(
+      mocks.rpc.mock.calls.every(
+        (call) => call[1].p_warehouse_id === "warehouse"
+      )
+    ).toBe(true);
+    expect(select.mock.calls[0][0]).not.toContain("total_stock");
   });
 
-  it("paginates catalogue metadata and costs beyond 1000 products", async () => {
-    const products = Array.from({ length: 1001 }, (_, index) =>
-      product(`product-${index}`)
+  it("fetches global metrics in a single RPC without catalogue, lots, prices or export queries", async () => {
+    mocks.rpc.mockResolvedValue({ data: metrics, error: null });
+    expect(await getStockMetrics("org")).toEqual(metrics);
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "get_inventory_stock_metrics",
+      { p_org_id: "org" }
     );
-    const ranges = setup(
-      products,
-      products.map((entry) => lot(entry.id, 1))
-    );
-    const metrics = await getStockMetrics("org");
-    expect(metrics).toMatchObject({
-      totalProducts: 1001,
-      activeProducts: 1001,
-      totalUnits: 1001,
-      totalStockValue: 2002,
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("scopes metrics solely by organization and warehouse, independently of table filters", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: { ...metrics, warehouseScoped: true },
+      error: null,
     });
-    expect(ranges).toHaveBeenCalledWith(
-      "view_stock_detail",
-      undefined,
-      1000,
-      1999
+    expect((await getStockMetrics("org", "warehouse")).warehouseScoped).toBe(
+      true
     );
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "get_inventory_stock_metrics",
+      { p_org_id: "org", p_warehouse_id: "warehouse" }
+    );
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("does not turn a catalogue timeout into an empty inventory", async () => {
+    const { ranges } = setupCatalogue(1);
+    ranges.mockResolvedValue({
+      data: [],
+      count: 0,
+      error: { message: "statement timeout" },
+    });
+    await expect(
+      getStockPaginated("org", { page: 1, pageSize: 20 })
+    ).rejects.toThrow("statement timeout");
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });

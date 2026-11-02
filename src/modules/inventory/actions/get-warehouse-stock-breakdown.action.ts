@@ -4,7 +4,10 @@ import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-group
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { getWarehouseStockBreakdown } from "../service/warehouse-stock-report.service";
 
-export async function getWarehouseStockBreakdownAction(orgSlug: string) {
+export async function getWarehouseStockBreakdownAction(
+  orgSlug: string,
+  warehouseId?: string
+) {
   await ensure(READ_PERMISSIONS.inventory, orgSlug);
-  return getWarehouseStockBreakdown(orgSlug);
+  return getWarehouseStockBreakdown(orgSlug, warehouseId);
 }

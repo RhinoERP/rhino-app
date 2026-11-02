@@ -110,6 +110,26 @@ describe("consultas del reporte de stock por depósito", () => {
     expect(mocks.from).not.toHaveBeenCalled();
   });
 
+  it("mantiene el alcance completo del depósito seleccionado sin filtros de tabla", async () => {
+    mocks.warehouses.mockResolvedValue([
+      warehouse,
+      { ...warehouse, id: "warehouse-b" },
+    ]);
+    const result = await getWarehouseStockBreakdown("org-slug", warehouse.id);
+    expect(mocks.lotsScope).toHaveBeenCalledWith("warehouse_id", [
+      warehouse.id,
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].warehouseId).toBe(warehouse.id);
+  });
+
+  it("rechaza un depósito fuera del alcance sin consultar lotes", async () => {
+    await expect(
+      getWarehouseStockBreakdown("org-slug", "forbidden")
+    ).rejects.toMatchObject({ status: 403 });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it("no interpreta un fallo de autorización como un reporte vacío", async () => {
     mocks.warehouses.mockRejectedValue(new Error("No autorizado"));
     await expect(getWarehouseStockBreakdown("org-slug")).rejects.toThrow(

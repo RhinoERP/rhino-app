@@ -143,13 +143,15 @@ export type StockPaginatedParams = {
 };
 
 export type StockMetrics = {
-  warehouseScoped?: boolean;
+  warehouseScoped: boolean;
   totalProducts: number;
   activeProducts: number;
   inactiveProducts: number;
   totalUnits: number;
   totalKg: number;
   totalLt: number;
-  totalStockValue: number;
   lowStockCount: number;
-};
+} & (
+  | { canViewCosts: true; totalStockValue: number }
+  | { canViewCosts: false; totalStockValue?: never }
+);

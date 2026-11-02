@@ -1,233 +1,142 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import type { Database } from "@/types/supabase";
-import type { StockItem } from "../types";
-import {
-  calculateWarehouseStockMetrics,
-  fetchWarehouseBalances,
-} from "./stock-scope.service";
+import { parseStockMetrics } from "../utils/stock-metrics-schema";
+import { WarehouseAccessError } from "../utils/warehouse-access-error";
+import { fetchStockBalances } from "./stock-scope.service";
 
-function createClient(
-  pages: { data: unknown[] | null; error: { message: string } | null }[]
-) {
-  const query = {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    order: vi.fn().mockReturnThis(),
-    range: vi.fn(),
-  };
-  for (const page of pages) {
-    query.range.mockResolvedValueOnce(page);
-  }
-  const from = vi.fn().mockReturnValue(query);
-  return {
-    query,
-    from,
-    client: { from } as unknown as SupabaseClient<Database>,
-  };
+const metrics = {
+  warehouseScoped: false,
+  canViewCosts: true,
+  totalProducts: 10_000,
+  activeProducts: 9000,
+  inactiveProducts: 1000,
+  totalUnits: 100_000,
+  totalKg: 25,
+  totalLt: 15,
+  lowStockCount: 2,
+  totalStockValue: 200_000,
+};
+
+function clientWithRpc(rpc: ReturnType<typeof vi.fn>) {
+  return { rpc } as unknown as SupabaseClient<Database>;
 }
 
-describe("warehouse stock balances", () => {
-  it("scopes queries to organization, warehouse and product IDs and sums multiple lots", async () => {
-    const { client, query } = createClient([
-      {
-        data: [
-          {
-            product_id: "product",
-            quantity_available: 12.5,
-            unit_quantity_available: 3,
-            variant: null,
-          },
-          {
-            product_id: "product",
-            quantity_available: 7.5,
-            unit_quantity_available: 2,
-            variant: null,
-          },
-        ],
+describe("aggregate stock balances", () => {
+  it("requests one aggregate row per product rather than downloading lots", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          product_id: "kg",
+          quantity_available: 12.5,
+          unit_quantity_available: 3,
+        },
+      ],
+      error: null,
+    });
+    const balances = await fetchStockBalances(
+      clientWithRpc(rpc),
+      "org",
+      ["kg"],
+      "warehouse"
+    );
+    expect(rpc).toHaveBeenCalledExactlyOnceWith(
+      "get_inventory_stock_balances",
+      { p_org_id: "org", p_product_ids: ["kg"], p_warehouse_id: "warehouse" }
+    );
+    expect(balances.get("kg")).toEqual({ quantity: 12.5, units: 3 });
+  });
+
+  it("omits the warehouse argument for global stock and deduplicates product IDs", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: [], error: null });
+    await fetchStockBalances(clientWithRpc(rpc), "org", ["product", "product"]);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith(
+      "get_inventory_stock_balances",
+      { p_org_id: "org", p_product_ids: ["product"] }
+    );
+  });
+
+  it("bounds each export block below the PostgREST row limit without truncating products", async () => {
+    const rpc = vi.fn().mockImplementation((_name, args) =>
+      Promise.resolve({
+        data: args.p_product_ids.map((id: string) => ({
+          product_id: id,
+          quantity_available: 1,
+          unit_quantity_available: 0,
+        })),
         error: null,
-      },
-    ]);
-    const balances = await fetchWarehouseBalances(
-      client,
-      "org",
-      "warehouse",
-      new Map([["product", { has_variants: false }]])
+      })
     );
-    expect(query.eq).toHaveBeenCalledWith("organization_id", "org");
-    expect(query.eq).toHaveBeenCalledWith("warehouse_id", "warehouse");
-    expect(query.in).toHaveBeenCalledWith("product_id", ["product"]);
-    expect(balances.get("product")).toEqual({ quantity: 20, units: 5 });
+    const ids = Array.from({ length: 1001 }, (_, index) => `product-${index}`);
+    const balances = await fetchStockBalances(clientWithRpc(rpc), "org", ids);
+    expect(balances.size).toBe(1001);
+    expect(rpc.mock.calls.map((call) => call[1].p_product_ids.length)).toEqual([
+      500, 500, 1,
+    ]);
   });
 
-  it("excludes inactive and unlinked variants, while retaining active variant balances", async () => {
-    const { client } = createClient([
-      {
-        data: [
-          {
-            product_id: "product",
-            quantity_available: 10,
-            unit_quantity_available: null,
-            variant: { is_active: true },
-          },
-          {
-            product_id: "product",
-            quantity_available: 100,
-            unit_quantity_available: null,
-            variant: { is_active: false },
-          },
-          {
-            product_id: "product",
-            quantity_available: 1000,
-            unit_quantity_available: null,
-            variant: null,
-          },
-        ],
-        error: null,
-      },
-    ]);
-    const balances = await fetchWarehouseBalances(
-      client,
-      "org",
-      "warehouse",
-      new Map([["product", { has_variants: true }]])
+  it("does not interpret an empty page as a complete-catalogue request", async () => {
+    const rpc = vi.fn();
+    expect(await fetchStockBalances(clientWithRpc(rpc), "org", [])).toEqual(
+      new Map()
     );
-    expect(balances.get("product")?.quantity).toBe(10);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
-  it("reads past the 1000-row API limit without losing balances", async () => {
-    const lot = {
-      product_id: "product",
-      quantity_available: 1,
-      unit_quantity_available: null,
-      variant: null,
-    };
-    const { client, query } = createClient([
-      { data: Array.from({ length: 1000 }, () => lot), error: null },
-      { data: [lot], error: null },
-    ]);
-    const balances = await fetchWarehouseBalances(
-      client,
-      "org",
-      "warehouse",
-      new Map([["product", { has_variants: false }]])
-    );
-    expect(balances.get("product")?.quantity).toBe(1001);
-    expect(query.range).toHaveBeenNthCalledWith(2, 1000, 1999);
-  });
-
-  it("propagates database failures rather than displaying zero stock", async () => {
-    const { client } = createClient([
-      { data: null, error: { message: "database unavailable" } },
-    ]);
+  it.each([
+    ["42501", 403],
+    ["22023", 400],
+  ])("maps SQLSTATE %s to an expected access/input error", async (code, status) => {
+    const rpc = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { code, message: "denied" } });
     await expect(
-      fetchWarehouseBalances(
-        client,
-        "org",
-        "warehouse",
-        new Map([["product", { has_variants: false }]])
-      )
-    ).rejects.toThrow("database unavailable");
+      fetchStockBalances(clientWithRpc(rpc), "org", ["product"])
+    ).rejects.toMatchObject({ status, name: "WarehouseAccessError" });
   });
 
-  it("does not query lots when the catalogue page is empty", async () => {
-    const { client, from } = createClient([]);
-    expect(
-      await fetchWarehouseBalances(client, "org", "warehouse", new Map())
-    ).toEqual(new Map());
-    expect(from).not.toHaveBeenCalled();
+  it("propagates timeouts rather than returning zero balances", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { code: "57014", message: "statement timeout" },
+    });
+    await expect(
+      fetchStockBalances(clientWithRpc(rpc), "org", ["product"])
+    ).rejects.toThrow("statement timeout");
+  });
+
+  it("rejects an absent RPC result", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    await expect(
+      fetchStockBalances(clientWithRpc(rpc), "org", ["product"])
+    ).rejects.toThrow("No se recibieron");
   });
 });
 
-function item(
-  id: string,
-  quantity: number,
-  unit: "UNIT" | "KG" | "LT",
-  active = true
-): StockItem {
-  return {
-    product_id: id,
-    total_stock: quantity,
-    unit_of_measure: unit,
-    is_active: active,
-  } as StockItem;
-}
-
-describe("warehouse metrics", () => {
-  it("uses scoped quantities for units, kg, liters and valuation, excluding inactive and zero-stock products", () => {
-    const metrics = calculateWarehouseStockMetrics(
-      [
-        item("units", 40, "UNIT"),
-        {
-          ...item("weight", 12.5, "KG"),
-          tracks_stock_units: true,
-          total_unit_stock: 3,
-        },
-        item("liquid", 7, "LT"),
-        item("empty", 0, "UNIT"),
-        item("inactive", 100, "UNIT", false),
-      ],
-      new Map([
-        ["units", 2],
-        ["weight", 10],
-        ["liquid", 5],
-        ["inactive", 100],
-      ]),
-      new Map([["units", 50]])
-    );
-    expect(metrics).toMatchObject({
-      warehouseScoped: true,
-      activeProducts: 3,
-      inactiveProducts: 1,
-      totalProducts: 4,
-      totalUnits: 40,
-      totalKg: 12.5,
-      totalLt: 7,
-      totalStockValue: 240,
-      lowStockCount: 1,
-    });
+describe("metrics response contract", () => {
+  it("retains the complete-scope aggregate rather than deriving statistics from a page", () => {
+    expect(parseStockMetrics(metrics)).toEqual(metrics);
   });
 
-  it("returns visible zero KPIs for an empty warehouse", () => {
-    expect(
-      calculateWarehouseStockMetrics(
-        [item("empty", 0, "KG")],
-        new Map(),
-        new Map()
-      )
-    ).toMatchObject({
-      warehouseScoped: true,
-      activeProducts: 0,
-      totalUnits: 0,
-      totalKg: 0,
-      totalLt: 0,
-      totalStockValue: 0,
-    });
+  it("strips valuations when the server response does not authorize them", () => {
+    const result = parseStockMetrics({ ...metrics, canViewCosts: false });
+    expect(result.canViewCosts).toBe(false);
+    expect(result).not.toHaveProperty("totalStockValue");
   });
 
-  it("keeps global catalogue counts while applying the same active-stock rules to quantities and costs", () => {
-    const items = [
-      item("active", 10, "UNIT"),
-      item("empty", 0, "UNIT"),
-      item("inactive-variant", 100, "UNIT", false),
-    ];
-    const metrics = calculateWarehouseStockMetrics(
-      items,
-      new Map([
-        ["active", 2],
-        ["inactive-variant", 100],
-      ]),
-      new Map(),
-      false
-    );
-    expect(metrics).toMatchObject({
-      warehouseScoped: false,
-      totalProducts: 3,
-      activeProducts: 2,
-      inactiveProducts: 1,
-      totalUnits: 10,
-      totalStockValue: 20,
-    });
+  it("does not replace a missing authorized valuation with a misleading zero", () => {
+    const { totalStockValue: _cost, ...missingCost } = metrics;
+    expect(() => parseStockMetrics(missingCost)).toThrow("inválida");
+  });
+
+  it("rejects incomplete and invalid indicator payloads", () => {
+    expect(() => parseStockMetrics({})).toThrow("inválida");
+    expect(() =>
+      parseStockMetrics({ ...metrics, totalProducts: "10000" })
+    ).toThrow("inválida");
+    expect(() =>
+      parseStockMetrics({ ...metrics, totalUnits: Number.NaN })
+    ).toThrow("inválida");
+    expect(new WarehouseAccessError("denied", 403)).toBeInstanceOf(Error);
   });
 });
