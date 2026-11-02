@@ -22,6 +22,7 @@ import {
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { findAlreadyDeductedItemIds } from "@/modules/orders/service/orders.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
+import { requiresFiscalInvoiceForSaleDebt } from "@/modules/organizations/service/debt-policy.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
@@ -6282,6 +6283,15 @@ async function createInformalAdvanceDocument(params: {
   dueDate: string;
   currency?: string;
 }): Promise<void> {
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.parentSaleId
+    )
+  ) {
+    return;
+  }
   const advanceAmount = truncateMoney(params.amount);
   if (advanceAmount <= 0) {
     return;
@@ -6446,6 +6456,15 @@ async function syncInformalAdvanceReceivable(params: {
   currency: string;
   createdBy: string | null;
 }): Promise<void> {
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.saleId
+    )
+  ) {
+    return;
+  }
   const advanceAmount =
     params.advancePercentage && params.advancePercentage > 0
       ? truncateMoney((params.totalAmount * params.advancePercentage) / 100)
@@ -6744,6 +6763,16 @@ async function updateReceivableForDispatchedSale(params: {
   currency?: string;
   advancePaymentPercentage?: number;
 }): Promise<void> {
+  // Fiscal documents own the debt in this mode; notes keep operational debt.
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.saleId
+    )
+  ) {
+    return;
+  }
   const dueDate = computeReceivableDueDateFromDispatch(
     params.dispatchedAt,
     params.creditDays
@@ -6798,6 +6827,17 @@ async function updateReceivableForSaleUpdate(params: {
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
 }): Promise<void> {
+  // Preserve fiscal debt and its adjustments; notes keep their usual sync.
+  // SQL applies the same exception to atomic updates.
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.saleId
+    )
+  ) {
+    return;
+  }
   const context = resolveReceivableUpdateContext({
     input: params.input,
     updatedSale: params.updatedSale,

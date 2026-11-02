@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "./organizations.service";
 
 export const OrgSettingsSchema = z.object({
+  invoice_backed_debt_enabled: z.boolean().default(false),
   accounting_integration_enabled: z.boolean().default(false),
   automatic_accounting_enabled: z.boolean().default(false),
   credit_note_accounting_modal_enabled: z.boolean().default(false),
