@@ -30,6 +30,7 @@ import type { WarehouseStockBreakdown } from "@/modules/inventory/service/wareho
 
 type WarehouseStockBreakdownDialogProps = {
   orgSlug: string;
+  warehouseId?: string;
 };
 
 function formatQuantity(value: number): string {
@@ -45,6 +46,7 @@ function getBadgeLabel(row: WarehouseStockBreakdown): string {
 
 export function WarehouseStockBreakdownDialog({
   orgSlug,
+  warehouseId,
 }: WarehouseStockBreakdownDialogProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -55,8 +57,8 @@ export function WarehouseStockBreakdownDialog({
     isFetching,
     refetch,
   } = useQuery({
-    queryKey: ["warehouse-stock-breakdown", orgSlug],
-    queryFn: () => getWarehouseStockBreakdownAction(orgSlug),
+    queryKey: ["warehouse-stock-breakdown", orgSlug, warehouseId ?? "all"],
+    queryFn: () => getWarehouseStockBreakdownAction(orgSlug, warehouseId),
     enabled: open,
     staleTime: 0,
   });
@@ -120,8 +122,9 @@ export function WarehouseStockBreakdownDialog({
         <DialogHeader>
           <DialogTitle>Stock por depósito</DialogTitle>
           <DialogDescription>
-            Stock de los depósitos a los que tenés acceso. Las transferencias no
-            duplican existencias; un producto puede figurar en varios depósitos.
+            {warehouseId
+              ? "Stock completo del depósito seleccionado, independiente de los filtros y la página de la tabla."
+              : "Stock de los depósitos a los que tenés acceso. Las transferencias no duplican existencias; un producto puede figurar en varios depósitos."}
           </DialogDescription>
         </DialogHeader>
 
