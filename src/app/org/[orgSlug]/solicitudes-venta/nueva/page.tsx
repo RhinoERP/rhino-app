@@ -52,8 +52,8 @@ export default async function NewSalesQuoteRequestPage({
   }
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="min-w-0 space-y-6">
+      <div className="min-w-0">
         <h1 className="font-heading text-2xl">Nueva solicitud de venta</h1>
         <p className="text-muted-foreground text-sm">
           Cotizá contra el precio de competencia. La solicitud se envía a

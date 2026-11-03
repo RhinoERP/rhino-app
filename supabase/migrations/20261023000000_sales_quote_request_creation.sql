@@ -73,6 +73,7 @@ begin
     select 1
     from jsonb_to_recordset(p_items) as x(
       product_id uuid, product_variant_id uuid, quantity numeric,
+      pricing_method text,
       base_unit_price numeric, competitor_unit_price numeric,
       agreed_unit_price numeric, discount_percentage numeric,
       discount_amount numeric, price_increase_amount numeric,
@@ -86,6 +87,7 @@ begin
     where p.id is null
       or x.product_variant_id is not null and pv.id is null
       or x.quantity is null or x.quantity <= 0
+      or x.pricing_method is null or x.pricing_method not in ('COMPETITOR', 'PERCENTAGE', 'LIST_PRICE')
       or x.base_unit_price is null or x.base_unit_price < 0
       or x.competitor_unit_price is null or x.competitor_unit_price < 0
       or x.agreed_unit_price is null or x.agreed_unit_price < 0
@@ -130,6 +132,7 @@ begin
   insert into public.sales_quote_request_items (
     request_id, organization_id, line_number, product_id, product_variant_id,
     product_name_snapshot, sku_snapshot, unit_of_measure_snapshot, quantity,
+    pricing_method,
     base_unit_price, competitor_unit_price, agreed_unit_price,
     discount_percentage, discount_amount, price_increase_amount,
     adjustment_type, unit_cost_snapshot, line_subtotal, taxes_snapshot,
@@ -137,6 +140,7 @@ begin
   ) select
     v_request_id, v_org_id, x.line_number, x.product_id, x.product_variant_id,
     x.product_name_snapshot, x.sku_snapshot, x.unit_of_measure_snapshot, x.quantity,
+    x.pricing_method,
     x.base_unit_price, x.competitor_unit_price, x.agreed_unit_price,
     x.discount_percentage, x.discount_amount, x.price_increase_amount,
     x.adjustment_type, x.unit_cost_snapshot, x.line_subtotal, x.taxes_snapshot,
@@ -144,7 +148,7 @@ begin
   from jsonb_to_recordset(p_items) as x(
     line_number integer, product_id uuid, product_variant_id uuid,
     product_name_snapshot text, sku_snapshot text, unit_of_measure_snapshot text,
-    quantity numeric, base_unit_price numeric, competitor_unit_price numeric,
+    quantity numeric, pricing_method text, base_unit_price numeric, competitor_unit_price numeric,
     agreed_unit_price numeric, discount_percentage numeric, discount_amount numeric,
     price_increase_amount numeric, adjustment_type text, unit_cost_snapshot numeric,
     line_subtotal numeric, taxes_snapshot jsonb, product_comment text,

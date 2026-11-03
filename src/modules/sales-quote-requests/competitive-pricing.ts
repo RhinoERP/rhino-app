@@ -5,6 +5,11 @@ export type CompetitivePriceAdjustmentType =
   | "DISCOUNT"
   | "PRICE_OVERRIDE";
 
+export type SalesQuotePricingMethod =
+  | "COMPETITOR"
+  | "PERCENTAGE"
+  | "LIST_PRICE";
+
 export type CompetitivePriceSuggestion = {
   baseUnitPrice: number;
   competitorUnitPrice: number;
@@ -16,13 +21,14 @@ export type CompetitivePriceSuggestion = {
 };
 
 /**
- * Suggests the competitor's price as the agreed price while retaining the
- * catalog/list price as the baseline. Increases are price overrides, never
- * negative discounts.
+ * Suggests matching the competitor when they are cheaper than our list price.
+ * When the competitor is more expensive, keep our own list price as the
+ * suggestion. A seller-selected agreed price can override that default.
  */
 export function calculateCompetitivePriceSuggestion(
   baseUnitPrice: number,
-  competitorUnitPrice: number
+  competitorUnitPrice: number,
+  selectedAgreedUnitPrice?: number
 ): CompetitivePriceSuggestion {
   if (
     !(Number.isFinite(baseUnitPrice) && Number.isFinite(competitorUnitPrice)) ||
@@ -36,8 +42,20 @@ export function calculateCompetitivePriceSuggestion(
 
   const base = truncateMoney(baseUnitPrice);
   const competitor = truncateMoney(competitorUnitPrice);
-  const isDiscount = competitor < base;
-  const isIncrease = competitor > base;
+  if (
+    selectedAgreedUnitPrice != null &&
+    (!Number.isFinite(selectedAgreedUnitPrice) || selectedAgreedUnitPrice < 0)
+  ) {
+    throw new Error(
+      "El precio acordado debe ser un número válido mayor o igual a cero"
+    );
+  }
+
+  const agreed = truncateMoney(
+    selectedAgreedUnitPrice ?? Math.min(base, competitor)
+  );
+  const isDiscount = agreed < base;
+  const isIncrease = agreed > base;
   let adjustmentType: CompetitivePriceAdjustmentType = "NONE";
   if (isDiscount) {
     adjustmentType = "DISCOUNT";
@@ -48,13 +66,13 @@ export function calculateCompetitivePriceSuggestion(
   return {
     baseUnitPrice: base,
     competitorUnitPrice: competitor,
-    agreedUnitPrice: competitor,
-    discountAmount: isDiscount ? truncateMoney(base - competitor) : 0,
+    agreedUnitPrice: agreed,
+    discountAmount: isDiscount ? truncateMoney(base - agreed) : 0,
     discountPercentage:
       isDiscount && base > 0
-        ? truncateToDecimals(((base - competitor) / base) * 100, 6)
+        ? truncateToDecimals(((base - agreed) / base) * 100, 6)
         : 0,
-    priceIncreaseAmount: isIncrease ? truncateMoney(competitor - base) : 0,
+    priceIncreaseAmount: isIncrease ? truncateMoney(agreed - base) : 0,
     adjustmentType,
   };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -12,6 +13,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
 import {
@@ -23,7 +26,13 @@ import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-con
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import { createSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/create-sales-quote-request.action";
-import { calculateCompetitivePriceSuggestion } from "@/modules/sales-quote-requests/competitive-pricing";
+import { updateSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/update-sales-quote-request.action";
+import {
+  calculateCompetitivePriceSuggestion,
+  type SalesQuotePricingMethod,
+} from "@/modules/sales-quote-requests/competitive-pricing";
+import type { SalesQuoteRequestEditValues } from "@/modules/sales-quote-requests/service/my-sales-quote-requests.service";
+import type { CreateSalesQuoteRequestInput } from "@/modules/sales-quote-requests/service/sales-quote-requests.service";
 
 type ProductVariantOption = {
   id: string;
@@ -37,8 +46,19 @@ type RequestItemDraft = {
   productId: string;
   productVariantId: string | null;
   quantity: string;
+  pricingMethod: SalesQuotePricingMethod;
   competitorUnitPrice: string;
+  discountPercentage: string;
+  agreedUnitPrice: string | null;
   comment: string;
+};
+
+type ParsedRequestItemDraft = RequestItemDraft & {
+  quantityNumber: number;
+  competitorPriceNumber: number;
+  agreedPriceNumber: number;
+  baseUnitPriceNumber: number;
+  pricingValid: boolean;
 };
 
 type SalesQuoteRequestFormProps = {
@@ -48,13 +68,199 @@ type SalesQuoteRequestFormProps = {
   priceLevels: PriceLevelWithStatus[];
   salesPriceLists: SalesPriceList[];
   variants: ProductVariantOption[];
+  requestId?: string;
+  initialValues?: SalesQuoteRequestEditValues;
 };
 
 const selectClassName =
-  "h-9 w-full rounded-md border border-input bg-background px-3 text-sm";
+  "h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
 
 function customerName(customer: Customer): string {
   return customer.fantasy_name || customer.business_name || "Cliente";
+}
+
+function buildLineView(params: {
+  item: RequestItemDraft;
+  products: SaleProduct[];
+  priceLevel: PriceLevelWithStatus | undefined;
+  priceAdjustments: SalePriceAdjustment[];
+  currency: "ARS" | "USD";
+  exchangeRate: number;
+}) {
+  const {
+    item,
+    products,
+    priceLevel,
+    priceAdjustments,
+    currency,
+    exchangeRate,
+  } = params;
+  const product = products.find((entry) => entry.id === item.productId);
+  if (!product) {
+    return { item, product: null, baseUnitPrice: 0, suggestion: null };
+  }
+
+  const salePrice = calculateSalePrice({
+    basePrice: product.price,
+    costPrice: product.costPrice,
+    level: priceLevel,
+    adjustments: priceAdjustments,
+  }).price;
+  const baseUnitPrice = convertPriceToQuoteCurrency(
+    salePrice,
+    product.currency,
+    currency,
+    exchangeRate
+  );
+  const selectedAgreedPrice =
+    item.agreedUnitPrice == null || item.agreedUnitPrice.trim() === ""
+      ? undefined
+      : Number(item.agreedUnitPrice);
+  const validSelectedPrice =
+    selectedAgreedPrice != null &&
+    Number.isFinite(selectedAgreedPrice) &&
+    selectedAgreedPrice >= 0
+      ? selectedAgreedPrice
+      : undefined;
+  const suggestion = calculateLineSuggestion(
+    item,
+    baseUnitPrice,
+    validSelectedPrice
+  );
+
+  return { item, product, baseUnitPrice, suggestion };
+}
+
+function calculateLineSuggestion(
+  item: RequestItemDraft,
+  baseUnitPrice: number,
+  selectedAgreedPrice: number | undefined
+) {
+  if (item.pricingMethod === "COMPETITOR") {
+    const competitorPrice = Number(item.competitorUnitPrice);
+    if (
+      item.competitorUnitPrice.trim() === "" ||
+      !Number.isFinite(competitorPrice) ||
+      competitorPrice < 0
+    ) {
+      return null;
+    }
+    return calculateCompetitivePriceSuggestion(
+      baseUnitPrice,
+      competitorPrice,
+      selectedAgreedPrice
+    );
+  }
+
+  if (item.pricingMethod === "PERCENTAGE") {
+    const percentage = Number(item.discountPercentage);
+    if (
+      item.discountPercentage.trim() === "" ||
+      !Number.isFinite(percentage) ||
+      percentage < 0 ||
+      percentage > 100
+    ) {
+      return null;
+    }
+    const percentagePrice = truncateMoney(
+      baseUnitPrice * (1 - percentage / 100)
+    );
+    return calculateCompetitivePriceSuggestion(
+      baseUnitPrice,
+      baseUnitPrice,
+      selectedAgreedPrice ?? percentagePrice
+    );
+  }
+
+  return calculateCompetitivePriceSuggestion(
+    baseUnitPrice,
+    baseUnitPrice,
+    selectedAgreedPrice ?? baseUnitPrice
+  );
+}
+
+function buildRequestValues(params: {
+  orgSlug: string;
+  customerId: string;
+  customerSegment: "ACTIVE" | "NEW" | "REACTIVATED";
+  sellerZone: string;
+  currency: "ARS" | "USD";
+  exchangeRate: number;
+  priceLevelId: string;
+  salesPriceListId: string;
+  paymentMethod: string;
+  paymentTerm: string;
+  invoiceType: string;
+  observations: string;
+  items: ParsedRequestItemDraft[];
+  products: SaleProduct[];
+}): CreateSalesQuoteRequestInput {
+  const exchangeRequired = params.items.some((item) => {
+    const product = params.products.find(
+      (entry) => entry.id === item.productId
+    );
+    return product?.currency !== params.currency;
+  });
+
+  return {
+    orgSlug: params.orgSlug,
+    customerId: params.customerId,
+    customerSegment: params.customerSegment,
+    sellerZone: params.sellerZone.trim(),
+    currency: params.currency,
+    exchangeRate:
+      Number.isFinite(params.exchangeRate) &&
+      params.exchangeRate > 0 &&
+      (params.currency !== "ARS" || exchangeRequired)
+        ? params.exchangeRate
+        : null,
+    priceLevelId: params.priceLevelId || null,
+    salesPriceListId: params.salesPriceListId || null,
+    paymentMethod: params.paymentMethod.trim(),
+    paymentTerm: params.paymentTerm.trim(),
+    invoiceType: params.invoiceType as
+      | "NOTA_DE_VENTA"
+      | "FACTURA_A"
+      | "FACTURA_A_RETENCION"
+      | "FACTURA_B"
+      | "FACTURA_C"
+      | "FACTURA_E",
+    observations: params.observations.trim(),
+    items: params.items.map((item) => ({
+      productId: item.productId,
+      productVariantId: item.productVariantId,
+      quantity: item.quantityNumber,
+      pricingMethod: item.pricingMethod,
+      competitorUnitPrice: item.competitorPriceNumber,
+      agreedUnitPrice: item.agreedPriceNumber,
+      discountPercentage:
+        item.pricingMethod === "PERCENTAGE"
+          ? Number(item.discountPercentage)
+          : undefined,
+      comment: item.comment,
+    })),
+  };
+}
+
+async function submitRequest(
+  requestId: string | undefined,
+  values: CreateSalesQuoteRequestInput
+): Promise<
+  | { type: "created"; requestId: string }
+  | { type: "updated" }
+  | { type: "error"; message: string }
+> {
+  if (requestId) {
+    const result = await updateSalesQuoteRequestAction({ requestId, values });
+    return result.success
+      ? { type: "updated" }
+      : { type: "error", message: result.error };
+  }
+
+  const result = await createSalesQuoteRequestAction(values);
+  return result.success
+    ? { type: "created", requestId: result.requestId }
+    : { type: "error", message: result.error };
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates seller form state and pricing preview.
@@ -65,24 +271,56 @@ export function SalesQuoteRequestForm({
   priceLevels,
   salesPriceLists,
   variants,
+  requestId,
+  initialValues,
 }: SalesQuoteRequestFormProps) {
-  const [customerId, setCustomerId] = useState("");
+  const router = useRouter();
+  const [customerId, setCustomerId] = useState(initialValues?.customerId ?? "");
   const [customerSegment, setCustomerSegment] = useState<
     "ACTIVE" | "NEW" | "REACTIVATED"
-  >("ACTIVE");
-  const [sellerZone, setSellerZone] = useState("");
-  const [currency, setCurrency] = useState<"ARS" | "USD">("ARS");
-  const [exchangeRate, setExchangeRate] = useState("");
-  const [priceLevelId, setPriceLevelId] = useState("");
-  const [salesPriceListId, setSalesPriceListId] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("");
-  const [paymentTerm, setPaymentTerm] = useState("");
-  const [invoiceType, setInvoiceType] = useState("NOTA_DE_VENTA");
-  const [observations, setObservations] = useState("");
-  const [items, setItems] = useState<RequestItemDraft[]>([]);
+  >(initialValues?.customerSegment ?? "ACTIVE");
+  const [sellerZone, setSellerZone] = useState(initialValues?.sellerZone ?? "");
+  const [currency, setCurrency] = useState<"ARS" | "USD">(
+    initialValues?.currency ?? "ARS"
+  );
+  const [exchangeRate, setExchangeRate] = useState(
+    initialValues?.exchangeRate?.toString() ?? ""
+  );
+  const [priceLevelId, setPriceLevelId] = useState(
+    initialValues?.priceLevelId ?? ""
+  );
+  const [salesPriceListId, setSalesPriceListId] = useState(
+    initialValues?.salesPriceListId ?? ""
+  );
+  const [paymentMethod, setPaymentMethod] = useState(
+    initialValues?.paymentMethod ?? ""
+  );
+  const [paymentTerm, setPaymentTerm] = useState(
+    initialValues?.paymentTerm ?? ""
+  );
+  const [invoiceType, setInvoiceType] = useState(
+    initialValues?.invoiceType ?? "NOTA_DE_VENTA"
+  );
+  const [observations, setObservations] = useState(
+    initialValues?.observations ?? ""
+  );
+  const [items, setItems] = useState<RequestItemDraft[]>(
+    (initialValues?.items ?? []).map((item, index) => ({
+      id: `initial-${index}`,
+      productId: item.productId,
+      productVariantId: item.productVariantId,
+      quantity: item.quantity.toString(),
+      pricingMethod: item.pricingMethod,
+      competitorUnitPrice: item.competitorUnitPrice.toString(),
+      discountPercentage: item.discountPercentage.toString(),
+      agreedUnitPrice: item.agreedUnitPrice.toString(),
+      comment: item.comment,
+    }))
+  );
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isAddingItem, startAddingItem] = useTransition();
   const [createdRequestId, setCreatedRequestId] = useState<string | null>(null);
 
   const selectedCustomer = customers.find(
@@ -124,35 +362,16 @@ export function SalesQuoteRequestForm({
 
   const lineViews = useMemo(
     () =>
-      items.map((item) => {
-        const product = products.find((entry) => entry.id === item.productId);
-        if (!product) {
-          return { item, product: null, baseUnitPrice: 0, suggestion: null };
-        }
-        const salePrice = calculateSalePrice({
-          basePrice: product.price,
-          costPrice: product.costPrice,
-          level: priceLevel,
-          adjustments: priceAdjustments,
-        }).price;
-        const baseUnitPrice = convertPriceToQuoteCurrency(
-          salePrice,
-          product.currency,
+      items.map((item) =>
+        buildLineView({
+          item,
+          products,
+          priceLevel,
+          priceAdjustments,
           currency,
-          exchangeRateNumber
-        );
-        const competitorPrice = Number(item.competitorUnitPrice);
-        const suggestion =
-          item.competitorUnitPrice.trim() !== "" &&
-          Number.isFinite(competitorPrice) &&
-          competitorPrice >= 0
-            ? calculateCompetitivePriceSuggestion(
-                baseUnitPrice,
-                competitorPrice
-              )
-            : null;
-        return { item, product, baseUnitPrice, suggestion };
-      }),
+          exchangeRate: exchangeRateNumber,
+        })
+      ),
     [
       currency,
       exchangeRateNumber,
@@ -189,22 +408,27 @@ export function SalesQuoteRequestForm({
       toast.error("Seleccioná una variante disponible");
       return;
     }
-    setItems((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        productId: selectedProduct.id,
-        productVariantId: selectedProduct.hasVariants
-          ? selectedVariantId
-          : null,
-        quantity: "1",
-        competitorUnitPrice: "",
-        comment: "",
-      },
-    ]);
-    setSelectedProductId("");
-    setSelectedVariantId("");
-    setCreatedRequestId(null);
+    startAddingItem(() => {
+      setItems((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          productId: selectedProduct.id,
+          productVariantId: selectedProduct.hasVariants
+            ? selectedVariantId
+            : null,
+          quantity: "1",
+          pricingMethod: "COMPETITOR",
+          competitorUnitPrice: "",
+          discountPercentage: "",
+          agreedUnitPrice: null,
+          comment: "",
+        },
+      ]);
+      setSelectedProductId("");
+      setSelectedVariantId("");
+      setCreatedRequestId(null);
+    });
   };
 
   const updateItem = (
@@ -215,6 +439,72 @@ export function SalesQuoteRequestForm({
       current.map((item) => (item.id === id ? { ...item, ...values } : item))
     );
     setCreatedRequestId(null);
+  };
+
+  const updatePricingMethod = (
+    itemId: string,
+    method: SalesQuotePricingMethod,
+    baseUnitPrice: number
+  ) => {
+    updateItem(itemId, {
+      pricingMethod: method,
+      competitorUnitPrice: "",
+      discountPercentage: method === "PERCENTAGE" ? "0" : "",
+      agreedUnitPrice:
+        method === "COMPETITOR"
+          ? null
+          : truncateMoney(baseUnitPrice).toString(),
+    });
+  };
+
+  const updatePercentage = (
+    itemId: string,
+    baseUnitPrice: number,
+    value: string
+  ) => {
+    const percentage = Number(value);
+    const agreedUnitPrice =
+      value.trim() !== "" &&
+      Number.isFinite(percentage) &&
+      percentage >= 0 &&
+      percentage <= 100
+        ? truncateMoney(baseUnitPrice * (1 - percentage / 100)).toString()
+        : "";
+    updateItem(itemId, { discountPercentage: value, agreedUnitPrice });
+  };
+
+  const updateAgreedPrice = (
+    item: RequestItemDraft,
+    baseUnitPrice: number,
+    value: string
+  ) => {
+    if (item.pricingMethod !== "PERCENTAGE") {
+      updateItem(item.id, { agreedUnitPrice: value });
+      return;
+    }
+
+    const agreedPrice = Number(value);
+    if (
+      value.trim() === "" ||
+      !Number.isFinite(agreedPrice) ||
+      agreedPrice < 0 ||
+      agreedPrice > baseUnitPrice
+    ) {
+      updateItem(item.id, { agreedUnitPrice: value, discountPercentage: "" });
+      return;
+    }
+
+    const percentage =
+      baseUnitPrice === 0
+        ? 0
+        : truncateToDecimals(
+            ((baseUnitPrice - agreedPrice) / baseUnitPrice) * 100,
+            6
+          );
+    updateItem(item.id, {
+      agreedUnitPrice: value,
+      discountPercentage: percentage.toString(),
+    });
   };
 
   const handleSubmit = () => {
@@ -231,15 +521,38 @@ export function SalesQuoteRequestForm({
       return;
     }
 
-    const parsedItems = items.map((item) => ({
-      ...item,
-      quantityNumber: Number(item.quantity),
-      competitorPriceNumber: Number(item.competitorUnitPrice),
-    }));
+    const parsedItems = items.map((item, index) => {
+      const baseUnitPrice = lineViews[index]?.baseUnitPrice ?? Number.NaN;
+      return {
+        ...item,
+        quantityNumber: Number(item.quantity),
+        baseUnitPriceNumber: baseUnitPrice,
+        competitorPriceNumber:
+          item.pricingMethod === "COMPETITOR"
+            ? Number(item.competitorUnitPrice)
+            : baseUnitPrice,
+        agreedPriceNumber:
+          item.agreedUnitPrice == null
+            ? (lineViews[index]?.suggestion?.agreedUnitPrice ?? Number.NaN)
+            : Number(item.agreedUnitPrice),
+        pricingValid: Boolean(lineViews[index]?.suggestion),
+      };
+    });
     if (
       parsedItems.some(
         (item) =>
-          item.competitorUnitPrice.trim() === "" ||
+          !item.pricingValid ||
+          (item.pricingMethod === "COMPETITOR" &&
+            item.competitorUnitPrice.trim() === "") ||
+          (item.pricingMethod === "PERCENTAGE" &&
+            (item.discountPercentage.trim() === "" ||
+              Number(item.discountPercentage) < 0 ||
+              Number(item.discountPercentage) > 100 ||
+              item.agreedPriceNumber > item.baseUnitPriceNumber)) ||
+          (item.agreedUnitPrice != null &&
+            item.agreedUnitPrice.trim() === "") ||
+          !Number.isFinite(item.agreedPriceNumber) ||
+          item.agreedPriceNumber < 0 ||
           !Number.isFinite(item.quantityNumber) ||
           item.quantityNumber <= 0 ||
           !Number.isFinite(item.competitorPriceNumber) ||
@@ -251,47 +564,31 @@ export function SalesQuoteRequestForm({
     }
 
     startTransition(async () => {
-      const result = await createSalesQuoteRequestAction({
+      const values = buildRequestValues({
         orgSlug,
         customerId,
         customerSegment,
-        sellerZone: sellerZone.trim(),
+        sellerZone,
         currency,
-        exchangeRate:
-          Number.isFinite(exchangeRateNumber) &&
-          exchangeRateNumber > 0 &&
-          (currency !== "ARS" ||
-            parsedItems.some((line) => {
-              const product = products.find(
-                (entry) => entry.id === line.productId
-              );
-              return product?.currency !== currency;
-            }))
-            ? exchangeRateNumber
-            : null,
-        priceLevelId: priceLevelId || null,
-        salesPriceListId: salesPriceListId || null,
-        paymentMethod: paymentMethod.trim(),
-        paymentTerm: paymentTerm.trim(),
-        invoiceType: invoiceType as
-          | "NOTA_DE_VENTA"
-          | "FACTURA_A"
-          | "FACTURA_A_RETENCION"
-          | "FACTURA_B"
-          | "FACTURA_C"
-          | "FACTURA_E",
-        observations: observations.trim(),
-        items: parsedItems.map((item) => ({
-          productId: item.productId,
-          productVariantId: item.productVariantId,
-          quantity: item.quantityNumber,
-          competitorUnitPrice: item.competitorPriceNumber,
-          comment: item.comment,
-        })),
+        exchangeRate: exchangeRateNumber,
+        priceLevelId,
+        salesPriceListId,
+        paymentMethod,
+        paymentTerm,
+        invoiceType,
+        observations,
+        items: parsedItems,
+        products,
       });
-
-      if (!result.success) {
-        toast.error(result.error);
+      const result = await submitRequest(requestId, values);
+      if (result.type === "error") {
+        toast.error(result.message);
+        return;
+      }
+      if (result.type === "updated") {
+        toast.success("Cotización actualizada y enviada a aprobación");
+        router.push(`/org/${orgSlug}/solicitudes-venta`);
+        router.refresh();
         return;
       }
 
@@ -305,15 +602,23 @@ export function SalesQuoteRequestForm({
   const exchangeRequired = lineViews.some(
     (line) => line.product && line.product.currency !== currency
   );
+  let submitLabel = requestId
+    ? "Guardar cambios y reenviar"
+    : "Enviar a aprobación";
+  if (isPending) {
+    submitLabel = requestId ? "Guardando..." : "Enviando...";
+  }
 
   return (
-    <div className="flex flex-col gap-6 lg:flex-row">
+    <div className="flex min-w-0 flex-col gap-6 xl:flex-row">
       <div className="min-w-0 flex-1 space-y-6">
         <Card>
           <CardHeader>
             <CardTitle>Datos comerciales</CardTitle>
             <CardDescription>
-              La solicitud se enviará a un administrador para su aprobación.
+              {requestId
+                ? "Al guardar, la cotización vuelve a la bandeja de aprobación."
+                : "La solicitud se enviará a un administrador para su aprobación."}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -458,7 +763,8 @@ export function SalesQuoteRequestForm({
           <CardHeader>
             <CardTitle>Productos</CardTitle>
             <CardDescription>
-              El precio acordado se sugiere igualando a la competencia.
+              Elegí una modalidad de precio para cada producto y completá sus
+              valores.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -516,6 +822,7 @@ export function SalesQuoteRequestForm({
               <Button
                 className="w-full md:w-auto md:min-w-40"
                 disabled={
+                  isAddingItem ||
                   !selectedProduct ||
                   (selectedProduct.hasVariants && !selectedVariantId)
                 }
@@ -523,7 +830,13 @@ export function SalesQuoteRequestForm({
                 type="button"
                 variant="outline"
               >
-                Agregar producto
+                {isAddingItem ? (
+                  <>
+                    <Spinner className="mr-2" /> Agregando...
+                  </>
+                ) : (
+                  "Agregar producto"
+                )}
               </Button>
             </div>
 
@@ -540,6 +853,15 @@ export function SalesQuoteRequestForm({
                       currency={currency}
                       item={item}
                       key={item.id}
+                      onAgreedPriceChange={(value) =>
+                        updateAgreedPrice(item, baseUnitPrice, value)
+                      }
+                      onPercentageChange={(value) =>
+                        updatePercentage(item.id, baseUnitPrice, value)
+                      }
+                      onPricingMethodChange={(method) =>
+                        updatePricingMethod(item.id, method, baseUnitPrice)
+                      }
                       onRemove={() =>
                         setItems((current) =>
                           current.filter((entry) => entry.id !== item.id)
@@ -575,8 +897,8 @@ export function SalesQuoteRequestForm({
         </Card>
       </div>
 
-      <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
-        <div className="sticky top-6 space-y-4">
+      <div className="w-full min-w-0 xl:w-80 xl:max-w-xs">
+        <div className="space-y-4 xl:sticky xl:top-6">
           <Card className="h-fit min-w-0">
             <CardHeader>
               <CardTitle>Resumen de solicitud</CardTitle>
@@ -608,7 +930,8 @@ export function SalesQuoteRequestForm({
                 onClick={handleSubmit}
                 type="button"
               >
-                {isPending ? "Enviando..." : "Enviar a aprobación"}
+                {isPending && <Spinner className="mr-2" />}
+                {submitLabel}
               </Button>
             </CardContent>
           </Card>
@@ -618,13 +941,42 @@ export function SalesQuoteRequestForm({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  labelClassName,
+}: {
+  label: string;
+  children: ReactNode;
+  labelClassName?: string;
+}) {
   return (
-    <div className="space-y-2">
-      <p className="font-medium text-sm">{label}</p>
+    <div className="min-w-0 space-y-2">
+      <p className={`font-medium text-sm ${labelClassName ?? ""}`}>{label}</p>
       {children}
     </div>
   );
+}
+
+function getAdjustmentLabel(
+  suggestion: ReturnType<typeof calculateCompetitivePriceSuggestion> | null
+): string {
+  if (!suggestion) {
+    return "Precio acordado";
+  }
+  if (suggestion.adjustmentType === "DISCOUNT") {
+    const percentage = suggestion.discountPercentage.toLocaleString("es-AR", {
+      maximumFractionDigits: 1,
+    });
+    return `Descuento sugerido: ${percentage}%`;
+  }
+  if (suggestion.adjustmentType === "PRICE_OVERRIDE") {
+    return "Ajuste de precio al alza";
+  }
+  if (suggestion.competitorUnitPrice > suggestion.baseUnitPrice) {
+    return "Precio de lista";
+  }
+  return "Sin ajuste sugerido";
 }
 
 function RequestItemCard({
@@ -635,6 +987,9 @@ function RequestItemCard({
   suggestion,
   currency,
   onUpdate,
+  onPricingMethodChange,
+  onPercentageChange,
+  onAgreedPriceChange,
   onRemove,
 }: {
   item: RequestItemDraft;
@@ -644,25 +999,30 @@ function RequestItemCard({
   suggestion: ReturnType<typeof calculateCompetitivePriceSuggestion> | null;
   currency: string;
   onUpdate: (values: Partial<Omit<RequestItemDraft, "id">>) => void;
+  onPricingMethodChange: (method: SalesQuotePricingMethod) => void;
+  onPercentageChange: (value: string) => void;
+  onAgreedPriceChange: (value: string) => void;
   onRemove: () => void;
 }) {
+  const itemLabelClassName = "flex h-12 items-end overflow-hidden leading-5";
   const quantity = Number(item.quantity);
   const lineTotal =
     suggestion && Number.isFinite(quantity) && quantity > 0
       ? suggestion.agreedUnitPrice * quantity
       : null;
-  let adjustmentLabel = "Ajuste sugerido";
-  if (suggestion?.adjustmentType === "DISCOUNT") {
-    adjustmentLabel = `Descuento sugerido: ${suggestion.discountPercentage}%`;
-  } else if (suggestion?.adjustmentType === "PRICE_OVERRIDE") {
-    adjustmentLabel = "Ajuste de precio al alza";
+  const adjustmentLabel = getAdjustmentLabel(suggestion);
+  let finalPriceLabel = `Precio lista (${currency})`;
+  if (item.pricingMethod === "COMPETITOR") {
+    finalPriceLabel = adjustmentLabel;
+  } else if (item.pricingMethod === "PERCENTAGE") {
+    finalPriceLabel = `Precio final (${currency})`;
   }
 
   return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="font-medium">
+    <div className="min-w-0 rounded-lg border p-3 sm:p-4">
+      <div className="mb-4 flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
+        <div className="min-w-0">
+          <p className="break-words font-medium">
             {product?.name ?? "Producto"}
             {variant ? ` · ${variant.color} / ${variant.talle}` : ""}
           </p>
@@ -675,8 +1035,11 @@ function RequestItemCard({
           Quitar
         </Button>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label={`Cantidad (${product?.unitOfMeasure ?? "unidad"})`}>
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Field
+          label={`Cantidad (${product?.unitOfMeasure ?? "unidad"})`}
+          labelClassName={itemLabelClassName}
+        >
           <Input
             min="0.001"
             onChange={(event) => onUpdate({ quantity: event.target.value })}
@@ -685,32 +1048,82 @@ function RequestItemCard({
             value={item.quantity}
           />
         </Field>
-        <Field label={`Precio competencia (${currency})`}>
-          <Input
-            min="0"
+        <Field label="Modalidad de precio" labelClassName={itemLabelClassName}>
+          <select
+            className={selectClassName}
             onChange={(event) =>
-              onUpdate({ competitorUnitPrice: event.target.value })
+              onPricingMethodChange(
+                event.target.value as SalesQuotePricingMethod
+              )
+            }
+            value={item.pricingMethod}
+          >
+            <option value="COMPETITOR">Por precio competencia</option>
+            <option value="PERCENTAGE">Por porcentaje</option>
+            <option value="LIST_PRICE">Precio lista</option>
+          </select>
+        </Field>
+        {item.pricingMethod === "COMPETITOR" && (
+          <Field
+            label={`Precio competencia (${currency})`}
+            labelClassName={itemLabelClassName}
+          >
+            <Input
+              min="0"
+              onChange={(event) =>
+                onUpdate({ competitorUnitPrice: event.target.value })
+              }
+              step="0.000001"
+              type="number"
+              value={item.competitorUnitPrice}
+            />
+          </Field>
+        )}
+        {item.pricingMethod === "PERCENTAGE" && (
+          <Field
+            label="Porcentaje de descuento (%)"
+            labelClassName={itemLabelClassName}
+          >
+            <Input
+              max="100"
+              min="0"
+              onChange={(event) => onPercentageChange(event.target.value)}
+              step="0.01"
+              type="number"
+              value={item.discountPercentage}
+            />
+          </Field>
+        )}
+        <div>
+          <p
+            className={`${itemLabelClassName} mb-2 text-muted-foreground text-xs`}
+          >
+            {finalPriceLabel}
+          </p>
+          <Input
+            aria-label="Precio final editable"
+            min="0"
+            onChange={(event) => onAgreedPriceChange(event.target.value)}
+            placeholder={
+              suggestion
+                ? suggestion.agreedUnitPrice.toString()
+                : "Ingresá el precio final"
             }
             step="0.01"
             type="number"
-            value={item.competitorUnitPrice}
+            value={
+              item.agreedUnitPrice ??
+              suggestion?.agreedUnitPrice.toString() ??
+              ""
+            }
           />
-        </Field>
-        <div>
-          <p className="mb-2 text-muted-foreground text-xs">
-            {adjustmentLabel}
-          </p>
-          <p className="font-medium text-sm">
-            {suggestion
-              ? formatCurrency(suggestion.agreedUnitPrice, currency)
-              : "Ingresá el precio de competencia"}
-          </p>
-          {suggestion?.adjustmentType === "DISCOUNT" && (
-            <p className="text-muted-foreground text-xs">
-              Descuento unitario:{" "}
-              {formatCurrency(suggestion.discountAmount, currency)}
-            </p>
-          )}
+          {item.pricingMethod === "COMPETITOR" &&
+            suggestion?.adjustmentType === "DISCOUNT" && (
+              <p className="text-muted-foreground text-xs">
+                Descuento unitario:{" "}
+                {formatCurrency(suggestion.discountAmount, currency)}
+              </p>
+            )}
           {suggestion?.adjustmentType === "PRICE_OVERRIDE" && (
             <p className="text-muted-foreground text-xs">
               Aumento unitario:{" "}
@@ -718,15 +1131,18 @@ function RequestItemCard({
             </p>
           )}
         </div>
-        <div>
-          <p className="mb-2 text-muted-foreground text-xs">
+        <div className="flex min-w-0 flex-col gap-2">
+          <p className={`${itemLabelClassName} text-muted-foreground text-xs`}>
             Subtotal acordado
           </p>
-          <p className="font-semibold text-sm">
+          <p className="flex h-9 items-center font-semibold text-sm">
             {lineTotal == null ? "—" : formatCurrency(lineTotal, currency)}
           </p>
         </div>
-        <Field label="Comentario del producto">
+        <Field
+          label="Comentario del producto"
+          labelClassName={itemLabelClassName}
+        >
           <Input
             maxLength={1000}
             onChange={(event) => onUpdate({ comment: event.target.value })}

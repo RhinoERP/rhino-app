@@ -11,13 +11,19 @@ import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import type { SaleProduct } from "@/modules/sales/types";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { buildItemizedTaxPlan } from "@/modules/taxes/item-tax-calculations";
-import { calculateCompetitivePriceSuggestion } from "../competitive-pricing";
+import {
+  calculateCompetitivePriceSuggestion,
+  type SalesQuotePricingMethod,
+} from "../competitive-pricing";
 
 const itemInputSchema = z.object({
   productId: z.string().uuid(),
   productVariantId: z.string().uuid().nullable().optional(),
   quantity: z.number().finite().positive(),
+  pricingMethod: z.enum(["COMPETITOR", "PERCENTAGE", "LIST_PRICE"]),
   competitorUnitPrice: z.number().finite().nonnegative(),
+  agreedUnitPrice: z.number().finite().nonnegative().optional(),
+  discountPercentage: z.number().finite().min(0).max(100).optional(),
   comment: z.string().trim().max(1000).optional().default(""),
 });
 
@@ -64,6 +70,7 @@ type RequestLineSnapshot = {
   unit_of_measure_snapshot: string;
   product_currency_snapshot: string;
   quantity: number;
+  pricing_method: SalesQuotePricingMethod;
   base_unit_price: number;
   competitor_unit_price: number;
   agreed_unit_price: number;
@@ -86,10 +93,7 @@ function mapRequestLine(params: {
   unitCost: number | null;
   taxSnapshots: Record<string, string | number | null>[];
 }): RequestLineSnapshot {
-  const suggestion = calculateCompetitivePriceSuggestion(
-    params.baseUnitPrice,
-    params.item.competitorUnitPrice
-  );
+  const suggestion = calculateLinePricing(params.item, params.baseUnitPrice);
   const lineSubtotal = truncateMoney(
     suggestion.agreedUnitPrice * params.item.quantity
   );
@@ -105,6 +109,7 @@ function mapRequestLine(params: {
     unit_of_measure_snapshot: params.product.unitOfMeasure,
     product_currency_snapshot: params.product.currency,
     quantity: params.item.quantity,
+    pricing_method: params.item.pricingMethod,
     base_unit_price: params.baseUnitPrice,
     competitor_unit_price: suggestion.competitorUnitPrice,
     agreed_unit_price: suggestion.agreedUnitPrice,
@@ -121,6 +126,30 @@ function mapRequestLine(params: {
     taxes_snapshot: params.taxSnapshots,
     product_comment: params.item.comment ?? "",
   };
+}
+
+function calculateLinePricing(
+  item: CreateSalesQuoteRequestInput["items"][number],
+  baseUnitPrice: number
+) {
+  if (item.pricingMethod === "COMPETITOR") {
+    return calculateCompetitivePriceSuggestion(
+      baseUnitPrice,
+      item.competitorUnitPrice,
+      item.agreedUnitPrice
+    );
+  }
+  if (item.agreedUnitPrice == null) {
+    throw new Error("Ingresá el precio final de cada producto");
+  }
+  if (item.pricingMethod === "PERCENTAGE" && item.discountPercentage == null) {
+    throw new Error("Ingresá el porcentaje de descuento");
+  }
+  return calculateCompetitivePriceSuggestion(
+    baseUnitPrice,
+    baseUnitPrice,
+    item.agreedUnitPrice
+  );
 }
 
 function prepareRequestLine(params: {
@@ -191,7 +220,8 @@ function prepareRequestLine(params: {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates access, catalog ownership, pricing and fiscal snapshots before creating a request.
 export async function createSalesQuoteRequest(
   rawInput: CreateSalesQuoteRequestInput,
-  createdBy: string
+  createdBy: string,
+  requestId?: string
 ): Promise<string> {
   const input = createSalesQuoteRequestSchema.parse(rawInput);
   const [organization, customers, products, priceLevels, salesPriceLists] =
@@ -269,10 +299,8 @@ export async function createSalesQuoteRequest(
 
   const lineSubtotals = lines.map((line) =>
     truncateMoney(
-      calculateCompetitivePriceSuggestion(
-        line.baseUnitPrice,
-        line.item.competitorUnitPrice
-      ).agreedUnitPrice * line.item.quantity
+      calculateLinePricing(line.item, line.baseUnitPrice).agreedUnitPrice *
+        line.item.quantity
     )
   );
   const subtotalAmount = truncateMoney(
@@ -322,37 +350,61 @@ export async function createSalesQuoteRequest(
     authData.user.user_metadata?.name ??
     authData.user.email ??
     "Vendedor";
-  const { data: requestId, error } = await adminClient.rpc(
-    "create_sales_quote_request",
-    {
-      p_request: {
-        organization_id: organization.id,
-        customer_id: customer.id,
-        created_by: createdBy,
-        seller_user_id: createdBy,
-        seller_name_snapshot: userName,
-        seller_zone_snapshot: input.sellerZone,
-        customer_segment: input.customerSegment,
-        currency: input.currency,
-        exchange_rate: input.exchangeRate ?? null,
-        price_level_id: input.priceLevelId ?? null,
-        sales_price_list_id: input.salesPriceListId ?? null,
-        payment_method: input.paymentMethod,
-        payment_term: input.paymentTerm,
-        invoice_type: input.invoiceType,
-        subtotal_amount: subtotalAmount,
-        tax_amount: taxAmount,
-        total_amount: totalAmount,
-        seller_observations: input.observations,
-      },
+  const requestSnapshot = {
+    organization_id: organization.id,
+    customer_id: customer.id,
+    created_by: createdBy,
+    seller_user_id: createdBy,
+    seller_name_snapshot: userName,
+    seller_zone_snapshot: input.sellerZone,
+    customer_segment: input.customerSegment,
+    currency: input.currency,
+    exchange_rate: input.exchangeRate ?? null,
+    price_level_id: input.priceLevelId ?? null,
+    sales_price_list_id: input.salesPriceListId ?? null,
+    payment_method: input.paymentMethod,
+    payment_term: input.paymentTerm,
+    invoice_type: input.invoiceType,
+    subtotal_amount: subtotalAmount,
+    tax_amount: taxAmount,
+    total_amount: totalAmount,
+    seller_observations: input.observations,
+  };
+  let createdRequestId: string | null = null;
+  let error: { message: string } | null = null;
+  if (requestId) {
+    const userClient = supabase as unknown as {
+      rpc: (
+        name: string,
+        args: Record<string, unknown>
+      ) => Promise<{ error: { message: string } | null }>;
+    };
+    ({ error } = await userClient.rpc("update_own_sales_quote_request", {
+      p_request_id: requestId,
+      p_request: requestSnapshot,
       p_items: lineSnapshots,
-    }
-  );
+    }));
+  } else {
+    const result = await adminClient.rpc("create_sales_quote_request", {
+      p_request: requestSnapshot,
+      p_items: lineSnapshots,
+    });
+    createdRequestId = result.data;
+    error = result.error;
+  }
 
-  if (error || !requestId) {
+  if (error || !(requestId || createdRequestId)) {
     throw new Error(
       `No se pudo enviar la solicitud: ${error?.message ?? "Error desconocido"}`
     );
   }
-  return requestId;
+  return requestId ?? createdRequestId ?? "";
+}
+
+export async function updateSalesQuoteRequest(
+  requestId: string,
+  rawInput: CreateSalesQuoteRequestInput,
+  updatedBy: string
+): Promise<void> {
+  await createSalesQuoteRequest(rawInput, updatedBy, requestId);
 }

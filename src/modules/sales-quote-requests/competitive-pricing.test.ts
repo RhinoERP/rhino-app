@@ -14,15 +14,27 @@ describe("calculateCompetitivePriceSuggestion", () => {
     });
   });
 
-  it("uses a price override when competitor price is above the baseline", () => {
+  it("keeps the list price when competitor price is above the baseline", () => {
     expect(calculateCompetitivePriceSuggestion(1000, 1100)).toEqual({
       baseUnitPrice: 1000,
       competitorUnitPrice: 1100,
-      agreedUnitPrice: 1100,
+      agreedUnitPrice: 1000,
       discountAmount: 0,
       discountPercentage: 0,
-      priceIncreaseAmount: 100,
-      adjustmentType: "PRICE_OVERRIDE",
+      priceIncreaseAmount: 0,
+      adjustmentType: "NONE",
+    });
+  });
+
+  it("allows a seller-selected agreed price and calculates its adjustment", () => {
+    expect(calculateCompetitivePriceSuggestion(1000, 900, 950)).toEqual({
+      baseUnitPrice: 1000,
+      competitorUnitPrice: 900,
+      agreedUnitPrice: 950,
+      discountAmount: 50,
+      discountPercentage: 5,
+      priceIncreaseAmount: 0,
+      adjustmentType: "DISCOUNT",
     });
   });
 
@@ -37,9 +49,9 @@ describe("calculateCompetitivePriceSuggestion", () => {
 
   it("handles a zero baseline without creating an invalid discount", () => {
     expect(calculateCompetitivePriceSuggestion(0, 500)).toMatchObject({
-      agreedUnitPrice: 500,
+      agreedUnitPrice: 0,
       discountPercentage: 0,
-      adjustmentType: "PRICE_OVERRIDE",
+      adjustmentType: "NONE",
     });
   });
 
