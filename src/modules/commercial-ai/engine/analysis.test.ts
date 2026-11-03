@@ -197,6 +197,87 @@ describe("analyzePortfolio", () => {
     expect(cross?.categoryId).toBe("fiambres");
   });
 
+  it("en una cartera grande y variada compara con los que compran parecido", () => {
+    // 6 queserías que llevan queso + muzza, y 30 clientes de otro rubro (jamón).
+    // Contra toda la cartera, muzza la lleva el 17 %: no llegaría al 65 %.
+    const similar = ["q1", "q2", "q3", "q4", "q5", "q6"];
+    const others = Array.from({ length: 30 }, (_, i) => `f${i}`);
+    const orders = [
+      ...regular({
+        customerId: "c",
+        every: 10,
+        span: 200,
+        lines: [["queso", 8000]],
+      }),
+      ...similar.flatMap((id) =>
+        regular({
+          customerId: id,
+          every: 10,
+          span: 200,
+          lines: [
+            ["queso", 8000],
+            ["muzza", 6000],
+          ],
+        })
+      ),
+      ...others.flatMap((id) =>
+        regular({
+          customerId: id,
+          every: 10,
+          span: 200,
+          lines: [["jamon", 9000]],
+        })
+      ),
+    ];
+    const all = [customer("c"), ...similar, ...others].map((c) =>
+      typeof c === "string"
+        ? { ...customer(c), channel: null }
+        : { ...c, channel: null }
+    );
+    const result = run(all, orders);
+    const missing = result.opportunities.find(
+      (o) => o.customerId === "c" && o.type === "faltante"
+    );
+    expect(missing?.productId).toBe("muzza");
+    expect(missing?.evidence).toContain("compran parecido");
+    expect(result.diagnostics.customersWithChannel).toBe(0);
+    expect(result.diagnostics.soldProductsWithCategory).toBe(3);
+  });
+
+  it("cuenta como par a quien compró el producto en la historia, no solo en la ventana", () => {
+    // Los pares compraron muzza hace 100-170 días (fuera de los 90 de ventana).
+    const peers = ["p1", "p2", "p3", "p4", "p5", "p6"];
+    const orders = [
+      ...regular({
+        customerId: "c",
+        every: 10,
+        span: 200,
+        lines: [["queso", 8000]],
+      }),
+      ...peers.flatMap((id) => [
+        ...regular({
+          customerId: id,
+          every: 10,
+          span: 200,
+          lines: [["queso", 8000]],
+        }),
+        order(id, 120, [["muzza", 6000]]),
+      ]),
+    ];
+    const result = run(
+      [customer("c"), ...peers.map((id) => customer(id))],
+      orders
+    );
+    expect(
+      result.opportunities.some(
+        (o) =>
+          o.customerId === "c" &&
+          o.type === "faltante" &&
+          o.productId === "muzza"
+      )
+    ).toBe(true);
+  });
+
   it("no genera nada para un cliente estable sin pares", () => {
     const result = run(
       [customer("e")],

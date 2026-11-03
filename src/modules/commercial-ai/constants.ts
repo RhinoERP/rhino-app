@@ -5,6 +5,13 @@ import type {
   OpportunityType,
 } from "./types";
 
+/**
+ * Cuántos "pares" usa cada cliente para Producto faltante y Cross-sell.
+ * Con carteras grandes y variadas, comparar contra todos hace que casi ningún
+ * producto llegue al % pedido; por eso se compara con los que compran parecido.
+ */
+export const SIMILAR_PEERS = 20;
+
 export const OPPORTUNITY_TYPES: Record<
   OpportunityType,
   { label: string; className: string }

@@ -259,7 +259,15 @@ export type CommercialAiSnapshot = {
   plan: MonthPlanView;
   aiEnabled: boolean;
   aiModel: string;
-  stats: { analyzedCustomers: number; analyzedOrders: number };
+  stats: {
+    analyzedCustomers: number;
+    analyzedOrders: number;
+    /** Datos que hacen falta para Producto faltante y Cross-sell. */
+    customersWithChannel: number;
+    soldProducts: number;
+    soldProductsWithCategory: number;
+    ordersWithoutLines: number;
+  };
   prospecting: ProspectingSnapshot;
   /** Consumo de IA del mes (solo gerentes y admins). */
   usage: UsageSummary | null;

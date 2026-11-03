@@ -16,6 +16,7 @@ const MAX_HISTORY_MESSAGES = 12;
 const MAX_CONTEXT_OPPORTUNITIES = 40;
 const MAX_CONTEXT_CUSTOMERS = 60;
 const MAX_CONTEXT_PROSPECTS = 25;
+const MAX_CONTEXT_DEBTORS = 100;
 
 export type AssistantMessage = { role: "user" | "assistant"; content: string };
 
@@ -47,8 +48,30 @@ export function buildAssistantContext(snapshot: CommercialAiSnapshot) {
       mensaje_sugerido: o.message,
     }));
 
+  // Misma fuente que Hoy y Cartera: CustomerView.overdue / maxDaysLate.
+  const debtors = snapshot.customers
+    .filter((c) => c.overdue > 0)
+    .sort((a, b) => b.overdue - a.overdue);
+  const receivables = {
+    clientes_con_deuda_vencida: debtors.length,
+    total_vencido: Math.round(debtors.reduce((a, c) => a + c.overdue, 0)),
+    ...(debtors.length > MAX_CONTEXT_DEBTORS
+      ? {
+          nota: `Se listan los ${MAX_CONTEXT_DEBTORS} con más deuda de ${debtors.length}.`,
+        }
+      : {}),
+    detalle: debtors.slice(0, MAX_CONTEXT_DEBTORS).map((c) => ({
+      cliente: c.name,
+      cid: c.id,
+      ...(isManager ? { vendedor: sellerName(c.sellerId) } : {}),
+      vencido: Math.round(c.overdue),
+      dias_de_atraso: c.maxDaysLate,
+    })),
+  };
+
   const portfolio = snapshot.customers
-    .filter((c) => c.metrics.status !== "activo" || c.overdue > 0)
+    .filter((c) => c.metrics.status !== "activo")
+    .sort((a, b) => b.metrics.monthly - a.metrics.monthly)
     .slice(0, MAX_CONTEXT_CUSTOMERS)
     .map((c) => ({
       cliente: c.name,
@@ -156,7 +179,8 @@ export function buildAssistantContext(snapshot: CommercialAiSnapshot) {
     usuario: `${snapshot.currentUserName}, ${isManager ? "gerente comercial" : "vendedor"}`,
     plan_del_mes: plan,
     oportunidades_abiertas: openOpportunities,
-    clientes_en_riesgo_dormidos_o_con_deuda: portfolio,
+    clientes_en_riesgo_o_dormidos: portfolio,
+    cuenta_corriente_vencida: receivables,
     proximos_pasos: pendingTasks,
   };
 }
@@ -167,6 +191,7 @@ Respondés en español rioplatense, con voseo, directo y breve: hasta unas 120 p
 Hoy es ${snapshot.today}. El JSON de abajo es un resumen. Para cualquier dato de ventas que no esté ahí (facturación de un cliente en un período, rankings, productos, ventas por vendedor, comparaciones entre meses o años) usá las herramientas: consultan las ventas reales de Rhinos. Si no tenés el id del cliente, primero usá buscar_clientes. "Este año" va del 1 de enero a hoy; "el mes pasado" es el mes calendario anterior.
 Facturación = ventas confirmadas, despachadas, entregadas o incompletas; no cuentan preventas ni canceladas. Si el usuario pregunta por montos, aclaralo en una línea si hace falta.
 Nunca inventes números ni clientes: si una herramienta no devuelve el dato, decilo.
+Para deuda vencida usá solo "cuenta_corriente_vencida": la cantidad de clientes y el total ya vienen calculados y son los mismos que ve el usuario en Hoy y en Cartera; no los cuentes vos ni los saques de otra lista. Los días de atraso son a hoy; si en esta conversación hay respuestas anteriores con otros números, los de ahora son los vigentes.
 Cuando nombres un cliente escribilo así: [[cli:CID|Nombre]]; una oportunidad: [[opp:ID|Nombre del cliente]]; un prospecto: [[pro:ID|Nombre]]. Así el usuario lo abre con un toque.
 Montos en pesos argentinos abreviados ($1,2M, $350k). Podés usar viñetas con "- " y **negrita** para lo clave. Si te piden un mensaje para un cliente, escribilo listo para WhatsApp.`;
 }

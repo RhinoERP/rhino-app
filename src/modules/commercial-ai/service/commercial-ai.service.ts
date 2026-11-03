@@ -845,6 +845,7 @@ export async function getCommercialAiSnapshot(
     stats: {
       analyzedCustomers: allCustomers.length,
       analyzedOrders: orders.length,
+      ...analysis.diagnostics,
     },
     prospecting,
     usage: await usagePromise,

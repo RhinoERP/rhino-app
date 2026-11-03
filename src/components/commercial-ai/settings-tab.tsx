@@ -9,7 +9,10 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { testAiConnectionAction } from "@/modules/commercial-ai/actions/assistant.actions";
 import { saveConfigAction } from "@/modules/commercial-ai/actions/commercial-ai.actions";
-import { OPPORTUNITY_TYPES } from "@/modules/commercial-ai/constants";
+import {
+  OPPORTUNITY_TYPES,
+  SIMILAR_PEERS,
+} from "@/modules/commercial-ai/constants";
 import {
   type CommercialAiConfig,
   DEFAULT_COMMERCIAL_AI_CONFIG,
@@ -189,6 +192,8 @@ function AnalysisSettings() {
         </Field>
       </RuleCard>
 
+      <PeerDataNotice />
+
       <RuleCard
         description="Productos de una categoría que el cliente ya compra, que sus pares llevan y él nunca pidió."
         enabled={config.faltOn}
@@ -228,8 +233,9 @@ function AnalysisSettings() {
           saber si algo ya se compró
         </Field>
         <Field>
-          Comparar con clientes del mismo canal si hay al menos{" "}
-          {num("minPares", "Pares mínimos")}; si no, con toda la cartera
+          Comparar a cada cliente con los {SIMILAR_PEERS} que más se le parecen
+          en lo que compran (del mismo canal si hay al menos{" "}
+          {num("minPares", "Pares mínimos")})
         </Field>
         <Field>
           Hasta {num("maxOpps", "Máximo por cliente")} oportunidades por cliente
@@ -248,6 +254,57 @@ function AnalysisSettings() {
         </Button>
       </div>
     </div>
+  );
+}
+
+const PCT = 100;
+
+/** Avisa qué datos faltan para que Producto faltante y Cross-sell funcionen. */
+function PeerDataNotice() {
+  const { snapshot } = useCommercialAi();
+  const {
+    analyzedCustomers,
+    customersWithChannel,
+    soldProducts,
+    soldProductsWithCategory,
+    ordersWithoutLines,
+    analyzedOrders,
+  } = snapshot.stats;
+  const notes: string[] = [];
+  if (soldProducts > 0 && soldProductsWithCategory < soldProducts) {
+    notes.push(
+      `${soldProducts - soldProductsWithCategory} de ${soldProducts} productos vendidos no tienen categoría. Sin categoría no entran en Producto faltante ni en Cross-sell.`
+    );
+  }
+  if (analyzedOrders > 0 && ordersWithoutLines > 0) {
+    notes.push(
+      `${ordersWithoutLines} ventas no tienen el detalle de productos y no se pueden comparar.`
+    );
+  }
+  if (analyzedCustomers > 0 && customersWithChannel === 0) {
+    notes.push(
+      "Ningún cliente tiene canal cargado: se compara con los clientes que compran parecido."
+    );
+  }
+  if (notes.length === 0) {
+    return null;
+  }
+  const coverage =
+    soldProducts > 0
+      ? Math.round((soldProductsWithCategory / soldProducts) * PCT)
+      : 0;
+  return (
+    <Card className="gap-1 border-amber-300 bg-amber-50 p-4 text-sm dark:bg-amber-950/30">
+      <h3 className="font-semibold">
+        Datos para Producto faltante y Cross-sell · {coverage} % de productos
+        con categoría
+      </h3>
+      <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

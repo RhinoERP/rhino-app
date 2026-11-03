@@ -6,6 +6,8 @@
  * con sus pares. Es determinístico y puro: recibe ventas ya normalizadas y
  * devuelve métricas y oportunidades, así se puede testear sin base de datos.
  */
+
+import { SIMILAR_PEERS } from "../constants";
 import type {
   CommercialAiConfig,
   CustomerMetrics,
@@ -353,7 +355,7 @@ function missingTexts(
   const product = lowerFirst(ctx.productName);
   const category = ctx.categoryName.toLowerCase();
   return {
-    evidence: `Compra ${category} (${detail.lines} líneas en ${config.ventana} días: ${detail.examples}) pero nunca pidió ${ctx.productName}. Lo compra el ${formatPercent(detail.share)} de ${ctx.peersText} (${detail.buyers} de ${detail.peers}).`,
+    evidence: `Compra ${category} (${detail.lines} líneas en ${config.historia} días: ${detail.examples}) pero nunca pidió ${ctx.productName}. Lo compra el ${formatPercent(detail.share)} de ${ctx.peersText} (${detail.buyers} de ${detail.peers}).`,
     evidenceShort: `Compra ${category} pero nunca ${ctx.productName} · lo lleva el ${formatPercent(detail.share)} de sus pares`,
     strategy: {
       con: `${ctx.productName}: ya compra ${category} y le falta este.`,
@@ -392,6 +394,7 @@ export type AnalysisResult = {
   metrics: Map<string, CustomerMetrics>;
   opportunities: Opportunity[];
   monthly: Map<string, number>;
+  diagnostics: AnalysisDiagnostics;
 };
 
 type AnalysisOptions = {
@@ -399,7 +402,69 @@ type AnalysisOptions = {
   sellerShortName: (sellerId: string | null) => string;
 };
 
-type PeerGroup = { list: EngineCustomer[]; scope: "canal" | "cartera" };
+type PeerGroup = {
+  list: EngineCustomer[];
+  scope: "canal-parecidos" | "canal" | "parecidos" | "cartera";
+};
+
+/** Parecido entre dos canastas: productos en común sobre productos totales. */
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  let shared = 0;
+  for (const item of small) {
+    if (big.has(item)) {
+      shared += 1;
+    }
+  }
+  return shared / (a.size + b.size - shared);
+}
+
+/** De los candidatos, los que más se parecen en lo que compran. */
+function mostSimilar(
+  mine: Set<string>,
+  candidates: EngineCustomer[],
+  history: Map<string, Set<string>>
+): EngineCustomer[] {
+  return candidates
+    .map((peer) => ({
+      peer,
+      score: jaccard(mine, history.get(peer.id) ?? new Set<string>()),
+    }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, SIMILAR_PEERS)
+    .map((x) => x.peer);
+}
+
+function peersTextFor(
+  scope: PeerGroup["scope"],
+  channel: string | null
+): string {
+  const channelText = `clientes del canal ${channel?.toLowerCase() ?? ""}`;
+  if (scope === "canal-parecidos") {
+    return `${channelText} que compran parecido`;
+  }
+  if (scope === "canal") {
+    return channelText;
+  }
+  if (scope === "parecidos") {
+    return "los clientes que compran parecido";
+  }
+  return "clientes de la cartera";
+}
+
+export type AnalysisDiagnostics = {
+  /** Clientes con canal cargado. */
+  customersWithChannel: number;
+  /** Productos vendidos en la historia que tienen categoría. */
+  soldProducts: number;
+  soldProductsWithCategory: number;
+  /** Ventas sin detalle de productos (no sirven para faltante ni cross-sell). */
+  ordersWithoutLines: number;
+};
 
 type BuildParams = {
   type: OpportunityType;
@@ -458,18 +523,16 @@ export function analyzePortfolio(
   }
 
   const recent = new Map<string, EngineOrder[]>();
-  const recentSet = new Map<string, Set<string>>();
+  const historyOrdersOf = new Map<string, EngineOrder[]>();
   const history = new Map<string, Set<string>>();
   const monthly = new Map<string, number>();
   for (const customer of customers) {
     const orders = ordersByCustomer.get(customer.id) ?? [];
     const recentOrders = inWindow(orders, today - config.ventana, today);
     recent.set(customer.id, recentOrders);
-    recentSet.set(customer.id, productIdSet(recentOrders));
-    history.set(
-      customer.id,
-      productIdSet(inWindow(orders, today - config.historia, today))
-    );
+    const historyOrders = inWindow(orders, today - config.historia, today);
+    historyOrdersOf.set(customer.id, historyOrders);
+    history.set(customer.id, productIdSet(historyOrders));
     monthly.set(
       customer.id,
       sum(recentOrders.map((o) => o.total)) / (config.ventana / DAYS_PER_MONTH)
@@ -489,14 +552,26 @@ export function analyzePortfolio(
         peer.channel === customer.channel
     );
     const everyone = active.filter((peer) => peer.id !== customer.id);
-    // Si todo el canal es la cartera entera, el canal no aporta: lo decimos como "cartera".
-    if (
+    // Si todo el canal es la cartera entera, el canal no aporta.
+    const useChannel =
       sameChannel.length >= config.minPares &&
-      sameChannel.length < everyone.length
+      sameChannel.length < everyone.length;
+    const candidates = useChannel ? sameChannel : everyone;
+    const similar = mostSimilar(
+      history.get(customer.id) ?? new Set<string>(),
+      candidates,
+      history
+    );
+    if (
+      similar.length >= config.minPares &&
+      similar.length < candidates.length
     ) {
-      return { list: sameChannel, scope: "canal" };
+      return {
+        list: similar,
+        scope: useChannel ? "canal-parecidos" : "parecidos",
+      };
     }
-    return { list: everyone, scope: "cartera" };
+    return { list: candidates, scope: useChannel ? "canal" : "cartera" };
   };
 
   const categoryOf = (productId: string): string | null =>
@@ -536,10 +611,7 @@ export function analyzePortfolio(
         categoryName: categoryName(
           categoryId ?? (productId ? categoryOf(productId) : null)
         ),
-        peersText:
-          peerScope === "canal"
-            ? `clientes del canal ${customer.channel?.toLowerCase() ?? ""}`.trim()
-            : "clientes de la cartera",
+        peersText: peersTextFor(peerScope, customer.channel),
       };
       const result = texts(ctx);
       mine.push({
@@ -616,17 +688,13 @@ export function analyzePortfolio(
           PEER_ADJ_MIN,
           PEER_ADJ_MAX
         );
-        const myRecent = recentSet.get(customer.id) ?? new Set<string>();
         const myHistory = history.get(customer.id) ?? new Set<string>();
-        const myCategories = new Set(
-          [...myRecent].map(categoryOf).filter((c): c is string => !!c)
-        );
         const historyCategories = new Set(
           [...myHistory].map(categoryOf).filter((c): c is string => !!c)
         );
 
         if (config.faltOn) {
-          for (const categoryId of myCategories) {
+          for (const categoryId of historyCategories) {
             for (const product of products.values()) {
               if (
                 product.categoryId !== categoryId ||
@@ -635,22 +703,25 @@ export function analyzePortfolio(
                 continue;
               }
               const buyers = peers.list.filter((peer) =>
-                recentSet.get(peer.id)?.has(product.id)
+                history.get(peer.id)?.has(product.id)
               );
               const share = buyers.length / peers.list.length;
-              if (share < config.faltPct / 100) {
+              if (buyers.length === 0 || share < config.faltPct / 100) {
                 continue;
               }
               const value =
                 median(
                   buyers.map(
                     (peer) =>
-                      productSpend(recent.get(peer.id) ?? [], product.id) /
-                      (config.ventana / DAYS_PER_MONTH)
+                      productSpend(
+                        historyOrdersOf.get(peer.id) ?? [],
+                        product.id
+                      ) /
+                      (config.historia / DAYS_PER_MONTH)
                   )
                 ) * adj;
               const myLines: string[] = [];
-              for (const order of recent.get(customer.id) ?? []) {
+              for (const order of historyOrdersOf.get(customer.id) ?? []) {
                 for (const line of order.lines) {
                   if (categoryOf(line.productId) === categoryId) {
                     myLines.push(line.productId);
@@ -663,7 +734,10 @@ export function analyzePortfolio(
                 .join(", ");
               const quantity = median(
                 buyers.map((peer) =>
-                  typicalQuantity(recent.get(peer.id) ?? [], product.id)
+                  typicalQuantity(
+                    historyOrdersOf.get(peer.id) ?? [],
+                    product.id
+                  )
                 )
               );
               build({
@@ -697,7 +771,7 @@ export function analyzePortfolio(
               continue;
             }
             const buyers = peers.list.filter((peer) =>
-              [...(recentSet.get(peer.id) ?? [])].some(
+              [...(history.get(peer.id) ?? [])].some(
                 (productId) => categoryOf(productId) === categoryId
               )
             );
@@ -710,18 +784,18 @@ export function analyzePortfolio(
                 buyers.map(
                   (peer) =>
                     categorySpend(
-                      recent.get(peer.id) ?? [],
+                      historyOrdersOf.get(peer.id) ?? [],
                       categoryId,
                       categoryOf
                     ) /
-                    (config.ventana / DAYS_PER_MONTH)
+                    (config.historia / DAYS_PER_MONTH)
                 )
               ) *
               adj *
               CROSS_VALUE_FACTOR;
             const counts = new Map<string, number>();
             for (const peer of buyers) {
-              for (const productId of recentSet.get(peer.id) ?? []) {
+              for (const productId of history.get(peer.id) ?? []) {
                 if (categoryOf(productId) === categoryId) {
                   counts.set(productId, (counts.get(productId) ?? 0) + 1);
                 }
@@ -764,7 +838,28 @@ export function analyzePortfolio(
     metricsOut.set(customerId, publicMetrics);
   }
 
-  return { metrics: metricsOut, opportunities, monthly };
+  const soldProducts = new Set<string>();
+  let ordersWithoutLines = 0;
+  for (const order of input.orders) {
+    if (order.day <= today - config.historia || order.day > today) {
+      continue;
+    }
+    if (order.lines.length === 0) {
+      ordersWithoutLines += 1;
+    }
+    for (const line of order.lines) {
+      soldProducts.add(line.productId);
+    }
+  }
+  const diagnostics: AnalysisDiagnostics = {
+    customersWithChannel: customers.filter((c) => c.channel).length,
+    soldProducts: soldProducts.size,
+    soldProductsWithCategory: [...soldProducts].filter((id) => !!categoryOf(id))
+      .length,
+    ordersWithoutLines,
+  };
+
+  return { metrics: metricsOut, opportunities, monthly, diagnostics };
 }
 
 /* ============ Avance del mes por palanca ============ */
