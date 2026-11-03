@@ -8,6 +8,10 @@ import { createProductForOrg } from "@/modules/inventory/service/inventory.servi
 import { setWarehouseStockBalance } from "@/modules/inventory/service/stock-maintenance.service";
 import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import {
+  resolveProductImportSupplier,
+  resolveProductImportVariants,
+} from "@/modules/inventory/utils/product-import-validation";
+import {
   resolveImportVariant,
   resolveImportWarehouse,
 } from "@/modules/inventory/utils/stock-import-identity";
@@ -31,7 +35,6 @@ type Tax = { id: string; name: string };
 const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
 const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
-const WHITESPACE_REGEX = /\s+/;
 const UNIT_MAP: Record<
   string,
   Database["public"]["Enums"]["unit_of_measure_type"]
@@ -89,19 +92,6 @@ function findCategoryId(
   const normalizedName = categoryName.trim().toLowerCase();
   return categories?.find(
     (cat) => cat.name.trim().toLowerCase() === normalizedName
-  )?.id;
-}
-
-function findSupplierId(
-  supplierName: string | undefined,
-  suppliers: Supplier[] | null
-): string | undefined {
-  if (!supplierName || typeof supplierName !== "string") {
-    return;
-  }
-  const normalizedName = supplierName.trim().toLowerCase();
-  return suppliers?.find(
-    (sup) => sup.name.trim().toLowerCase() === normalizedName
   )?.id;
 }
 
@@ -213,10 +203,11 @@ async function processProductRow(
     row.category as string | undefined,
     categories
   );
-  const supplier_id = findSupplierId(
-    row.supplier as string | undefined,
-    suppliers
-  );
+  const supplier = resolveProductImportSupplier(row.supplier, suppliers ?? []);
+  if ("error" in supplier) {
+    return { success: false, error: `Fila ${index + 3}: ${supplier.error}` };
+  }
+  const supplier_id = supplier.supplierId;
 
   const skuLower = String(row.sku).toLowerCase();
   const combinationKey = `${supplier_id || "null"}:${skuLower}`;
@@ -283,46 +274,11 @@ async function processProductRow(
   const weight_per_unit = parseNumericField(row.weight_per_unit);
   const unit_of_measure = getUnitOfMeasure(row.unit);
 
-  const tallesRaw = row.talles ? String(row.talles).trim() : "";
-  const coloresRaw = row.colores ? String(row.colores).trim() : "";
-  const hasVariantInput = tallesRaw.length > 0 || coloresRaw.length > 0;
-
-  if (hasVariantInput && (tallesRaw.length === 0 || coloresRaw.length === 0)) {
-    return {
-      success: false,
-      error: `Fila ${index + 3}: Si el producto tiene variantes, debe especificar talles y colores`,
-    };
+  const variants = resolveProductImportVariants(row.talles, row.colores);
+  if ("error" in variants) {
+    return { success: false, error: `Fila ${index + 3}: ${variants.error}` };
   }
-
-  let talles: string[] = [];
-  let colores: string[] = [];
-
-  if (hasVariantInput) {
-    talles = [
-      ...new Set(
-        tallesRaw
-          .split(",")
-          .map((t) => t.trim().toUpperCase())
-          .filter(Boolean)
-      ),
-    ];
-
-    colores = [
-      ...new Set(
-        coloresRaw
-          .split(",")
-          .map((c) =>
-            c
-              .trim()
-              .split(WHITESPACE_REGEX)
-              .filter(Boolean)
-              .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-              .join(" ")
-          )
-          .filter(Boolean)
-      ),
-    ];
-  }
+  const { hasVariants: hasVariantInput, talles, colores } = variants;
 
   let tax_ids: string[] | undefined;
 
@@ -380,46 +336,81 @@ async function processProductRow(
   return { success: true };
 }
 
+async function fetchProductImportReferencePages<Row>(
+  label: string,
+  fetchPage: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: Row[] | null; error: unknown }>
+): Promise<Row[]> {
+  const rows: Row[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const result = await fetchPage(offset, offset + 999);
+    if (result.error || !result.data) {
+      throw new Error(
+        `No se pudieron consultar ${label} para validar la importación`
+      );
+    }
+    rows.push(...result.data);
+    if (result.data.length < 1000) {
+      return rows;
+    }
+  }
+}
+
 async function prepareProductImportData(orgId: string) {
   const supabase = await createClient();
 
-  const [categoriesResult, suppliersResult, productsResult, taxesResult] =
-    await Promise.all([
+  const [categories, suppliers, products, taxes] = await Promise.all([
+    fetchProductImportReferencePages("las categorías", (from, to) =>
       supabase
         .from("categories")
         .select("id, name")
-        .eq("organization_id", orgId),
+        .eq("organization_id", orgId)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchProductImportReferencePages("los proveedores", (from, to) =>
       supabase
         .from("suppliers")
         .select("id, name")
-        .eq("organization_id", orgId),
+        .eq("organization_id", orgId)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchProductImportReferencePages("los productos", (from, to) =>
       supabase
         .from("products")
         .select("sku, supplier_id, barcode")
-        .eq("organization_id", orgId),
+        .eq("organization_id", orgId)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchProductImportReferencePages("los impuestos", (from, to) =>
       supabase
         .from("taxes")
         .select("id, name")
         .eq("organization_id", orgId)
-        .eq("is_active", true),
-    ]);
+        .eq("is_active", true)
+        .order("id")
+        .range(from, to)
+    ),
+  ]);
 
   const existingCombinations = new Set(
-    productsResult.data?.map(
-      (p) => `${p.supplier_id || "null"}:${p.sku.toLowerCase()}`
-    ) || []
+    products.map((p) => `${p.supplier_id || "null"}:${p.sku.toLowerCase()}`)
   );
 
   const existingBarcodes = new Set(
-    (productsResult.data ?? [])
+    products
       .map((product) => normalizeBarcodeKey(product.barcode))
       .filter((barcode): barcode is string => Boolean(barcode))
   );
 
   return {
-    categories: categoriesResult.data,
-    suppliers: suppliersResult.data,
-    taxes: taxesResult.data ?? [],
+    categories,
+    suppliers,
+    taxes,
     existingCombinations,
     existingBarcodes,
   };
@@ -491,6 +482,7 @@ export async function importProducts(
   formData: FormData,
   orgSlug: string
 ): Promise<ImportResult> {
+  await ensure("inventory.manage", orgSlug);
   try {
     const file = formData.get("file") as File;
 
@@ -530,10 +522,13 @@ export async function importProducts(
       existingBarcodes,
     });
 
-    revalidatePath(`/org/${orgSlug}/products`);
+    if (imported > 0) {
+      revalidatePath(`/org/${orgSlug}/stock`);
+    }
+    const rejected = errors.length + skipped.length;
     return {
-      success: true,
-      message: `Se importaron ${imported} productos`,
+      success: imported > 0,
+      message: `Se importaron ${imported} de ${normalizedData.length} productos. Filas no importadas: ${rejected}.`,
       imported,
       errors: [...errors, ...skipped],
     };

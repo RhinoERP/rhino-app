@@ -34,7 +34,7 @@ export async function createProductAction(
     const result = await createProductForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
 
-    const productId = Array.isArray(result) ? result[0]?.id : result.id;
+    const productId = result.id;
 
     return {
       success: true,
