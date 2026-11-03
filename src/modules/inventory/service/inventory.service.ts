@@ -390,32 +390,77 @@ function buildStockItems(
       };
     });
 }
-/**
- * Creates a new product in the organization.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps validation and persistence together for clarity
+function getProductCreationVariants(
+  hasVariants: boolean | undefined,
+  talles: string[] | undefined,
+  colores: string[] | undefined
+) {
+  if (!hasVariants) {
+    return [];
+  }
+  if (
+    !(Array.isArray(talles) && Array.isArray(colores)) ||
+    talles.length === 0 ||
+    colores.length === 0
+  ) {
+    throw new Error(
+      "Se requiere al menos un talle y un color si el producto tiene variantes"
+    );
+  }
+  if (
+    talles.some((talle) => typeof talle !== "string" || !talle.trim()) ||
+    colores.some((color) => typeof color !== "string" || !color.trim())
+  ) {
+    throw new Error("Los talles y colores no pueden estar vacíos");
+  }
+  if (talles.length * colores.length > 1000) {
+    throw new Error(
+      "El producto admite hasta 1000 combinaciones de talle y color"
+    );
+  }
+  return talles.flatMap((talle) =>
+    colores.map((color) => ({ talle: talle.trim(), color: color.trim() }))
+  );
+}
+
+function buildProductCreationPayload(input: CreateProductInput) {
+  const canTrackUnits =
+    input.unit_of_measure === "KG" || input.unit_of_measure === "LT";
+  return {
+    name: input.name.trim(),
+    sku: input.sku.trim(),
+    barcode: resolveBarcodeValue(input.sku, input.barcode),
+    description: sanitizeOptionalText(input.description),
+    brand: sanitizeOptionalText(input.brand),
+    accounting_account_code: sanitizeOptionalText(
+      input.accounting_account_code
+    ),
+    profit_margin: input.profit_margin ?? null,
+    min_stock: input.min_stock ?? null,
+    ...(typeof input.sale_price === "number"
+      ? { sale_price: input.sale_price }
+      : {}),
+    category_id: input.category_id || null,
+    supplier_id: input.supplier_id || null,
+    unit_of_measure: input.unit_of_measure,
+    units_per_box: input.units_per_box || null,
+    boxes_per_pallet: input.boxes_per_pallet || null,
+    weight_per_unit: input.weight_per_unit || null,
+    image_url: sanitizeOptionalText(input.image_url),
+    tracks_stock_units: canTrackUnits && Boolean(input.tracks_stock_units),
+    has_variants: input.has_variants ?? false,
+  };
+}
+
+/** Creates the product and all initial associations in a single DB transaction. */
 export async function createProductForOrg(
   input: CreateProductInput
-): Promise<Product | Product[]> {
+): Promise<Product> {
   const {
     orgSlug,
     name,
     sku,
-    barcode,
-    description,
-    brand,
-    accounting_account_code,
-    sale_price,
     profit_margin,
-    min_stock,
-    category_id,
-    supplier_id,
-    unit_of_measure,
-    units_per_box,
-    boxes_per_pallet,
-    weight_per_unit,
-    image_url,
-    tracks_stock_units,
     has_variants,
     talles,
     colores,
@@ -431,6 +476,11 @@ export async function createProductForOrg(
   }
 
   validateProfitMargin(profit_margin);
+  const combinations = getProductCreationVariants(
+    has_variants,
+    talles,
+    colores
+  );
 
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -439,81 +489,22 @@ export async function createProductForOrg(
   }
 
   const supabase = await createClient();
-  const normalizedSku = sku.trim();
-  const resolvedBarcode = resolveBarcodeValue(normalizedSku, barcode);
-  await ensureBarcodeIsAvailable({
-    supabase,
-    organizationId: org.id,
-    barcode: resolvedBarcode,
-  });
+  const baseProductData = buildProductCreationPayload(input);
 
-  const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
-  const tracksUnits = canTrackUnits && Boolean(tracks_stock_units);
-
-  const baseProductData = {
-    organization_id: org.id,
-    description: sanitizeOptionalText(description),
-    brand: sanitizeOptionalText(brand),
-    accounting_account_code: sanitizeOptionalText(accounting_account_code),
-    profit_margin: profit_margin ?? null,
-    min_stock: min_stock ?? null,
-    ...(typeof sale_price === "number" ? { sale_price } : {}),
-    category_id: category_id || null,
-    supplier_id: supplier_id || null,
-    unit_of_measure,
-    units_per_box: units_per_box || null,
-    boxes_per_pallet: boxes_per_pallet || null,
-    weight_per_unit: weight_per_unit || null,
-    image_url: sanitizeOptionalText(image_url),
-    tracks_stock_units: tracksUnits,
-  };
-
-  // 1. Insertamos el producto principal UNA SOLA VEZ
   const { data: productData, error: productError } = await supabase
-    .from("products")
-    .insert({
-      ...baseProductData,
-      organization_id: org.id,
-      name: name.trim(),
-      sku: normalizedSku,
-      has_variants: has_variants ?? false,
-      barcode: resolvedBarcode,
-      is_active: true,
+    .rpc("create_inventory_product", {
+      p_org_id: org.id,
+      p_product: baseProductData,
+      p_variants: combinations,
+      ...(tax_ids ? { p_tax_ids: [...new Set(tax_ids.filter(Boolean))] } : {}),
     })
-    .select("*")
     .single();
 
   if (productError || !productData) {
     throw new Error(
-      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(productError?.message ?? "", resolvedBarcode)}`
+      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(productError?.message ?? "", baseProductData.barcode)}`
     );
   }
-
-  // 2. Si tiene variantes, creamos lotes DEFAULT y las guardamos
-  if (has_variants) {
-    if (!(talles && colores) || talles.length === 0 || colores.length === 0) {
-      throw new Error(
-        "Se requiere al menos un talle y un color si el producto tiene variantes"
-      );
-    }
-
-    const warehouseId = await getDefaultWarehouseId(supabase, org.id);
-    await createVariantsWithInitialBalances({
-      supabase,
-      orgId: org.id,
-      productId: productData.id,
-      warehouseId,
-      combinations: talles.flatMap((talle) =>
-        colores.map((color) => ({ talle, color }))
-      ),
-    });
-  }
-  await syncProductTaxAssignments({
-    supabase,
-    orgId: org.id,
-    productId: productData.id,
-    taxIds: tax_ids,
-  });
 
   return productData;
 }
