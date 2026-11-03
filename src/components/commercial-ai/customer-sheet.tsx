@@ -446,7 +446,7 @@ function Kpi({
   return (
     <div className={`rounded-lg border bg-card p-3 ${className ?? ""}`}>
       <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="font-heading text-xl tabular-nums">{value}</div>
+      <div className="font-heading text-xl">{value}</div>
       <div className="text-muted-foreground text-xs">{sub}</div>
     </div>
   );

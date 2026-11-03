@@ -279,12 +279,58 @@ type TextResult = {
 };
 
 /** Pasa a minúscula la inicial ("Queso" → "queso") sin romper siglas o nombres en mayúsculas. */
+// Siglas cortas sin vocales: LR, SRL, JJ.
+const NO_VOWELS = /^[b-df-hj-np-tv-z]{2,4}$/i;
+const INNER_CAPITAL = /\s\p{Lu}/u;
+const WHITESPACE_SPLIT = /(\s+)/;
+
 function lowerFirst(text: string): string {
   const second = text.charAt(1);
   const isCapitalizedWord = second !== "" && second === second.toLowerCase();
-  return isCapitalizedWord
+  // "Queso cremoso" → "queso cremoso"; "Productos Frescos Tropa" queda igual.
+  const restHasCapitals = INNER_CAPITAL.test(text);
+  return isCapitalizedWord && !restHasCapitals
     ? text.charAt(0).toLowerCase() + text.slice(1)
     : text;
+}
+
+const LOWER_WORDS = new Set(["de", "del", "la", "las", "el", "los", "y", "e"]);
+const KEEP_UPPER =
+  /^(s\.?a\.?s?\.?|s\.?r\.?l\.?|s\.?a\.?c\.?i\.?|caba|[ivx]+)$/i;
+
+/**
+ * Los nombres vienen muchas veces en mayúsculas desde el ERP. Para los
+ * mensajes al cliente los pasamos a "Tipo Título": RAMIRO → Ramiro,
+ * CIUDAD AUTONOMA DE BUENOS AIRES → Ciudad Autonoma de Buenos Aires.
+ * Si el texto ya tiene minúsculas, se respeta como está.
+ */
+export function niceName(text: string): string {
+  if (!text || text !== text.toUpperCase()) {
+    return text;
+  }
+  return text
+    .toLowerCase()
+    .split(WHITESPACE_SPLIT)
+    .map((word, index) => {
+      if (word.trim() === "") {
+        return word;
+      }
+      if (KEEP_UPPER.test(word) || NO_VOWELS.test(word)) {
+        return word.toUpperCase();
+      }
+      if (index > 0 && LOWER_WORDS.has(word)) {
+        return word;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join("");
+}
+
+/** "1,8 → 0,7 (−62 %)" o "(+14 %)" si subió. */
+function changeText(before: string, after: string, drop: number): string {
+  const pct = Math.round(Math.abs(drop) * 100);
+  const sign = drop >= 0 ? "−" : "+";
+  return `${before} → ${after} (${sign}${pct} %)`;
 }
 
 function greeting(ctx: TextContext): string {
@@ -297,15 +343,29 @@ function riskTexts(
   config: CommercialAiConfig,
   value: number
 ): TextResult {
+  const byAmount = risk.dropAmount >= risk.dropFreq;
   const drop = Math.round(Math.max(risk.dropFreq, risk.dropAmount) * 100);
   const product = lowerFirst(ctx.productName);
   const place = ctx.customer.city ? ` por ${ctx.customer.city}` : "";
+  const freqChange = changeText(
+    formatDecimal(risk.freqBase),
+    formatDecimal(risk.freqRecent),
+    risk.dropFreq
+  );
+  const amountChange = changeText(
+    formatMoneyShort(risk.amountBase),
+    formatMoneyShort(risk.amountRecent),
+    risk.dropAmount
+  );
+  const freqVerb = risk.dropFreq >= 0 ? "bajó" : "subió";
   return {
-    evidence: `Entre el ${formatDayShort(risk.baseStart + 1)} y el ${formatDayShort(risk.recentStart)} hacía ${formatDecimal(risk.freqBase)} pedidos cada 30 días (${formatMoneyShort(risk.amountBase)}/mes). En los últimos ${config.riesgoRec} días bajó a ${formatDecimal(risk.freqRecent)} pedidos cada 30 días (${formatMoneyShort(risk.amountRecent)}/mes): ${formatPercent(Math.max(0, risk.dropFreq))} menos frecuencia y ${formatPercent(Math.max(0, risk.dropAmount))} menos monto.`,
-    evidenceShort: `Antes ${formatDecimal(risk.freqBase)} pedidos/30 d; últimos ${config.riesgoRec} d: ${formatDecimal(risk.freqRecent)} pedidos/30 d (−${drop} %)`,
+    evidence: `Entre el ${formatDayShort(risk.baseStart + 1)} y el ${formatDayShort(risk.recentStart)} hacía ${formatDecimal(risk.freqBase)} pedidos cada 30 días por ${formatMoneyShort(risk.amountBase)}/mes. En los últimos ${config.riesgoRec} días la frecuencia ${freqVerb} a ${formatDecimal(risk.freqRecent)} pedidos cada 30 días y el monto quedó en ${formatMoneyShort(risk.amountRecent)}/mes.`,
+    evidenceShort: `Pedidos/mes ${freqChange} · Monto/mes ${amountChange} · últimos ${config.riesgoRec} d`,
     strategy: {
       con: `${ctx.productName}, que es lo que más dejó de pedir.`,
-      porque: `Compra ${drop} % menos que antes. Si no repone pronto, el próximo pedido se lo hace a otro proveedor.`,
+      porque: byAmount
+        ? `Compra ${drop} % menos en plata que antes. Si no repone pronto, el próximo pedido se lo hace a otro proveedor.`
+        : `Pide ${drop} % menos seguido que antes. Si no repone pronto, el próximo pedido se lo hace a otro proveedor.`,
       ofrecer: `Pasar a ver qué cambió y dejar armado un pedido de reposición de ${product}.`,
       canal: value >= HIGH_VALUE_VISIT_THRESHOLD ? "Visita" : "WhatsApp",
     },
@@ -604,12 +664,15 @@ export function analyzePortfolio(
     }: BuildParams) => {
       const ctx: TextContext = {
         orgName: options.orgName,
-        sellerShortName,
-        customer,
-        productName: productName(productId),
+        sellerShortName: niceName(sellerShortName),
+        customer: {
+          ...customer,
+          city: customer.city ? niceName(customer.city) : null,
+        },
+        productName: niceName(productName(productId)),
         quantityText: formatQuantity(Math.max(1, quantity), unitOf(productId)),
-        categoryName: categoryName(
-          categoryId ?? (productId ? categoryOf(productId) : null)
+        categoryName: niceName(
+          categoryName(categoryId ?? (productId ? categoryOf(productId) : null))
         ),
         peersText: peersTextFor(peerScope, customer.channel),
       };

@@ -254,9 +254,7 @@ export function PlanCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-baseline gap-2">
-          <span className="font-heading text-2xl tabular-nums">
-            {formatMoney(real)}
-          </span>
+          <span className="font-heading text-2xl">{formatMoney(real)}</span>
           {target > 0 ? (
             <>
               <span className="text-muted-foreground text-sm">

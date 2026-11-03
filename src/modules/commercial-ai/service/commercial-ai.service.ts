@@ -118,6 +118,18 @@ export async function requireCommercialAiAccess(
 
 /* ============ Fechas en hora argentina ============ */
 
+const FILLER_ONLY = /^[-._\s]*$/;
+const NO_DATA = /^(s\/?d|n\/?a|sin dato)$/i;
+
+/** Localidades vacías o de relleno ("-", ".", "s/d") cuentan como sin dato. */
+function cleanPlace(value: string | null): string | null {
+  const text = value?.trim() ?? "";
+  if (FILLER_ONLY.test(text) || NO_DATA.test(text)) {
+    return null;
+  }
+  return text;
+}
+
 export function todayInArgentina(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
@@ -502,7 +514,7 @@ export async function getCommercialAiSnapshot(
   const allCustomers: EngineCustomer[] = sales.customers.map((row) => ({
     id: row.id,
     name: row.fantasy_name || row.business_name || "Cliente sin nombre",
-    city: row.delivery_city || row.city,
+    city: cleanPlace(row.delivery_city) ?? cleanPlace(row.city),
     channel: row.customer_channel,
     sellerId:
       row.assigned_seller_id ??
@@ -750,8 +762,17 @@ export async function getCommercialAiSnapshot(
     );
   }
 
+  const unassignedOpen = opportunities.some((o) => !o.sellerId);
   const planSellers = [...progressBySeller.entries()]
     .filter(([sellerKey]) => isManager || sellerKey === access.userId)
+    // "Sin asignar" solo aparece si tiene ventas, meta u oportunidades.
+    .filter(
+      ([sellerKey, progress]) =>
+        sellerKey !== "sin-asignar" ||
+        progress.real > 0 ||
+        unassignedOpen ||
+        goalBySeller.has(sellerKey)
+    )
     .map(([sellerKey, progress]) => {
       const goal = goalBySeller.get(sellerKey);
       return {

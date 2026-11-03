@@ -198,7 +198,7 @@ function Kpi({
   return (
     <Card className="gap-1 p-3">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <span className="font-heading text-xl tabular-nums">{value}</span>
+      <span className="font-heading text-xl">{value}</span>
       {sub ? (
         <span className="text-muted-foreground text-xs">{sub}</span>
       ) : null}

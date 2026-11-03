@@ -232,7 +232,7 @@ export function OpportunitySheet({
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
           <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
             <div>
-              <div className="font-heading text-3xl tabular-nums">
+              <div className="font-heading text-3xl">
                 ~{formatMoneyShort(opportunity.value)}
                 <span className="text-base text-muted-foreground">/mes</span>
               </div>

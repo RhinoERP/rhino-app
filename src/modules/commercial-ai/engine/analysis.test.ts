@@ -9,6 +9,7 @@ import {
   analyzePortfolio,
   formatMoneyShort,
   monthProgressByCustomer,
+  niceName,
   toDayNumber,
 } from "./analysis";
 
@@ -319,5 +320,46 @@ describe("formatMoneyShort", () => {
   it("abrevia millones y miles", () => {
     expect(formatMoneyShort(1_250_000)).toBe("$1,3M");
     expect(formatMoneyShort(350_400)).toBe("$350k");
+  });
+});
+
+describe("niceName", () => {
+  it("pasa a Tipo Título los nombres en mayúsculas", () => {
+    expect(niceName("CIUDAD AUTONOMA DE BUENOS AIRES")).toBe(
+      "Ciudad Autonoma de Buenos Aires"
+    );
+    expect(niceName("RAMIRO")).toBe("Ramiro");
+    expect(niceName("DISTRIBUIDORA LR S.R.L.")).toBe("Distribuidora LR S.R.L.");
+  });
+
+  it("respeta lo que ya viene escrito con minúsculas", () => {
+    expect(niceName("Queso cremoso")).toBe("Queso cremoso");
+  });
+});
+
+describe("textos de En riesgo", () => {
+  it("separa pedidos y monto, y marca la suba con +", () => {
+    // Más pedidos pero mucho más chicos: cae en plata, no en frecuencia.
+    const orders = [
+      ...regular({
+        customerId: "c",
+        every: 10,
+        span: 165,
+        from: 45,
+        lines: [["queso", 100_000]],
+      }),
+      ...regular({
+        customerId: "c",
+        every: 7,
+        span: 45,
+        lines: [["queso", 5000]],
+      }),
+    ];
+    const result = run([customer("c")], orders);
+    const risk = result.opportunities.find((o) => o.type === "riesgo");
+    expect(risk?.evidenceShort).toContain("Pedidos/mes");
+    expect(risk?.evidenceShort).toContain("(+");
+    expect(risk?.evidenceShort).toContain("Monto/mes");
+    expect(risk?.strategy.porque).toContain("en plata");
   });
 });

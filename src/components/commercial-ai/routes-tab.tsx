@@ -250,7 +250,7 @@ function RoutesWeek({
         {kpis.map(([label, value]) => (
           <Card className="gap-1 p-3" key={label}>
             <span className="text-muted-foreground text-xs">{label}</span>
-            <span className="font-heading text-2xl tabular-nums">{value}</span>
+            <span className="font-heading text-2xl">{value}</span>
           </Card>
         ))}
       </div>
