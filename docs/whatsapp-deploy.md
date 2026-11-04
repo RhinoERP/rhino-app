@@ -55,6 +55,7 @@ El SQL usa una transacción e incluye, en orden:
 5. Opt-in, protección de flags, políticas restrictivas y RPCs con bloqueo por
    empresa `20261026000000_gate_whatsapp_modules.sql`.
 6. Pedidos recurrentes `20261027000000_whatsapp_recurring_orders.sql`: múltiples carritos y preventas por chat, una preventa por carrito, confirmaciones versionadas y conversión transaccional.
+7. Recomendaciones `20261030000000_whatsapp_product_recommendations.sql`: frecuencia de pedidos confirmados y compras conjuntas de los últimos 90 días, con ejecución exclusiva de servidor.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones
@@ -220,6 +221,18 @@ integración una vez habilitada, pero no puede habilitarse el módulo por API o 
 en borrador. No es un catálogo ficticio ni una base descartable. No envía a Meta,
 no confirma ventas, no factura ni reserva stock. Las integraciones del sandbox
 usan el prefijo `rhinos-local-simulator:` y permanecen en `DRAFT`.
+
+La configuración incorpora **Entregas**, **Retiro de mercadería** y **Criterio
+comercial y recomendaciones**. Cargar zonas, días, horarios, hora límite y
+condiciones reales de la empresa, además de características o complementos
+validados. El simulador usa las mismas políticas de la organización, también en
+sesiones ya iniciadas. Si faltan políticas, el agente deja la logística a
+confirmación comercial y puede seguir armando el pedido.
+
+Las recomendaciones requieren la migración del 30 de octubre; si todavía no se
+aplicó, el agente puede orientar con catálogo y ofertas, pero no afirmar qué es
+lo más vendido. La regresión de esa consulta se ejecuta en una base PostgreSQL
+vacía y descartable con `supabase/tests/whatsapp-product-recommendations.sql`.
 
 ## 5. Meta y prueba de punta a punta
 

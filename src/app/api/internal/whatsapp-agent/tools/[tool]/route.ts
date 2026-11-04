@@ -15,6 +15,8 @@ const requestSchema = z.object({
     integrationId: z.string().uuid(),
     conversationId: z.string().uuid(),
     sourceMessageId: z.string().uuid(),
+    jobId: z.string().uuid().optional(),
+    leaseToken: z.string().uuid().optional(),
   }),
   arguments: z.unknown(),
 });

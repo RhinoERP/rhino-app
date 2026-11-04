@@ -30,3 +30,7 @@ CREATE TABLE products (id uuid PRIMARY KEY);
 CREATE TABLE product_variants (id uuid PRIMARY KEY,product_id uuid REFERENCES products(id));
 CREATE TABLE permissions (key text PRIMARY KEY, description text);
 CREATE FUNCTION public.update_updated_at_column() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=now(); RETURN NEW; END; $$;
+
+CREATE SCHEMA IF NOT EXISTS storage;
+CREATE TABLE IF NOT EXISTS storage.buckets(id text PRIMARY KEY,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+CREATE TABLE IF NOT EXISTS storage.objects(bucket_id text,name text);

@@ -1,51 +1,74 @@
 import { createServer } from "node:http";
 import { hostname } from "node:os";
+import { audioEnabled, positiveInteger } from "./audio/config.js";
+import { processAudioJob } from "./audio/jobs.js";
 import {
   createCommercialJobProcessor,
   getMissingCommercialEnvironment,
-  isCommercialAgentConfigured,
 } from "./commercial-agent.js";
-import { createWorkerSupabaseClient, WhatsAppWorker } from "./worker.js";
+import { claimJob, executeJob, type JobType } from "./jobs.js";
+import { createWorkerSupabaseClient } from "./worker.js";
 
-const port = Number(process.env.PORT ?? "3002");
-const pollIntervalMs = Number(
-  process.env.WHATSAPP_AGENT_POLL_INTERVAL_MS ?? "1000"
+const port = Number(process.env.PORT || "3002");
+const pollMs = positiveInteger(
+  process.env.WHATSAPP_AGENT_POLL_INTERVAL_MS,
+  5000,
+  60_000
 );
+const role =
+  process.argv.find((argument) => argument.startsWith("--role="))?.slice(7) ||
+  process.env.WHATSAPP_AGENT_WORKER_ROLE ||
+  "all";
+if (!["all", "transcription", "commercial"].includes(role)) {
+  throw new Error("Rol inválido: all, transcription o commercial.");
+}
 const workerId =
-  process.env.WHATSAPP_AGENT_WORKER_ID ?? `${hostname()}-${process.pid}`;
-
-const supabase = createWorkerSupabaseClient();
-const isConfigured = isCommercialAgentConfigured();
-const worker = new WhatsAppWorker({
-  workerId,
-  supabase,
-  process: createCommercialJobProcessor(supabase),
-});
-
-let running = false;
+  process.env.WHATSAPP_AGENT_WORKER_ID || `${hostname()}-${process.pid}`;
+const db = createWorkerSupabaseClient();
+const commercial = createCommercialJobProcessor(db);
 let stopped = false;
+const tasks = new Set<Promise<void>>();
+const missing =
+  role === "transcription"
+    ? ["OPENAI_API_KEY", "WHATSAPP_META_ACCESS_TOKEN"].filter(
+        (key) => !process.env[key]?.trim()
+      )
+    : getMissingCommercialEnvironment();
 
-async function poll(): Promise<void> {
-  if (stopped) {
-    return;
-  }
-  try {
-    if (!running) {
-      running = true;
-      while (!stopped && (await worker.runOnce())) {
-        // Drenar los trabajos disponibles antes de volver a esperar.
+async function consumer(type: JobType, slot: number): Promise<void> {
+  while (!stopped) {
+    let worked = false;
+    try {
+      const job = await claimJob(db, type, {
+        workerId: `${workerId}-${type}-${slot}`,
+      });
+      if (job) {
+        worked = true;
+        await executeJob(
+          db,
+          job,
+          type === "TRANSCRIBE_AUDIO"
+            ? (item) => processAudioJob(db, item)
+            : commercial
+        );
       }
+    } catch (error) {
+      console.error("[whatsapp-agent] fallo del trabajo", {
+        type,
+        error: error instanceof Error ? error.message : "unknown",
+      });
     }
-  } catch (error) {
-    console.error(
-      "[whatsapp-agent] error del worker",
-      error instanceof Error ? error.message : "unknown"
-    );
-  } finally {
-    running = false;
-    if (!stopped) {
-      setTimeout(poll, pollIntervalMs);
+    if (!(worked || stopped)) {
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
+  }
+}
+
+function startConsumers(type: JobType, count: number): void {
+  for (let slot = 0; slot < count; slot += 1) {
+    const task = consumer(type, slot);
+    tasks.add(task);
+    task.finally(() => tasks.delete(task));
   }
 }
 
@@ -55,34 +78,52 @@ const server = createServer((request, response) => {
     response.end(
       JSON.stringify({
         ok: true,
-        configured: isConfigured,
-        missingConfiguration: getMissingCommercialEnvironment(),
+        configured: !missing.length,
+        missingConfiguration: missing,
+        role,
+        audioEnabled: audioEnabled(),
         service: "whatsapp-agent",
         workerId,
+        activeConsumers: tasks.size,
       })
     );
+  } else {
+    response.writeHead(404);
+    response.end();
+  }
+}).listen(port, () => {
+  if (missing.length) {
+    console.warn("[whatsapp-agent] configuración incompleta", {
+      role,
+      missing,
+    });
     return;
   }
-  response.writeHead(404);
-  response.end();
-}).listen(port, () => {
-  console.log(`[whatsapp-agent] escuchando en ${port}`);
-  if (isConfigured) {
-    console.log("[whatsapp-agent] worker configurado; iniciando polling");
-    poll().catch((error: unknown) => {
-      console.error("[whatsapp-agent] no se pudo iniciar el polling", error);
-    });
-  } else {
-    console.warn(
-      `[whatsapp-agent] faltan variables comerciales: ${getMissingCommercialEnvironment().join(", ")}; el worker no reclamará trabajos. Guardarlas en Production y crear un nuevo deployment; reiniciar el daemon no actualiza su entorno.`
+  if (role !== "transcription") {
+    startConsumers(
+      "PROCESS_CONVERSATION",
+      positiveInteger(process.env.WHATSAPP_AGENT_COMMERCIAL_CONCURRENCY, 1, 8)
     );
   }
+  if (role !== "commercial" && audioEnabled()) {
+    startConsumers(
+      "TRANSCRIBE_AUDIO",
+      positiveInteger(process.env.WHATSAPP_AGENT_AUDIO_CONCURRENCY, 1, 8)
+    );
+  }
+  console.log("[whatsapp-agent] worker configurado; iniciando polling", {
+    role,
+    workerId,
+  });
 });
 
-function shutdown(): void {
+async function shutdown(): Promise<void> {
+  if (stopped) {
+    return;
+  }
   stopped = true;
   server.close();
+  await Promise.allSettled([...tasks]);
 }
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);

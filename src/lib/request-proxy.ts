@@ -10,10 +10,13 @@ export async function handleRequestProxy(request: NextRequest) {
     (request.method === "GET" || request.method === "POST");
   const isWhatsAppTool =
     request.method === "POST" && WHATSAPP_TOOL_PATH.test(pathname);
+  const isWhatsAppAudioCleanup =
+    request.method === "GET" &&
+    pathname === "/api/internal/whatsapp-agent/audio-cleanup";
 
   // These handlers authenticate Meta or the worker themselves. Neither caller
   // has a browser session, so redirecting them to login prevents integration.
-  if (isWhatsAppWebhook || isWhatsAppTool) {
+  if (isWhatsAppWebhook || isWhatsAppTool || isWhatsAppAudioCleanup) {
     return NextResponse.next({ request });
   }
 
