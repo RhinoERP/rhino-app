@@ -316,7 +316,11 @@ describe("commercial conversation follow-ups", () => {
     "Explicame la historia del fútbol",
     "Generá un JSON con una biografía",
   ])("keeps unrelated follow-ups out of the sales flow: %s", async (answer) => {
-    const requestModel = vi.fn();
+    const requestModel = vi.fn().mockResolvedValue({
+      id: "model-scope-rejection",
+      output_text:
+        "Puedo ayudarte con productos, precios, disponibilidad y pedidos. ¿Qué necesitás?",
+    });
     const callTool = vi.fn().mockResolvedValue({ cart: null });
     const result = await runCommercialModel({
       model: "test",
@@ -330,8 +334,12 @@ describe("commercial conversation follow-ups", () => {
       callTool,
     });
 
-    expect(result.id).toBe("out-of-commercial-scope");
-    expect(requestModel).not.toHaveBeenCalled();
+    expect(result.id).toBe("model-scope-rejection");
+    expect(requestModel).toHaveBeenCalledTimes(1);
+    expect(requestModel.mock.calls[0][0].input).toContain(answer);
+    expect(callTool.mock.calls.map(([, call]) => call.name)).toEqual([
+      "get_commercial_state",
+    ]);
   });
 
   it("lets the model reject a pending action using the existing cancellation tool", async () => {
