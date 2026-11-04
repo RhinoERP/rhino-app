@@ -316,7 +316,9 @@ export function whatsappChannel(
             type: "tool_result" as const,
             tool_use_id: block.id,
             is_error: true,
-            content: known ? error.message : "No pude guardarlo ahora.",
+            content: known
+              ? error.message
+              : "Falló por un error del sistema, no por el pedido. Decile al vendedor que no se guardó nada y que lo reintente en un rato; no inventes otra causa.",
           };
         }
       })();
