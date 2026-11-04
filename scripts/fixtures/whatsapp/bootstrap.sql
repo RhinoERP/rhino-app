@@ -1,5 +1,8 @@
 CREATE SCHEMA auth;
 DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN
+    CREATE ROLE anon NOLOGIN;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN
     CREATE ROLE authenticated NOLOGIN;
   END IF;
@@ -26,7 +29,9 @@ CREATE TABLE sales_order_taxes (organization_id uuid,sales_order_id uuid REFEREN
 CREATE TABLE sales_order_item_taxes (organization_id uuid,sales_order_id uuid REFERENCES sales_orders(id),sales_order_item_id uuid REFERENCES sales_order_items(id),product_id uuid,tax_id uuid NOT NULL,name text,rate numeric,base_amount numeric,tax_amount numeric,tax_code_snapshot text,source text);
 CREATE TABLE sales_price_lists (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id));
 CREATE TABLE organization_members (user_id uuid REFERENCES auth.users(id), organization_id uuid REFERENCES organizations(id), is_active boolean DEFAULT true);
-CREATE TABLE products (id uuid PRIMARY KEY);
+CREATE TABLE categories (id uuid PRIMARY KEY, organization_id uuid, name text);
+CREATE TABLE products (id uuid PRIMARY KEY, organization_id uuid, is_active boolean DEFAULT true,
+ name text, brand text, description text, category_id uuid);
 CREATE TABLE product_variants (id uuid PRIMARY KEY,product_id uuid REFERENCES products(id));
 CREATE TABLE permissions (key text PRIMARY KEY, description text);
 CREATE FUNCTION public.update_updated_at_column() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=now(); RETURN NEW; END; $$;
