@@ -6,7 +6,12 @@ import {
   createCommercialJobProcessor,
   getMissingCommercialEnvironment,
 } from "./commercial-agent.js";
-import { claimJob, executeJob, type JobType } from "./jobs.js";
+import {
+  claimJob,
+  executeJob,
+  type JobType,
+  workerDatabaseReady,
+} from "./jobs.js";
 import { createWorkerSupabaseClient } from "./worker.js";
 
 const port = Number(process.env.PORT || "3002");
@@ -27,6 +32,7 @@ const workerId =
 const db = createWorkerSupabaseClient();
 const commercial = createCommercialJobProcessor(db);
 let stopped = false;
+let databaseReady = false;
 const tasks = new Set<Promise<void>>();
 const missing =
   role === "transcription"
@@ -74,11 +80,14 @@ function startConsumers(type: JobType, count: number): void {
 
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
-    response.writeHead(200, { "Content-Type": "application/json" });
+    response.writeHead(!missing.length && databaseReady ? 200 : 503, {
+      "Content-Type": "application/json",
+    });
     response.end(
       JSON.stringify({
         ok: true,
-        configured: !missing.length,
+        configured: !missing.length && databaseReady,
+        databaseReady,
         missingConfiguration: missing,
         role,
         audioEnabled: audioEnabled(),
@@ -99,13 +108,37 @@ const server = createServer((request, response) => {
     });
     return;
   }
+  const startup = startWhenDatabaseReady();
+  tasks.add(startup);
+  startup.finally(() => tasks.delete(startup));
+});
+
+async function startWhenDatabaseReady(): Promise<void> {
+  let reported = false;
+  while (!(stopped || databaseReady)) {
+    databaseReady = await workerDatabaseReady(db);
+    if (databaseReady) {
+      break;
+    }
+    if (!reported) {
+      console.warn(
+        "[whatsapp-agent] falta completar la migración del protocolo; no se consumen trabajos"
+      );
+      reported = true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  if (stopped) {
+    return;
+  }
   if (role !== "transcription") {
     startConsumers(
       "PROCESS_CONVERSATION",
       positiveInteger(process.env.WHATSAPP_AGENT_COMMERCIAL_CONCURRENCY, 1, 8)
     );
   }
-  if (role !== "commercial" && audioEnabled()) {
+  // Drain disabled audio jobs into a terminal fallback so they cannot block text.
+  if (role !== "commercial") {
     startConsumers(
       "TRANSCRIBE_AUDIO",
       positiveInteger(process.env.WHATSAPP_AGENT_AUDIO_CONCURRENCY, 1, 8)
@@ -115,7 +148,7 @@ const server = createServer((request, response) => {
     role,
     workerId,
   });
-});
+}
 
 async function shutdown(): Promise<void> {
   if (stopped) {

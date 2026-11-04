@@ -26,6 +26,7 @@ import {
 import {
   claimJob,
   executeJob,
+  workerDatabaseReady,
 } from "../../../../../../../services/whatsapp-agent/src/jobs";
 
 export const runtime = "nodejs";
@@ -202,6 +203,7 @@ async function runSimulationModel(
   }
 
   await recordSimulationMessage({
+    ...leaseContext,
     state,
     direction: "OUTBOUND",
     content: text,
@@ -250,6 +252,12 @@ async function resolveSimulationState(
 async function runSimulationTurn(params: SimulationTurnParams) {
   const actorId = await currentActorId();
   await assertWhatsAppOrderSchema();
+  const db = createWhatsAppAdminClient();
+  if (!(await workerDatabaseReady(db))) {
+    throw new Error(
+      "Falta completar la actualización de la base de datos de WhatsApp antes de iniciar la simulación."
+    );
+  }
   const state = await resolveSimulationState(params, actorId);
 
   if (params.input.resume) {
@@ -262,7 +270,6 @@ async function runSimulationTurn(params: SimulationTurnParams) {
       direction: "INBOUND",
       content: params.input.message || "",
     }));
-  const db = createWhatsAppAdminClient();
   if (params.input.sourceMessageId) {
     const audio = await db
       .from("whatsapp_audio_assets")
@@ -302,9 +309,6 @@ async function runSimulationTurn(params: SimulationTurnParams) {
   const runTurn = (
     leaseContext: { jobId?: string; leaseToken?: string } = {}
   ) => runSimulationModel(params, state, sourceMessageId, leaseContext);
-  if (!params.input.sourceMessageId) {
-    return runTurn();
-  }
   const pending = await db
     .from("agent_jobs")
     .select("id")
@@ -313,7 +317,7 @@ async function runSimulationTurn(params: SimulationTurnParams) {
     .eq("execution_mode", "INLINE")
     .single();
   if (pending.error || !pending.data) {
-    throw new Error("Falta preparar el trabajo comercial del audio.");
+    throw new Error("Falta preparar el trabajo comercial de la conversación.");
   }
   const job = await claimJob(db, "PROCESS_CONVERSATION", {
     workerId: `sandbox-commercial-${randomUUID()}`,

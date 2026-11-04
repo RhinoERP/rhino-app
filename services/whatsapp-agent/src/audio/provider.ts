@@ -122,7 +122,7 @@ export async function transcribeAudio(
   audio: InspectedAudio,
   request: typeof fetch = fetch
 ): Promise<Transcription> {
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) {
     throw new AudioError(
       "AUDIO_CONFIGURATION",

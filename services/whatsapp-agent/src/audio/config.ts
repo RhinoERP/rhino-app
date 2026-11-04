@@ -2,7 +2,7 @@ export const AUDIO_MAX_BYTES = 4_000_000;
 export const AUDIO_MAX_SECONDS = 120;
 export const AUDIO_MAX_TEXT = 12_000;
 export const AUDIO_BUCKET = "whatsapp-audio";
-export const AUDIO_MIGRATION = "20261103000000_whatsapp_audio_pipeline.sql";
+export const AUDIO_MIGRATION = "20261104010000_whatsapp_audio_review_fixes.sql";
 
 export class AudioError extends Error {
   readonly code: string;

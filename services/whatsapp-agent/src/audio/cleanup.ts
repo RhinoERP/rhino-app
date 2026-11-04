@@ -7,61 +7,15 @@ type ExpiredAsset = {
   status: string;
 };
 
-async function expirePendingAudio(
-  db: SupabaseClient,
-  asset: ExpiredAsset,
-  now: string
-): Promise<boolean> {
-  if (asset.status === "SUCCEEDED") {
-    return true;
-  }
-  const expired = await db
-    .from("whatsapp_audio_assets")
-    .update({
-      status: "FAILED",
-      error_code: "AUDIO_EXPIRED",
-      error_message: "El audio venció. Pedile al cliente que lo reenvíe.",
-    })
-    .eq("message_id", asset.message_id)
-    .neq("status", "SUCCEEDED");
-  if (expired.error) {
-    return false;
-  }
-  await db
-    .from("agent_jobs")
-    .update({
-      status: "FAILED",
-      completed_at: now,
-      last_error: "El audio venció.",
-    })
-    .eq("source_message_id", asset.message_id)
-    .eq("job_type", "TRANSCRIBE_AUDIO")
-    .in("status", ["PENDING", "RETRY"]);
-  await db
-    .from("agent_jobs")
-    .update({ status: "PENDING", available_at: now })
-    .eq("source_message_id", asset.message_id)
-    .eq("job_type", "PROCESS_CONVERSATION")
-    .eq("status", "WAITING");
-  return true;
-}
-
 async function removeExpiredAudio(
   db: SupabaseClient,
   asset: ExpiredAsset,
   now: string
 ): Promise<boolean> {
-  const active = await db
-    .from("agent_jobs")
-    .select("id")
-    .eq("source_message_id", asset.message_id)
-    .eq("status", "PROCESSING")
-    .gt("lease_expires_at", now)
-    .limit(1);
-  if (active.error || active.data?.length) {
-    return false;
-  }
-  if (!(await expirePendingAudio(db, asset, now))) {
+  const expired = await db.rpc("expire_whatsapp_audio_asset", {
+    p_message_id: asset.message_id,
+  });
+  if (expired.error || !expired.data) {
     return false;
   }
   const deleted = await db.storage
@@ -87,6 +41,7 @@ export async function cleanupAudioFiles(
     .select("message_id,storage_path,status")
     .lte("expires_at", now)
     .is("purged_at", null)
+    .order("expires_at")
     .limit(20);
   if (assets.error) {
     throw new Error("No se pudo consultar la retención de audios.");
@@ -102,8 +57,23 @@ export async function cleanupAudioFiles(
     .select("id,storage_path")
     .is("message_id", null)
     .lte("expires_at", now)
+    .order("expires_at")
     .limit(20);
+  if (uploads.error) {
+    throw new Error("No se pudo consultar la retención de cargas.");
+  }
   for (const upload of uploads.data || []) {
+    const claimed = await db
+      .from("whatsapp_audio_uploads")
+      .update({ cleanup_claimed_at: now })
+      .eq("id", upload.id)
+      .is("message_id", null)
+      .lte("expires_at", now)
+      .select("id")
+      .maybeSingle();
+    if (claimed.error || !claimed.data) {
+      continue;
+    }
     const deleted = await db.storage
       .from(AUDIO_BUCKET)
       .remove([upload.storage_path]);

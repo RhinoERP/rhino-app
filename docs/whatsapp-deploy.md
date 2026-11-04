@@ -57,6 +57,8 @@ El SQL usa una transacción e incluye, en orden:
 6. Pedidos recurrentes `20261027000000_whatsapp_recurring_orders.sql`: múltiples carritos y preventas por chat, una preventa por carrito, confirmaciones versionadas y conversión transaccional.
 7. Recomendaciones `20261030000000_whatsapp_product_recommendations.sql`: frecuencia de pedidos confirmados y compras conjuntas de los últimos 90 días, con ejecución exclusiva de servidor.
 8. Audios `20261103000000_whatsapp_audio_pipeline.sql`: almacenamiento privado, transcripción, cuotas, trabajos con lease y registro durable de envíos.
+9. Permisos `20261104000000_whatsapp_rpc_permissions.sql`: revocación explícita de acceso de `anon` y `authenticated` a las RPC de servidor de WhatsApp.
+10. Revisión `20261104010000_whatsapp_audio_review_fixes.sql`: protocolo verificado, exclusión transaccional, cuotas de uploads, recuperación, retención y protección de confirmaciones.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones
@@ -392,6 +394,8 @@ despliegue y deja el detalle técnico en logs del servidor.
 1. Revisar las migraciones pendientes de recomendaciones y audios indicadas
    arriba. En una instalación existente, aplicar únicamente las pendientes,
    completas y en una transacción. Preparar el SQL antes de detener el worker.
+   Si la migración de audios del 3 de noviembre ya está aplicada, las dos
+   migraciones del 4 de noviembre también son obligatorias antes de este código.
 2. Si el daemon está activo, escalarlo a 0 y esperar su cierre antes de aplicar
    la migración de audios: cambia el protocolo de reclamo y finalización de jobs.
    El webhook puede seguir recibiendo mensajes durante la actualización.
@@ -418,8 +422,43 @@ instancias o concurrencia, validar exclusión por conversación, cuotas y
 recuperación de leases bajo carga. Un envío de resultado incierto queda en
 `UNKNOWN` para revisión operativa; no se reenvía automáticamente.
 
+El worker y el sandbox verifican el protocolo SQL antes de consumir trabajos.
+Si falta una actualización o quedan permisos inseguros, el worker permanece sin
+consumir jobs y `/health` responde 503. Texto y audio del sandbox usan la misma
+exclusión por conversación. Una transcripción fallida invalida confirmaciones
+anteriores; se requiere una nueva cotización antes de convertir la preventa.
+
+Hay dos límites iniciales por organización y día UTC: 100 cargas firmadas y 100
+trabajos de transcripción admitidos. La limpieza de archivos no reinicia el
+contador de cargas. La reserva del trabajo es idempotente, pero un reintento tras
+una respuesta incierta del proveedor puede generar consumo adicional de API.
+
 Validación de la migración de audios en PostgreSQL descartable:
 `bash scripts/test-whatsapp-audio-db.sh`. La prueba aplica la migración dos veces
-y cubre deduplicación, dependencias audio/texto, exclusión y cuotas. El plan de
+y cubre deduplicación, dependencias audio/texto, exclusión, cuotas, permisos por
+defecto de Supabase y cuatro consumidores concurrentes. Incluye más de 50 mensajes
+bloqueados en un chat para comprobar que no frenen otros chats. El plan de
 evolución y los criterios completos de aceptación están en
 [el plan de audios](whatsapp-audio-plan.md).
+
+### Corrección independiente de permisos
+
+`20261104000000_whatsapp_rpc_permissions.sql` puede aplicarse por separado sobre
+una instalación existente. Sólo cambia permisos de las RPC de servidor de
+WhatsApp; conserva el acceso de `service_role` y de los helpers usados por RLS.
+No habilita flags, no toma jobs ni modifica conversaciones. Los handlers de
+webhook, herramientas y acciones manuales usan el cliente de servidor autorizado.
+
+No alcanza con revocar `PUBLIC`: Supabase también otorga permisos explícitos a
+`anon` y `authenticated`. Las pruebas reproducen esos defaults. Referencia:
+[permisos de funciones en Supabase](https://supabase.com/docs/guides/database/functions).
+
+### Envío con resultado incierto
+
+Antes de resolver un registro `UNKNOWN`, revisar en Meta y en la conversación si
+el mensaje se entregó. No cambiarlo a `PENDING` ni reintentar automáticamente:
+puede haberse entregado aunque haya fallado la respuesta HTTP. Mantener la
+conversación con atención humana durante la revisión. El registro debe conservarse
+para auditoría; si se cancela el envío automático, marcarlo `CANCELLED` únicamente
+tras esa revisión y continuar manualmente. Después se puede reactivar el bot para
+mensajes nuevos. La interfaz específica para resolver estos casos sigue pendiente.

@@ -963,3 +963,40 @@ describe("recurring commercial tools", () => {
     ).rejects.toThrow("automatización");
   });
 });
+
+describe("commercial worker fencing", () => {
+  const leasedContext = {
+    ...context,
+    jobId: "88888888-8888-4888-8888-888888888888",
+    leaseToken: "99999999-9999-4999-8999-999999999999",
+  };
+  it("passes the lease into the mutation transaction instead of relying on a prior read", async () => {
+    testDb.rpc.mockImplementation((name) =>
+      Promise.resolve({
+        data: name === "assert_whatsapp_job_lease" ? true : {},
+        error: null,
+      })
+    );
+    await executeCommercialTool(leasedContext, "start_order", {});
+    expect(testDb.rpc).toHaveBeenCalledWith(
+      "mutate_whatsapp_order_leased",
+      expect.objectContaining({
+        p_job_id: leasedContext.jobId,
+        p_lease_token: leasedContext.leaseToken,
+        p_operation: "START",
+      })
+    );
+    expect(testDb.rpc.mock.calls.map(([name]) => name)).not.toContain(
+      "mutate_whatsapp_order"
+    );
+  });
+  it("rejects a stale worker before it can request a commercial mutation", async () => {
+    testDb.rpc.mockResolvedValue({ data: false, error: null });
+    await expect(
+      executeCommercialTool(leasedContext, "start_order", {})
+    ).rejects.toThrow("perdió su exclusión");
+    expect(testDb.rpc.mock.calls.map(([name]) => name)).toEqual([
+      "assert_whatsapp_job_lease",
+    ]);
+  });
+});

@@ -422,8 +422,11 @@ async function mutate(
   payload: unknown = {}
 ) {
   const { data, error } = await createWhatsAppAdminClient().rpc(
-    "mutate_whatsapp_order",
+    context.jobId ? "mutate_whatsapp_order_leased" : "mutate_whatsapp_order",
     {
+      ...(context.jobId
+        ? { p_job_id: context.jobId, p_lease_token: context.leaseToken }
+        : {}),
       p_organization_id: context.organizationId,
       p_integration_id: context.integrationId,
       p_conversation_id: context.conversationId,
@@ -1516,6 +1519,15 @@ async function renderOrderResponse(context: VerifiedContext, text: string) {
 }
 
 async function handoffToHuman(context: VerifiedContext, reason: string) {
+  if (context.jobId) {
+    await mutate(context, "HANDOFF", undefined, { reason });
+    return {
+      handedOff: true,
+      message:
+        context.handoffMessage ??
+        "Te conectamos con una persona del equipo comercial para continuar.",
+    };
+  }
   const { error } = await createWhatsAppAdminClient()
     .from("whatsapp_conversations")
     .update({

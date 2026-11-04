@@ -283,8 +283,24 @@ export async function recordSimulationMessage(params: {
   content: string;
   sourceMessageId?: string;
   orderPrompt?: boolean;
+  jobId?: string;
+  leaseToken?: string;
 }): Promise<string> {
   const supabase = createWhatsAppAdminClient();
+  if (params.direction === "OUTBOUND" && params.jobId) {
+    const result = await supabase.rpc("record_whatsapp_simulation_outbound", {
+      p_job_id: params.jobId,
+      p_lease_token: params.leaseToken,
+      p_text: params.content,
+      p_order_prompt: params.orderPrompt ?? false,
+    });
+    if (result.error || !result.data) {
+      throw new Error(
+        "No se pudo guardar la respuesta con una exclusión vigente."
+      );
+    }
+    return result.data as string;
+  }
   const messageId = randomUUID();
   const { error } = await supabase.from("whatsapp_messages").insert({
     id: messageId,

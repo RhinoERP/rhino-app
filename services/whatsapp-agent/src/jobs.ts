@@ -10,6 +10,18 @@ export type LeasedJob = AgentJob & {
   lease_expires_at: string;
 };
 
+/** Never consume jobs while the deployed SQL still uses an older protocol. */
+export async function workerDatabaseReady(
+  db: SupabaseClient
+): Promise<boolean> {
+  try {
+    const { data, error } = await db.rpc("whatsapp_worker_protocol_version");
+    return !error && data === 2;
+  } catch {
+    return false;
+  }
+}
+
 export async function claimJob(
   db: SupabaseClient,
   type: JobType,
@@ -45,11 +57,16 @@ export async function executeJob(
     db.rpc("renew_whatsapp_job_lease", {
       p_job_id: job.id,
       p_lease_token: job.lease_token,
-    }).then(({ data: renewed, error: renewError }) => {
-      if (renewError || !renewed) {
+    }).then(
+      ({ data: renewed, error: renewError }) => {
+        if (renewError || !renewed) {
+          lost = true;
+        }
+      },
+      () => {
         lost = true;
       }
-    });
+    );
   }, 30_000);
   timer.unref();
   let failure: unknown;

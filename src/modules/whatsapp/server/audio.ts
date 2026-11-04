@@ -73,7 +73,7 @@ function audioSetupMessage(
   if (!audioEnabled()) {
     return "Configurá WHATSAPP_AUDIO_ENABLED=true en el servidor.";
   }
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.OPENAI_API_KEY?.trim()) {
     return "Falta configurar OPENAI_API_KEY en el servidor.";
   }
   if (!enabled) {
@@ -84,25 +84,33 @@ function audioSetupMessage(
 
 export async function audioCapabilities(organizationId: string) {
   const db = createWhatsAppAdminClient();
-  const [org, schema] = await Promise.all([
+  const [org, schema, uploads, protocol] = await Promise.all([
     db
       .from("organizations")
       .select("whatsapp_sandbox_audio_enabled")
       .eq("id", organizationId)
       .single(),
     db.from("whatsapp_audio_assets").select("message_id").limit(0),
+    db.from("whatsapp_audio_uploads").select("cleanup_claimed_at").limit(0),
+    db.rpc("whatsapp_worker_protocol_version"),
   ]);
-  const needsMigration = Boolean(org.error || schema.error);
+  const needsMigration = Boolean(
+    org.error ||
+      schema.error ||
+      uploads.error ||
+      protocol.error ||
+      protocol.data !== 2
+  );
   return {
     ready:
       !needsMigration &&
       audioEnabled() &&
-      Boolean(process.env.OPENAI_API_KEY) &&
+      Boolean(process.env.OPENAI_API_KEY?.trim()) &&
       org.data?.whatsapp_sandbox_audio_enabled === true,
     needsMigration,
     migration: AUDIO_MIGRATION,
     enabled: org.data?.whatsapp_sandbox_audio_enabled === true,
-    configured: audioEnabled() && Boolean(process.env.OPENAI_API_KEY),
+    configured: audioEnabled() && Boolean(process.env.OPENAI_API_KEY?.trim()),
     model: transcriptionModel(),
     message: audioSetupMessage(
       needsMigration,
@@ -154,6 +162,53 @@ async function resolveUploadState(
   });
 }
 
+type UploadReservation = {
+  conversation_id: string;
+  integration_id: string;
+  storage_path: string;
+  mime_type: string;
+  declared_bytes: number;
+  cleanup_claimed_at: string | null;
+  message_id: string | null;
+};
+
+function validateUploadReservation(
+  row: UploadReservation | null,
+  state: SimulationState,
+  input: z.infer<typeof uploadSchema>
+) {
+  if (
+    !row ||
+    row.conversation_id !== state.conversationId ||
+    row.integration_id !== state.integrationId ||
+    row.mime_type !== input.mimeType ||
+    row.declared_bytes !== input.size ||
+    row.cleanup_claimed_at ||
+    row.message_id
+  ) {
+    throw new AudioError(
+      "AUDIO_UPLOAD_CONFLICT",
+      "La carga ya fue completada o pertenece a otra sesión. Adjuntá un audio nuevo.",
+      409
+    );
+  }
+  return row;
+}
+
+function throwUploadReservationError(error: { code?: string } | null) {
+  if (!error) {
+    return;
+  }
+  if (error.code === "54000") {
+    throw new AudioError(
+      "AUDIO_UPLOAD_QUOTA",
+      "Se alcanzó el límite diario de cargas de audio de esta organización.",
+      429
+    );
+  }
+  throw new Error("No se pudo preparar la carga.");
+}
+
 export async function reserveAudioUpload(orgSlug: string, raw: unknown) {
   const input = uploadSchema.parse(raw);
   const { organization, actorId, db } = await audioContext(orgSlug);
@@ -170,6 +225,16 @@ export async function reserveAudioUpload(orgSlug: string, raw: unknown) {
   }
   let state = input.state;
   if (existing.data) {
+    if (
+      input.state &&
+      input.state.conversationId !== existing.data.conversation_id
+    ) {
+      throw new AudioError(
+        "AUDIO_UPLOAD_CONFLICT",
+        "La carga pertenece a otra sesión.",
+        409
+      );
+    }
     const conversation = await db
       .from("whatsapp_conversations")
       .select("customer_id")
@@ -207,35 +272,45 @@ export async function reserveAudioUpload(orgSlug: string, raw: unknown) {
       },
       { onConflict: "id", ignoreDuplicates: true }
     );
-    if (inserted.error) {
-      throw new Error("No se pudo preparar la carga.");
-    }
+    throwUploadReservationError(inserted.error);
   }
-  const { data, error } = await db.storage
-    .from(AUDIO_BUCKET)
-    .createSignedUploadUrl(existing.data?.storage_path || storagePath, {
-      upsert: false,
-    });
-  if (error || !data) {
-    throw new AudioError(
-      "AUDIO_STORAGE",
-      "No se pudo preparar el almacenamiento privado.",
-      502,
-      true
-    );
+  // Re-read the row that actually won the upsert before issuing any capability.
+  const persisted = await db
+    .from("whatsapp_audio_uploads")
+    .select("*")
+    .eq("id", input.clientMessageId)
+    .eq("organization_id", organization.id)
+    .eq("actor_id", actorId)
+    .single();
+  if (persisted.error) {
+    throw new Error("No se pudo consultar la carga persistida.");
   }
+  const reservation = validateUploadReservation(persisted.data, state, input);
   const renewed = await db
     .from("whatsapp_audio_uploads")
     .update({ expires_at: new Date(Date.now() + 125 * 60_000).toISOString() })
     .eq("id", input.clientMessageId)
     .eq("organization_id", organization.id)
     .eq("actor_id", actorId)
+    .is("cleanup_claimed_at", null)
+    .is("message_id", null)
     .select("id")
     .single();
   if (renewed.error || !renewed.data) {
     throw new AudioError(
       "AUDIO_UPLOAD_EXPIRED",
       "La carga venció. Volvé a adjuntar el audio."
+    );
+  }
+  const { data, error } = await db.storage
+    .from(AUDIO_BUCKET)
+    .createSignedUploadUrl(reservation.storage_path, { upsert: false });
+  if (error || !data) {
+    throw new AudioError(
+      "AUDIO_STORAGE",
+      "No se pudo preparar el almacenamiento privado.",
+      502,
+      true
     );
   }
   return {

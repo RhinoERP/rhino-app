@@ -257,27 +257,14 @@ async function readStoredResponse(
   if (!job.lease_token) {
     return null;
   }
-  const result = await db
-    .from("whatsapp_outbox")
-    .select("text,order_prompt,status")
-    .eq("source_message_id", job.source_message_id)
-    .eq("organization_id", job.organization_id)
-    .maybeSingle();
+  const result = await db.rpc("recover_whatsapp_outbox", {
+    p_job_id: job.id,
+    p_lease_token: job.lease_token,
+  });
   if (result.error) {
     throw new Error("No se pudo recuperar el estado del envío.");
   }
   const row = result.data as StoredResponse | null;
-  if (row?.status === "SENDING") {
-    await db
-      .from("whatsapp_outbox")
-      .update({ status: "UNKNOWN" })
-      .eq("source_message_id", job.source_message_id)
-      .eq("status", "SENDING");
-    throw new AudioError(
-      "DELIVERY_REVIEW",
-      "La respuesta anterior requiere revisión antes de continuar."
-    );
-  }
   if (row?.status === "UNKNOWN") {
     throw new AudioError(
       "DELIVERY_REVIEW",
@@ -346,6 +333,11 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
   const toolCalls: ToolCallAudit[] = [];
   let run: AgentRun | null = null;
   try {
+    // Reconcile a possibly accepted send even if a newer message supersedes it.
+    const cached = await readStoredResponse(supabase, job);
+    if (cached?.status === "SENT" || cached?.status === "CANCELLED") {
+      return;
+    }
     const context = await loadJobContext(supabase, job);
     if (context.superseded) {
       return;
@@ -359,10 +351,6 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
         });
     if (responseAt) {
       return { deferUntil: responseAt.toISOString() };
-    }
-    const cached = await readStoredResponse(supabase, job);
-    if (cached?.status === "SENT" || cached?.status === "CANCELLED") {
-      return;
     }
     run = await startAgentRun(supabase, job);
     const output = await produceCommercialOutput({

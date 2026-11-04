@@ -8,13 +8,14 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
 import type { SimulationState } from "@/modules/whatsapp/server/simulation";
 import {
   createAudioRecorder,
   releaseMicrophone,
   stopRecorder,
 } from "./audio-recorder";
+
+import { requestAudio, type Upload, uploadAudioFile } from "./audio-upload";
 
 const phaseLabels: Record<string, string> = {
   uploading: "Subiendo audio…",
@@ -29,13 +30,6 @@ type Capability = {
   configured: boolean;
   message: string | null;
 };
-type Upload = {
-  uploadId: string;
-  state: SimulationState;
-  bucket: string;
-  path: string;
-  token: string;
-};
 type Transcribed = {
   messageId: string;
   state: SimulationState;
@@ -44,64 +38,6 @@ type Transcribed = {
   error: string | null;
   retryable: boolean;
 };
-
-async function requestAudio<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error || "No se pudo procesar el audio.");
-  }
-  return result as T;
-}
-
-async function uploadAudioFile({
-  base,
-  file,
-  clientMessageId,
-  state,
-  customerId,
-  priceListId,
-  onSessionReady,
-}: {
-  base: string;
-  file: File;
-  clientMessageId: string;
-  state: SimulationState | undefined;
-  customerId: string;
-  priceListId: string;
-  onSessionReady: (state: SimulationState) => void;
-}): Promise<Upload> {
-  const upload = await requestAudio<Upload>(`${base}/uploads`, {
-    method: "POST",
-    body: JSON.stringify({
-      clientMessageId,
-      state,
-      customerId: state ? undefined : customerId,
-      priceListId: state ? undefined : priceListId,
-      mimeType: file.type || "application/octet-stream",
-      size: file.size,
-    }),
-  });
-  onSessionReady(upload.state);
-  const result = await createClient()
-    .storage.from(upload.bucket)
-    .uploadToSignedUrl(upload.path, upload.token, file, {
-      contentType: file.type || "application/octet-stream",
-    });
-  if (
-    result.error &&
-    !(
-      "statusCode" in result.error &&
-      ["400", "409"].includes(String(result.error.statusCode))
-    )
-  ) {
-    throw new Error("No se pudo subir el audio. Volvé a intentar.");
-  }
-  return upload;
-}
 
 async function completeAudioUpload(base: string, uploadId: string) {
   const result = await requestAudio<Transcribed>(
@@ -182,7 +118,6 @@ export function WhatsAppAudioComposer({
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const input = useRef<HTMLInputElement | null>(null);
-  const _chunks = useRef<Blob[]>([]);
   const mounted = useRef(true);
   const requestId = useRef<string | null>(null);
   const pending = useRef<Upload | null>(null);

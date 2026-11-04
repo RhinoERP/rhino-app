@@ -46,8 +46,16 @@ async function downloadMetaAudio(
     .eq("id", job.integration_id)
     .eq("organization_id", job.organization_id)
     .eq("status", "ACTIVE")
-    .single();
-  if (integration.error || !integration.data) {
+    .maybeSingle();
+  if (integration.error) {
+    throw new AudioError(
+      "AUDIO_INTEGRATION",
+      "No se pudo comprobar la integración.",
+      503,
+      true
+    );
+  }
+  if (!integration.data) {
     throw new AudioError(
       "AUDIO_INTEGRATION",
       "La integración está desactivada."
@@ -170,23 +178,20 @@ async function validateAndStore(
       "El archivo cambió desde su primera validación."
     );
   }
+  // Reject over-quota work before creating a persistent copy in Storage.
+  await admitTranscription(db, job, audio.durationSeconds);
   if (!asset.stored) {
     await storeAudio(db, asset, audio, digest);
   }
-  const result = await db
-    .from("whatsapp_audio_assets")
-    .update({
-      stored: true,
-      mime_type: audio.mimeType,
-      byte_size: bytes.length,
-      duration_seconds: audio.durationSeconds,
-      sha256: digest,
-      status: "PROCESSING",
-    })
-    .eq("message_id", job.source_message_id)
-    .eq("organization_id", job.organization_id)
-    .neq("status", "SUCCEEDED");
-  if (result.error) {
+  const result = await db.rpc("validate_whatsapp_audio_asset", {
+    p_job_id: job.id,
+    p_lease_token: job.lease_token,
+    p_mime_type: audio.mimeType,
+    p_byte_size: bytes.length,
+    p_duration_seconds: audio.durationSeconds,
+    p_sha256: digest,
+  });
+  if (result.error || !result.data) {
     throw new Error("No se pudo guardar la validación del audio.");
   }
   return audio;
@@ -202,7 +207,15 @@ async function admitTranscription(
     p_lease_token: job.lease_token,
     p_seconds: seconds,
   });
-  if (quota.error || !quota.data) {
+  if (quota.error) {
+    throw new AudioError(
+      "AUDIO_QUOTA_UNAVAILABLE",
+      "No se pudo comprobar la cuota de audios. Volvé a intentar.",
+      503,
+      true
+    );
+  }
+  if (!quota.data) {
     throw new AudioError(
       "AUDIO_QUOTA",
       "Se alcanzó la cuota diaria de audios o el trabajo perdió su exclusión.",
@@ -213,7 +226,15 @@ async function admitTranscription(
     p_job_id: job.id,
     p_lease_token: job.lease_token,
   });
-  if (eligible.error || !eligible.data) {
+  if (eligible.error) {
+    throw new AudioError(
+      "AUDIO_ELIGIBILITY",
+      "No se pudo comprobar el estado de la conversación.",
+      503,
+      true
+    );
+  }
+  if (!eligible.data) {
     throw new AudioError(
       "AUDIO_PAUSED",
       "La conversación fue pausada o los audios se deshabilitaron."
@@ -254,7 +275,6 @@ export async function processAudioJob(
     );
   }
   const audio = await validateAndStore(db, job, asset);
-  await admitTranscription(db, job, audio.durationSeconds);
   const transcript = await transcribeAudio(audio);
   const saved = await db.rpc("complete_whatsapp_transcription", {
     p_job_id: job.id,
