@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AudioError } from "./audio/config.js";
 
+const ARGENTINE_MOBILE_WA_ID = /^549\d{10}$/;
+
 export type SendWhatsAppTextInput = {
   integrationId: string;
   conversationId: string;
@@ -131,6 +133,7 @@ async function dispatchToMeta(
   text: string,
   finish: FinishDelivery
 ): Promise<string> {
+  const recipient = input.recipient;
   const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
   let response: Response;
   try {
@@ -144,7 +147,7 @@ async function dispatchToMeta(
         },
         body: JSON.stringify({
           messaging_product: "whatsapp",
-          to: input.recipient,
+          to: recipient,
           type: "text",
           text: { body: text },
         }),
@@ -159,10 +162,29 @@ async function dispatchToMeta(
     );
   }
   if (!response.ok) {
+    const rejection = (await response.json().catch(() => null)) as {
+      error?: { code?: number };
+    } | null;
+    const code = rejection?.error?.code;
+    // Meta's test-recipient list can store an Argentine mobile without the 9
+    // present in inbound wa_id. Only retry an explicitly rejected send; never
+    // change the conversation identity or retry an uncertain delivery.
+    if (
+      response.status === 400 &&
+      code === 131_030 &&
+      ARGENTINE_MOBILE_WA_ID.test(recipient)
+    ) {
+      return dispatchToMeta(
+        { ...input, recipient: `54${recipient.slice(3)}` },
+        token,
+        text,
+        finish
+      );
+    }
     await finish(rejectionStatus(response.status));
     throw new AudioError(
       "DELIVERY_REJECTED",
-      `Meta rechazó el mensaje saliente (${response.status})`,
+      `Meta rechazó el mensaje saliente (${response.status}${typeof code === "number" ? `; código ${code}` : ""})`,
       502,
       response.status === 429
     );
