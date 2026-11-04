@@ -307,7 +307,9 @@ async function fetchVariantStocks(
 
   const { data: variantsData } = await supabase
     .from("product_variants")
-    .select("product_id, talle, color, product_lots(quantity_available)")
+    .select(
+      "product_id, talle, color, product_lots!product_lots_variant_fk(quantity_available)"
+    )
     .eq("organization_id", organizationId)
     .in("product_id", variantProductIds)
     .eq("is_active", true);

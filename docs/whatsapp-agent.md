@@ -2,6 +2,11 @@
 
 > Guía de arquitectura y backlog para el agregado de ventas conversacionales de Rhinos. Define el MVP de tesis y funciona como referencia de implementación.
 
+La incorporación de notas de voz en WhatsApp y el sandbox está definida en el
+[plan de implementación de audios](whatsapp-audio-plan.md), pendiente de ejecución.
+Incluye trabajos separados de transcripción y conversación, roles de workers y
+pruebas de escalabilidad y recuperación para la tesis.
+
 ## Objetivo y límites
 
 Permitir que un cliente de cada organización consulte productos, precios y disponibilidad por WhatsApp, arme un pedido conversacional y genere una **preventa supervisada**. El equipo comercial conserva el control: puede tomar una conversación, responder desde Rhinos y confirmar la venta mediante los flujos existentes.
@@ -67,6 +72,68 @@ El worker reclama trabajos pendientes, obtiene el contexto autorizado y opera el
 
 No procesa conversaciones en atención manual, pausadas ni asociadas a una integración inactiva.
 
+### Orientación comercial y objeciones
+
+El simulador y el worker comparten las mismas instrucciones comerciales. El
+agente usa la necesidad, el uso y el presupuesto ya expresados; pregunta un solo
+dato cuando cambia la recomendación y ofrece hasta dos opciones con diferencias
+respaldadas por el catálogo y las ofertas actuales. Una lista de marcas no
+reemplaza una recomendación. No afirma equivalencia, rendimiento ni popularidad
+sin datos, ni compara precios de presentaciones o monedas incompatibles.
+
+Ante una marca faltante busca por categoría; ante una objeción de precio busca
+una alternativa comparable más económica. Después del primer rechazo comercial
+puede realizar una única propuesta argumentada. Una enumeración previa no cuenta
+como ese intento. Si el cliente vuelve a rechazar, pide terminar o no existe una
+alternativa pertinente con disponibilidad verificada, cierra cordialmente. Un
+agradecimiento no reinicia la venta. Las recomendaciones no autorizan iniciar ni
+modificar un carrito.
+
+Un no a una pregunta de confirmación o descarte se resuelve con
+`cancel_pending_action`, sin aprovecharlo para insistir ni alterar el pedido.
+El filtro de alcance conserva respuestas breves sobre uso, presupuesto y
+objeciones dentro de la conversación comercial.
+
+Casos de revisión conversacional al cambiar estas instrucciones:
+
+- Consulta amplia: orientar con diferencias verificadas o una pregunta útil.
+- Producto concreto: responder directamente sin un cuestionario previo.
+- Marca faltante seguida de “No, no, gracias”: una alternativa argumentada.
+- “Es caro”: menor precio comprobado para una presentación comparable.
+- Segundo rechazo, cierre explícito o agradecimiento: ninguna nueva oferta.
+- Alternativas sin stock o disponibilidad desconocida: no prometer disponibilidad.
+- Rechazo de cotización o descarte: cancelar sólo la acción pendiente.
+- Tema ajeno después de una consulta comercial: conservar el límite de alcance.
+
+El estado comercial incluye las políticas de entrega y retiro y el criterio
+comercial editables en Configuración. Se acompañan de fecha y hora locales para
+orientar sobre reparto sin confundirlo con el horario del bot. La logística
+pendiente de validación no interrumpe una compra, salvo que el cliente la haya
+puesto como condición para avanzar. El simulador consulta las políticas vigentes
+de la misma organización sin cambiar sus datos ni su circuito de preventas reales.
+
+`get_offer` expone presentación, piezas por caja, piezas disponibles y cantidad
+aproximada por pieza: usa la referencia del producto o, si hay control de piezas,
+el promedio de los lotes actuales. `upsert_cart_item.quantity_kind` distingue
+`SALE_UNIT` (kilos, litros o unidades de venta) y `PIECE` (piezas físicas). La
+conversión se calcula en el servidor y se conserva en el snapshot del carrito.
+La preventa mantiene las piezas y el peso separados cuando el producto controla
+ambos, identifica los valores estimados y conserva la cantidad pedida en su
+descripción. Un cambio de referencia exige actualizar y cotizar nuevamente.
+
+`get_recommendations` consulta todos los productos activos que coincidan con la
+búsqueda, ordenados por cantidad de pedidos confirmados distintos en los últimos
+90 días. También puede buscar compras conjuntas con un producto. Excluye
+borradores, cancelaciones, fechas futuras y simulaciones; devuelve sólo opciones
+con stock verificado y no expone datos de clientes ni acredita segmentos como
+“distribuidores”. Se complementa con descripciones del catálogo y el criterio
+comercial validado por el equipo. Requiere la migración del 30 de octubre.
+
+El cierre exitoso se compone en el servidor a partir del carrito convertido por
+el mensaje actual: comunica la reconfirmación comercial y la coordinación de
+retiro o envío. Un fallo de creación no puede usar ese cierre. En atención humana
+se conservan los controles de reactivación para el operador fuera del chat.
+
 ### Flujo de preventa
 
 1. Identificar al cliente o solicitar el dato faltante.
@@ -89,6 +156,7 @@ La autenticación representa una integración de sistema. Toda operación valida
 | `find_customer_by_phone` | Buscar o reconocer al cliente de la organización. |
 | `search_catalog` | Buscar productos comercializables por nombre, SKU o categoría. |
 | `get_offer` | Consultar precio, lista aplicable y disponibilidad. |
+| `get_recommendations` | Consultar frecuencia de pedidos confirmados o compras conjuntas, con ofertas y stock actuales. |
 | `get_cart` / `upsert_cart_item` | Leer y actualizar el carrito persistente. |
 | `quote_cart` | Recalcular los totales con reglas comerciales vigentes. |
 | `create_pre_sale` | Crear una preventa sólo después de confirmación explícita. |
@@ -275,6 +343,15 @@ acción pendiente y mensaje de origen. Worker y sandbox usan el mismo motor y lo
 últimos 32 mensajes en orden cronológico. El agente puede paginar mensajes y
 pedidos anteriores de ese chat, sin perfiles de preferencias ni acceso a otra
 integración (incluido otro sandbox).
+
+El modelo evalúa el alcance comercial con el mensaje completo y el historial;
+no hay una lista fija de palabras o productos que bloquee consultas antes de
+interpretarlas. Al cambiar de producto conserva el pedido pendiente, busca las
+nuevas opciones y pregunta sólo por datos faltantes. Si un mensaje combina una
+elección con otra consulta, atiende ambas. Un sí a una selección de producto no
+confirma una preventa: esa confirmación requiere una cotización y su acción
+pendiente vigente. Las consultas ajenas al negocio reciben la redirección
+comercial indicada en el prompt; también pasan por el modelo.
 
 Las mutaciones reciben carrito/versión y mensaje de origen. Una RPC bloquea la
 conversación, valida que el mensaje siga vigente y aplica cada transición. La

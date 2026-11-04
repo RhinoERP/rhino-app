@@ -219,8 +219,10 @@ export default async function ProductDetailsPage({
           {/* Stock by Variants or Lots based on product configuration */}
           {product.has_variants ? (
             <ProductVariantsStockCard
+              lots={lots}
               minStock={product.min_stock ?? 0}
               orgSlug={orgSlug}
+              product={product}
               productId={productId}
             />
           ) : (

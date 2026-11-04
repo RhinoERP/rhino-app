@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CaretUpDownIcon, CheckIcon, PlusIcon, X } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -49,6 +50,7 @@ import {
   getProductVariantsAction,
   updateProductAction,
 } from "@/modules/inventory/actions/product.actions";
+import { stockMetricsQueryKey } from "@/modules/inventory/queries/query-keys";
 import type { Product } from "@/modules/inventory/types";
 import {
   normalizeTalleValue,
@@ -126,6 +128,7 @@ export function AddProductDialog({
   isAccountingEnabled = false,
 }: AddProductDialogProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
@@ -236,6 +239,7 @@ export function AddProductDialog({
   };
 
   const handleSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: stockMetricsQueryKey(orgSlug) });
     handleClose();
     if (isEditing) {
       if (onUpdated) {

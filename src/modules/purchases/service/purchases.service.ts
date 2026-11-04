@@ -7,6 +7,7 @@ import {
   NO_PAYABLE_INVOICE_RATE_MESSAGE,
   resolvePayableExchangeRate,
 } from "@/modules/collections/utils/payment-rate";
+import { isInvoiceBackedDebtEnabled } from "@/modules/organizations/service/debt-policy.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
@@ -137,6 +138,9 @@ async function syncAccountsPayable(params: {
 }) {
   const { supabase, orgId, supplierId, purchaseOrderId, totalAmount, dueDate } =
     params;
+  if (await isInvoiceBackedDebtEnabled(supabase, orgId)) {
+    return;
+  }
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
   const { data: purchaseOrderData } = await supabase
@@ -446,6 +450,7 @@ export async function createPurchaseOrder(
     .maybeSingle();
 
   const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+  const invoiceBackedDebt = await isInvoiceBackedDebtEnabled(supabase, org.id);
 
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
@@ -463,7 +468,9 @@ export async function createPurchaseOrder(
       global_discount_amount,
       total_amount,
       status: "ORDERED",
-      payable_origin: input.payable_origin ?? "PURCHASE_NOTE",
+      payable_origin: invoiceBackedDebt
+        ? "SUPPLIER_INVOICE"
+        : (input.payable_origin ?? "PURCHASE_NOTE"),
       fallback_taxes: fallbackTaxes ?? [],
       tax_snapshot_initialized: true,
     })
@@ -2734,7 +2741,8 @@ export async function calculateBulkSupplierPaymentDistribution(
  */
 export async function getSupplierCredits(
   orgSlug: string,
-  supplierId: string
+  supplierId: string,
+  currency?: "ARS" | "USD"
 ): Promise<
   Array<{
     id: string;
@@ -2751,13 +2759,16 @@ export async function getSupplierCredits(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("supplier_credits" as never)
     .select("id, amount, remaining_amount, notes, created_at")
     .eq("organization_id", org.id)
     .eq("supplier_id", supplierId)
-    .gt("remaining_amount", 0)
-    .order("created_at", { ascending: true });
+    .gt("remaining_amount", 0);
+  if (currency) {
+    query = query.eq("currency", currency);
+  }
+  const { data, error } = await query.order("created_at", { ascending: true });
 
   if (error || !data) {
     console.error("Error fetching supplier credits:", error);
@@ -2784,9 +2795,10 @@ export async function getSupplierCredits(
  */
 export async function getSupplierCreditBalance(
   orgSlug: string,
-  supplierId: string
+  supplierId: string,
+  currency?: "ARS" | "USD"
 ): Promise<number> {
-  const credits = await getSupplierCredits(orgSlug, supplierId);
+  const credits = await getSupplierCredits(orgSlug, supplierId, currency);
   return credits.reduce(
     (sum, credit) =>
       truncateMoney(sum + truncateMoney(credit.remaining_amount)),

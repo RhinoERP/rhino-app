@@ -276,6 +276,7 @@ export function createColumns({
 
               return (
                 <InlinePriceEdit
+                  costPrice={item.cost_price}
                   disabled={isDisabled}
                   disabledReason={
                     listSelected ? "Vista previa" : "Sin precio de costo"

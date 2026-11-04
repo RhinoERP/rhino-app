@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { AudioError } from "./audio/config.js";
 
 export type SendWhatsAppTextInput = {
   integrationId: string;
@@ -8,19 +9,20 @@ export type SendWhatsAppTextInput = {
   text: string;
   sourceMessageId?: string;
   orderPrompt?: boolean;
+  jobId?: string;
+  leaseToken?: string;
 };
 
-type MetaSendResponse = { messages?: Array<{ id?: string }> };
+type DeliveryStatus = "PENDING" | "SENT" | "UNKNOWN" | "CANCELLED";
+type FinishDelivery = (
+  status: DeliveryStatus,
+  externalId?: string
+) => Promise<void>;
 
-export async function sendWhatsAppText(
+async function authorizeDelivery(
   supabase: SupabaseClient,
   input: SendWhatsAppTextInput
-): Promise<string> {
-  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
-  if (!token) {
-    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
-  }
-
+): Promise<void> {
   // Re-check after model/tool execution: superadmin may have disabled the
   // tenant or a human may have paused the conversation in the meantime.
   const { data: integration, error: integrationError } = await supabase
@@ -68,38 +70,153 @@ export async function sendWhatsAppText(
       "El canal está deshabilitado o la conversación fue pausada"
     );
   }
+}
 
-  const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
-  const response = await fetch(
-    `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: input.recipient,
-        type: "text",
-        text: { body: input.text },
-      }),
-    }
+async function prepareDelivery(
+  db: SupabaseClient,
+  input: SendWhatsAppTextInput
+) {
+  const durable = Boolean(
+    input.jobId && input.leaseToken && input.sourceMessageId
   );
+  if (!durable) {
+    return {
+      durable,
+      text: input.text,
+      sentId: undefined as string | undefined,
+    };
+  }
+  const prepared = await db.rpc("prepare_whatsapp_outbox", {
+    p_job_id: input.jobId,
+    p_lease_token: input.leaseToken,
+    p_text: input.text,
+    p_order_prompt: input.orderPrompt ?? false,
+  });
+  if (prepared.error || !prepared.data) {
+    throw new Error("No se pudo preparar el envío persistente.");
+  }
+  if (prepared.data.status === "SENT") {
+    return {
+      durable,
+      text: prepared.data.text as string,
+      sentId: prepared.data.external_message_id as string,
+    };
+  }
+  if (prepared.data.status !== "SENDING") {
+    throw new AudioError(
+      "DELIVERY_REVIEW",
+      "El envío requiere revisión o fue reemplazado por un mensaje posterior."
+    );
+  }
+  return {
+    durable,
+    text: prepared.data.text as string,
+    sentId: undefined as string | undefined,
+  };
+}
 
+function rejectionStatus(status: number): DeliveryStatus {
+  if (status >= 500) {
+    return "UNKNOWN";
+  }
+  if (status === 429) {
+    return "PENDING";
+  }
+  return "CANCELLED";
+}
+
+async function dispatchToMeta(
+  input: SendWhatsAppTextInput,
+  token: string,
+  text: string,
+  finish: FinishDelivery
+): Promise<string> {
+  const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: input.recipient,
+          type: "text",
+          text: { body: text },
+        }),
+        signal: AbortSignal.timeout(20_000),
+      }
+    );
+  } catch {
+    await finish("UNKNOWN");
+    throw new AudioError(
+      "DELIVERY_UNKNOWN",
+      "Meta no confirmó el envío. Revisá la conversación antes de reenviarlo."
+    );
+  }
   if (!response.ok) {
-    throw new Error(`Meta rechazó el mensaje saliente (${response.status})`);
+    await finish(rejectionStatus(response.status));
+    throw new AudioError(
+      "DELIVERY_REJECTED",
+      `Meta rechazó el mensaje saliente (${response.status})`,
+      502,
+      response.status === 429
+    );
   }
-  const responseBody = (await response.json()) as MetaSendResponse;
-  const externalMessageId = responseBody.messages?.[0]?.id;
-  if (!externalMessageId) {
-    throw new Error("Meta no devolvió un identificador de mensaje");
+  const body = (await response.json().catch(() => null)) as {
+    messages?: Array<{ id?: string }>;
+  } | null;
+  const id = body?.messages?.[0]?.id;
+  if (!id || typeof id !== "string") {
+    await finish("UNKNOWN");
+    throw new AudioError(
+      "DELIVERY_UNKNOWN",
+      "Meta no devolvió un identificador de mensaje. Revisá la conversación."
+    );
   }
+  return id;
+}
 
-  const { error } = await supabase.rpc("record_whatsapp_outbound_message", {
+export async function sendWhatsAppText(
+  supabase: SupabaseClient,
+  input: SendWhatsAppTextInput
+): Promise<string> {
+  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
+  }
+  await authorizeDelivery(supabase, input);
+  const delivery = await prepareDelivery(supabase, input);
+  if (delivery.sentId) {
+    return delivery.sentId;
+  }
+  const finish: FinishDelivery = async (status, externalId) => {
+    if (!delivery.durable) {
+      return;
+    }
+    const result = await supabase.rpc("complete_whatsapp_outbox", {
+      p_source_message_id: input.sourceMessageId,
+      p_lease_token: input.leaseToken,
+      p_status: status,
+      p_external_message_id: externalId || null,
+    });
+    if (result.error || !result.data) {
+      throw new Error("No se pudo registrar el resultado del envío.");
+    }
+  };
+  const id = await dispatchToMeta(input, token, delivery.text, finish);
+  if (delivery.durable) {
+    await finish("SENT", id);
+    return id;
+  }
+  const result = await supabase.rpc("record_whatsapp_outbound_message", {
     p_conversation_id: input.conversationId,
     p_integration_id: input.integrationId,
-    p_external_message_id: externalMessageId,
+    p_external_message_id: id,
     p_message_type: "TEXT",
     p_content: input.text,
     p_payload: {
@@ -108,11 +225,10 @@ export async function sendWhatsAppText(
       orderPrompt: input.orderPrompt ?? false,
     },
   });
-  if (error) {
+  if (result.error) {
     throw new Error(
-      `No se pudo registrar el mensaje saliente: ${error.message}`
+      `No se pudo registrar el mensaje saliente: ${result.error.message}`
     );
   }
-
-  return externalMessageId;
+  return id;
 }

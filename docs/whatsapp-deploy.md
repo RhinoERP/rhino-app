@@ -55,6 +55,10 @@ El SQL usa una transacción e incluye, en orden:
 5. Opt-in, protección de flags, políticas restrictivas y RPCs con bloqueo por
    empresa `20261026000000_gate_whatsapp_modules.sql`.
 6. Pedidos recurrentes `20261027000000_whatsapp_recurring_orders.sql`: múltiples carritos y preventas por chat, una preventa por carrito, confirmaciones versionadas y conversión transaccional.
+7. Recomendaciones `20261030000000_whatsapp_product_recommendations.sql`: frecuencia de pedidos confirmados y compras conjuntas de los últimos 90 días, con ejecución exclusiva de servidor.
+8. Audios `20261103000000_whatsapp_audio_pipeline.sql`: almacenamiento privado, transcripción, cuotas, trabajos con lease y registro durable de envíos.
+9. Permisos `20261104000000_whatsapp_rpc_permissions.sql`: revocación explícita de acceso de `anon` y `authenticated` a las RPC de servidor de WhatsApp.
+10. Revisión `20261104010000_whatsapp_audio_review_fixes.sql`: protocolo verificado, exclusión transaccional, cuotas de uploads, recuperación, retención y protección de confirmaciones.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones
@@ -221,6 +225,18 @@ en borrador. No es un catálogo ficticio ni una base descartable. No envía a Me
 no confirma ventas, no factura ni reserva stock. Las integraciones del sandbox
 usan el prefijo `rhinos-local-simulator:` y permanecen en `DRAFT`.
 
+La configuración incorpora **Entregas**, **Retiro de mercadería** y **Criterio
+comercial y recomendaciones**. Cargar zonas, días, horarios, hora límite y
+condiciones reales de la empresa, además de características o complementos
+validados. El simulador usa las mismas políticas de la organización, también en
+sesiones ya iniciadas. Si faltan políticas, el agente deja la logística a
+confirmación comercial y puede seguir armando el pedido.
+
+Las recomendaciones requieren la migración del 30 de octubre; si todavía no se
+aplicó, el agente puede orientar con catálogo y ofertas, pero no afirmar qué es
+lo más vendido. La regresión de esa consulta se ejecuta en una base PostgreSQL
+vacía y descartable con `supabase/tests/whatsapp-product-recommendations.sql`.
+
 ## 5. Meta y prueba de punta a punta
 
 En la aplicación Meta correspondiente al token y a los números configurados:
@@ -308,13 +324,17 @@ Referencias oficiales: [Vercel Daemons](https://vercel.com/docs/daemons),
 
 ## Actualización a pedidos recurrentes
 
-1. Antes del merge, generar y revisar `/tmp/whatsapp-release.sql` desde el commit
-   del PR. No ejecutar el nuevo worker contra el esquema anterior.
+1. Si WhatsApp ya está instalado, preparar y revisar **sólo**
+   `supabase/migrations/20261027000000_whatsapp_recurring_orders.sql`, dentro de
+   `BEGIN;` y `COMMIT;`. Son 275 líneas de migración; el bundle completo de unas
+   1400 líneas incluye la instalación y actualizaciones anteriores y no hace
+   falta repetirlo para este caso. No ejecutar el worker nuevo contra el esquema
+   anterior.
 2. En Vercel → Daemons → whatsapp-agent → Scale, poner temporalmente **0**
    instancias. Esperar a que termine la instancia: el webhook sigue desplegado,
    recibe mensajes y los guarda en la cola. No pausar la integración de Meta ni
    deshabilitar la empresa, porque eso impide la ingesta.
-3. Ejecutar el SQL completo generado, en una transacción, en el Supabase correcto.
+3. Ejecutar únicamente esa migración pendiente, completa y en una transacción, en el Supabase correcto.
 4. Integrar el PR y esperar un deployment Production **Ready**, con la aplicación
    y la imagen nueva del daemon. No mezclar un worker anterior con este esquema.
 5. Volver a **1** instancia. Los overrides de Scale persisten entre deployments;
@@ -347,3 +367,98 @@ Las pruebas locales adicionales cubren actualización desde datos históricos,
 rechazo de datos inconsistentes, repetición del bundle con varias preventas por
 chat, versiones antiguas, confirmaciones condicionadas, reversión completa ante
 fallos de impuestos y separación de organización/conversación/integración.
+
+### Sandbox: “La conversación no está disponible para automatización”
+
+Si aparece apenas enviar el primer mensaje después de desplegar pedidos
+recurrentes, comprobar el esquema antes de cambiar tokens, números o el daemon:
+
+```sql
+select pending_order_action, automation_resumed_at from public.whatsapp_conversations limit 0;
+select version, quote_snapshot, last_source_message_id from public.conversation_carts limit 0;
+select whatsapp_cart_id from public.sales_orders limit 0;
+```
+
+Si alguna columna no existe, falta completar la migración de este release.
+Aplicar sólo la migración pendiente indicada en el procedimiento de actualización
+anterior, con el daemon temporalmente en 0 y el webhook recibiendo mensajes. Luego usar
+**Reiniciar** en el simulador y volver a elegir cliente/lista de precios.
+El sandbox no usa el daemon para responder; encenderlo no crea las columnas.
+
+El simulador comprueba el esquema antes de guardar una sesión o un mensaje.
+Si falta la actualización, informa que un administrador debe completar el
+despliegue y deja el detalle técnico en logs del servidor.
+
+## Actualización a audios
+
+1. Revisar las migraciones pendientes de recomendaciones y audios indicadas
+   arriba. En una instalación existente, aplicar únicamente las pendientes,
+   completas y en una transacción. Preparar el SQL antes de detener el worker.
+   Si la migración de audios del 3 de noviembre ya está aplicada, las dos
+   migraciones del 4 de noviembre también son obligatorias antes de este código.
+2. Si el daemon está activo, escalarlo a 0 y esperar su cierre antes de aplicar
+   la migración de audios: cambia el protocolo de reclamo y finalización de jobs.
+   El webhook puede seguir recibiendo mensajes durante la actualización.
+3. Desplegar la aplicación y la imagen nueva del worker. Para audios, configurar
+   `WHATSAPP_AUDIO_ENABLED=true` y la misma `OPENAI_API_KEY` existente. El modelo
+   se configura con `WHATSAPP_AGENT_TRANSCRIPTION_MODEL`; su valor por defecto
+   es `gpt-transcribe`. Los flags por organización nacen apagados.
+4. Para probar sólo sandbox, habilitar **Audios en este sandbox**, seleccionar
+   cliente y lista, grabar o adjuntar un audio de hasta 2 minutos y 4 MB y
+   comprobar transcripción y respuesta. Esto no requiere Meta ni daemon.
+5. Configurar `CRON_SECRET` en el servidor para autenticar la limpieza horaria
+   de archivos temporales declarada en `vercel.json`. La ruta verifica ese
+   secreto y no requiere una sesión de navegador.
+6. Antes de habilitar WhatsApp real, verificar el recorrido completo con el
+   número de prueba de Meta y los reintentos de descarga, transcripción y envío.
+   Activar expresamente `organizations.whatsapp_audio_enabled` para las
+   organizaciones elegidas y restaurar una instancia con la imagen nueva.
+
+El rol inicial del worker es `WHATSAPP_AGENT_WORKER_ROLE=all`, con concurrencia
+independiente para audio y procesamiento comercial, ambas inicialmente en 1.
+Los roles `transcription` y `commercial` permiten separar consumidores en
+deployments distintos sin cambiar el protocolo de jobs. Antes de aumentar
+instancias o concurrencia, validar exclusión por conversación, cuotas y
+recuperación de leases bajo carga. Un envío de resultado incierto queda en
+`UNKNOWN` para revisión operativa; no se reenvía automáticamente.
+
+El worker y el sandbox verifican el protocolo SQL antes de consumir trabajos.
+Si falta una actualización o quedan permisos inseguros, el worker permanece sin
+consumir jobs y `/health` responde 503. Texto y audio del sandbox usan la misma
+exclusión por conversación. Una transcripción fallida invalida confirmaciones
+anteriores; se requiere una nueva cotización antes de convertir la preventa.
+
+Hay dos límites iniciales por organización y día UTC: 100 cargas firmadas y 100
+trabajos de transcripción admitidos. La limpieza de archivos no reinicia el
+contador de cargas. La reserva del trabajo es idempotente, pero un reintento tras
+una respuesta incierta del proveedor puede generar consumo adicional de API.
+
+Validación de la migración de audios en PostgreSQL descartable:
+`bash scripts/test-whatsapp-audio-db.sh`. La prueba aplica la migración dos veces
+y cubre deduplicación, dependencias audio/texto, exclusión, cuotas, permisos por
+defecto de Supabase y cuatro consumidores concurrentes. Incluye más de 50 mensajes
+bloqueados en un chat para comprobar que no frenen otros chats. El plan de
+evolución y los criterios completos de aceptación están en
+[el plan de audios](whatsapp-audio-plan.md).
+
+### Corrección independiente de permisos
+
+`20261104000000_whatsapp_rpc_permissions.sql` puede aplicarse por separado sobre
+una instalación existente. Sólo cambia permisos de las RPC de servidor de
+WhatsApp; conserva el acceso de `service_role` y de los helpers usados por RLS.
+No habilita flags, no toma jobs ni modifica conversaciones. Los handlers de
+webhook, herramientas y acciones manuales usan el cliente de servidor autorizado.
+
+No alcanza con revocar `PUBLIC`: Supabase también otorga permisos explícitos a
+`anon` y `authenticated`. Las pruebas reproducen esos defaults. Referencia:
+[permisos de funciones en Supabase](https://supabase.com/docs/guides/database/functions).
+
+### Envío con resultado incierto
+
+Antes de resolver un registro `UNKNOWN`, revisar en Meta y en la conversación si
+el mensaje se entregó. No cambiarlo a `PENDING` ni reintentar automáticamente:
+puede haberse entregado aunque haya fallado la respuesta HTTP. Mantener la
+conversación con atención humana durante la revisión. El registro debe conservarse
+para auditoría; si se cancela el envío automático, marcarlo `CANCELLED` únicamente
+tras esa revisión y continuar manualmente. Después se puede reactivar el bot para
+mensajes nuevos. La interfaz específica para resolver estos casos sigue pendiente.

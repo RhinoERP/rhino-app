@@ -48,6 +48,7 @@ type StockDataTableProps = {
   categories: Array<{ id: string; name: string }>;
   suppliers: Array<{ id: string; name: string }>;
   viewOnly?: boolean;
+  warehouseId?: string;
 };
 
 const STATUS_OPTIONS = [
@@ -62,6 +63,7 @@ export function StockDataTable({
   categories,
   suppliers,
   viewOnly = false,
+  warehouseId,
 }: StockDataTableProps) {
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -168,7 +170,7 @@ export function StockDataTable({
     setRowSelection({});
   };
 
-  if (data.length === 0 && !search) {
+  if (data.length === 0 && !isFiltered && !warehouseId) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -290,6 +292,7 @@ export function StockDataTable({
             <VariantExpandedContent
               orgSlug={orgSlug}
               productId={row.original.product_id}
+              warehouseId={warehouseId}
             />
           )}
           table={table}
@@ -356,7 +359,16 @@ export function StockDataTable({
             </div>
             <div className="flex items-center gap-2">
               {!viewOnly && (
-                <StockExportButton orgSlug={orgSlug} table={table} />
+                <StockExportButton
+                  filters={{
+                    warehouseId,
+                    search,
+                    category: categoria,
+                    status,
+                  }}
+                  orgSlug={orgSlug}
+                  table={table}
+                />
               )}
               {!viewOnly && <DataTableViewOptions align="end" table={table} />}
             </div>
@@ -382,6 +394,7 @@ export function StockDataTable({
           onToggleSelection={handleToggleSelection}
           orgSlug={orgSlug}
           selectedIds={selectedIds}
+          warehouseId={warehouseId}
         />
       </div>
 

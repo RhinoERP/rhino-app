@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/internal/whatsapp-agent/audio-cleanup",
+      "schedule": "0 * * * *"
+    }
+  ],
   "daemons": {
     "whatsapp-agent": {
       "root": "services/whatsapp-agent",

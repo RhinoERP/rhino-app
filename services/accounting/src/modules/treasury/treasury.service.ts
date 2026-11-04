@@ -246,6 +246,38 @@ const buildReceivedCheckEndorsementOperationKey = (
   return `received-check-endorsement:${input.accountPayableId}:${input.paymentDate}:${checkIds}:${input.creditAmount ?? "0.0000"}`;
 };
 
+async function resolveEndorsementExchangeRate(
+  trx: Transaction<Database>,
+  payable: {
+    exchange_rate: string | null;
+    purchase_order_id: string | null;
+    supplier_id: string;
+  },
+  orgId: string
+): Promise<Decimal> {
+  const storedRate = new Decimal(payable.exchange_rate ?? 0);
+  if (storedRate.gt(0)) {
+    return storedRate;
+  }
+  if (payable.purchase_order_id) {
+    const invoice = await trx
+      .selectFrom("public.supplier_invoices")
+      .select("exchange_rate")
+      .where("purchase_order_id", "=", payable.purchase_order_id)
+      .where("supplier_id", "=", payable.supplier_id)
+      .where("organization_id", "=", orgId)
+      .orderBy("created_at", "desc")
+      .executeTakeFirst();
+    const invoiceRate = new Decimal(invoice?.exchange_rate ?? 0);
+    if (invoiceRate.gt(0)) {
+      return invoiceRate;
+    }
+  }
+  throw AppError.unprocessable(
+    "El pago no tiene una factura de compra registrada con cotización. Registrá la factura antes de pagar."
+  );
+}
+
 async function loadPayableForEndorsement(
   trx: Transaction<Database>,
   input: EndorseReceivedChecksForPayableInput
@@ -271,10 +303,18 @@ async function loadPayableForEndorsement(
     throw AppError.conflict("La cuenta por pagar ya no tiene saldo pendiente");
   }
 
+  const currency: "ARS" | "USD" = payable.currency === "USD" ? "USD" : "ARS";
+  const exchangeRate =
+    currency === "USD"
+      ? await resolveEndorsementExchangeRate(trx, payable, input.orgId)
+      : null;
+
   return {
     payable,
     pendingBalance,
     totalAmount: new Decimal(payable.total_amount),
+    currency,
+    exchangeRate,
   };
 }
 
@@ -325,13 +365,15 @@ async function loadChecksForEndorsement(
 async function loadSupplierCreditsForEndorsement(
   trx: Transaction<Database>,
   input: EndorseReceivedChecksForPayableInput,
-  requestedCredit: Decimal
+  requestedCredit: Decimal,
+  currency: "ARS" | "USD"
 ) {
   const supplierCredits = await listSupplierCreditsForUpdate(
     input.orgId,
     input.supplierId,
+    currency,
     trx
-  );
+  ).then((credits) => credits.filter((credit) => credit.currency === currency));
   const availableCredit = supplierCredits.reduce(
     (sum, credit) => sum.plus(credit.remaining_amount),
     new Decimal(0)
@@ -478,22 +520,42 @@ async function executeReceivedCheckEndorsement(params: {
   normalizedCreditAmount: string;
   sortedCheckIds: string[];
 }) {
-  const { payable, pendingBalance, totalAmount } =
+  const { payable, pendingBalance, totalAmount, currency, exchangeRate } =
     await loadPayableForEndorsement(params.trx, params.input);
   const checks = await loadChecksForEndorsement(
     params.trx,
     params.input.orgId,
     params.sortedCheckIds
   );
-  const paymentAmount = checks.reduce(
+  const paymentAmountArs = checks.reduce(
     (sum, check) => sum.plus(check.importe),
     new Decimal(0)
   );
   const requestedCredit = new Decimal(params.normalizedCreditAmount);
+  const remainingAfterCredit = pendingBalance.minus(requestedCredit);
+  if (
+    currency === "USD" &&
+    exchangeRate &&
+    paymentAmountArs.gt(remainingAfterCredit.times(exchangeRate))
+  ) {
+    throw AppError.unprocessable(
+      "La suma de cheques y crédito no puede exceder el saldo pendiente"
+    );
+  }
+  const paymentAmount =
+    currency === "USD" && exchangeRate
+      ? Decimal.min(
+          paymentAmountArs
+            .div(exchangeRate)
+            .toDecimalPlaces(4, Decimal.ROUND_DOWN),
+          remainingAfterCredit
+        )
+      : paymentAmountArs;
   const supplierCredits = await loadSupplierCreditsForEndorsement(
     params.trx,
     params.input,
-    requestedCredit
+    requestedCredit,
+    currency
   );
   const totalApplied = validateEndorsementTotals({
     paymentAmount,
@@ -506,6 +568,9 @@ async function executeReceivedCheckEndorsement(params: {
       organization_id: params.input.orgId,
       account_payable_id: payable.id,
       amount: paymentAmount.toFixed(4),
+      currency,
+      exchange_rate: exchangeRate?.toFixed(4) ?? null,
+      amount_ars: paymentAmountArs.toFixed(4),
       payment_method: "cheque",
       payment_date: params.input.paymentDate,
       reference_number: params.input.referenceNumber?.trim() || null,
@@ -551,6 +616,9 @@ async function executeReceivedCheckEndorsement(params: {
     result: {
       paymentId: payment.id,
       paymentAmount: paymentAmount.toFixed(4),
+      paymentAmountArs: paymentAmountArs.toFixed(4),
+      currency,
+      exchangeRate: exchangeRate?.toFixed(4) ?? null,
       creditApplied: requestedCredit.toFixed(4),
       newPendingBalance: newPendingBalance.toFixed(4),
       newStatus,
@@ -594,19 +662,25 @@ async function loadExistingReceivedCheckEndorsementResult(
     );
   }
 
-  const creditApplied =
-    endorsements.length === 0
-      ? new Decimal(0)
-      : Decimal.max(
-          new Decimal(0),
-          new Decimal(payable.total_amount)
-            .minus(payable.pending_balance)
-            .minus(payment.amount)
-        );
+  const creditApplications = await db
+    .selectFrom("public.supplier_credit_applications")
+    .select("amount")
+    .where("payable_payment_id", "=", paymentId)
+    .where("organization_id", "=", orgId)
+    .execute();
+  const creditApplied = creditApplications.reduce(
+    (total, application) => total.plus(application.amount),
+    new Decimal(0)
+  );
 
   return {
     paymentId: payment.id,
     paymentAmount: new Decimal(payment.amount).toFixed(4),
+    paymentAmountArs: new Decimal(payment.amount_ars ?? payment.amount).toFixed(
+      4
+    ),
+    currency: payment.currency === "USD" ? "USD" : "ARS",
+    exchangeRate: payment.exchange_rate,
     creditApplied: creditApplied.toFixed(4),
     newPendingBalance: new Decimal(payable.pending_balance).toFixed(4),
     newStatus: derivePayableStatus(
@@ -944,6 +1018,29 @@ export function createReceivedCheckService(input: CreateReceivedCheckInput) {
   });
 }
 
+function getLinkedCheckFaceAmount(payment: {
+  amount: string;
+  amount_ars: string | null;
+  currency: string;
+  exchange_rate: string | null;
+}): Decimal {
+  if (payment.currency === "ARS") {
+    return new Decimal(payment.amount);
+  }
+  if (
+    payment.currency !== "USD" ||
+    !payment.amount_ars ||
+    !payment.exchange_rate ||
+    new Decimal(payment.exchange_rate).lte(0) ||
+    new Decimal(payment.amount_ars).lte(0)
+  ) {
+    throw AppError.unprocessable(
+      "El pago en USD requiere cotización y equivalente en pesos válidos"
+    );
+  }
+  return new Decimal(payment.amount_ars);
+}
+
 async function validateReceivedCheckPaymentLink(params: {
   trx: DbExecutor;
   input: CreateReceivedCheckInput;
@@ -963,8 +1060,10 @@ async function validateReceivedCheckPaymentLink(params: {
       "id",
       "account_receivable_id",
       "amount",
+      "amount_ars",
       "payment_method",
       "currency",
+      "exchange_rate",
     ])
     .where("id", "=", receivablePaymentId)
     .where("organization_id", "=", input.orgId)
@@ -981,14 +1080,9 @@ async function validateReceivedCheckPaymentLink(params: {
       "Solo se pueden vincular cheques con cobranzas pagadas con cheque o e-cheq"
     );
   }
-  if (payment.currency !== "ARS") {
+  if (!getLinkedCheckFaceAmount(payment).eq(normalizedAmount)) {
     throw AppError.unprocessable(
-      "Solo se pueden vincular cheques a cobranzas en pesos"
-    );
-  }
-  if (!new Decimal(payment.amount).eq(normalizedAmount)) {
-    throw AppError.unprocessable(
-      "El importe del cheque debe coincidir con el importe de la cobranza"
+      "El importe en pesos del cheque debe coincidir con el equivalente en pesos de la cobranza"
     );
   }
   if ((input.tipo === "ECH") !== (payment.payment_method === "e-cheq")) {
@@ -999,13 +1093,87 @@ async function validateReceivedCheckPaymentLink(params: {
 
   const receivable = await trx
     .selectFrom("public.accounts_receivable")
-    .select("customer_id")
+    .select(["customer_id", "currency"])
     .where("id", "=", payment.account_receivable_id)
     .where("organization_id", "=", input.orgId)
     .executeTakeFirst();
   if (!receivable || receivable.customer_id !== input.libradorId) {
     throw AppError.unprocessable(
       "El librador vinculado no coincide con el cliente de la cobranza"
+    );
+  }
+  if (receivable.currency !== payment.currency) {
+    throw AppError.unprocessable(
+      "La moneda de la cobranza no coincide con la moneda de la deuda"
+    );
+  }
+}
+
+async function validateIssuedCheckPaymentLink(params: {
+  trx: DbExecutor;
+  input: CreateIssuedCheckInput;
+  normalizedAmount: string;
+}): Promise<void> {
+  const { trx, input, normalizedAmount } = params;
+  if (
+    !input.referenciaPagoId ||
+    input.referenciaPagoTabla !== "payable_payments"
+  ) {
+    throw AppError.unprocessable(
+      "El cheque propio solo puede vincularse a un pago a proveedor"
+    );
+  }
+
+  const payment = await trx
+    .selectFrom("public.payable_payments")
+    .select([
+      "account_payable_id",
+      "amount",
+      "amount_ars",
+      "currency",
+      "exchange_rate",
+      "payment_method",
+    ])
+    .where("id", "=", input.referenciaPagoId)
+    .where("organization_id", "=", input.orgId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!payment) {
+    throw AppError.notFound("El pago vinculado al cheque propio no existe");
+  }
+  if (
+    payment.payment_method !== "cheque" &&
+    payment.payment_method !== "e-cheq"
+  ) {
+    throw AppError.unprocessable(
+      "Solo se pueden vincular cheques propios con pagos por cheque o e-cheq"
+    );
+  }
+  if ((input.tipo === "ECH") !== (payment.payment_method === "e-cheq")) {
+    throw AppError.unprocessable(
+      "El tipo de cheque propio no coincide con el medio de pago"
+    );
+  }
+  if (!getLinkedCheckFaceAmount(payment).eq(normalizedAmount)) {
+    throw AppError.unprocessable(
+      "El importe en pesos del cheque propio no coincide con el equivalente en pesos del pago"
+    );
+  }
+
+  const payable = await trx
+    .selectFrom("public.accounts_payable")
+    .select(["currency", "supplier_id"])
+    .where("id", "=", payment.account_payable_id)
+    .where("organization_id", "=", input.orgId)
+    .executeTakeFirst();
+  if (!payable || payable.currency !== payment.currency) {
+    throw AppError.unprocessable(
+      "La moneda del pago no coincide con la moneda de la deuda del proveedor"
+    );
+  }
+  if (input.beneficiarioId && input.beneficiarioId !== payable.supplier_id) {
+    throw AppError.unprocessable(
+      "El beneficiario del cheque no coincide con el proveedor del pago"
     );
   }
 }
@@ -1206,11 +1374,19 @@ export function createIssuedCheckService(input: CreateIssuedCheckInput) {
       return check;
     },
     execute: async (trx, operationId) => {
-      await loadBankAccountForMutation(
+      const bankAccount = await loadBankAccountForMutation(
         input.cuentaBancariaId,
         input.orgId,
         trx
       );
+      if (bankAccount.moneda !== "ARS") {
+        throw AppError.unprocessable(
+          "Los cheques propios solo pueden emitirse desde cuentas en pesos"
+        );
+      }
+      if (input.referenciaPagoId) {
+        await validateIssuedCheckPaymentLink({ trx, input, normalizedAmount });
+      }
       const check = await createIssuedCheck(
         { ...input, importe: normalizedAmount },
         operationId,
@@ -1565,6 +1741,11 @@ export function createCheckDepositSlipService(
         input.orgId,
         trx
       );
+      if (cuenta.moneda !== "ARS") {
+        throw AppError.unprocessable(
+          "Los cheques recibidos solo pueden depositarse en cuentas en pesos"
+        );
+      }
       const checks = await listReceivedChecksByIdsForUpdate(
         sortedCheckIds,
         input.orgId,

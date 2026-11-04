@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import { QuoteStatusManager } from "@/components/quotes/quote-status-manager";
+import { QuoteWarehouseEditor } from "@/components/quotes/quote-warehouse-editor";
 import { statusStyles } from "@/components/quotes/quotes-table";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Badge } from "@/components/ui/badge";
@@ -231,6 +232,7 @@ function buildDefaultValues(
 
   return {
     customerId: quote.customer_id,
+    warehouseId: quote.warehouse_id,
     salesPriceListId:
       quote.sales_price_list_id ?? customer?.sales_price_list_id ?? "none",
     priceLevelId: quote.price_level_id ?? "none",
@@ -698,6 +700,13 @@ export function QuoteEditWrapper({
           </div>
 
           <div className="space-y-4">
+            {quote.status !== "CONVERTED" && !quote.parent_quote_id && (
+              <QuoteWarehouseEditor
+                orgSlug={orgSlug}
+                quoteId={quote.id}
+                warehouseId={quote.warehouse_id}
+              />
+            )}
             {quote.status !== "CANCELLED" && (
               <QuoteStatusManager
                 customerEmail={customer?.email ?? null}

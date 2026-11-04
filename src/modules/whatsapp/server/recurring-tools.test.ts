@@ -33,6 +33,15 @@ class Query implements PromiseLike<unknown> {
     this.rows = this.rows.filter((row) => row[key] !== value);
     return this;
   }
+  not(key: string, operator: string, value: string) {
+    if (operator !== "like" || !value.endsWith("%")) {
+      throw new Error("Unsupported negative filter in test");
+    }
+    this.rows = this.rows.filter(
+      (row) => !String(row[key]).startsWith(value.slice(0, -1))
+    );
+    return this;
+  }
   lte(key: string, value: string) {
     this.rows = this.rows.filter((row) => String(row[key]) <= value);
     return this;
@@ -152,6 +161,17 @@ beforeEach(() => {
         currency: "ARS",
       },
     ],
+    products: [
+      {
+        id: product,
+        organization_id: org,
+        is_active: true,
+        name: "Queso",
+        unit_of_measure: "UN",
+        tracks_stock_units: false,
+      },
+    ],
+    product_lots: [],
     sales_price_lists: [
       {
         id: "price-list",
@@ -221,6 +241,395 @@ function pendingCart() {
 }
 
 describe("recurring commercial tools", () => {
+  function weightedProduct(weightPerUnit: number | null = 3.8) {
+    Object.assign(testDb.tables.products[0], {
+      unit_of_measure: "KG",
+      tracks_stock_units: true,
+      weight_per_unit: weightPerUnit,
+      units_per_box: 4,
+    });
+    testDb.tables.product_lots = [
+      {
+        id: "lot",
+        organization_id: org,
+        product_id: product,
+        quantity_available: 38,
+        unit_quantity_available: 10,
+      },
+    ];
+    testDb.tables.view_stock_detail[0].unit_of_measure = "KG";
+  }
+
+  it.each([
+    3.8,
+    null,
+  ])("provides a reliable approximate weight from product metadata or current lots: %s", async (reference) => {
+    weightedProduct(reference);
+    const offer = await executeCommercialTool(context, "get_offer", {
+      product_id: product,
+    });
+    expect(offer).toMatchObject({
+      approximateQuantityPerPiece: 3.8,
+      unitOfMeasure: "KG",
+      piecesAvailable: 10,
+      unitsPerBox: 4,
+      quantityPerPieceSource: reference ? "PRODUCT" : "CURRENT_LOTS",
+    });
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not infer a weight or piece count from incomplete lot data", async () => {
+    weightedProduct(null);
+    testDb.tables.product_lots[0].unit_quantity_available = null;
+    const offer = await executeCommercialTool(context, "get_offer", {
+      product_id: product,
+    });
+    expect(offer).toMatchObject({
+      approximateQuantityPerPiece: null,
+      piecesAvailable: null,
+    });
+  });
+
+  it("can explain a configured presentation even when stock does not track physical pieces", async () => {
+    weightedProduct();
+    testDb.tables.products[0].tracks_stock_units = false;
+    const offer = await executeCommercialTool(context, "get_offer", {
+      product_id: product,
+    });
+    expect(offer).toMatchObject({
+      approximateQuantityPerPiece: 3.8,
+      piecesAvailable: null,
+    });
+  });
+
+  it("preserves an order in kilos without inventing a physical piece count", async () => {
+    pendingCart();
+    weightedProduct();
+    testDb.tables.conversation_cart_items[0].quantity = 20;
+    await executeCommercialTool(context, "quote_cart", version);
+    expect(testDb.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          items: [expect.objectContaining({ quantity: 0, weightQuantity: 20 })],
+        }),
+      })
+    );
+  });
+
+  it("converts pieces to estimated kilos on the server without confusing them with stock units", async () => {
+    pendingCart();
+    weightedProduct();
+    await executeCommercialTool(context, "upsert_cart_item", {
+      ...version,
+      product_id: product,
+      quantity: 2,
+      quantity_kind: "PIECE",
+    });
+    expect(testDb.rpc).toHaveBeenCalledWith(
+      "mutate_whatsapp_order",
+      expect.objectContaining({
+        p_operation: "UPSERT",
+        p_payload: expect.objectContaining({
+          quantity: 7.6,
+          price_snapshot: expect.objectContaining({
+            requestedPieces: 2,
+            quantityEstimated: true,
+          }),
+        }),
+      })
+    );
+  });
+
+  it("requires kilos when pieces have no reliable reference", async () => {
+    pendingCart();
+    weightedProduct(null);
+    testDb.tables.product_lots = [];
+    await expect(
+      executeCommercialTool(context, "upsert_cart_item", {
+        ...version,
+        product_id: product,
+        quantity: 2,
+        quantity_kind: "PIECE",
+      })
+    ).rejects.toThrow("Preguntá qué cantidad en kilos");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
+  it("checks both kilos and the number of pieces before updating the cart", async () => {
+    pendingCart();
+    weightedProduct();
+    testDb.tables.view_stock_detail[0].total_stock = 100;
+    await expect(
+      executeCommercialTool(context, "upsert_cart_item", {
+        ...version,
+        product_id: product,
+        quantity: 11,
+        quantity_kind: "PIECE",
+      })
+    ).rejects.toThrow("suficientes piezas");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
+  it("preserves pieces, estimated kilos and the estimate notice through quoting", async () => {
+    pendingCart();
+    weightedProduct();
+    Object.assign(testDb.tables.conversation_cart_items[0], {
+      quantity: 7.6,
+      price_snapshot: {
+        productName: "Queso",
+        unitOfMeasure: "KG",
+        requestedPieces: 2,
+        quantityEstimated: true,
+      },
+    });
+    await executeCommercialTool(context, "quote_cart", version);
+    expect(testDb.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          items: [
+            expect.objectContaining({
+              quantity: 2,
+              weightQuantity: 7.6,
+              basePrice: 20,
+            }),
+          ],
+          observations: expect.stringContaining("Pesos e importes estimados"),
+        }),
+      })
+    );
+    const payload = testDb.rpc.mock.calls[0][1].p_payload;
+    expect(payload.items[0].price_snapshot).toMatchObject({
+      requestedPieces: 2,
+      quantityEstimated: true,
+    });
+    const rendered = await executeCommercialTool(
+      context,
+      "render_order_response",
+      { text: "Confirmá" }
+    );
+    expect(rendered).toMatchObject({
+      orderPrompt: true,
+      text: expect.stringContaining("2 piezas (aprox. 7.6 KG)"),
+    });
+    expect((rendered as { text: string }).text).toContain("Total estimado");
+  });
+
+  it("invalidates an estimate when the weight reference changes before quoting", async () => {
+    pendingCart();
+    weightedProduct(4);
+    Object.assign(testDb.tables.conversation_cart_items[0], {
+      quantity: 7.6,
+      price_snapshot: {
+        productName: "Queso",
+        requestedPieces: 2,
+        quantityEstimated: true,
+      },
+    });
+    await expect(
+      executeCommercialTool(context, "quote_cart", version)
+    ).rejects.toThrow("cambió el peso de referencia");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
+  it("exposes configured policies and the local date without changing an order", async () => {
+    testDb.tables.whatsapp_integrations[0].commercial_rules = {
+      deliveryPolicy: "Zona centro: lunes a viernes, pedidos hasta las 12.",
+      pickupPolicy: "Retiro de 9 a 17 en el depósito.",
+      salesGuidance: "Cremac: apto para cocinar.",
+    };
+    const state = await executeCommercialTool(
+      context,
+      "get_commercial_state",
+      {}
+    );
+    expect(state).toMatchObject({
+      commercialGuidance:
+        testDb.tables.whatsapp_integrations[0].commercial_rules,
+      timezone: "America/Argentina/Buenos_Aires",
+      localDateTime: expect.any(String),
+    });
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
+  it("uses current organization policies in an existing simulator session", async () => {
+    testDb.tables.whatsapp_integrations[0].status = "DRAFT";
+    testDb.tables.whatsapp_integrations[0].phone_number_id =
+      "rhinos-local-simulator:test";
+    testDb.tables.whatsapp_conversations[0].customer_phone =
+      "SIMULACIÓN LOCAL · test";
+    testDb.tables.whatsapp_integrations.push({
+      id: "real-channel",
+      organization_id: org,
+      phone_number_id: "real-phone",
+      commercial_rules: { deliveryPolicy: "Reparto los martes." },
+    });
+    testDb.tables.whatsapp_integrations.push({
+      id: "foreign-channel",
+      organization_id: "another-org",
+      phone_number_id: "other-phone",
+      commercial_rules: { deliveryPolicy: "private-policy" },
+    });
+    const state = await executeCommercialTool(
+      { ...context, mode: "LOCAL_SIMULATOR" },
+      "get_commercial_state",
+      {}
+    );
+    expect(state).toMatchObject({
+      commercialGuidance: expect.objectContaining({
+        deliveryPolicy: "Reparto los martes.",
+      }),
+    });
+    expect(JSON.stringify(state)).not.toContain("private-policy");
+  });
+
+  it("confirms commercial follow-up only for a cart converted by this message", async () => {
+    pendingCart();
+    Object.assign(testDb.tables.conversation_carts[0], {
+      status: "CONVERTED",
+      last_source_message_id: source,
+    });
+    testDb.tables.whatsapp_conversations[0].current_pre_sale_id =
+      "created-sale";
+    const rendered = await executeCommercialTool(
+      context,
+      "render_order_response",
+      { text: "¡Ya tenés entrega hoy!" }
+    );
+    expect(rendered).toMatchObject({
+      text: expect.stringContaining(
+        "reconfirmarlo y coordinar el retiro o envío"
+      ),
+      orderPrompt: false,
+    });
+    testDb.tables.conversation_carts[0].last_source_message_id =
+      "older-message";
+    const later = await executeCommercialTool(
+      context,
+      "render_order_response",
+      { text: "Gracias a vos." }
+    );
+    expect(later).toMatchObject({ text: "Gracias a vos." });
+  });
+
+  it("renders human attention without leaking operator instructions", async () => {
+    testDb.tables.whatsapp_conversations[0].status = "HANDOFF";
+    const rendered = await executeCommercialTool(
+      context,
+      "render_order_response",
+      { text: "Reactivá el bot desde Rhinos" }
+    );
+    expect(rendered).toMatchObject({
+      text: "Una persona del equipo comercial va a continuar la atención por este chat.",
+    });
+  });
+
+  it("returns tenant-scoped purchase evidence with verified offers and no customer identities", async () => {
+    testDb.rpc.mockResolvedValue({
+      data: [
+        { product_id: product, order_count: "8" },
+        { product_id: "foreign-product", order_count: "99" },
+      ],
+      error: null,
+    });
+    testDb.tables.products.push({
+      id: "foreign-product",
+      organization_id: "other",
+      is_active: true,
+    });
+    const result = await executeCommercialTool(
+      context,
+      "get_recommendations",
+      {}
+    );
+    expect(testDb.rpc).toHaveBeenCalledWith(
+      "whatsapp_product_recommendations",
+      {
+        p_organization_id: org,
+        p_query: null,
+        p_related_product_id: null,
+      }
+    );
+    expect(result).toMatchObject({
+      products: [
+        expect.objectContaining({
+          productId: product,
+          orderCount: 8,
+          stockAvailable: 50,
+        }),
+      ],
+      periodDays: 90,
+      segment: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("foreign-product");
+    expect(JSON.stringify(result)).not.toContain(customer);
+  });
+
+  it("does not recommend bestsellers without stock or claim popularity without evidence", async () => {
+    testDb.tables.view_stock_detail[0].total_stock = 0;
+    testDb.rpc.mockResolvedValue({
+      data: [{ product_id: product, order_count: 8 }],
+      error: null,
+    });
+    expect(
+      await executeCommercialTool(context, "get_recommendations", {})
+    ).toMatchObject({ products: [] });
+    testDb.rpc.mockResolvedValue({ data: [], error: null });
+    expect(
+      await executeCommercialTool(context, "get_recommendations", {})
+    ).toMatchObject({ evidence: "NO_CONFIRMED_SALES" });
+  });
+
+  it("validates a complementary product anchor inside the tenant before accessing purchase evidence", async () => {
+    await expect(
+      executeCommercialTool(context, "get_recommendations", {
+        related_product_id: "88888888-8888-4888-8888-888888888888",
+      })
+    ).rejects.toThrow("no está disponible");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "No",
+    "No, gracias",
+    "No, no, gracias",
+    "NO QUIERO, gracias",
+  ])("cancels only the pending action for an explicit refusal: %s", async (answer) => {
+    pendingCart();
+    const originalCart = structuredClone(testDb.tables.conversation_carts);
+    const originalItems = structuredClone(
+      testDb.tables.conversation_cart_items
+    );
+    testDb.tables.whatsapp_messages[0].content = answer;
+    testDb.tables.whatsapp_conversations[0].pending_order_action = {
+      kind: "ABANDON_CART",
+      cartId,
+      version: 2,
+    };
+
+    await executeCommercialTool(context, "cancel_pending_action", {});
+
+    expect(testDb.rpc).toHaveBeenCalledTimes(1);
+    expect(testDb.rpc).toHaveBeenCalledWith(
+      "mutate_whatsapp_order",
+      expect.objectContaining({ p_operation: "CANCEL_ACTION" })
+    );
+    expect(testDb.tables.conversation_carts).toEqual(originalCart);
+    expect(testDb.tables.conversation_cart_items).toEqual(originalItems);
+  });
+
+  it.each([
+    "No, mejor cambiá a Cremac",
+    "No sé",
+    "Sí, confirmo",
+  ])("does not cancel a pending action from an ambiguous or modifying answer: %s", async (answer) => {
+    testDb.tables.whatsapp_messages[0].content = answer;
+
+    await expect(
+      executeCommercialTool(context, "cancel_pending_action", {})
+    ).rejects.toThrow("El cliente no rechazó la acción pendiente");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
   it("reading the state or catalog does not create a cart", async () => {
     const state = (await executeCommercialTool(
       context,
@@ -400,7 +809,13 @@ describe("recurring commercial tools", () => {
     expect(result.differences[0]).toContain("no se agregó ni se sustituyó");
     expect(testDb.rpc).not.toHaveBeenCalled();
   });
-  it("price differences on a repeated purchase require review before quoting", async () => {
+  it.each([
+    false,
+    true,
+  ])("price or weight differences on a repeated purchase require review before quoting (weighted=%s)", async (weighted) => {
+    if (weighted) {
+      weightedProduct(4);
+    }
     const saleId = "88888888-8888-4888-8888-888888888888";
     testDb.tables.sales_orders = [
       {
@@ -417,7 +832,8 @@ describe("recurring commercial tools", () => {
         sales_order_id: saleId,
         product_id: product,
         product_variant_id: null,
-        quantity: 1,
+        quantity: weighted ? 2 : 1,
+        unit_quantity: weighted ? 7.6 : null,
         unit_price: 10,
         description: "Queso",
       },
@@ -446,9 +862,9 @@ describe("recurring commercial tools", () => {
             organization_id: org,
             product_id: product,
             product_variant_id: null,
-            quantity: 1,
+            quantity: args.p_payload.quantity,
             unit_price: 20,
-            price_snapshot: { productName: "Queso" },
+            price_snapshot: args.p_payload.price_snapshot,
           },
         ];
       }
@@ -471,6 +887,15 @@ describe("recurring commercial tools", () => {
       "UPSERT",
       "REQUEST_REPEAT_REVIEW",
     ]);
+    if (weighted) {
+      const update = testDb.rpc.mock.calls.find(
+        (call) => call[1].p_operation === "UPSERT"
+      )?.[1];
+      expect(update.p_payload).toMatchObject({
+        quantity: 8,
+        price_snapshot: { requestedPieces: 2, quantityEstimated: true },
+      });
+    }
     const rendered = (await executeCommercialTool(
       context,
       "render_order_response",
@@ -502,5 +927,76 @@ describe("recurring commercial tools", () => {
       p_operation: "START",
       p_payload: { confirmStart: false },
     });
+  });
+  it("sandbox works with only its own module enabled and a DRAFT integration", async () => {
+    testDb.tables.organizations[0].whatsapp_enabled = false;
+    testDb.tables.whatsapp_integrations[0].status = "DRAFT";
+    testDb.tables.whatsapp_integrations[0].phone_number_id =
+      "rhinos-local-simulator:test";
+    testDb.tables.whatsapp_conversations[0].customer_phone =
+      "SIMULACIÓN LOCAL · test";
+    const state = (await executeCommercialTool(
+      { ...context, mode: "LOCAL_SIMULATOR" },
+      "get_commercial_state",
+      {}
+    )) as { cart: unknown };
+    expect(state.cart).toBeNull();
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+  it("a live worker cannot use a sandbox integration", async () => {
+    testDb.tables.whatsapp_integrations[0].status = "DRAFT";
+    testDb.tables.whatsapp_integrations[0].phone_number_id =
+      "rhinos-local-simulator:test";
+    testDb.tables.whatsapp_conversations[0].customer_phone =
+      "SIMULACIÓN LOCAL · test";
+    await expect(
+      executeCommercialTool(context, "get_commercial_state", {})
+    ).rejects.toThrow("automatización");
+  });
+  it("a sandbox context cannot use a live integration", async () => {
+    await expect(
+      executeCommercialTool(
+        { ...context, mode: "LOCAL_SIMULATOR" },
+        "get_commercial_state",
+        {}
+      )
+    ).rejects.toThrow("automatización");
+  });
+});
+
+describe("commercial worker fencing", () => {
+  const leasedContext = {
+    ...context,
+    jobId: "88888888-8888-4888-8888-888888888888",
+    leaseToken: "99999999-9999-4999-8999-999999999999",
+  };
+  it("passes the lease into the mutation transaction instead of relying on a prior read", async () => {
+    testDb.rpc.mockImplementation((name) =>
+      Promise.resolve({
+        data: name === "assert_whatsapp_job_lease" ? true : {},
+        error: null,
+      })
+    );
+    await executeCommercialTool(leasedContext, "start_order", {});
+    expect(testDb.rpc).toHaveBeenCalledWith(
+      "mutate_whatsapp_order_leased",
+      expect.objectContaining({
+        p_job_id: leasedContext.jobId,
+        p_lease_token: leasedContext.leaseToken,
+        p_operation: "START",
+      })
+    );
+    expect(testDb.rpc.mock.calls.map(([name]) => name)).not.toContain(
+      "mutate_whatsapp_order"
+    );
+  });
+  it("rejects a stale worker before it can request a commercial mutation", async () => {
+    testDb.rpc.mockResolvedValue({ data: false, error: null });
+    await expect(
+      executeCommercialTool(leasedContext, "start_order", {})
+    ).rejects.toThrow("perdió su exclusión");
+    expect(testDb.rpc.mock.calls.map(([name]) => name)).toEqual([
+      "assert_whatsapp_job_lease",
+    ]);
   });
 });

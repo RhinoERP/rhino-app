@@ -62,7 +62,7 @@ function createFakeTrx(rows: Record<string, unknown>) {
           calls.push({ op: "raw", parameters: query.parameters });
           return Promise.resolve({
             rows: [{ create_contra_entry: "contra-1" }],
-            numAffectedRows: 1n,
+            numAffectedRows: BigInt(1),
           });
         },
       };

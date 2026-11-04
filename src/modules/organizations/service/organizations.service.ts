@@ -561,7 +561,10 @@ export async function resolveUserRedirect(): Promise<string> {
       details: membershipsError.details,
       hint: membershipsError.hint,
     });
-    return "/auth/login";
+
+    throw new Error(
+      `Error fetching user organizations: ${membershipsError.message}`
+    );
   }
 
   if (!memberships || memberships.length === 0) {
@@ -685,8 +688,9 @@ export async function getOrganizationLayoutData(
   ]);
 
   if (organizationsResult.error) {
-    console.error("Error fetching organizations", organizationsResult.error);
-    return null;
+    throw new Error(
+      `Error fetching user organizations: ${organizationsResult.error.message}`
+    );
   }
 
   const memberships =

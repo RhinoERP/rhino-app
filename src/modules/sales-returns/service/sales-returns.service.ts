@@ -1,5 +1,11 @@
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import {
+  applyStockReentries,
+  checkReentryOrigins,
+  undoStockReentries,
+} from "@/modules/inventory/service/stock-reentry.service";
+import { hasFractionalVariantReturn } from "@/modules/inventory/utils/variant-return-quantity";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -29,6 +35,7 @@ type PosSaleWithProductRaw =
             tracks_stock_units?: boolean | null;
             unit_of_measure?: string | null;
           } | null;
+          variant?: { talle: string; color: string } | null;
         })[]
       | null;
   };
@@ -59,9 +66,10 @@ type ResolvedReturnLine = {
 
 type MutableLotState = {
   id: string;
+  warehouseId: string;
   productId: string;
   lotNumber: string;
-  expirationDate: string;
+  expirationDate: string | null;
   quantityAvailable: number;
   unitQuantityAvailable: number | null;
 };
@@ -518,12 +526,14 @@ export async function getPosSaleReturnableItems(params: {
       items:pos_sale_items(
         id,
         product_id,
+        product_variant_id,
         lot_id,
         quantity,
         unit_price,
         subtotal,
         discount_amount,
-        product:products(id, name, sku, tracks_stock_units, unit_of_measure)
+        product:products(id, name, sku, tracks_stock_units, unit_of_measure),
+        variant:product_variants!pos_sale_items_product_variant_id_fkey(talle, color)
       )
     `)
     .eq("organization_id", org.id)
@@ -566,6 +576,7 @@ export async function getPosSaleReturnableItems(params: {
   );
 
   const items = (sale.items ?? [])
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps quantity and discount calculations alongside variant display
     .map((item) => {
       if (!(item.id && item.product_id)) {
         return null;
@@ -610,7 +621,10 @@ export async function getPosSaleReturnableItems(params: {
       return {
         posSaleItemId: item.id,
         productId: item.product_id,
-        productName: item.product?.name ?? "Producto sin nombre",
+        productVariantId: item.product_variant_id ?? null,
+        productName: item.variant
+          ? `${item.product?.name ?? "Producto sin nombre"} — ${item.variant.color} / ${item.variant.talle}`
+          : (item.product?.name ?? "Producto sin nombre"),
         productSku: item.product?.sku ?? "",
         lotId: item.lot_id ?? null,
         soldQuantity,
@@ -664,6 +678,20 @@ function resolveReturnLines(params: {
   for (const item of params.saleItems) {
     if (item.id) {
       saleItemsById.set(item.id, item);
+    }
+  }
+
+  for (const requestedLine of params.requestedItems) {
+    const soldItem = saleItemsById.get(requestedLine.posSaleItemId);
+    if (
+      soldItem &&
+      hasFractionalVariantReturn({
+        variantId: soldItem.product_variant_id,
+        quantity: requestedLine.quantity,
+        unitQuantity: requestedLine.unitQuantity,
+      })
+    ) {
+      throw new Error("Las variantes deben devolverse en unidades enteras.");
     }
   }
 
@@ -783,7 +811,7 @@ async function buildInboundStockReversalContext(params: {
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
+        "id, product_id, warehouse_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
       )
       .eq("organization_id", orgId)
       .in("id", lotIds),
@@ -811,12 +839,13 @@ async function buildInboundStockReversalContext(params: {
   const lotsById = new Map<string, MutableLotState>();
 
   for (const lot of lotsResult.data ?? []) {
-    if (!(lot.id && lot.product_id && lot.lot_number && lot.expiration_date)) {
+    if (!(lot.id && lot.product_id && lot.lot_number)) {
       continue;
     }
 
     lotsById.set(lot.id, {
       id: lot.id,
+      warehouseId: lot.warehouse_id,
       productId: lot.product_id,
       lotNumber: lot.lot_number,
       expirationDate: lot.expiration_date,
@@ -900,6 +929,7 @@ async function buildInboundStockReversalContext(params: {
       rollbackByLotId.set(lot.id, {
         id: lot.id,
         organization_id: orgId,
+        warehouse_id: lot.warehouseId,
         product_id: lot.productId,
         lot_number: lot.lotNumber,
         expiration_date: lot.expirationDate,
@@ -916,7 +946,7 @@ async function buildInboundStockReversalContext(params: {
 
     const previousUnitStock = lot.unitQuantityAvailable;
     const movementUnitQuantity =
-      inboundUnitQuantity !== null && previousUnitStock !== null
+      inboundUnitQuantity !== null
         ? truncateQuantity(inboundUnitQuantity)
         : null;
     const newUnitStock =
@@ -930,6 +960,7 @@ async function buildInboundStockReversalContext(params: {
     lotUpdatesById.set(lot.id, {
       id: lot.id,
       organization_id: orgId,
+      warehouse_id: lot.warehouseId,
       product_id: lot.productId,
       lot_number: lot.lotNumber,
       expiration_date: lot.expirationDate,
@@ -943,6 +974,7 @@ async function buildInboundStockReversalContext(params: {
     movementPayloads.push({
       organization_id: orgId,
       lot_id: lot.id,
+      warehouse_id: lot.warehouseId,
       created_by: createdBy,
       type: "INBOUND",
       quantity: inboundBaseQuantity,
@@ -962,42 +994,25 @@ async function buildInboundStockReversalContext(params: {
 
 async function applyInboundStockAdjustments(
   supabase: SupabaseServerClient,
-  context: StockReversalContext
+  context: StockReversalContext,
+  options: { returnId: string; orgId: string; allowDefaultFallback?: boolean }
 ): Promise<string[]> {
   if (!context.lotUpdates.length) {
     return [];
   }
 
-  const { error: lotUpdateError } = await supabase
-    .from("product_lots")
-    .upsert(context.lotUpdates);
-
-  if (lotUpdateError) {
-    throw new Error(
-      `No se pudo reingresar stock en lotes: ${lotUpdateError.message}`
-    );
-  }
-
-  if (!context.movementPayloads.length) {
-    return [];
-  }
-
-  const { data: insertedMovements, error: movementError } = await supabase
-    .from("stock_movements")
-    .insert(context.movementPayloads)
-    .select("id");
-
-  if (movementError) {
-    await supabase.from("product_lots").upsert(context.rollbackLotUpdates);
-
-    throw new Error(
-      `No se pudo registrar movimientos de reingreso de stock: ${movementError.message}`
-    );
-  }
-
-  return (insertedMovements ?? [])
-    .map((movement) => movement.id)
-    .filter((id): id is string => Boolean(id));
+  return await applyStockReentries({
+    supabase,
+    orgId: options.orgId,
+    allowDefaultFallback: options.allowDefaultFallback,
+    entries: context.movementPayloads.map((movement, index) => ({
+      sourceLotId: movement.lot_id,
+      quantity: movement.quantity,
+      unitQuantity: movement.unit_quantity,
+      reason: movement.reason ?? "Devolución POS",
+      operationKey: `pos-return:${options.returnId}:${movement.lot_id}:${index}`,
+    })),
+  });
 }
 
 async function rollbackInboundStockAdjustments(params: {
@@ -1006,33 +1021,7 @@ async function rollbackInboundStockAdjustments(params: {
   context: StockReversalContext;
   movementIds: string[];
 }) {
-  const { supabase, orgId, context, movementIds } = params;
-
-  if (movementIds.length) {
-    try {
-      await supabase
-        .from("stock_movements")
-        .delete()
-        .in("id", movementIds)
-        .eq("organization_id", orgId);
-    } catch (error) {
-      console.error(
-        "No se pudieron revertir movimientos de stock de devolución POS",
-        error
-      );
-    }
-  }
-
-  if (context.rollbackLotUpdates.length) {
-    try {
-      await supabase.from("product_lots").upsert(context.rollbackLotUpdates);
-    } catch (error) {
-      console.error(
-        "No se pudo revertir actualización de lotes de devolución POS",
-        error
-      );
-    }
-  }
+  await undoStockReentries(params);
 }
 
 async function createCustomerCreditRecord(params: {
@@ -1448,6 +1437,16 @@ export async function processPosSaleReturn(
   const returnDateTime = toReturnDateTime(payload.returnDate);
   const normalizedReason = sanitizeText(payload.reason);
   const financialNotePrefix = `Devolución POS ${saleReference}`;
+  if (payload.restock) {
+    await checkReentryOrigins({
+      supabase,
+      orgId: org.id,
+      lotIds: resolvedLines
+        .map((line) => line.lotId)
+        .filter((id): id is string => Boolean(id)),
+      allowDefaultFallback: payload.allowDefaultFallback,
+    });
+  }
 
   let posSaleReturnId: string | null = null;
   let customerCreditId: string | null = null;
@@ -1530,7 +1529,12 @@ export async function processPosSaleReturn(
 
       stockMovementIds = await applyInboundStockAdjustments(
         supabase,
-        stockContext
+        stockContext,
+        {
+          orgId: org.id,
+          returnId: posSaleReturnId,
+          allowDefaultFallback: payload.allowDefaultFallback,
+        }
       );
     }
 

@@ -28,7 +28,12 @@ function database(organizationEnabled: boolean, conversationAvailable = true) {
       };
       return query;
     }),
-    rpc: vi.fn(async () => ({ error: null })),
+    rpc: vi.fn(
+      async (
+        _name: string,
+        _args: Record<string, unknown>
+      ): Promise<{ data?: unknown; error: null }> => ({ error: null })
+    ),
   };
 }
 
@@ -81,6 +86,66 @@ describe("WhatsApp outbound authorization", () => {
     expect(db.rpc).toHaveBeenCalledWith(
       "record_whatsapp_outbound_message",
       expect.objectContaining({ p_external_message_id: "wamid.test" })
+    );
+  });
+
+  it("persists an uncertain result and never resends it automatically", async () => {
+    const db = database(true);
+    const durableInput = {
+      ...input,
+      sourceMessageId: "source",
+      jobId: "job",
+      leaseToken: "lease",
+    };
+    let status = "SENDING";
+    db.rpc.mockImplementation((name, args) => {
+      if (name === "prepare_whatsapp_outbox") {
+        return Promise.resolve({
+          data: { status, text: "Persisted response" },
+          error: null,
+        });
+      }
+      status = String(args.p_status);
+      return Promise.resolve({ data: true, error: null });
+    });
+    vi.mocked(fetch).mockRejectedValue(new Error("Connection lost after send"));
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, durableInput)
+    ).rejects.toMatchObject({ code: "DELIVERY_UNKNOWN" });
+    expect(status).toBe("UNKNOWN");
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, durableInput)
+    ).rejects.toMatchObject({ code: "DELIVERY_REVIEW" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the stored response on a retry rather than replacing it", async () => {
+    const db = database(true);
+    db.rpc.mockImplementation((name) =>
+      Promise.resolve({
+        data:
+          name === "prepare_whatsapp_outbox"
+            ? { status: "SENDING", text: "Saved quote" }
+            : true,
+        error: null,
+      })
+    );
+    await sendWhatsAppText(db as unknown as SupabaseClient, {
+      ...input,
+      text: "Regenerated quote",
+      sourceMessageId: "source",
+      jobId: "job",
+      leaseToken: "lease",
+    });
+    expect(
+      JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).text.body
+    ).toBe("Saved quote");
+    expect(db.rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_outbox",
+      expect.objectContaining({
+        p_status: "SENT",
+        p_external_message_id: "wamid.test",
+      })
     );
   });
 });

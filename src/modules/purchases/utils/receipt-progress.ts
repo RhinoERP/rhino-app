@@ -2,6 +2,16 @@ import { truncateMoney } from "@/lib/decimal";
 
 export type VariantQuantities = Record<string, Record<string, number>>;
 
+export function hasPendingPurchaseReceipt(params: {
+  newItem?: boolean;
+  quantity: number;
+  unitQuantity: number;
+}): boolean {
+  return (
+    params.newItem === true || params.quantity > 0 || params.unitQuantity > 0
+  );
+}
+
 export type ReceivedProgress = {
   quantity: number;
   unitQuantity: number;

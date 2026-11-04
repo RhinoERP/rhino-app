@@ -33,6 +33,7 @@ export const processPosSaleReturnSchema = z.object({
   returnDate: z.string().trim().min(1).optional().nullable(),
   reason: z.string().trim().max(500).optional().nullable(),
   restock: z.coerce.boolean().default(true),
+  allowDefaultFallback: z.boolean().optional(),
   resolution: posSaleReturnResolutionSchema.default("credit_note"),
   refundMethod: posSaleReturnRefundMethodSchema.optional().nullable(),
   refundAmount: z.coerce.number().finite().min(0).optional().nullable(),
@@ -82,6 +83,7 @@ export type PosSaleReturnableSale = {
 export type PosSaleReturnableItem = {
   posSaleItemId: string;
   productId: string;
+  productVariantId: string | null;
   productName: string;
   productSku: string;
   lotId: string | null;

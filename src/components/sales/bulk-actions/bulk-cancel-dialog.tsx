@@ -3,6 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -36,21 +37,27 @@ export function BulkCancelDialog({
 }: BulkCancelDialogProps) {
   const queryClient = useQueryClient();
   const [isPending, setIsPending] = useState(false);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const [results, setResults] = useState<BulkSaleResult[] | null>(null);
 
   const saleLabel = (s: SalesOrderWithCustomer) =>
     s.sale_number ? `#${s.sale_number}` : s.id;
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (allowDefaultFallback = false) => {
     setIsPending(true);
     const result = await bulkCancelSalesAction(
       orgSlug,
       selectedSales.map((s) => ({
         saleId: s.id,
         saleNumber: saleLabel(s),
-      }))
+      })),
+      allowDefaultFallback
     );
     setIsPending(false);
+    if (result.requiresDefaultFallback) {
+      setFallbackOpen(true);
+      return;
+    }
     onOpenChange(false);
 
     if (result.error && result.results.length === 0) {
@@ -68,6 +75,15 @@ export function BulkCancelDialog({
 
   return (
     <>
+      <StockReentryFallbackDialog
+        onConfirm={() => {
+          setFallbackOpen(false);
+          return handleConfirm(true);
+        }}
+        onOpenChange={setFallbackOpen}
+        open={fallbackOpen}
+        pending={isPending}
+      />
       <AlertDialog
         onOpenChange={(v) => {
           if (!isPending) {
@@ -104,7 +120,7 @@ export function BulkCancelDialog({
             <AlertDialogCancel disabled={isPending}>Volver</AlertDialogCancel>
             <Button
               disabled={isPending}
-              onClick={handleConfirm}
+              onClick={() => handleConfirm()}
               variant="destructive"
             >
               {isPending ? "Cancelando..." : "Cancelar ventas"}

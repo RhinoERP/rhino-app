@@ -60,7 +60,10 @@ import {
   deleteProductLotAction,
   updateProductLotAction,
 } from "@/modules/inventory/actions/stock.actions";
+import { useInventoryWarehouse } from "@/modules/inventory/hooks/use-inventory-warehouse";
 import type { Product, ProductLotWithStatus } from "@/modules/inventory/types";
+import { InventoryWarehouseSelector } from "./inventory-warehouse-selector";
+import { StockTransferDialog } from "./stock-transfer-dialog";
 
 const leadingZerosRegex = /^0+/;
 const noExpirationFallback = "2100-12-31";
@@ -243,6 +246,7 @@ export function ProductLotsCard({
   const { can } = usePermissions();
   const canManageInventory = can("inventory.manage");
   const [open, setOpen] = useState(false);
+  const warehouse = useInventoryWarehouse(orgSlug);
   const [lotNumber, setLotNumber] = useState("");
   const [expirationDate, setExpirationDate] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -268,6 +272,9 @@ export function ProductLotsCard({
   const [isDeletePending, startDeleteTransition] = useTransition();
 
   const [viewAllOpen, setViewAllOpen] = useState(false);
+  const [transferLot, setTransferLot] = useState<ProductLotWithStatus | null>(
+    null
+  );
 
   const isWeightBased =
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
@@ -349,6 +356,7 @@ export function ProductLotsCard({
     startCreateTransition(async () => {
       const result = await createProductLotAction({
         orgSlug,
+        warehouseId: warehouse.warehouseId,
         productId,
         lotNumber,
         expirationDate: validation.expirationToUse,
@@ -410,6 +418,7 @@ export function ProductLotsCard({
     startEditTransition(async () => {
       const result = await updateProductLotAction({
         orgSlug,
+        warehouseId: editingLot.warehouse_id,
         productId,
         lotId: editingLot.id,
         lotNumber: editLotNumber,
@@ -496,6 +505,12 @@ export function ProductLotsCard({
           Editar lote
         </DropdownMenuItem>
         <DropdownMenuItem
+          disabled={lot.quantity_available <= 0}
+          onSelect={() => setTransferLot(lot)}
+        >
+          Transferir stock
+        </DropdownMenuItem>
+        <DropdownMenuItem
           className="text-destructive focus:text-destructive"
           disabled={isDeletePending}
           onSelect={(event) => {
@@ -519,6 +534,10 @@ export function ProductLotsCard({
   const renderLotRow = (lot: ProductLotWithStatus, key: string) => (
     <TableRow key={key}>
       <TableCell className="font-medium">{lot.lot_number}</TableCell>
+      <TableCell>
+        {warehouse.query.data?.find((row) => row.id === lot.warehouse_id)
+          ?.name ?? lot.warehouse_id}
+      </TableCell>
       <TableCell>
         {lot.expiration_date ? formatDateTime(lot.expiration_date) : "—"}
       </TableCell>
@@ -593,6 +612,13 @@ export function ProductLotsCard({
                   </DialogHeader>
 
                   <div className="space-y-4 py-2">
+                    <InventoryWarehouseSelector
+                      control={warehouse.form.control}
+                      disabled={isCreatePending}
+                      error={warehouse.query.isError}
+                      isLoading={warehouse.query.isPending}
+                      warehouses={warehouse.query.data}
+                    />
                     <div className="grid gap-2">
                       <Label htmlFor="lotNumber">Número de lote</Label>
                       <Input
@@ -739,6 +765,7 @@ export function ProductLotsCard({
             <TableHeader>
               <TableRow>
                 <TableHead>Lote</TableHead>
+                <TableHead>Depósito</TableHead>
                 <TableHead>Vencimiento</TableHead>
                 <TableHead className="text-right">
                   {availabilityLabel}
@@ -755,7 +782,7 @@ export function ProductLotsCard({
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
-                    colSpan={tracksUnits ? 6 : 5}
+                    colSpan={tracksUnits ? 7 : 6}
                   >
                     Aún no hay lotes registrados para este producto.
                   </TableCell>
@@ -790,6 +817,7 @@ export function ProductLotsCard({
               <TableHeader>
                 <TableRow>
                   <TableHead>Lote</TableHead>
+                  <TableHead>Depósito</TableHead>
                   <TableHead>Vencimiento</TableHead>
                   <TableHead className="text-right">
                     {availabilityLabel}
@@ -806,7 +834,7 @@ export function ProductLotsCard({
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
-                      colSpan={tracksUnits ? 6 : 5}
+                      colSpan={tracksUnits ? 7 : 6}
                     >
                       Aún no hay lotes registrados para este producto.
                     </TableCell>
@@ -979,6 +1007,21 @@ export function ProductLotsCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <StockTransferDialog
+        initialLotId={transferLot?.id}
+        lots={lots}
+        onOpenChange={(openValue) => {
+          if (!openValue) {
+            setTransferLot(null);
+          }
+        }}
+        onTransferred={() => router.refresh()}
+        open={Boolean(transferLot)}
+        orgSlug={orgSlug}
+        product={product}
+        variants={[]}
+      />
 
       <AlertDialog
         onOpenChange={(openValue) => {
