@@ -8,6 +8,7 @@ import {
   phoneKey,
   routeText,
   toWhatsAppText,
+  whatsappRecipient,
 } from "./format";
 
 describe("normalizePhone", () => {
@@ -25,6 +26,17 @@ describe("normalizePhone", () => {
 
   it("compara por los últimos 10 dígitos", () => {
     expect(phoneKey("5491123456789")).toBe(phoneKey("541123456789"));
+  });
+});
+
+describe("whatsappRecipient", () => {
+  it("saca el 9 de los celulares argentinos para responder", () => {
+    expect(whatsappRecipient("5491126856731")).toBe("541126856731");
+  });
+
+  it("deja igual los demás números", () => {
+    expect(whatsappRecipient("541126856731")).toBe("541126856731");
+    expect(whatsappRecipient("15551643687")).toBe("15551643687");
   });
 });
 

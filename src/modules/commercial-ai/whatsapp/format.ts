@@ -46,6 +46,23 @@ export function normalizePhone(input: string): string | null {
   return digits;
 }
 
+const AR_MOBILE_PREFIX = "549";
+const AR_MOBILE_LENGTH = 13;
+
+/**
+ * Número al que se le responde. Meta manda los celulares argentinos como
+ * 549 + área + número, pero para escribirles la API espera 54 + área + número
+ * (sin el 9); si no, rechaza el envío (o el número no figura entre los
+ * destinatarios de prueba).
+ */
+export function whatsappRecipient(phone: string): string {
+  const digits = phone.replace(NON_DIGITS, "");
+  return digits.startsWith(AR_MOBILE_PREFIX) &&
+    digits.length === AR_MOBILE_LENGTH
+    ? `54${digits.slice(AR_MOBILE_PREFIX.length)}`
+    : digits;
+}
+
 /** Últimos 10 dígitos: coincide aunque cambie el prefijo del país o el 9. */
 export function phoneKey(phone: string): string {
   return phone.replace(NON_DIGITS, "").slice(-PHONE_KEY_LENGTH);

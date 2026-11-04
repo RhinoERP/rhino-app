@@ -19,6 +19,7 @@ import {
   phoneKey,
   routeText,
   toWhatsAppText,
+  whatsappRecipient,
 } from "./format";
 import {
   SellerAudioError,
@@ -26,6 +27,21 @@ import {
   transcribeSellerAudio,
 } from "./seller-audio";
 import { whatsappChannel } from "./seller-tools";
+
+/** Código y mensaje de error de la API de Meta, sin datos del mensaje. */
+async function metaErrorText(response: Response): Promise<string> {
+  try {
+    const json = (await response.json()) as {
+      error?: { code?: number; error_subcode?: number; message?: string };
+    };
+    const error = json.error;
+    return error
+      ? `${error.code ?? "?"}/${error.error_subcode ?? "-"} ${error.message ?? ""}`.trim()
+      : "sin detalle";
+  } catch {
+    return "sin detalle";
+  }
+}
 
 /**
  * Asistente del vendedor por WhatsApp.
@@ -98,14 +114,16 @@ export async function sendSellerText(
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
-        to: target.phone,
+        to: whatsappRecipient(target.phone),
         type: "text",
         text: { body: text, preview_url: false },
       }),
     }
   );
   if (!response.ok) {
-    throw new Error(`Meta rechazó el mensaje (${response.status})`);
+    throw new Error(
+      `Meta rechazó el mensaje (${response.status}): ${await metaErrorText(response)}`
+    );
   }
   const json = (await response.json()) as { messages?: { id?: string }[] };
   await createAdminClient()
@@ -146,7 +164,7 @@ async function sendDigestTemplate(
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
-        to: target.phone,
+        to: whatsappRecipient(target.phone),
         type: "template",
         template: {
           name: template,
