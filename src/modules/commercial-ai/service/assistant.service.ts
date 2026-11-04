@@ -20,6 +20,16 @@ const MAX_CONTEXT_DEBTORS = 100;
 
 export type AssistantMessage = { role: "user" | "assistant"; content: string };
 
+/** Herramientas extra para un canal (por ejemplo, WhatsApp puede registrar visitas). */
+export type AssistantChannel = {
+  /** Instrucciones que se suman al prompt de sistema. */
+  prompt: string;
+  tools: Anthropic.Beta.BetaTool[];
+  runTool: (
+    block: Anthropic.Beta.BetaToolUseBlock
+  ) => Promise<Anthropic.Beta.BetaToolResultBlockParam> | null;
+};
+
 const STATUS_TEXT = {
   activo: "Activo",
   riesgo: "En riesgo",
@@ -200,7 +210,8 @@ const MAX_TOOL_ROUNDS = 6;
 
 export async function askAssistant(
   snapshot: CommercialAiSnapshot,
-  history: AssistantMessage[]
+  history: AssistantMessage[],
+  channel?: AssistantChannel
 ): Promise<string> {
   const trimmed = history.slice(-MAX_HISTORY_MESSAGES);
   // La conversación tiene que arrancar con el usuario.
@@ -214,7 +225,10 @@ export async function askAssistant(
     userName: snapshot.currentUserName,
     feature: "asistente" as const,
   };
-  const system = `${systemPrompt(snapshot)}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`;
+  const system = `${systemPrompt(snapshot)}${channel ? `\n\n${channel.prompt}` : ""}\n\nDATOS:\n${JSON.stringify(buildAssistantContext(snapshot))}`;
+  const tools = channel
+    ? [...ASSISTANT_TOOLS, ...channel.tools]
+    : ASSISTANT_TOOLS;
   const messages: Anthropic.Beta.BetaMessageParam[] = [...trimmed];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
@@ -223,7 +237,7 @@ export async function askAssistant(
       system,
       messages,
       maxTokens: 4000,
-      tools: ASSISTANT_TOOLS,
+      tools,
     });
 
     if (response.stop_reason === "refusal") {
@@ -244,7 +258,10 @@ export async function askAssistant(
         block.type === "tool_use"
     );
     const results = await Promise.all(
-      toolUses.map((block) => runAssistantTool({ snapshot }, block))
+      toolUses.map(
+        (block) =>
+          channel?.runTool(block) ?? runAssistantTool({ snapshot }, block)
+      )
     );
     messages.push({ role: "user", content: results });
   }

@@ -20,6 +20,7 @@ import {
 import { IcpSection, RouteSettingsSection } from "./settings-prospecting";
 import { TypeBadge, useCommercialAi } from "./shared";
 import { UsagePanel } from "./usage-panel";
+import { WhatsAppSettings } from "./whatsapp-settings";
 
 type NumberKey = {
   [K in keyof CommercialAiConfig]: CommercialAiConfig[K] extends number
@@ -36,7 +37,7 @@ type BooleanKey = {
 export function SettingsTab() {
   const { snapshot } = useCommercialAi();
   const [section, setSection] = useState<
-    "cartera" | "rutas" | "prospeccion" | "consumo"
+    "cartera" | "rutas" | "prospeccion" | "whatsapp" | "consumo"
   >("cartera");
   return (
     <div className="space-y-4">
@@ -51,6 +52,7 @@ export function SettingsTab() {
             <TabsTrigger value="cartera">Análisis de cartera</TabsTrigger>
             <TabsTrigger value="rutas">Rutas</TabsTrigger>
             <TabsTrigger value="prospeccion">Prospección</TabsTrigger>
+            <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
             <TabsTrigger value="consumo">Consumo IA</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -59,6 +61,7 @@ export function SettingsTab() {
       {section === "cartera" ? <AnalysisSettings /> : null}
       {section === "rutas" ? <RouteSettingsSection /> : null}
       {section === "prospeccion" ? <IcpSection /> : null}
+      {section === "whatsapp" ? <WhatsAppSettings /> : null}
       {section === "consumo" ? <UsagePanel usage={snapshot.usage} /> : null}
     </div>
   );

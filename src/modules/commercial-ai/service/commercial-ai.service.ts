@@ -30,6 +30,7 @@ import {
   type OpportunityStateRow,
   type OpportunityView,
   type SellerMonthProgress,
+  type SellerWhatsAppView,
 } from "../types";
 import { commercialAiModel, isAiEnabled } from "./ai-client";
 import { loadProspectingSnapshot } from "./prospecting.service";
@@ -444,7 +445,6 @@ function effectiveStage(
   return state.stage;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: arma en un solo lugar la vista completa que consume la UI
 export async function getCommercialAiSnapshot(
   orgSlug: string
 ): Promise<CommercialAiSnapshot | null> {
@@ -452,7 +452,165 @@ export async function getCommercialAiSnapshot(
   if (!access) {
     return null;
   }
+  return buildCommercialAiSnapshot(orgSlug, access, () => loadMembers(orgSlug));
+}
 
+/**
+ * Snapshot para un usuario sin sesión web (por ejemplo, un vendedor que escribe
+ * por WhatsApp). Lee permisos y miembros con el cliente de servicio.
+ */
+export async function getCommercialAiSnapshotForUser(
+  organizationId: string,
+  userId: string
+): Promise<CommercialAiSnapshot | null> {
+  const admin = createAdminClient();
+  const resolved = await resolveCommercialAiAccessForUser(
+    admin,
+    organizationId,
+    userId
+  );
+  if (!resolved) {
+    return null;
+  }
+  return buildCommercialAiSnapshot(resolved.orgSlug, resolved.access, () =>
+    loadMembersWithAdmin(admin, organizationId)
+  );
+}
+
+export async function resolveCommercialAiAccessForUser(
+  admin: AdminClient,
+  organizationId: string,
+  userId: string
+): Promise<{ access: CommercialAiAccess; orgSlug: string } | null> {
+  const [{ data: organization }, { data: membership }, { data: userData }] =
+    await Promise.all([
+      admin
+        .from("organizations")
+        .select("id, name, slug")
+        .eq("id", organizationId)
+        .maybeSingle(),
+      admin
+        .from("organization_members")
+        .select("role_id, is_active, is_owner")
+        .eq("organization_id", organizationId)
+        .eq("user_id", userId)
+        .maybeSingle(),
+      admin.auth.admin.getUserById(userId),
+    ]);
+  if (!(organization && membership?.is_active)) {
+    return null;
+  }
+  let permissions: string[] = [];
+  if (membership.role_id) {
+    const { data: rows } = await admin
+      .from("role_permissions")
+      .select("permissions(key)")
+      .eq("role_id", membership.role_id);
+    permissions = (rows ?? []).flatMap((row) => {
+      const related = (row as { permissions: unknown }).permissions;
+      const list = Array.isArray(related) ? related : [related];
+      return list
+        .map((item) => (item as { key?: string } | null)?.key)
+        .filter((key): key is string => !!key);
+    });
+  }
+  const isManager =
+    membership.is_owner ||
+    permissions.includes("organization.admin") ||
+    permissions.includes("commercial_ai.manage");
+  if (!(isManager || permissions.includes("commercial_ai.read"))) {
+    return null;
+  }
+  const user = userData?.user;
+  return {
+    orgSlug: organization.slug,
+    access: {
+      role: isManager ? "gerente" : "vendedor",
+      userId,
+      userName:
+        (user?.user_metadata?.full_name as string | undefined) ??
+        user?.email ??
+        "Usuario",
+      organizationId,
+      organizationName: organization.name,
+    },
+  };
+}
+
+async function loadSellerWhatsApp(
+  admin: AdminClient,
+  access: CommercialAiAccess
+): Promise<SellerWhatsAppView> {
+  const [integration, phones] = await Promise.all([
+    admin
+      .from("whatsapp_integrations")
+      .select("display_phone_number")
+      .eq("organization_id", access.organizationId)
+      .maybeSingle(),
+    admin
+      .from("commercial_ai_seller_phones")
+      .select("user_id, phone, daily_digest")
+      .eq("organization_id", access.organizationId),
+  ]);
+  return {
+    connected: Boolean(integration.data),
+    displayNumber:
+      (integration.data?.display_phone_number as string | null) ?? null,
+    // Si la migración no está aplicada, phones viene con error: lista vacía.
+    phones: (phones.data ?? [])
+      .filter(
+        (row) => access.role === "gerente" || row.user_id === access.userId
+      )
+      .map((row) => ({
+        userId: row.user_id as string,
+        phone: row.phone as string,
+        dailyDigest: Boolean(row.daily_digest),
+      })),
+  };
+}
+
+async function loadMembersWithAdmin(
+  admin: AdminClient,
+  organizationId: string
+): Promise<MemberRow[]> {
+  const { data, error } = await admin
+    .from("organization_members")
+    .select("user_id, is_active, roles(key)")
+    .eq("organization_id", organizationId);
+  if (error) {
+    console.warn(
+      `IA Comercial: no se pudieron leer miembros: ${error.message}`
+    );
+    return [];
+  }
+  return Promise.all(
+    (data ?? []).map(async (row) => {
+      const { data: userData } = await admin.auth.admin.getUserById(
+        row.user_id
+      );
+      const role = (row as { roles: unknown }).roles;
+      const roleKey = (
+        (Array.isArray(role) ? role[0] : role) as { key?: string } | null
+      )?.key;
+      return {
+        user_id: row.user_id,
+        full_name:
+          (userData?.user?.user_metadata?.full_name as string | undefined) ??
+          null,
+        email: userData?.user?.email ?? null,
+        role_key: roleKey ?? null,
+        is_active: row.is_active ?? false,
+      };
+    })
+  );
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: arma en un solo lugar la vista completa que consume la UI
+async function buildCommercialAiSnapshot(
+  orgSlug: string,
+  access: CommercialAiAccess,
+  membersLoader: () => Promise<MemberRow[]>
+): Promise<CommercialAiSnapshot> {
   const admin = createAdminClient();
   const today = todayInArgentina();
   const todayDay = toDayNumber(today);
@@ -462,7 +620,7 @@ export async function getCommercialAiSnapshot(
   const [sales, moduleState, members] = await Promise.all([
     loadSalesData(admin, access.organizationId, today),
     loadModuleState(admin, access.organizationId, periodMonth),
-    loadMembers(orgSlug),
+    membersLoader(),
   ]);
 
   const config: CommercialAiConfig = {
@@ -823,6 +981,7 @@ export async function getCommercialAiSnapshot(
   const usagePromise = isManager
     ? getUsageSummary(access.organizationId)
     : Promise.resolve(null);
+  const whatsappPromise = loadSellerWhatsApp(admin, access);
   const prospecting = await loadProspectingSnapshot({
     admin,
     access,
@@ -870,5 +1029,6 @@ export async function getCommercialAiSnapshot(
     },
     prospecting,
     usage: await usagePromise,
+    whatsapp: await whatsappPromise,
   };
 }

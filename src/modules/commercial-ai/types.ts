@@ -271,6 +271,16 @@ export type CommercialAiSnapshot = {
   prospecting: ProspectingSnapshot;
   /** Consumo de IA del mes (solo gerentes y admins). */
   usage: UsageSummary | null;
+  /** Asistente del vendedor por WhatsApp. */
+  whatsapp: SellerWhatsAppView;
+};
+
+export type SellerWhatsAppView = {
+  /** Hay un número de WhatsApp de la empresa conectado a Rhinos. */
+  connected: boolean;
+  displayNumber: string | null;
+  /** Gerente: todo el equipo; vendedor: solo el suyo. */
+  phones: { userId: string; phone: string; dailyDigest: boolean }[];
 };
 
 /* ============ Fase 2: rutas, prospección y aprendizajes ============ */
