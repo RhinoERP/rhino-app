@@ -14,12 +14,28 @@ vi.mock("@/lib/supabase/proxy", () => ({
 describe.each([
   ["root", rootProxy],
   ["src", srcProxy],
-])("WhatsApp server requests through %s entry point", (_name, proxy) => {
+])("Request authentication through %s entry point", (_name, proxy) => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateSessionMock.mockResolvedValue(
       NextResponse.redirect("https://rhinos.example/auth/login")
     );
+  });
+
+  it.each([
+    ["GET", "/privacidad"],
+    ["HEAD", "/privacidad"],
+    ["GET", "/eliminacion-datos"],
+    ["HEAD", "/eliminacion-datos"],
+    ["GET", "/privacidad?source=meta"],
+  ])("serves public legal information for %s %s", async (method, pathname) => {
+    const response = await proxy(
+      new NextRequest(`https://rhinos.example${pathname}`, { method })
+    );
+
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.has("location")).toBe(false);
+    expect(updateSessionMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -48,6 +64,11 @@ describe.each([
     ["DELETE", "/api/webhooks/whatsapp"],
     ["POST", "/api/internal/whatsapp-agent/audio-cleanup"],
     ["GET", "/api/internal/whatsapp-agent/audio-cleanup/extra"],
+    ["GET", "/privacidad-extra"],
+    ["GET", "/privacidad/extra"],
+    ["GET", "/eliminacion-datos/extra"],
+    ["POST", "/privacidad"],
+    ["DELETE", "/eliminacion-datos"],
   ])("keeps session authentication for %s %s", async (method, pathname) => {
     const request = new NextRequest(`https://rhinos.example${pathname}`, {
       method,
