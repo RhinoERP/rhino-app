@@ -102,7 +102,7 @@ export function helpText(name: string): string {
     "• *ruta* · las paradas de hoy",
     "• *pendientes* · lo que prometiste hacer",
     "",
-    "O contame en tus palabras, por ejemplo:",
+    "O contame en tus palabras, escrito o por audio 🎧, por ejemplo:",
     "• _Pasé por Lácteos Catamarca, pidieron 20 kg de muzza_",
     "• _Recordame llamar a El Obrero el jueves_",
     "• _¿Cuánto me compró Morini este año?_",

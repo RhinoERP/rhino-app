@@ -20,6 +20,11 @@ import {
   routeText,
   toWhatsAppText,
 } from "./format";
+import {
+  SellerAudioError,
+  sellerAudioEnabled,
+  transcribeSellerAudio,
+} from "./seller-audio";
 import { whatsappChannel } from "./seller-tools";
 
 /**
@@ -308,15 +313,58 @@ async function reply(
 }
 
 /** Atiende un mensaje de un vendedor. Pensado para correr después de responder a Meta. */
+const HEARD_PREVIEW = 160;
+
+async function resolveText(
+  admin: SupabaseClient,
+  target: SellerTarget,
+  message: WhatsAppInboundMessage,
+  inboundId: string
+): Promise<{ text: string; heard: string | null } | { notice: string }> {
+  const text = inboundText(message);
+  if (text) {
+    return { text, heard: null };
+  }
+  if (message.messageType !== "AUDIO") {
+    return {
+      notice:
+        "Por ahora entiendo texto y audios. Escribime *ayuda* para ver qué puedo hacer.",
+    };
+  }
+  if (!(await sellerAudioEnabled(admin, target.organizationId))) {
+    return {
+      notice:
+        "Los audios no están activados para tu empresa. Mandámelo escrito y lo anoto.",
+    };
+  }
+  try {
+    const heard = await transcribeSellerAudio(
+      message.payload,
+      target.phoneNumberId
+    );
+    // El historial guarda lo que dijo, para que la IA tenga el contexto.
+    await admin
+      .from("commercial_ai_whatsapp_messages")
+      .update({ body: heard })
+      .eq("id", inboundId);
+    return { text: heard, heard };
+  } catch (error) {
+    if (error instanceof SellerAudioError) {
+      return { notice: error.message };
+    }
+    throw error;
+  }
+}
+
+/** Atiende un mensaje de un vendedor. Pensado para correr después de responder a Meta. */
 export async function processSellerMessage(
   target: SellerTarget,
   message: WhatsAppInboundMessage
 ): Promise<void> {
   const admin = createAdminClient();
-  const text = inboundText(message);
 
   // Meta reintenta: si ya guardamos este mensaje, no se procesa de nuevo.
-  const { error: insertError } = await admin
+  const { data: inbound, error: insertError } = await admin
     .from("commercial_ai_whatsapp_messages")
     .insert({
       organization_id: target.organizationId,
@@ -324,20 +372,23 @@ export async function processSellerMessage(
       direction: "in",
       external_message_id: message.externalMessageId,
       message_type: message.messageType,
-      body: text ?? "",
-    });
-  if (insertError) {
+      body: inboundText(message) ?? "",
+    })
+    .select("id")
+    .single();
+  if (insertError || !inbound) {
     return;
   }
 
   try {
-    if (!text) {
-      await sendSellerText(
-        target,
-        message.messageType === "AUDIO"
-          ? "Todavía no puedo escuchar audios 🎧. Mandámelo escrito y lo anoto."
-          : "Por ahora entiendo mensajes de texto. Escribime *ayuda* para ver qué puedo hacer."
-      );
+    const input = await resolveText(
+      admin,
+      target,
+      message,
+      inbound.id as string
+    );
+    if ("notice" in input) {
+      await sendSellerText(target, input.notice);
       return;
     }
     const snapshot = await getCommercialAiSnapshotForUser(
@@ -351,7 +402,11 @@ export async function processSellerMessage(
       );
       return;
     }
-    await sendSellerText(target, await reply(snapshot, target, text, admin));
+    const answer = await reply(snapshot, target, input.text, admin);
+    const heard = input.heard
+      ? `🎧 _Entendí:_ "${input.heard.length > HEARD_PREVIEW ? `${input.heard.slice(0, HEARD_PREVIEW)}…` : input.heard}"\n\n`
+      : "";
+    await sendSellerText(target, `${heard}${answer}`);
   } catch (error) {
     console.error("IA Comercial WhatsApp: no se pudo responder", error);
     const reason =

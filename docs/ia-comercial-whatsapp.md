@@ -24,9 +24,12 @@ Las visitas quedan en `commercial_ai_checkins` (sin GPS, con
 la ruta de hoy, la parada queda marcada. Los recordatorios van a
 `commercial_ai_tasks` y aparecen en Hoy y en el resumen diario.
 
-Los audios todavía no se procesan: se le pide que lo mande escrito. Cuando se
-integre la transcripción de `codex/whatsapp-audio-transcription`, el texto
-transcripto entra por el mismo camino (`processSellerMessage`).
+**Notas de voz:** se transcriben con el mismo proveedor que el agente de pedidos
+(OpenAI, `OPENAI_API_KEY`, `WHATSAPP_AGENT_TRANSCRIPTION_MODEL`) y solo si
+están prendidos `WHATSAPP_AUDIO_ENABLED=true` y `organizations.whatsapp_audio_enabled`.
+Al vendedor se le responde en el momento: el audio se baja de Meta, se transcribe
+sin cola, no se guarda (solo el texto) y la respuesta arranca con lo que se
+entendió. Hasta 4 MB (unos 2 minutos).
 
 ## Puesta en marcha
 
