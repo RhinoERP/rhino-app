@@ -257,6 +257,7 @@ export type ReceivedChecksTable = {
   id: Generated<string>;
   org_id: string;
   operation_id: string;
+  receivable_payment_id: string | null;
   numero_cheque: string;
   banco_emisor: string;
   importe: ColumnType<string, string, string>; // NUMERIC(15,4)
@@ -302,6 +303,8 @@ export type PublicAccountsPayableTable = {
   id: Generated<string>;
   organization_id: string;
   supplier_id: string;
+  currency: string;
+  exchange_rate: string | null;
   purchase_order_id: string;
   total_amount: ColumnType<string, string, string>;
   pending_balance: ColumnType<string, string, string>;
@@ -314,12 +317,71 @@ export type PublicAccountsPayable = Selectable<PublicAccountsPayableTable>;
 export type UpdatePublicAccountsPayable =
   Updateable<PublicAccountsPayableTable>;
 
+export type PublicAccountsReceivableTable = {
+  id: Generated<string>;
+  organization_id: string;
+  customer_id: string;
+  currency: string;
+  total_amount: ColumnType<string, string, string>;
+  pending_balance: ColumnType<string, string, string>;
+  status: string;
+  updated_at: ColumnType<Date | null, string | null | undefined, string | null>;
+};
+
+export type PublicAccountsReceivable =
+  Selectable<PublicAccountsReceivableTable>;
+
+export type PublicReceivablePaymentsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  account_receivable_id: string;
+  amount: ColumnType<string, string, string>;
+  amount_ars: string | null;
+  payment_method: string;
+  currency: string;
+  exchange_rate: string | null;
+  accounting_journal_entry_id: string | null;
+};
+
+export type PublicReceivablePayment = Selectable<PublicReceivablePaymentsTable>;
+
+export type PublicCustomerCreditsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  source_payment_id: string | null;
+  amount: ColumnType<string, string, string>;
+  remaining_amount: ColumnType<string, string, string>;
+};
+
+export type PublicCustomerCreditApplicationsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  customer_credit_id: string | null;
+};
+
+export type PublicCommissionsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  receivable_payment_id: string | null;
+};
+
 export type PublicPayablePaymentsTable = {
   id: Generated<string>;
   organization_id: string;
   account_payable_id: string;
   amount: ColumnType<string, string, string>;
+  amount_ars: ColumnType<
+    string | null,
+    string | null | undefined,
+    string | null
+  >;
   payment_method: string;
+  currency: ColumnType<string, string | undefined, string>;
+  exchange_rate: ColumnType<
+    string | null,
+    string | null | undefined,
+    string | null
+  >;
   payment_date: ColumnType<Date, string, string>;
   reference_number: string | null;
   notes: string | null;
@@ -344,6 +406,7 @@ export type PublicSupplierCreditsTable = {
   id: Generated<string>;
   organization_id: string;
   supplier_id: string;
+  currency: string;
   amount: ColumnType<string, string, string>;
   remaining_amount: ColumnType<string, string, string>;
   source_payment_id: string | null;
@@ -354,6 +417,15 @@ export type PublicSupplierCreditsTable = {
 
 export type PublicSupplierCredit = Selectable<PublicSupplierCreditsTable>;
 export type UpdatePublicSupplierCredit = Updateable<PublicSupplierCreditsTable>;
+
+export type PublicSupplierInvoicesTable = {
+  id: Generated<string>;
+  organization_id: string;
+  supplier_id: string;
+  purchase_order_id: string | null;
+  exchange_rate: string | null;
+  created_at: ColumnType<Date, never, never>;
+};
 
 export type PublicSupplierCreditApplicationsTable = {
   id: Generated<string>;
@@ -461,7 +533,13 @@ export type Database = {
   "accounting.treasury_deposit_slips": TreasuryDepositSlipsTable;
   "accounting.treasury_deposit_slip_checks": TreasuryDepositSlipChecksTable;
   "public.accounts_payable": PublicAccountsPayableTable;
+  "public.supplier_invoices": PublicSupplierInvoicesTable;
   "public.payable_payments": PublicPayablePaymentsTable;
+  "public.accounts_receivable": PublicAccountsReceivableTable;
+  "public.receivable_payments": PublicReceivablePaymentsTable;
+  "public.customer_credits": PublicCustomerCreditsTable;
+  "public.customer_credit_applications": PublicCustomerCreditApplicationsTable;
+  "public.commissions": PublicCommissionsTable;
   "public.supplier_credits": PublicSupplierCreditsTable;
   "public.supplier_credit_applications": PublicSupplierCreditApplicationsTable;
 };

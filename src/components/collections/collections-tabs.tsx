@@ -32,6 +32,7 @@ type CollectionsTabsProps = {
   creditOnlyCustomers: CustomerCreditEntry[];
   fullReceivables: ReceivableAccount[];
   fullPayables: PayableAccount[];
+  receivableSupplierOptions: Array<{ value: string; label: string }>;
   paymentAccountId?: string;
   paginatedData: PaginatedDataUnion | null;
 };
@@ -51,6 +52,7 @@ export function CollectionsTabs({
   creditOnlyCustomers,
   fullReceivables,
   fullPayables,
+  receivableSupplierOptions,
   paymentAccountId,
   paginatedData,
 }: CollectionsTabsProps) {
@@ -139,6 +141,7 @@ export function CollectionsTabs({
                 orgSlug={orgSlug}
                 pageCount={paginatedData.pageCount}
                 paymentAccountId={paymentAccountId}
+                supplierOptions={receivableSupplierOptions}
               />
             )
           )}

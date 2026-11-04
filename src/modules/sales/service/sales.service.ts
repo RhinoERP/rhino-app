@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   asentarInformalEntry,
   cancelInformalEntry,
@@ -6,12 +6,23 @@ import {
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import type { QueryBuilder } from "@/lib/query-builder";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
+import {
+  applyStockReentries,
+  undoStockReentries,
+} from "@/modules/inventory/service/stock-reentry.service";
+import {
+  assertWholesaleWarehouseForOrganization,
+  resolveWholesaleWarehouseId,
+} from "@/modules/inventory/service/warehouse-stock.service";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { findAlreadyDeductedItemIds } from "@/modules/orders/service/orders.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
+import { requiresFiscalInvoiceForSaleDebt } from "@/modules/organizations/service/debt-policy.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
@@ -49,10 +60,35 @@ import {
   computeDueDate,
   computeReceivableDueDateFromDispatch,
 } from "../utils/date";
+import { computeAverageQuantityPerUnit } from "../utils/quantity-per-unit";
+import { getSaleStockOriginLedger } from "./sale-stock-origin.service";
 import { applySalesDateFilters } from "./sales-filters";
-import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
+import {
+  getAuthorizedSaleFiscalUpdateFields,
+  shouldUpdateSaleWarehouse,
+} from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Contexto de confianza para integraciones de sistema. No se expone a Server
+ * Actions ni al navegador: permite reutilizar el alta comercial sin una cookie
+ * de usuario, conservando un vendedor/actor de la organización.
+ */
+type TrustedPreSaleExecution = {
+  supabase: SupabaseServerClient;
+  organizationId: string;
+  actorId: string;
+  conversationId?: string;
+  prepareOnly?: (payload: PreparedWhatsAppPreSale) => void;
+};
+
+export type PreparedWhatsAppPreSale = {
+  order: Record<string, unknown>;
+  items: Record<string, unknown>[];
+  itemTaxes: Record<string, unknown>[];
+  taxes: Record<string, unknown>[];
+};
 
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
   "NOTA_DE_VENTA";
@@ -1484,7 +1520,8 @@ function addLotToStockTotals(
 async function fetchStockTotals(
   supabase: SupabaseServerClient,
   orgId: string,
-  productIds: string[]
+  productIds: string[],
+  warehouseId?: string
 ) {
   const stockTotals = new Map<string, StockTotals>();
   const idChunks = chunkItems(
@@ -1493,11 +1530,14 @@ async function fetchStockTotals(
   );
 
   for (const ids of idChunks) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("product_lots")
       .select("product_id, quantity_available, unit_quantity_available")
-      .eq("organization_id", orgId)
-      .in("product_id", ids);
+      .eq("organization_id", orgId);
+    if (warehouseId) {
+      query = query.eq("warehouse_id", warehouseId);
+    }
+    const { data, error } = await query.in("product_id", ids);
 
     if (error) {
       throw new Error(`Error obteniendo stock: ${error.message}`);
@@ -1509,56 +1549,6 @@ async function fetchStockTotals(
   }
 
   return stockTotals;
-}
-
-/**
- * Prioritizes the static weightPerUnit field from the product definition.
- * Falls back to calculated average only if weightPerUnit is not set.
- *
- * @param options - Object with all required fields
- * @returns The weight/volume per unit, or null if not applicable
- */
-type ComputeAverageQuantityPerUnitOptions = {
-  unitOfMeasure: SaleProduct["unitOfMeasure"];
-  tracksStockUnits: boolean;
-  weightPerUnit: number | null | undefined;
-  totalUnits: number | null;
-  totalQuantity: number | null;
-};
-
-function computeAverageQuantityPerUnit({
-  unitOfMeasure,
-  tracksStockUnits,
-  weightPerUnit,
-  totalUnits,
-  totalQuantity,
-}: ComputeAverageQuantityPerUnitOptions): number | null {
-  const isWeightOrVolume = unitOfMeasure === "KG" || unitOfMeasure === "LT";
-
-  if (!(tracksStockUnits && isWeightOrVolume)) {
-    return null;
-  }
-
-  // PRIORITY 1: Use static weightPerUnit from product definition
-  if (
-    weightPerUnit !== null &&
-    weightPerUnit !== undefined &&
-    weightPerUnit > 0
-  ) {
-    return weightPerUnit;
-  }
-
-  // PRIORITY 2: Calculate average if possible
-  if (
-    totalUnits !== null &&
-    totalUnits > 0 &&
-    totalQuantity !== null &&
-    totalQuantity > 0
-  ) {
-    return totalQuantity / totalUnits;
-  }
-
-  return null;
 }
 
 function resolveSalesProductAccountingAccountCode(params: {
@@ -1580,7 +1570,10 @@ function resolveSalesProductAccountingAccountCode(params: {
   return accountingRuleByCategoryId.get(categoryId) ?? null;
 }
 
-export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
+export async function getSaleProducts(
+  orgSlug: string,
+  warehouseId?: string
+): Promise<SaleProduct[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -1588,6 +1581,9 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   }
 
   const supabase = await createClient();
+  const resolvedWarehouseId = warehouseId
+    ? await resolveWholesaleWarehouseId(orgSlug, warehouseId)
+    : undefined;
   const products = await fetchActiveProductsForOrg(supabase, org.id);
 
   if (!products.length) {
@@ -1606,7 +1602,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const [productSettings, stockTotals, productTaxes, categoryRules] =
     await Promise.all([
       fetchProductStockSettingsMap(supabase, org.id, productIds),
-      fetchStockTotals(supabase, org.id, productIds),
+      fetchStockTotals(supabase, org.id, productIds, resolvedWarehouseId),
       getProductTaxAssignments({
         supabase,
         orgId: org.id,
@@ -2818,7 +2814,8 @@ export async function getSalesOrderById(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: business logic involves several guarded steps
 export async function createPreSaleOrder(
-  input: CreatePreSaleOrderInput
+  input: CreatePreSaleOrderInput,
+  trustedExecution?: TrustedPreSaleExecution
 ): Promise<string> {
   const { orgSlug, customerId, sellerId, saleDate } = input;
 
@@ -2836,18 +2833,24 @@ export async function createPreSaleOrder(
     throw new Error("Agrega al menos un ítem a la preventa");
   }
 
-  const org = await getOrganizationBySlug(orgSlug);
+  const org = trustedExecution
+    ? { id: trustedExecution.organizationId }
+    : await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
 
-  const supabase = await createClient();
-  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
-  assertCanManageSales(accessContext);
-  const userId = await getCurrentUserId(supabase);
+  const supabase = trustedExecution?.supabase ?? (await createClient());
+  if (!trustedExecution) {
+    const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+    assertCanManageSales(accessContext);
+    const resolvedSellerId = sellerId || (await getCurrentUserId(supabase));
+    assertCanAssignSeller(accessContext, resolvedSellerId);
+  }
+  const userId =
+    trustedExecution?.actorId ?? (await getCurrentUserId(supabase));
   const resolvedSellerId = sellerId || userId;
-  assertCanAssignSeller(accessContext, resolvedSellerId);
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
@@ -2945,29 +2948,67 @@ export async function createPreSaleOrder(
     input.creditDays
   );
 
+  const warehouseId = trustedExecution
+    ? await getDefaultWarehouseId(supabase, org.id)
+    : await resolveWholesaleWarehouseId(
+        orgSlug,
+        input.warehouseId ?? undefined
+      );
+
+  const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] = {
+    organization_id: org.id,
+    warehouse_id: warehouseId,
+    customer_id: customerId,
+    user_id: resolvedSellerId as string,
+    sale_date: saleDate,
+    credit_days: input.creditDays ?? null,
+    expiration_date: dueDate,
+    invoice_type: invoiceType,
+    invoice_number: sanitizeText(input.invoiceNumber),
+    observations: sanitizeText(input.observations),
+    sub_total: subTotalAmount,
+    total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
+    global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+    global_discount_amount: globalDiscountAmount,
+    total_amount: totalAmount,
+    sales_price_list_id: input.salesPriceListId ?? null,
+    price_level_id: input.priceLevelId ?? null,
+    advance_payment_percentage: normalizedAdvancePercentage,
+    status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
+    created_by: userId,
+  };
+  if (trustedExecution?.prepareOnly) {
+    const saleOrderId = randomUUID();
+    trustedExecution.prepareOnly({
+      order: { ...orderValues, id: saleOrderId },
+      items: items.map((item) => ({
+        ...createPreSaleItemPayload(item, org.id, saleOrderId),
+        product_variant_id: item.productVariantId ?? null,
+      })),
+      itemTaxes: buildSalesOrderItemTaxesPayload({
+        orgId: org.id,
+        saleOrderId,
+        taxPlan,
+      }),
+      taxes: buildSalesOrderTaxesPayload({
+        orgId: org.id,
+        saleOrderId,
+        taxPlan,
+      }),
+    });
+    return saleOrderId;
+  }
   const { data: order, error: orderError } = await supabase
     .from("sales_orders")
-    .insert({
-      organization_id: org.id,
-      customer_id: customerId,
-      user_id: resolvedSellerId as string,
-      sale_date: saleDate,
-      credit_days: input.creditDays ?? null,
-      expiration_date: dueDate,
-      invoice_type: invoiceType,
-      invoice_number: sanitizeText(input.invoiceNumber),
-      observations: sanitizeText(input.observations),
-      sub_total: subTotalAmount,
-      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
-      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
-      global_discount_amount: globalDiscountAmount,
-      total_amount: totalAmount,
-      sales_price_list_id: input.salesPriceListId ?? null,
-      price_level_id: input.priceLevelId ?? null,
-      advance_payment_percentage: normalizedAdvancePercentage,
-      status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
-      created_by: userId,
-    })
+    .insert(
+      trustedExecution?.conversationId
+        ? ({
+            ...orderValues,
+            source: "WHATSAPP",
+            conversation_id: trustedExecution.conversationId,
+          } as never)
+        : orderValues
+    )
     .select("id")
     .maybeSingle();
 
@@ -3051,8 +3092,39 @@ export async function createPreSaleOrder(
   return saleOrderId;
 }
 
+/**
+ * Prepara importes, productos e impuestos con las mismas reglas del alta manual,
+ * sin persistir. Las herramientas de WhatsApp cotizan este resultado y lo
+ * convierten transaccionalmente sólo después de la confirmación de esa versión.
+ */
+export async function prepareWhatsAppPreSaleOrder(params: {
+  organizationId: string;
+  conversationId: string;
+  sellerId: string;
+  input: Omit<CreatePreSaleOrderInput, "sellerId">;
+}): Promise<PreparedWhatsAppPreSale> {
+  let prepared: PreparedWhatsAppPreSale | undefined;
+  await createPreSaleOrder(
+    { ...params.input, sellerId: params.sellerId },
+    {
+      supabase: createAdminClient() as unknown as SupabaseServerClient,
+      organizationId: params.organizationId,
+      actorId: params.sellerId,
+      conversationId: params.conversationId,
+      prepareOnly: (payload) => {
+        prepared = payload;
+      },
+    }
+  );
+  if (!prepared) {
+    throw new Error("No se pudo preparar la preventa");
+  }
+  return prepared;
+}
+
 type ProductStockMetadata = {
   id: string;
+  hasVariants: boolean;
   name: string;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
@@ -3142,14 +3214,34 @@ function resolveWeightRequirement(
   return Math.max(0, item.quantity);
 }
 
+async function getSaleWarehouseId(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<string> {
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select("warehouse_id")
+    .eq("organization_id", orgId)
+    .eq("id", saleId)
+    .single();
+  if (error || !data) {
+    throw new Error("No se pudo resolver el depósito de la venta");
+  }
+  return data.warehouse_id;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Stock allocation across lots requires several guarded branches
 async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   items: ConfirmSaleItemInput[];
   movementReason: string;
 }): Promise<StockAdjustmentContext> {
   const { supabase, orgId, items, movementReason } = params;
+  const warehouseId = await getSaleWarehouseId(supabase, orgId, params.saleId);
+  await assertWholesaleWarehouseForOrganization(supabase, orgId, warehouseId);
 
   const productIds = Array.from(
     new Set(
@@ -3170,15 +3262,18 @@ async function buildStockAdjustmentContext(params: {
   const [productsResult, lotsResult] = await Promise.all([
     supabase
       .from("products")
-      .select("id, name, unit_of_measure, tracks_stock_units, weight_per_unit")
+      .select(
+        "id, name, unit_of_measure, tracks_stock_units, weight_per_unit, has_variants"
+      )
       .eq("organization_id", orgId)
       .in("id", productIds),
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
+        "id, product_id, product_variant_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
       )
       .eq("organization_id", orgId)
+      .eq("warehouse_id", warehouseId)
       .in("product_id", productIds)
       .order("expiration_date", { ascending: true })
       .order("created_at", { ascending: true }),
@@ -3196,49 +3291,9 @@ async function buildStockAdjustmentContext(params: {
     );
   }
 
-  // --- Fetch variant lot mappings (for variant products) ---
-  const variantIds = items
-    .map((item) => item.productVariantId)
-    .filter((id): id is string => Boolean(id));
+  const products = productsResult.data ?? [];
 
-  const variantLotMap = new Map<string, string>();
-  if (variantIds.length > 0) {
-    const { data: variantData, error: variantError } = await supabase
-      .from("product_variants")
-      .select("id, lot_id")
-      .eq("organization_id", orgId)
-      .in("id", variantIds);
-
-    if (variantError) {
-      throw new Error(`Error obteniendo variantes: ${variantError.message}`);
-    }
-
-    for (const v of variantData ?? []) {
-      if (v.id && v.lot_id) {
-        variantLotMap.set(v.id, v.lot_id);
-      }
-    }
-  }
-
-  const products =
-    (productsResult.data as Array<{
-      id?: string | null;
-      name?: string | null;
-      unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"];
-      tracks_stock_units?: boolean | null;
-      weight_per_unit?: number | null;
-    }>) ?? [];
-
-  const lots =
-    (lotsResult.data as Array<{
-      id?: string | null;
-      product_id?: string | null;
-      quantity_available?: number | null;
-      unit_quantity_available?: number | null;
-      lot_number?: string | null;
-      expiration_date?: string | null;
-      created_at?: string | null;
-    }>) ?? [];
+  const lots = lotsResult.data ?? [];
 
   const productsById = new Map<string, ProductStockMetadata>();
 
@@ -3249,6 +3304,7 @@ async function buildStockAdjustmentContext(params: {
 
     productsById.set(product.id, {
       id: product.id,
+      hasVariants: product.has_variants,
       name: product.name ?? "Producto sin nombre",
       unitOfMeasure:
         (product.unit_of_measure as SaleProduct["unitOfMeasure"]) || "UN",
@@ -3264,10 +3320,6 @@ async function buildStockAdjustmentContext(params: {
   }
 
   const lotsByProduct = new Map<string, typeof lots>();
-  const totalsByProduct = new Map<
-    string,
-    { totalQuantity: number; totalUnits: number | null }
-  >();
 
   for (const lot of lots) {
     if (!lot.product_id) {
@@ -3277,27 +3329,11 @@ async function buildStockAdjustmentContext(params: {
     const lotList = lotsByProduct.get(lot.product_id) ?? [];
     lotList.push(lot);
     lotsByProduct.set(lot.product_id, lotList);
-
-    const currentTotals = totalsByProduct.get(lot.product_id) ?? {
-      totalQuantity: 0,
-      totalUnits: null as number | null,
-    };
-
-    const nextTotalUnits =
-      currentTotals.totalUnits !== null || lot.unit_quantity_available !== null
-        ? (currentTotals.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
-        : null;
-
-    totalsByProduct.set(lot.product_id, {
-      totalQuantity:
-        currentTotals.totalQuantity + (lot.quantity_available ?? 0),
-      totalUnits: nextTotalUnits,
-    });
   }
 
   const lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][] =
     [];
-  const rollbackLotUpdates: Database["public"]["Tables"]["product_lots"]["Update"][] =
+  const rollbackLotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][] =
     [];
   const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
     [];
@@ -3314,103 +3350,30 @@ async function buildStockAdjustmentContext(params: {
     if (!product) {
       throw new Error("Producto no encontrado para descontar stock.");
     }
-
-    // ============= PRODUCTOS CON VARIANTES =============
-    if (item.productVariantId) {
-      const variantLotId = variantLotMap.get(item.productVariantId);
-      if (!variantLotId) {
-        throw new Error(
-          `No se encontró el lote de la variante para ${product.name}.`
-        );
-      }
-
-      const variantLot = lots.find((l) => l.id === variantLotId);
-      if (!variantLot) {
-        throw new Error(
-          `No hay lote de stock para la variante de ${product.name}.`
-        );
-      }
-
-      const weightUnit = isWeightOrVolumeUnit(product.unitOfMeasure);
-      const variantTotals = {
-        totalQuantity: variantLot.quantity_available ?? 0,
-        totalUnits: variantLot.unit_quantity_available ?? null,
-      };
-      const requiredBase = weightUnit
-        ? resolveWeightRequirement(item, product, variantTotals)
-        : item.quantity;
-
-      if (requiredBase > variantTotals.totalQuantity) {
-        throw new Error(
-          `No hay stock suficiente para la variante de ${product.name}. Disponible: ${variantTotals.totalQuantity}`
-        );
-      }
-
-      const availableQuantity = Math.max(0, variantLot.quantity_available ?? 0);
-      const baseToConsume = Math.min(availableQuantity, requiredBase);
-
-      if (baseToConsume <= 0) {
-        throw new Error(
-          `No se pudo asignar stock para la variante de ${product.name}.`
-        );
-      }
-
-      const lotId = variantLot.id;
-      if (!lotId) {
-        throw new Error(
-          `El lote de la variante de ${product.name} no tiene ID.`
-        );
-      }
-
-      if (!rollbackSnapshotByLot.has(lotId)) {
-        rollbackSnapshotByLot.add(lotId);
-        rollbackLotUpdates.push({
-          id: lotId,
-          organization_id: orgId,
-          product_id: variantLot.product_id as string,
-          lot_number: variantLot.lot_number ?? "DEFAULT",
-          expiration_date: variantLot.expiration_date,
-          quantity_available: availableQuantity,
-          ...(variantLot.unit_quantity_available !== null
-            ? { unit_quantity_available: variantLot.unit_quantity_available }
-            : {}),
-          updated_at: timestamp,
-        });
-      }
-
-      const nextQuantity = Math.max(0, availableQuantity - baseToConsume);
-
-      lotUpdates.push({
-        id: lotId,
-        organization_id: orgId,
-        product_id: variantLot.product_id as string,
-        lot_number: variantLot.lot_number ?? "DEFAULT",
-        expiration_date: variantLot.expiration_date,
-        quantity_available: nextQuantity,
-        updated_at: timestamp,
-      });
-
-      movementPayloads.push({
-        organization_id: orgId,
-        lot_id: lotId,
-        type: "OUTBOUND",
-        quantity: baseToConsume,
-        previous_stock: availableQuantity,
-        new_stock: nextQuantity,
-        reason: movementReason,
-      });
-
-      continue;
+    if (product.hasVariants !== Boolean(item.productVariantId)) {
+      throw new Error(
+        `Seleccioná la variante correspondiente de ${product.name}`
+      );
     }
 
-    // ============= PRODUCTOS SIN VARIANTES (FIFO existente) =============
-    const productLots = [...(lotsByProduct.get(item.productId) ?? [])].sort(
-      compareLotsForFifo
+    const productLots = (lotsByProduct.get(item.productId) ?? [])
+      .filter(
+        (lot) => lot.product_variant_id === (item.productVariantId ?? null)
+      )
+      .sort(compareLotsForFifo);
+    const totals = productLots.reduce(
+      (acc, lot) => ({
+        totalQuantity: acc.totalQuantity + lot.quantity_available,
+        totalUnits:
+          acc.totalUnits !== null || lot.unit_quantity_available !== null
+            ? (acc.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
+            : null,
+      }),
+      {
+        totalQuantity: 0,
+        totalUnits: null as number | null,
+      }
     );
-    const totals = totalsByProduct.get(item.productId) ?? {
-      totalQuantity: 0,
-      totalUnits: null as number | null,
-    };
 
     if (!productLots.length || totals.totalQuantity <= 0) {
       throw new Error(`No hay stock disponible para ${product.name}.`);
@@ -3483,6 +3446,7 @@ async function buildStockAdjustmentContext(params: {
         rollbackLotUpdates.push({
           id: lotId,
           organization_id: orgId,
+          warehouse_id: lot.warehouse_id,
           product_id: lotProductId as string,
           lot_number: lotNumber,
           expiration_date: expirationDate,
@@ -3500,9 +3464,16 @@ async function buildStockAdjustmentContext(params: {
           ? Math.max(0, (lot.unit_quantity_available ?? 0) - unitsToConsume)
           : null;
 
+      // Keep subsequent lines from allocating the same pre-deduction balance.
+      lot.quantity_available = nextQuantity;
+      if (nextUnits !== null) {
+        lot.unit_quantity_available = nextUnits;
+      }
+
       lotUpdates.push({
         id: lotId,
         organization_id: orgId,
+        warehouse_id: lot.warehouse_id,
         product_id: lotProductId as string,
         lot_number: lotNumber,
         expiration_date: expirationDate,
@@ -3514,6 +3485,7 @@ async function buildStockAdjustmentContext(params: {
       movementPayloads.push({
         organization_id: orgId,
         lot_id: lotId,
+        warehouse_id: lot.warehouse_id,
         type: "OUTBOUND",
         quantity: baseToConsume,
         previous_stock: availableQuantity,
@@ -3535,10 +3507,10 @@ async function buildStockAdjustmentContext(params: {
   }
 
   return {
-    lotUpdates,
+    lotUpdates: [...new Map(lotUpdates.map((lot) => [lot.id, lot])).values()],
     rollbackLotUpdates,
     movementPayloads,
-  } as StockAdjustmentContext;
+  };
 }
 
 async function getSaleReasonMetadata(
@@ -3730,6 +3702,7 @@ export async function confirmIncompleteSaleWithStockDeduction(
     movementContext = await buildStockAdjustmentContext({
       supabase,
       orgId,
+      saleId,
       items,
       movementReason,
     });
@@ -3844,6 +3817,7 @@ type StockMovementRow = {
   lot_id: string | null;
   quantity: number | null;
   unit_quantity: number | null;
+  reentry_source_lot_id?: string | null;
 };
 
 type NetLot = { quantity: number; unit_quantity: number | null };
@@ -3874,15 +3848,16 @@ function subtractPreviousReingresos(
   reingresos: StockMovementRow[]
 ): void {
   for (const m of reingresos) {
-    if (!m.lot_id) {
+    const sourceLotId = m.reentry_source_lot_id ?? m.lot_id;
+    if (!sourceLotId) {
       continue;
     }
-    const current = netByLot.get(m.lot_id);
+    const current = netByLot.get(sourceLotId);
     if (!current) {
       continue;
     }
     const uq = m.unit_quantity != null ? Math.abs(m.unit_quantity) : null;
-    netByLot.set(m.lot_id, {
+    netByLot.set(sourceLotId, {
       quantity: current.quantity - (m.quantity ?? 0),
       unit_quantity:
         uq != null && current.unit_quantity != null
@@ -3913,6 +3888,7 @@ type RestockPayloads = {
 
 type LotRow = {
   id: string | null;
+  warehouse_id: string;
   product_id: string | null;
   lot_number: string | null;
   expiration_date: string | null;
@@ -3936,7 +3912,7 @@ function buildSingleLotRestock(
   net: NetLot,
   ctx: RestockContext
 ): LotRestockEntry | null {
-  if (!(lot.id && lot.product_id && lot.lot_number && lot.expiration_date)) {
+  if (!(lot.id && lot.product_id && lot.lot_number)) {
     return null;
   }
   const previousStock = lot.quantity_available ?? 0;
@@ -3951,6 +3927,7 @@ function buildSingleLotRestock(
     lotUpdate: {
       id: lot.id,
       organization_id: ctx.orgId,
+      warehouse_id: lot.warehouse_id,
       product_id: lot.product_id,
       lot_number: lot.lot_number,
       expiration_date: lot.expiration_date,
@@ -3963,6 +3940,7 @@ function buildSingleLotRestock(
     movement: {
       organization_id: ctx.orgId,
       lot_id: lot.id,
+      warehouse_id: lot.warehouse_id,
       type: "INBOUND",
       quantity: net.quantity,
       previous_stock: previousStock,
@@ -4007,8 +3985,9 @@ function buildRestockPayloads(
 async function restockFromSale(
   supabase: SupabaseServerClient,
   orgId: string,
-  saleId: string
-) {
+  saleId: string,
+  allowDefaultFallback = false
+): Promise<string[]> {
   const saleReason = await getSaleReasonMetadata(supabase, orgId, saleId);
 
   const reingresReason = formatSaleMovementReason({
@@ -4019,46 +3998,33 @@ async function restockFromSale(
     prefix: "Reingreso ",
   });
 
-  const [outboundsResult, inboundsResult] = await Promise.all([
-    supabase
-      .from("stock_movements")
-      .select("lot_id, quantity, unit_quantity")
-      .eq("organization_id", orgId)
-      .eq("type", "OUTBOUND")
-      .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]),
-    supabase
-      .from("stock_movements")
-      .select("lot_id, quantity, unit_quantity")
-      .eq("organization_id", orgId)
-      .eq("type", "INBOUND")
-      .eq("reason", reingresReason),
-  ]);
-
-  if (outboundsResult.error) {
-    throw new Error(
-      `No se pudieron obtener los movimientos de la venta para reingresar stock: ${outboundsResult.error.message}`
-    );
-  }
-
-  const outbounds = outboundsResult.data ?? [];
+  const ledger = await getSaleStockOriginLedger({
+    supabase,
+    orgId,
+    saleId,
+    saleNumber: saleReason.saleNumber,
+    invoiceNumber: saleReason.invoiceNumber,
+    reentryReason: reingresReason,
+  });
+  const outbounds = ledger.outgoing;
   if (!outbounds.length) {
-    return;
+    return [];
   }
 
-  const netByLot = buildNetByLot(outbounds, inboundsResult.data ?? []);
+  const netByLot = buildNetByLot(outbounds, ledger.inbound);
 
   const activeLotIds = Array.from(netByLot.entries())
     .filter(([, net]) => net.quantity > 0)
     .map(([lotId]) => lotId);
 
   if (!activeLotIds.length) {
-    return;
+    return [];
   }
 
   const { data: lots, error: lotsError } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
+      "id, product_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
     .in("id", activeLotIds);
@@ -4068,34 +4034,37 @@ async function restockFromSale(
       `No se pudieron obtener los lotes para reingresar stock: ${lotsError.message}`
     );
   }
+  if (lots?.length !== activeLotIds.length) {
+    throw new Error("No se encontró un lote original para el reingreso");
+  }
 
-  const { lotUpdates, movements } = buildRestockPayloads(lots ?? [], netByLot, {
+  const { movements } = buildRestockPayloads(lots ?? [], netByLot, {
     orgId,
     reingresReason,
     timestamp: new Date().toISOString(),
   });
 
-  if (lotUpdates.length) {
-    const { error: updateError } = await supabase
-      .from("product_lots")
-      .upsert(lotUpdates);
-    if (updateError) {
-      throw new Error(
-        `No se pudo reingresar el stock de la venta: ${updateError.message}`
-      );
-    }
-  }
-
-  if (movements.length) {
-    const { error: movementInsertError } = await supabase
-      .from("stock_movements")
-      .insert(movements);
-    if (movementInsertError) {
-      throw new Error(
-        `No se pudo registrar el reingreso de stock: ${movementInsertError.message}`
-      );
-    }
-  }
+  const operationId = createHash("sha256")
+    .update(
+      outbounds
+        .map((movement) => movement.id)
+        .sort()
+        .join(":")
+    )
+    .digest("hex")
+    .slice(0, 32);
+  return applyStockReentries({
+    supabase,
+    orgId,
+    allowDefaultFallback,
+    entries: movements.map((movement) => ({
+      sourceLotId: movement.lot_id,
+      quantity: movement.quantity,
+      unitQuantity: movement.unit_quantity,
+      reason: reingresReason,
+      operationKey: `sale-reentry:${saleId}:${operationId}:${movement.lot_id}`,
+    })),
+  });
 }
 
 export async function validateStockBeforeSaleConfirmation(
@@ -4127,6 +4096,11 @@ export async function validateStockBeforeSaleConfirmation(
       "Solo las preventas en borrador o incompletas pueden confirmarse"
     );
   }
+  await assertWholesaleWarehouseForOrganization(
+    supabase,
+    org.id,
+    await getSaleWarehouseId(supabase, org.id, input.saleId)
+  );
 
   // An incomplete sale has already had its stock deducted. An ARCA-authorized
   // preventa uses its persisted lines rather than the editable form payload.
@@ -4176,6 +4150,7 @@ export async function validateStockBeforeSaleConfirmation(
   await buildStockAdjustmentContext({
     supabase,
     orgId: org.id,
+    saleId: input.saleId,
     items,
     movementReason: "Validación de stock antes de confirmar venta",
   });
@@ -4218,7 +4193,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage, warehouse_id"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4235,6 +4210,11 @@ export async function confirmSaleOrder(
   }
 
   assertCanManageSale(accessContext, existingSale.user_id ?? null);
+  await assertWholesaleWarehouseForOrganization(
+    supabase,
+    org.id,
+    existingSale.warehouse_id
+  );
 
   if (
     input.commercialExchangeRate !== undefined &&
@@ -4366,6 +4346,7 @@ export async function confirmSaleOrder(
     ? await buildStockAdjustmentContext({
         supabase,
         orgId: org.id,
+        saleId,
         items,
         movementReason: saleMovementReason,
       })
@@ -4736,7 +4717,8 @@ async function assertAuthorizedPreventaCanBeCancelled(params: {
 
 export async function cancelSaleOrder(
   orgSlug: string,
-  saleId: string
+  saleId: string,
+  allowDefaultFallback = false
 ): Promise<{
   status: Database["public"]["Enums"]["order_status"];
   wasUpdated: boolean;
@@ -4795,9 +4777,9 @@ export async function cancelSaleOrder(
     sale.status === "DISPATCH" ||
     sale.status === "DELIVERED";
 
-  if (shouldRestock) {
-    await restockFromSale(supabase, org.id, saleId);
-  }
+  const reentryIds = shouldRestock
+    ? await restockFromSale(supabase, org.id, saleId, allowDefaultFallback)
+    : [];
 
   const { error: updateError } = await supabase
     .from("sales_orders")
@@ -4809,6 +4791,11 @@ export async function cancelSaleOrder(
     .eq("organization_id", org.id);
 
   if (updateError) {
+    await undoStockReentries({
+      supabase,
+      orgId: org.id,
+      movementIds: reentryIds,
+    });
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
   }
 
@@ -5012,12 +4999,13 @@ async function validateSaleForUpdate(
   invoiceType: Database["public"]["Enums"]["invoice_type"] | null;
   customerId: string | null;
   userId: string | null;
+  warehouseId: string | null;
   advancePaymentPercentage: number | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status, advance_payment_percentage, document_type"
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, warehouse_id, arca_status, advance_payment_percentage, document_type"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -5080,11 +5068,46 @@ async function validateSaleForUpdate(
         : null,
     userId:
       typeof existingSale.user_id === "string" ? existingSale.user_id : null,
+    warehouseId:
+      typeof existingSale.warehouse_id === "string"
+        ? existingSale.warehouse_id
+        : null,
     advancePaymentPercentage:
       typeof existingSale.advance_payment_percentage === "number"
         ? existingSale.advance_payment_percentage
         : null,
   };
+}
+
+function resolveSaleWarehouseUpdate(
+  orgSlug: string,
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  requestedWarehouseId: string | undefined
+): Promise<string | undefined> | undefined {
+  const params = {
+    status: existingSale.status,
+    currentWarehouseId: existingSale.warehouseId,
+    requestedWarehouseId,
+  };
+  if (!shouldUpdateSaleWarehouse(params)) {
+    return;
+  }
+  return resolveWholesaleWarehouseId(orgSlug, params.requestedWarehouseId);
+}
+
+async function applySaleWarehouseUpdate(
+  orgSlug: string,
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  input: UpdateSaleOrderInput
+): Promise<void> {
+  if (input.warehouseId === undefined) {
+    return;
+  }
+  input.warehouseId = await resolveSaleWarehouseUpdate(
+    orgSlug,
+    existingSale,
+    input.warehouseId
+  );
 }
 
 function buildSaleUpdateData(
@@ -5135,6 +5158,9 @@ function buildSaleUpdateData(
   }
   if (input.priceLevelId !== undefined) {
     updateData.price_level_id = input.priceLevelId;
+  }
+  if (input.warehouseId !== undefined) {
+    updateData.warehouse_id = input.warehouseId;
   }
 
   return updateData;
@@ -5648,6 +5674,7 @@ async function resolveSaleStockImpactContext(params: {
 async function applySaleStockUpdate(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   items: ConfirmSaleItemInput[];
   movementReason: string;
 }): Promise<{
@@ -5657,6 +5684,7 @@ async function applySaleStockUpdate(params: {
   const stockContext = await buildStockAdjustmentContext({
     supabase: params.supabase,
     orgId: params.orgId,
+    saleId: params.saleId,
     items: params.items ?? [],
     movementReason: params.movementReason,
   });
@@ -5672,6 +5700,7 @@ async function applySaleStockUpdate(params: {
 async function restorePreviousStockAfterEditFailure(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   items: ConfirmSaleItemInput[];
   movementReason: string;
 }): Promise<void> {
@@ -5679,6 +5708,7 @@ async function restorePreviousStockAfterEditFailure(params: {
     const rollbackContext = await buildStockAdjustmentContext({
       supabase: params.supabase,
       orgId: params.orgId,
+      saleId: params.saleId,
       items: params.items ?? [],
       movementReason: params.movementReason,
     });
@@ -5736,6 +5766,7 @@ async function updateSaleStockIfNeeded(params: {
     const { stockContext, appliedMovementIds } = await applySaleStockUpdate({
       supabase: params.supabase,
       orgId: params.orgId,
+      saleId: params.saleId,
       items: impactContext.newStockItems,
       movementReason: impactContext.movementReason,
     });
@@ -5753,6 +5784,7 @@ async function updateSaleStockIfNeeded(params: {
       await restorePreviousStockAfterEditFailure({
         supabase: params.supabase,
         orgId: params.orgId,
+        saleId: params.saleId,
         items: impactContext.previousStockItems,
         movementReason: impactContext.previousMovementReason,
       });
@@ -6202,6 +6234,15 @@ async function createInformalAdvanceDocument(params: {
   dueDate: string;
   currency?: string;
 }): Promise<void> {
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.parentSaleId
+    )
+  ) {
+    return;
+  }
   const advanceAmount = truncateMoney(params.amount);
   if (advanceAmount <= 0) {
     return;
@@ -6211,6 +6252,11 @@ async function createInformalAdvanceDocument(params: {
     .from("sales_orders")
     .insert({
       organization_id: params.orgId,
+      warehouse_id: await getSaleWarehouseId(
+        params.supabase,
+        params.orgId,
+        params.parentSaleId
+      ),
       customer_id: params.customerId,
       user_id: params.userId,
       sale_date: new Date().toISOString().slice(0, 10),
@@ -6361,6 +6407,15 @@ async function syncInformalAdvanceReceivable(params: {
   currency: string;
   createdBy: string | null;
 }): Promise<void> {
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.saleId
+    )
+  ) {
+    return;
+  }
   const advanceAmount =
     params.advancePercentage && params.advancePercentage > 0
       ? truncateMoney((params.totalAmount * params.advancePercentage) / 100)
@@ -6659,6 +6714,16 @@ async function updateReceivableForDispatchedSale(params: {
   currency?: string;
   advancePaymentPercentage?: number;
 }): Promise<void> {
+  // Fiscal documents own the debt in this mode; notes keep operational debt.
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.saleId
+    )
+  ) {
+    return;
+  }
   const dueDate = computeReceivableDueDateFromDispatch(
     params.dispatchedAt,
     params.creditDays
@@ -6713,6 +6778,17 @@ async function updateReceivableForSaleUpdate(params: {
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
 }): Promise<void> {
+  // Preserve fiscal debt and its adjustments; notes keep their usual sync.
+  // SQL applies the same exception to atomic updates.
+  if (
+    await requiresFiscalInvoiceForSaleDebt(
+      params.supabase,
+      params.orgId,
+      params.saleId
+    )
+  ) {
+    return;
+  }
   const context = resolveReceivableUpdateContext({
     input: params.input,
     updatedSale: params.updatedSale,
@@ -6745,6 +6821,7 @@ async function updateReceivableForSaleUpdate(params: {
 async function rollbackSaleUpdateStock(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  saleId: string;
   state: SaleStockUpdateState;
 }): Promise<void> {
   if (params.state.stockNeedsRollback && params.state.stockContext) {
@@ -6761,6 +6838,7 @@ async function rollbackSaleUpdateStock(params: {
       const rollbackContext = await buildStockAdjustmentContext({
         supabase: params.supabase,
         orgId: params.orgId,
+        saleId: params.saleId,
         items: params.state.previousStockItems ?? [],
         movementReason: params.state.previousMovementReason,
       });
@@ -6918,6 +6996,7 @@ export async function updateSaleOrder(
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
+  await applySaleWarehouseUpdate(orgSlug, existingSale, input);
   await assertEditedItemsIncludeExtras(supabase, org.id, saleId, input.items);
   assertNoAuthorizedSaleFiscalChanges(existingSale, input);
   if (
@@ -7004,6 +7083,7 @@ export async function updateSaleOrder(
     await rollbackSaleUpdateStock({
       supabase,
       orgId: org.id,
+      saleId,
       state: stockState,
     });
 

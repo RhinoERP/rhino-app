@@ -41,7 +41,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { createChequeEmitidoAction } from "@/modules/treasury/actions/checks.action";
 import { useCuentasBancarias } from "@/modules/treasury/queries/queries.client";
 import { BulkSupplierPaymentPreview } from "./bulk-supplier-payment-preview";
 
@@ -258,42 +257,12 @@ export function BulkSupplierPaymentDialog({
 
       return response.json();
     },
-    onSuccess: (result, variables) => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["payables"] });
       queryClient.invalidateQueries({ queryKey: ["collections"] });
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
       queryClient.invalidateQueries({ queryKey: ["accounts-payable"] });
       queryClient.invalidateQueries({ queryKey: ["supplier-credit-balance"] });
-
-      // Fire-and-forget issued check if paid by cheque/e-cheq
-      if (
-        (variables.paymentMethod === "cheque" ||
-          variables.paymentMethod === "e-cheq") &&
-        variables.chequeCuentaBancariaId &&
-        variables.chequeNumero
-      ) {
-        createChequeEmitidoAction(orgSlug, {
-          cuentaBancariaId: variables.chequeCuentaBancariaId,
-          numeroCheque: variables.chequeNumero,
-          importe: String(variables.totalAmount),
-          fechaEmision:
-            variables.chequeFechaEmision ??
-            new Date().toISOString().split("T")[0] ??
-            "",
-          fechaDebito:
-            variables.chequeFechaDebito ??
-            new Date().toISOString().split("T")[0] ??
-            "",
-          beneficiario: variables.chequeBeneficiario || selectedSupplierName,
-          beneficiarioId: variables.supplierId,
-          tipo: variables.paymentMethod === "e-cheq" ? "ECH" : "CDF",
-        }).catch((err: unknown) => {
-          console.error(
-            "No se pudo registrar cheque emitido en Tesorería:",
-            err
-          );
-        });
-      }
 
       const creditMessage =
         result.creditBalance > 0

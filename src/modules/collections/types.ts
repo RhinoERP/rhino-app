@@ -39,6 +39,8 @@ export type ReceivableAccount = {
     id: string;
     name: string;
   } | null;
+  /** Current suppliers of products in this sale; may contain several. */
+  suppliers?: Array<{ id: string; name: string }>;
   sale?: {
     invoice_number?: string | null;
     sale_date?: string | null;
@@ -152,6 +154,7 @@ export type BulkPaymentResult =
       error: string;
       code?:
         | "invalid_amount"
+        | "invalid_payment_method"
         | "no_pending_accounts"
         | "customer_not_found"
         | "organization_not_found"
@@ -179,6 +182,7 @@ export type ReceivablesPaginatedParams = {
   customerId?: string;
   customerIds?: string[];
   sellerIds?: string[];
+  supplierIds?: string[];
   statusFilter?: string[];
 };
 
@@ -236,6 +240,14 @@ export type RegisterPaymentInput = {
     fechaEmision: string;
     fechaDebito: string;
     beneficiario: string;
+    notas?: string;
+  };
+  receivedCheckData?: {
+    bancoEmisor: string;
+    numeroCheque: string;
+    fechaEmision: string;
+    fechaVencimiento: string;
+    librador?: string;
     notas?: string;
   };
 };

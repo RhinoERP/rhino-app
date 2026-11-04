@@ -5,6 +5,7 @@ import { useEffect, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { BankSelect } from "@/components/treasury/bank-select";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -147,7 +148,10 @@ export function ReceivedCheckFormDialog({
                   <FormItem>
                     <FormLabel>Banco emisor</FormLabel>
                     <FormControl>
-                      <Input placeholder="Banco BBVA" {...field} />
+                      <BankSelect
+                        onChange={field.onChange}
+                        value={field.value}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

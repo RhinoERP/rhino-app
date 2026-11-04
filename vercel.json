@@ -1,8 +1,22 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
+    {
+      "path": "/api/internal/whatsapp-agent/audio-cleanup",
+      "schedule": "0 * * * *"
+    },
     {
       "path": "/api/cron/ia-comercial-resumen",
       "schedule": "30 11 * * 1-6"
     }
-  ]
+  ],
+  "daemons": {
+    "whatsapp-agent": {
+      "root": "services/whatsapp-agent",
+      "entrypoint": "Dockerfile",
+      "instances": { "iad1": 0 },
+      "resources": { "requests": { "memory": "1Gi" } },
+      "terminationGracePeriodSeconds": 120
+    }
+  }
 }

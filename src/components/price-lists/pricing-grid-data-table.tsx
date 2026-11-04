@@ -39,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { truncateMoney } from "@/lib/decimal";
 import {
   updateDirectMarginAction,
   updateDirectSalePriceAction,
@@ -46,6 +47,11 @@ import {
   updateWholesalePriceAction,
 } from "@/modules/inventory/actions/pricing-grid.actions";
 import type { ProductPricingItem } from "@/modules/inventory/types";
+import {
+  calculateMarginFromCostAndPrice,
+  calculateSalePriceFromCostAndMargin,
+  roundMargin,
+} from "@/modules/inventory/utils/price-calculations";
 import {
   applySalesPriceListAdjustment,
   createColumns,
@@ -63,6 +69,17 @@ type PricingGridDataTableProps = {
   mode: "wholesale" | "direct";
   categories: Array<{ id: string; name: string }>;
 };
+
+async function requireSuccessfulPricingUpdate(
+  operation: Promise<{ success: boolean; error?: string }>,
+  fallbackError: string
+): Promise<{ success: true }> {
+  const result = await operation;
+  if (!result.success) {
+    throw new Error(result.error || fallbackError);
+  }
+  return { success: true };
+}
 
 const ACTIVE_FILTER = [
   { id: "is_active", value: ["active"] },
@@ -261,7 +278,11 @@ export function PricingGridDataTable({
     }: {
       productId: string;
       newPrice: number;
-    }) => updateWholesalePriceAction(orgSlug, productId, newPrice),
+    }) =>
+      requireSuccessfulPricingUpdate(
+        updateWholesalePriceAction(orgSlug, productId, newPrice),
+        "No se pudo actualizar el precio"
+      ),
     onMutate: async ({ productId, newPrice }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
@@ -272,10 +293,13 @@ export function PricingGridDataTable({
           }
           const costPrice = item.cost_price;
           if (costPrice != null && costPrice > 0) {
-            const newMargin = (newPrice / costPrice - 1) * 100;
+            const newMargin = calculateMarginFromCostAndPrice(
+              costPrice,
+              truncateMoney(newPrice)
+            );
             return {
               ...item,
-              calculated_sale_price: newPrice,
+              calculated_sale_price: truncateMoney(newPrice),
               profit_margin: newMargin,
             };
           }
@@ -284,11 +308,11 @@ export function PricingGridDataTable({
       );
       return { previous };
     },
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
-      toast.error("Error al actualizar el precio");
+      toast.error(error.message || "Error al actualizar el precio");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
@@ -302,7 +326,11 @@ export function PricingGridDataTable({
     }: {
       productId: string;
       newMargin: number;
-    }) => updateWholesaleMarginAction(orgSlug, productId, newMargin),
+    }) =>
+      requireSuccessfulPricingUpdate(
+        updateWholesaleMarginAction(orgSlug, productId, newMargin),
+        "No se pudo actualizar el margen"
+      ),
     onMutate: async ({ productId, newMargin }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
@@ -313,11 +341,15 @@ export function PricingGridDataTable({
           }
           const costPrice = item.cost_price;
           if (costPrice != null && costPrice > 0) {
-            const newPrice = costPrice * (1 + newMargin / 100);
+            const persistedMargin = roundMargin(newMargin);
+            const newPrice = calculateSalePriceFromCostAndMargin(
+              costPrice,
+              persistedMargin
+            );
             return {
               ...item,
               calculated_sale_price: newPrice,
-              profit_margin: newMargin,
+              profit_margin: persistedMargin,
             };
           }
           return item;
@@ -325,11 +357,11 @@ export function PricingGridDataTable({
       );
       return { previous };
     },
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
-      toast.error("Error al actualizar el margen");
+      toast.error(error.message || "Error al actualizar el margen");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
@@ -343,7 +375,11 @@ export function PricingGridDataTable({
     }: {
       productId: string;
       price: number | null;
-    }) => updateDirectSalePriceAction(orgSlug, productId, price),
+    }) =>
+      requireSuccessfulPricingUpdate(
+        updateDirectSalePriceAction(orgSlug, productId, price),
+        "No se pudo actualizar el precio"
+      ),
     onMutate: async ({ productId, price }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
@@ -356,11 +392,11 @@ export function PricingGridDataTable({
       );
       return { previous };
     },
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
-      toast.error("Error al actualizar el precio");
+      toast.error(error.message || "Error al actualizar el precio");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
@@ -374,7 +410,11 @@ export function PricingGridDataTable({
     }: {
       productId: string;
       newMargin: number;
-    }) => updateDirectMarginAction(orgSlug, productId, newMargin),
+    }) =>
+      requireSuccessfulPricingUpdate(
+        updateDirectMarginAction(orgSlug, productId, newMargin),
+        "No se pudo actualizar el margen"
+      ),
     onMutate: async ({ productId, newMargin }) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
@@ -385,7 +425,10 @@ export function PricingGridDataTable({
           }
           const costPrice = item.cost_price;
           if (costPrice != null && costPrice > 0) {
-            const newPrice = costPrice * (1 + newMargin / 100);
+            const newPrice = calculateSalePriceFromCostAndMargin(
+              costPrice,
+              roundMargin(newMargin)
+            );
             return { ...item, direct_sale_price: newPrice };
           }
           return item;
@@ -393,11 +436,11 @@ export function PricingGridDataTable({
       );
       return { previous };
     },
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
-      toast.error("Error al actualizar el margen");
+      toast.error(error.message || "Error al actualizar el margen");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });

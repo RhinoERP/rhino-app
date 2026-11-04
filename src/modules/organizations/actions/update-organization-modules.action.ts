@@ -14,6 +14,8 @@ const organizationModulesSchema = z.object({
   salesAdvancesEnabled: z.boolean(),
   commissionsEnabled: z.boolean(),
   routeSheetsEnabled: z.boolean(),
+  whatsappEnabled: z.boolean(),
+  whatsappSandboxEnabled: z.boolean(),
   supplierDifferentiatedCredits: z.boolean(),
   remittanceMaskPrintingEnabled: z.boolean(),
 });
@@ -66,6 +68,8 @@ export async function updateOrganizationModulesAction(
       sales_advances_enabled: parsedInput.data.salesAdvancesEnabled,
       commissions_enabled: parsedInput.data.commissionsEnabled,
       route_sheets_enabled: parsedInput.data.routeSheetsEnabled,
+      whatsapp_enabled: parsedInput.data.whatsappEnabled,
+      whatsapp_sandbox_enabled: parsedInput.data.whatsappSandboxEnabled,
       supplier_differentiated_credits:
         parsedInput.data.supplierDifferentiatedCredits,
     } as never)
@@ -120,7 +124,7 @@ export async function updateOrganizationModulesAction(
   revalidatePath("/admin");
   if (orgSlug) {
     revalidatePath(`/admin/organizacion/${orgSlug}`);
-    revalidatePath(`/org/${orgSlug}`);
+    revalidatePath(`/org/${orgSlug}`, "layout");
     revalidatePath(`/org/${orgSlug}/ventas`);
     revalidatePath(`/org/${orgSlug}/venta-directa`);
     revalidatePath(`/org/${orgSlug}/produccion`);

@@ -8,6 +8,8 @@ export type Organization =
   Database["public"]["Tables"]["organizations"]["Row"] & {
     sales_advances_enabled?: boolean;
     route_sheets_enabled?: boolean;
+    whatsapp_enabled?: boolean;
+    whatsapp_sandbox_enabled?: boolean;
   };
 export type SalesDefaultPaymentMethod = PosPaymentMethod;
 export type SalesDefaultInvoiceType = InvoiceType;

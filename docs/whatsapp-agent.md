@@ -2,6 +2,11 @@
 
 > Guía de arquitectura y backlog para el agregado de ventas conversacionales de Rhinos. Define el MVP de tesis y funciona como referencia de implementación.
 
+La incorporación de notas de voz en WhatsApp y el sandbox está definida en el
+[plan de implementación de audios](whatsapp-audio-plan.md), pendiente de ejecución.
+Incluye trabajos separados de transcripción y conversación, roles de workers y
+pruebas de escalabilidad y recuperación para la tesis.
+
 ## Objetivo y límites
 
 Permitir que un cliente de cada organización consulte productos, precios y disponibilidad por WhatsApp, arme un pedido conversacional y genere una **preventa supervisada**. El equipo comercial conserva el control: puede tomar una conversación, responder desde Rhinos y confirmar la venta mediante los flujos existentes.
@@ -17,7 +22,7 @@ El MVP incluye consultas comerciales, carrito, cotización, preventa y derivaci�
 | Repositorio | Un único repositorio: este. Los servicios se despliegan de manera independiente. |
 | Canal | Meta Cloud API. Cada `phone_number_id` corresponde a una organización activa. |
 | Rhinos | Next desplegado en Vercel: panel, APIs internas y webhook. |
-| Worker | `services/whatsapp-agent`, servicio Node persistente desplegado en Railway. |
+| Worker | `services/whatsapp-agent`, servicio Node persistente desplegado en Vercel Daemons (Railway como alternativa). |
 | Datos | El proyecto Supabase actual es la fuente de verdad comercial y conversacional. |
 | Aislamiento | El número receptor resuelve la organización; el modelo nunca elige ni recibe un `organization_id` arbitrario. |
 | Operaciones | El agente usa herramientas comerciales de Rhinos; no tiene SQL libre ni acceso administrativo general a Supabase. |
@@ -28,7 +33,7 @@ flowchart LR
   M --> W[Webhook Rhinos / Next]
   W --> S[(Supabase)]
   W --> J[agent_jobs]
-  J --> A[Worker whatsapp-agent\nRailway]
+  J --> A[Worker whatsapp-agent\nVercel Daemons]
   A --> T[API/MCP interna de Rhinos]
   T --> S
   A -->|respuesta saliente| M
@@ -51,18 +56,83 @@ Incorporar `src/modules/whatsapp` y rutas bajo `/org/[orgSlug]/whatsapp`.
 
 El webhook verifica la firma, deduplica, persiste el mensaje, encola un trabajo durable y responde `200`. Si no existe una integración activa para el número, no encola automatización.
 
+La configuración permite establecer días y franjas semanales, zona horaria y un rango de demora aleatoria (0–120 minutos). Si un mensaje llega fuera de horario, el trabajo queda en la cola hasta la próxima apertura; el agente vuelve a comprobar el horario antes de procesarlo. La instrucción compartida con el simulador y el worker prohíbe el uso de emojis.
+
 ### Worker `services/whatsapp-agent`
 
 El worker reclama trabajos pendientes, obtiene el contexto autorizado y opera el asistente:
 
 1. Reclama un trabajo de forma exclusiva.
-2. Lee conversación, últimos mensajes, carrito y configuración permitida.
-3. Ejecuta el modelo y sus herramientas comerciales.
-4. Registra la ejecución y cada llamada de herramienta.
-5. Envía la respuesta por Meta o deriva a atención manual.
-6. Termina el trabajo o programa un reintento transitorio.
+2. Consulta el horario y la demora configurados; si corresponde, difiere el trabajo en la cola durable.
+3. Lee conversación, últimos mensajes, carrito y configuración permitida.
+4. Ejecuta el modelo y sus herramientas comerciales.
+5. Registra la ejecución y cada llamada de herramienta.
+6. Envía la respuesta por Meta o deriva a atención manual.
+7. Termina el trabajo o programa un reintento transitorio.
 
 No procesa conversaciones en atención manual, pausadas ni asociadas a una integración inactiva.
+
+### Orientación comercial y objeciones
+
+El simulador y el worker comparten las mismas instrucciones comerciales. El
+agente usa la necesidad, el uso y el presupuesto ya expresados; pregunta un solo
+dato cuando cambia la recomendación y ofrece hasta dos opciones con diferencias
+respaldadas por el catálogo y las ofertas actuales. Una lista de marcas no
+reemplaza una recomendación. No afirma equivalencia, rendimiento ni popularidad
+sin datos, ni compara precios de presentaciones o monedas incompatibles.
+
+Ante una marca faltante busca por categoría; ante una objeción de precio busca
+una alternativa comparable más económica. Después del primer rechazo comercial
+puede realizar una única propuesta argumentada. Una enumeración previa no cuenta
+como ese intento. Si el cliente vuelve a rechazar, pide terminar o no existe una
+alternativa pertinente con disponibilidad verificada, cierra cordialmente. Un
+agradecimiento no reinicia la venta. Las recomendaciones no autorizan iniciar ni
+modificar un carrito.
+
+Un no a una pregunta de confirmación o descarte se resuelve con
+`cancel_pending_action`, sin aprovecharlo para insistir ni alterar el pedido.
+El filtro de alcance conserva respuestas breves sobre uso, presupuesto y
+objeciones dentro de la conversación comercial.
+
+Casos de revisión conversacional al cambiar estas instrucciones:
+
+- Consulta amplia: orientar con diferencias verificadas o una pregunta útil.
+- Producto concreto: responder directamente sin un cuestionario previo.
+- Marca faltante seguida de “No, no, gracias”: una alternativa argumentada.
+- “Es caro”: menor precio comprobado para una presentación comparable.
+- Segundo rechazo, cierre explícito o agradecimiento: ninguna nueva oferta.
+- Alternativas sin stock o disponibilidad desconocida: no prometer disponibilidad.
+- Rechazo de cotización o descarte: cancelar sólo la acción pendiente.
+- Tema ajeno después de una consulta comercial: conservar el límite de alcance.
+
+El estado comercial incluye las políticas de entrega y retiro y el criterio
+comercial editables en Configuración. Se acompañan de fecha y hora locales para
+orientar sobre reparto sin confundirlo con el horario del bot. La logística
+pendiente de validación no interrumpe una compra, salvo que el cliente la haya
+puesto como condición para avanzar. El simulador consulta las políticas vigentes
+de la misma organización sin cambiar sus datos ni su circuito de preventas reales.
+
+`get_offer` expone presentación, piezas por caja, piezas disponibles y cantidad
+aproximada por pieza: usa la referencia del producto o, si hay control de piezas,
+el promedio de los lotes actuales. `upsert_cart_item.quantity_kind` distingue
+`SALE_UNIT` (kilos, litros o unidades de venta) y `PIECE` (piezas físicas). La
+conversión se calcula en el servidor y se conserva en el snapshot del carrito.
+La preventa mantiene las piezas y el peso separados cuando el producto controla
+ambos, identifica los valores estimados y conserva la cantidad pedida en su
+descripción. Un cambio de referencia exige actualizar y cotizar nuevamente.
+
+`get_recommendations` consulta todos los productos activos que coincidan con la
+búsqueda, ordenados por cantidad de pedidos confirmados distintos en los últimos
+90 días. También puede buscar compras conjuntas con un producto. Excluye
+borradores, cancelaciones, fechas futuras y simulaciones; devuelve sólo opciones
+con stock verificado y no expone datos de clientes ni acredita segmentos como
+“distribuidores”. Se complementa con descripciones del catálogo y el criterio
+comercial validado por el equipo. Requiere la migración del 30 de octubre.
+
+El cierre exitoso se compone en el servidor a partir del carrito convertido por
+el mensaje actual: comunica la reconfirmación comercial y la coordinación de
+retiro o envío. Un fallo de creación no puede usar ese cierre. En atención humana
+se conservan los controles de reactivación para el operador fuera del chat.
 
 ### Flujo de preventa
 
@@ -86,6 +156,7 @@ La autenticación representa una integración de sistema. Toda operación valida
 | `find_customer_by_phone` | Buscar o reconocer al cliente de la organización. |
 | `search_catalog` | Buscar productos comercializables por nombre, SKU o categoría. |
 | `get_offer` | Consultar precio, lista aplicable y disponibilidad. |
+| `get_recommendations` | Consultar frecuencia de pedidos confirmados o compras conjuntas, con ofertas y stock actuales. |
 | `get_cart` / `upsert_cart_item` | Leer y actualizar el carrito persistente. |
 | `quote_cart` | Recalcular los totales con reglas comerciales vigentes. |
 | `create_pre_sale` | Crear una preventa sólo después de confirmación explícita. |
@@ -126,12 +197,47 @@ Restricciones e índices mínimos:
 | Ruta | Contenido |
 | --- | --- |
 | `/org/[orgSlug]/whatsapp/conversaciones` | Inbox, filtros, historial, carrito, preventa y respuesta manual. |
+| `/org/[orgSlug]/whatsapp/simulador` | Sandbox con clientes, catálogo, precios y stock reales; sin enviar mensajes a Meta. |
 | `/org/[orgSlug]/whatsapp/metricas` | Conversaciones, respuesta, preventas, conversión, abandono, derivaciones, intervención humana, productos y faltantes. |
 | `/org/[orgSlug]/whatsapp/configuracion` | Meta, lista de precios, vendedor, horario, activación y reglas de derivación. |
+
+El sandbox usa el mismo ciclo del modelo y herramientas comerciales del worker
+(`services/whatsapp-agent/src/agent-core.ts`). Consulta datos reales de la empresa,
+guarda conversaciones y carritos de prueba y puede crear **preventas reales en
+borrador** tras confirmación explícita y con permiso `sales.manage`. No factura,
+no reserva stock y nunca envía mensajes a Meta. Requiere `OPENAI_API_KEY` en
+Vercel; no requiere Railway ni credenciales de Meta.
+
+Superadmin controla dos flags independientes en
+`/admin/organizacion/[orgSlug]` → Configuración de Módulos:
+`whatsapp_enabled` y `whatsapp_sandbox_enabled`. Ambos son `false` por defecto
+para empresas existentes y nuevas. Los permisos de usuario siguen siendo
+necesarios después de habilitar un módulo. La navegación, rutas, acciones,
+herramientas internas, RLS, ingesta y reclamo de trabajos respetan el opt-in.
+Los jobs pendientes de una empresa deshabilitada dejan de reclamarse y pueden
+reanudar cuando se habilita nuevamente; los webhooks recibidos mientras está
+apagada se ignoran. El envío vuelve a comprobar la habilitación tras ejecutar el
+modelo; un envío ya aceptado por Meta no se puede retirar.
+
+Para el procedimiento de publicación, variables por servicio, migraciones,
+pruebas y reversión, ver [Deploy de WhatsApp](whatsapp-deploy.md).
 
 Los permisos del módulo distinguen lectura de inbox, atención de conversaciones, administración de configuración y lectura de métricas.
 
 ## Backlog
+
+### Estado actual — 26 de octubre de 2026
+
+| Fase | Estado | Alcance disponible en código |
+| --- | --- | --- |
+| 1 — Fundación | Parcialmente completada | Esquema, RLS, permisos y configuración de número, lista, responsable, horarios semanales, zona horaria, demora aleatoria y derivación. Flags de disponibilidad configurables desde superadmin. Las credenciales de Meta todavía son variables globales del servicio; no hay provisionamiento de secretos por integración. |
+| 2 — Canal y trazabilidad | Implementada, pendiente de despliegue | Webhook firmado, persistencia idempotente, cola durable, reintentos, estados de entrega y worker. Requiere aplicar migraciones y configurar Meta y el daemon de Vercel. |
+| 3 — Asistente comercial | En curso | Worker con Responses API, herramientas comerciales acotadas, carrito persistente, cotización, confirmación explícita, preventa idempotente y auditoría. Falta una prueba end-to-end contra Meta y el proveedor de modelo. |
+| 4 — Operación humana | En curso | Inbox inicial, respuesta manual, derivación y pausa/reactivación explícita. Faltan asignación, alertas y vista detallada de historial. |
+| 5 — Métricas y tesis | Pendiente | Sin dashboard ni protocolo comparativo implementados. |
+
+La integración debe conservarse inactiva hasta que estén configuradas sus
+credenciales de producción y se complete una prueba real de punta a punta.
 
 ### Fase 1 — Fundación
 
@@ -145,7 +251,7 @@ Los permisos del módulo distinguen lectura de inbox, atención de conversacione
 
 - Implementar verificación y recepción del webhook de Meta Cloud API.
 - Persistir mensajes de forma idempotente y crear trabajos durables.
-- Crear el worker Railway con reclamación, reintentos y registro de errores.
+- Crear el worker en Vercel Daemons con reclamación, reintentos y registro de errores.
 - Implementar mensajes salientes y estado de entrega.
 
 **Salida:** cada mensaje queda trazado y se procesa una sola vez aunque Meta lo reintente.
@@ -211,3 +317,51 @@ Comparar flujo manual y asistido por período, organización y canal:
 - Costo medio de procesamiento por conversación.
 
 La evaluación debe diferenciar automatización total de asistencia supervisada: el objetivo del MVP es reducir carga operativa sin eliminar la revisión comercial humana.
+
+## Ciclo de pedidos recurrentes
+
+Una conversación es permanente para la pareja integración/teléfono. Puede tener
+muchos carritos históricos y preventas; sólo uno queda pendiente. Confirmar una
+preventa convierte su carrito, sin cerrar ni vaciar el chat. Un saludo, un
+agradecimiento y el paso del tiempo no crean ni abandonan pedidos.
+
+| Decisión | Comportamiento |
+| --- | --- |
+| Consulta informativa | Lee catálogo/precio/stock sin crear carrito. |
+| Compra nueva | Abre un carrito nuevo; un sí repetido no inicia otra compra. |
+| Pedido pendiente | Se conserva; al volver otro día con intención ambigua, pregunta si lo retoma o empieza otro. |
+| Cambios antes de confirmar | Actualiza o quita productos e invalida la cotización. |
+| Descartar o reemplazar | Pregunta, guarda la acción pendiente y exige confirmación posterior. |
+| Confirmar compra | Valida la versión y el mensaje donde se presentó la cotización; recalcula precio, disponibilidad e impuestos. Si cambia, vuelve a preguntar. |
+| Consultar pedido anterior | Lee preventas del mismo chat; presenta una selección si hay ambigüedad. |
+| Repetir compra | Copia productos/cantidades, revisa condiciones actuales y pregunta por diferencias o faltantes antes de una cotización nueva. No sustituye productos. |
+| Cambiar o cancelar preventa creada | Deriva a una persona sin modificarla. |
+| Atención humana | Sigue pausada hasta la reactivación manual; descarta autorizaciones antiguas, conservando datos. |
+
+`get_commercial_state` entrega el carrito pendiente, su versión, última preventa,
+acción pendiente y mensaje de origen. Worker y sandbox usan el mismo motor y los
+últimos 32 mensajes en orden cronológico. El agente puede paginar mensajes y
+pedidos anteriores de ese chat, sin perfiles de preferencias ni acceso a otra
+integración (incluido otro sandbox).
+
+El modelo evalúa el alcance comercial con el mensaje completo y el historial;
+no hay una lista fija de palabras o productos que bloquee consultas antes de
+interpretarlas. Al cambiar de producto conserva el pedido pendiente, busca las
+nuevas opciones y pregunta sólo por datos faltantes. Si un mensaje combina una
+elección con otra consulta, atiende ambas. Un sí a una selección de producto no
+confirma una preventa: esa confirmación requiere una cotización y su acción
+pendiente vigente. Las consultas ajenas al negocio reciben la redirección
+comercial indicada en el prompt; también pasan por el modelo.
+
+Las mutaciones reciben carrito/versión y mensaje de origen. Una RPC bloquea la
+conversación, valida que el mensaje siga vigente y aplica cada transición. La
+conversión inserta cabecera, productos, impuestos y vínculos en una transacción;
+el índice único por carrito devuelve la misma preventa completa ante reintentos.
+Los cálculos fiscales reutilizan el servicio comercial de preventas, sin cobrar,
+facturar ni reservar stock.
+
+Las preguntas de confirmación se generan en el servidor con el total calculado
+y se vinculan al mensaje saliente realmente registrado. Un sí para descartar no
+puede confirmar una compra. Una modificación condicionada nunca cuenta como sí.
+La bandeja muestra el carrito pendiente y las preventas vinculadas; el sandbox
+permite varias compras sin Reiniciar y ofrece reactivación manual del bot.

@@ -11,12 +11,15 @@ export async function handleRequestProxy(request: NextRequest) {
     (request.method === "GET" || request.method === "POST");
   const isWhatsAppTool =
     request.method === "POST" && WHATSAPP_TOOL_PATH.test(pathname);
+  const isWhatsAppAudioCleanup =
+    request.method === "GET" &&
+    pathname === "/api/internal/whatsapp-agent/audio-cleanup";
   // Vercel Cron se autentica con CRON_SECRET dentro de cada ruta.
   const isCron = request.method === "GET" && CRON_PATH.test(pathname);
 
-  // These handlers authenticate Meta, the worker or Vercel Cron themselves.
-  // None has a browser session, so redirecting them to login breaks them.
-  if (isWhatsAppWebhook || isWhatsAppTool || isCron) {
+  // These handlers authenticate Meta, the worker or the cron themselves. No caller
+  // has a browser session, so redirecting them to login prevents integration.
+  if (isWhatsAppWebhook || isWhatsAppTool || isWhatsAppAudioCleanup || isCron) {
     return NextResponse.next({ request });
   }
 

@@ -10,6 +10,36 @@ const baseInput = {
 };
 
 describe("whatsappIntegrationConfigurationSchema", () => {
+  it("preserva reglas existentes y valida las nuevas políticas comerciales", () => {
+    const result = whatsappIntegrationConfigurationSchema.parse({
+      ...baseInput,
+      status: "DRAFT",
+      salesPriceListId: null,
+      responsibleUserId: null,
+      commercialRules: {
+        legacyRule: true,
+        deliveryPolicy: " Reparto los martes. ",
+      },
+    });
+    expect(result.commercialRules).toEqual({
+      legacyRule: true,
+      deliveryPolicy: "Reparto los martes.",
+      pickupPolicy: "",
+      salesGuidance: "",
+    });
+  });
+
+  it("rechaza políticas demasiado largas antes de guardar la configuración", () => {
+    const result = whatsappIntegrationConfigurationSchema.safeParse({
+      ...baseInput,
+      status: "DRAFT",
+      salesPriceListId: null,
+      responsibleUserId: null,
+      commercialRules: { deliveryPolicy: "x".repeat(4001) },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("permite guardar una configuración inicial en borrador", () => {
     const result = whatsappIntegrationConfigurationSchema.safeParse({
       ...baseInput,

@@ -32,6 +32,38 @@ export function convertPriceToQuoteCurrency(
   return price;
 }
 
+/** Ajusta un precio ya cotizado sin volver a tomar el precio del catálogo. */
+export function revalueQuotedPriceForRate({
+  price,
+  productCurrency,
+  quoteCurrency,
+  previousRate,
+  newRate,
+}: {
+  price: number;
+  productCurrency: string | null | undefined;
+  quoteCurrency: string;
+  previousRate: number | null | undefined;
+  newRate: number | null | undefined;
+}): number {
+  if (!(previousRate && previousRate > 0 && newRate && newRate > 0)) {
+    return price;
+  }
+  if (productCurrency === "ARS" && quoteCurrency === "USD") {
+    return truncateToDecimals(
+      (price * previousRate) / newRate,
+      CONVERSION_PRECISION
+    );
+  }
+  if (productCurrency === "USD" && quoteCurrency === "ARS") {
+    return truncateToDecimals(
+      (price / previousRate) * newRate,
+      CONVERSION_PRECISION
+    );
+  }
+  return price;
+}
+
 /**
  * Indica si hace falta un tipo de cambio válido para mostrar/agregar un
  * producto de otra moneda en un presupuesto.

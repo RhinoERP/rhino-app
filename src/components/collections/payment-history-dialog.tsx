@@ -39,6 +39,7 @@ import {
   getPaymentHistoryAction,
   type PaymentHistoryEntry,
 } from "@/modules/collections/actions/get-payment-history.action";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import { RegisterPaymentDialog } from "./register-payment-dialog";
 
 type PaymentHistoryDialogProps = {
@@ -297,36 +298,44 @@ export function PaymentHistoryDialog({
                         Recibo
                       </Button>
                     ) : null}
-                    <RegisterPaymentDialog
-                      accountId={accountId}
-                      counterpartyId={counterpartyId}
-                      counterpartyName={counterpartyName}
-                      currency={currency}
-                      dueDate={dueDate}
-                      existingPayment={payment}
-                      onCompleted={() => {
-                        setError(null);
-                        setPayments(null);
-                      }}
-                      orgId={orgId}
-                      orgSlug={orgSlug}
-                      pendingBalance={pendingBalance ?? 0}
-                      totalAmount={totalAmount}
-                      trigger={
-                        <Button className="px-4" size="sm" variant="outline">
-                          Editar
+                    {isCheckPaymentMethod(payment.payment_method) ? null : (
+                      <>
+                        <RegisterPaymentDialog
+                          accountId={accountId}
+                          counterpartyId={counterpartyId}
+                          counterpartyName={counterpartyName}
+                          currency={currency}
+                          dueDate={dueDate}
+                          existingPayment={payment}
+                          onCompleted={() => {
+                            setError(null);
+                            setPayments(null);
+                          }}
+                          orgId={orgId}
+                          orgSlug={orgSlug}
+                          pendingBalance={pendingBalance ?? 0}
+                          totalAmount={totalAmount}
+                          trigger={
+                            <Button
+                              className="px-4"
+                              size="sm"
+                              variant="outline"
+                            >
+                              Editar
+                            </Button>
+                          }
+                          type={type}
+                        />
+                        <Button
+                          className="px-4"
+                          onClick={() => handleDeleteClick(payment)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <TrashIcon className="h-4 w-4" />
                         </Button>
-                      }
-                      type={type}
-                    />
-                    <Button
-                      className="px-4"
-                      onClick={() => handleDeleteClick(payment)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                    </Button>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="mt-1 text-muted-foreground text-xs">

@@ -6,7 +6,9 @@ export type OrganizationModule =
   | "production"
   | "accounting"
   | "commissions"
-  | "route_sheets";
+  | "route_sheets"
+  | "whatsapp"
+  | "whatsapp_sandbox";
 
 type OrganizationModuleFlags = Partial<
   Pick<
@@ -17,6 +19,8 @@ type OrganizationModuleFlags = Partial<
     | "accounting_enabled"
     | "commissions_enabled"
     | "route_sheets_enabled"
+    | "whatsapp_enabled"
+    | "whatsapp_sandbox_enabled"
   >
 >;
 
@@ -24,6 +28,14 @@ export function isOrganizationModuleEnabled(
   organization: OrganizationModuleFlags | null | undefined,
   module: OrganizationModule
 ): boolean {
+  // New WhatsApp capabilities fail closed, including missing layout data.
+  if (module === "whatsapp") {
+    return organization?.whatsapp_enabled === true;
+  }
+  if (module === "whatsapp_sandbox") {
+    return organization?.whatsapp_sandbox_enabled === true;
+  }
+
   if (!organization) {
     return true;
   }

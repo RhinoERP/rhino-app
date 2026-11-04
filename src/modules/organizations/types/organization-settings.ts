@@ -6,6 +6,7 @@ import { z } from "zod";
  * Existing settings (remittance_auto_enabled, etc.) remain in organizations.
  */
 export const organizationSettingsSchema = z.object({
+  invoice_backed_debt_enabled: z.boolean().default(false),
   accounting_integration_enabled: z.boolean().default(false),
   automatic_accounting_enabled: z.boolean().default(false),
   credit_note_accounting_modal_enabled: z.boolean().default(false),
@@ -96,6 +97,7 @@ export type OrganizationSettingsData = z.infer<
 >;
 
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
+  invoice_backed_debt_enabled: false,
   accounting_integration_enabled: false,
   automatic_accounting_enabled: false,
   credit_note_accounting_modal_enabled: false,

@@ -392,12 +392,11 @@ export function createChequeRecibidoServer(
 
 export function rechazarChequeRecibidoServer(
   id: string,
-  orgId: string,
-  cuentaBancariaId: string
+  orgId: string
 ): Promise<ReceivedCheck> {
   return servicePut(
     `tesoreria/cheques/recibidos/${id}/rechazar?org_id=${encodeURIComponent(orgId)}`,
-    { cuentaBancariaId }
+    {}
   );
 }
 

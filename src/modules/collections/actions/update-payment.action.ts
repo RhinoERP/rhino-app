@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import {
   assertPaymentExchangeRate,
   resolvePaymentCurrencyFields,
@@ -128,7 +129,7 @@ async function fetchReceivablePayment(
   return await supabase
     .from("receivable_payments")
     .select(
-      "id, amount, currency, exchange_rate, account_receivable_id, organization_id"
+      "id, amount, currency, exchange_rate, account_receivable_id, organization_id, payment_method"
     )
     .eq("id", paymentId)
     .eq("organization_id", orgId)
@@ -276,6 +277,14 @@ async function handleReceivablePayment(
       success: false,
       error: "Pago no encontrado",
       code: "payment_not_found",
+    };
+  }
+
+  if (isCheckPaymentMethod(payment.payment_method)) {
+    return {
+      success: false,
+      error:
+        "Los cobros con cheque o e-cheq no se pueden editar. Gestioná el cheque desde Tesorería.",
     };
   }
 
@@ -575,6 +584,14 @@ export async function updatePaymentAction(
       success: false,
       error: "Organización no encontrada",
       code: "organization_not_found",
+    };
+  }
+
+  if (isCheckPaymentMethod(input.paymentMethod)) {
+    return {
+      success: false,
+      error:
+        "No se puede convertir un pago existente en cheque o e-cheq. Registrá una nueva operación.",
     };
   }
 

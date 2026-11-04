@@ -1623,6 +1623,7 @@ export type ReceivedCheck = {
   librador_id: string | null;
   notas: string | null;
   estado: ReceivedCheckEstado;
+  receivable_payment_id?: string | null;
   endorsement_payment_id?: string | null;
   endorsement_supplier_id?: string | null;
   endorsement_supplier_name?: string | null;
@@ -1648,6 +1649,9 @@ export type EndorseReceivedChecksForPayableInput = {
 export type EndorseReceivedChecksForPayableResult = {
   paymentId: string;
   paymentAmount: string;
+  paymentAmountArs: string;
+  currency: "ARS" | "USD";
+  exchangeRate: string | null;
   creditApplied: string;
   newPendingBalance: string;
   newStatus: "PENDING" | "PARTIAL" | "PAID";
@@ -1741,6 +1745,7 @@ export type CreateReceivedCheckInput = {
   librador?: string;
   libradorId?: string;
   notas?: string;
+  receivablePaymentId?: string;
 };
 
 export type CreateIssuedCheckInput = {
@@ -1766,6 +1771,7 @@ export type CreateCheckDepositSlipInput = {
   fecha: string;
   descripcion: string;
   checkIds: string[];
+  permitirAnticipado?: boolean;
 };
 
 export type CreateCashDepositSlipInput = {

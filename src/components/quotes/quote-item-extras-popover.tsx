@@ -19,13 +19,13 @@ export type QuoteItemExtra = {
 type QuoteItemExtrasPopoverProps = {
   extras: QuoteItemExtra[];
   onChange: (extras: QuoteItemExtra[]) => void;
-  currency?: string;
+  currency: string;
 };
 
 export function QuoteItemExtrasPopover({
   extras,
   onChange,
-  currency = "ARS",
+  currency,
 }: QuoteItemExtrasPopoverProps) {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
@@ -76,7 +76,7 @@ export function QuoteItemExtrasPopover({
               />
             </div>
             <div className="grid grid-cols-3 items-center gap-4">
-              <Label htmlFor="price">Precio Un.</Label>
+              <Label htmlFor="price">Precio Un. ({currency})</Label>
               <Input
                 className="col-span-2 h-8"
                 id="price"

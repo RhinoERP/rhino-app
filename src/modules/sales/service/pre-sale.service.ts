@@ -223,6 +223,26 @@ export async function deletePreSale(orgSlug: string, id: string) {
     .filter((receivableId): receivableId is string => Boolean(receivableId));
 
   if (receivableIds.length > 0) {
+    const { data: checkPayment, error: checkPaymentsError } = await supabase
+      .from("receivable_payments")
+      .select("id")
+      .eq("organization_id", org.id)
+      .in("account_receivable_id", receivableIds)
+      .in("payment_method", ["cheque", "e-cheq"])
+      .limit(1)
+      .maybeSingle();
+
+    if (checkPaymentsError) {
+      throw new Error(
+        `No se pudieron validar los cobros de la preventa: ${checkPaymentsError.message}`
+      );
+    }
+    if (checkPayment) {
+      throw new Error(
+        "No se puede eliminar la preventa porque tiene un cobro con cheque o e-cheq. Gestioná el cheque desde Tesorería."
+      );
+    }
+
     const { error: deleteReceivablePaymentsError } = await supabase
       .from("receivable_payments")
       .delete()

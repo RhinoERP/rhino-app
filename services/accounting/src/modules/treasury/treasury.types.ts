@@ -74,6 +74,8 @@ export type CreateReceivedCheckInput = {
   librador?: string;
   libradorId?: string;
   notas?: string;
+  /** Cobranza (public.receivable_payments) que originó el cheque */
+  receivablePaymentId?: string;
   creadoPor?: string;
 };
 
@@ -99,6 +101,9 @@ export type EndorseReceivedChecksForPayableInput = {
 export type EndorseReceivedChecksForPayableResult = {
   paymentId: string;
   paymentAmount: string;
+  paymentAmountArs: string;
+  currency: "ARS" | "USD";
+  exchangeRate: string | null;
   creditApplied: string;
   newPendingBalance: string;
   newStatus: "PENDING" | "PARTIAL" | "PAID";
@@ -111,7 +116,6 @@ export type EndorseReceivedChecksForPayableResult = {
 };
 
 export type RejectReceivedCheckInput = {
-  cuentaBancariaId: string;
   /** account_code contrapartida: por defecto 'CHEQUES_RECHAZADOS', configurable */
   cuentaContrapartidaCode?: string;
   creadoPor?: string;
@@ -156,6 +160,7 @@ export type CreateCheckDepositSlipInput = {
   fecha: string;
   descripcion: string;
   checkIds: string[]; // received_check IDs to include
+  permitirAnticipado?: boolean;
   creadoPor?: string;
 };
 

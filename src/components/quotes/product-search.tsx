@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,7 @@ import {
   type SalePriceAdjustment,
 } from "@/modules/price-levels/service/price-calculator";
 import type { PriceLevel } from "@/modules/price-levels/types";
+import { getQuoteWarehouseAvailabilityAction } from "@/modules/quotes/actions/quote-warehouse.actions";
 import {
   convertPriceToQuoteCurrency,
   needsExchangeRate,
@@ -18,6 +20,8 @@ import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
 type ProductSearchProps = {
+  orgSlug: string;
+  warehouseId?: string;
   products: SaleProduct[];
   onSelectProduct: (product: SaleProduct, quantity?: number) => void;
   level?: PriceLevel | null;
@@ -60,6 +64,20 @@ const normalizeSearchValue = (value: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+
+function stockLabel(params: {
+  isError: boolean;
+  isFetching: boolean;
+  stock?: number;
+}): string {
+  if (params.isError) {
+    return "Stock no disponible";
+  }
+  if (params.isFetching) {
+    return "Consultando stock...";
+  }
+  return `Stock en depósito: ${params.stock ?? "—"}`;
+}
 
 function ProductMetaLine({
   product,
@@ -111,6 +129,8 @@ function CurrencyBadge({ currency }: { currency?: string }) {
 }
 
 export function ProductSearch({
+  orgSlug,
+  warehouseId,
   products,
   onSelectProduct,
   level,
@@ -148,6 +168,19 @@ export function ProductSearch({
       })
       .slice(0, 20);
   }, [products, searchTokens]);
+
+  const productIds = filteredProducts.map((product) => product.id);
+  const availability = useQuery({
+    queryKey: ["quote-stock", orgSlug, warehouseId, productIds],
+    queryFn: () =>
+      getQuoteWarehouseAvailabilityAction({
+        orgSlug,
+        warehouseId: warehouseId ?? "",
+        productIds,
+      }),
+    enabled: Boolean(warehouseId) && productIds.length > 0,
+    staleTime: 0,
+  });
 
   const handleStartAdd = (product: SaleProduct) => {
     setActivatingId(product.id);
@@ -204,6 +237,17 @@ export function ProductSearch({
                       product={product}
                       quoteCurrency={currency}
                     />
+                    {warehouseId && (
+                      <span className="text-muted-foreground text-xs">
+                        {stockLabel({
+                          isError: availability.isError,
+                          isFetching: availability.isFetching,
+                          stock: availability.data?.find(
+                            (row) => row.productId === product.id
+                          )?.totalStock,
+                        })}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">

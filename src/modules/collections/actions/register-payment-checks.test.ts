@@ -1,0 +1,515 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const createClient = vi.fn();
+const createChequeRecibidoServer = vi.fn();
+const createChequeEmitidoServer = vi.fn();
+const endorseReceivedChecksForPayableServer = vi.fn();
+const buildOrdenPago = vi.fn();
+const isAccountingIntegrationEnabled = vi.fn(async () => false);
+
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: (...args: unknown[]) => createClient(...args),
+}));
+vi.mock("@/lib/supabase/auth", () => ({ requireAuth: vi.fn() }));
+vi.mock("@/lib/accounting-client", () => ({
+  buildCobro: vi.fn(),
+  buildOrdenPago: (...args: unknown[]) => buildOrdenPago(...args),
+}));
+vi.mock("@/lib/accounting-server", () => ({
+  confirmAccountingEvent: vi.fn(),
+  createChequeEmitidoServer: (...args: unknown[]) =>
+    createChequeEmitidoServer(...args),
+  createChequeRecibidoServer: (...args: unknown[]) =>
+    createChequeRecibidoServer(...args),
+  endorseReceivedChecksForPayableServer: (...args: unknown[]) =>
+    endorseReceivedChecksForPayableServer(...args),
+  previewAccountingEvent: vi.fn(),
+}));
+vi.mock("@/modules/accounting/service/accounting-integration.service", () => ({
+  isAccountingIntegrationEnabled: () => isAccountingIntegrationEnabled(),
+}));
+vi.mock("@/modules/collections/service/collections.service", () => ({
+  deriveReceivableCreditSupplier: vi.fn(),
+}));
+vi.mock("@/modules/commissions/service/commissions-generation.service", () => ({
+  generateCommissions: vi.fn(),
+}));
+vi.mock("@/modules/organizations/service/module-access.service", () => ({
+  guardOrganizationPermissionAccess: vi.fn(),
+}));
+vi.mock("@/modules/organizations/service/org-settings.service", () => ({
+  getOrgSettings: vi.fn(async () => ({
+    automatic_accounting_enabled: false,
+  })),
+}));
+vi.mock("@/modules/organizations/service/organizations.service", () => ({
+  getOrganizationBySlug: vi.fn(async () => ({
+    id: "org-1",
+    supplier_differentiated_credits: false,
+    commissions_enabled: false,
+  })),
+}));
+
+const { registerPaymentAction } = await import("./register-payment.action");
+
+type QueryResult = { data: unknown; error: { message: string } | null };
+type Query = Record<string, unknown> & {
+  then: (
+    resolve: (value: QueryResult) => unknown,
+    reject?: (reason: unknown) => unknown
+  ) => Promise<unknown>;
+};
+
+function makeQuery(result: unknown): Query {
+  const query = {} as Query;
+  query.select = () => query;
+  query.eq = () => query;
+  query.gt = () => query;
+  query.order = () => query;
+  query.in = () => query;
+  query.update = () => query;
+  query.insert = () => query;
+  query.delete = () => query;
+  query.single = () => Promise.resolve({ data: result, error: null });
+  query.maybeSingle = () => Promise.resolve({ data: result, error: null });
+  // biome-ignore lint/suspicious/noThenProperty: fake Supabase query builders are awaitable.
+  Object.defineProperty(query, "then", {
+    value: (
+      resolve: (value: QueryResult) => unknown,
+      reject?: (reason: unknown) => unknown
+    ) => Promise.resolve({ data: result, error: null }).then(resolve, reject),
+  });
+  return query;
+}
+
+function makeCreditsQuery({
+  credits,
+  currentBalance,
+  updates,
+}: {
+  credits: Array<{ id: string; remaining_amount: number }>;
+  currentBalance: number;
+  updates: unknown[];
+}) {
+  const query = makeQuery(credits);
+  query.maybeSingle = () =>
+    Promise.resolve({
+      data: { remaining_amount: currentBalance },
+      error: null,
+    });
+  query.update = (values: unknown) => {
+    updates.push(values);
+    return query;
+  };
+  return query;
+}
+
+const receivedCheckData = {
+  bancoEmisor: "Banco",
+  numeroCheque: "123",
+  fechaEmision: "2026-01-01",
+  fechaVencimiento: "2026-02-01",
+};
+
+const issuedCheckData = {
+  cuentaBancariaId: "bank-1",
+  numeroCheque: "123",
+  fechaEmision: "2026-01-01",
+  fechaDebito: "2026-02-01",
+  beneficiario: "Proveedor",
+};
+
+const receivable = {
+  id: "ar-1",
+  organization_id: "org-1",
+  total_amount: 100,
+  pending_balance: 100,
+  status: "PENDING",
+  customer_id: "customer-1",
+  sales_order_id: null,
+  currency: "ARS",
+};
+
+const payable = {
+  id: "ap-1",
+  organization_id: "org-1",
+  total_amount: 100,
+  pending_balance: 100,
+  status: "PENDING",
+  supplier_id: "supplier-1",
+  purchase_order_id: null,
+  currency: "ARS",
+  exchange_rate: null,
+};
+
+const payment = {
+  id: "payment-1",
+  organization_id: "org-1",
+  account_receivable_id: "ar-1",
+  amount: 50,
+  payment_method: "cheque",
+  payment_date: "2026-01-01",
+  reference_number: null,
+};
+
+describe("nominal ARS de cheques aplicados a deudas USD", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    "cheque",
+    "e-cheq",
+  ] as const)("registra un %s recibido por el equivalente ARS sin cambiar el pago USD", async (paymentMethod) => {
+    const insertedPayments: unknown[] = [];
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery({
+          ...receivable,
+          sales_order_id: "sale-1",
+          currency: "USD",
+        });
+      }
+      if (table === "sales_orders") {
+        return makeQuery({ exchange_rate: 1200, arca_request_json: null });
+      }
+      if (table === "receivable_payments") {
+        return {
+          insert: (values: unknown) => {
+            insertedPayments.push(values);
+            return makeQuery({ ...payment, amount: 50 });
+          },
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ar-1",
+      amount: 50,
+      paymentMethod,
+      paymentDate: "2026-01-01",
+      receivedCheckData,
+      type: "receivable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(insertedPayments).toEqual([
+      expect.objectContaining({
+        amount: 50,
+        amount_ars: 60_000,
+        currency: "USD",
+        exchange_rate: 1200,
+      }),
+    ]);
+    expect(createChequeRecibidoServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importe: "60000.0000",
+        receivablePaymentId: "payment-1",
+        tipo: paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      })
+    );
+  });
+
+  it.each([
+    "cheque",
+    "e-cheq",
+  ] as const)("registra un %s propio por el equivalente ARS sin cambiar el pago USD", async (paymentMethod) => {
+    const insertedPayments: unknown[] = [];
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_payable") {
+        return makeQuery({
+          ...payable,
+          currency: "USD",
+          exchange_rate: 1200,
+        });
+      }
+      if (table === "payable_payments") {
+        return {
+          insert: (values: unknown) => {
+            insertedPayments.push(values);
+            return makeQuery({ ...payment, account_payable_id: "ap-1" });
+          },
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ap-1",
+      amount: 50,
+      paymentMethod,
+      paymentDate: "2026-01-01",
+      issuedCheckData,
+      type: "payable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(insertedPayments).toEqual([
+      expect.objectContaining({
+        amount: 50,
+        amount_ars: 60_000,
+        currency: "USD",
+        exchange_rate: 1200,
+      }),
+    ]);
+    expect(createChequeEmitidoServer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importe: "60000.0000",
+        referenciaPagoId: "payment-1",
+        tipo: paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      })
+    );
+  });
+
+  it("rechaza un cheque USD si la deuda no tiene cotización de factura", async () => {
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery({
+          ...receivable,
+          sales_order_id: "sale-1",
+          currency: "USD",
+        });
+      }
+      if (table === "sales_orders") {
+        return makeQuery({ exchange_rate: null, arca_request_json: null });
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ar-1",
+      amount: 50,
+      paymentMethod: "cheque",
+      paymentDate: "2026-01-01",
+      receivedCheckData,
+      type: "receivable",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: "exchange_rate_required",
+    });
+    expect(createChequeRecibidoServer).not.toHaveBeenCalled();
+  });
+
+  it("endosa cheques ARS a una deuda USD y contabiliza el valor en ARS", async () => {
+    const from = vi.fn(() =>
+      makeQuery({
+        ...payable,
+        currency: "USD",
+        exchange_rate: 1200,
+      })
+    );
+    createClient.mockResolvedValue({ from });
+    isAccountingIntegrationEnabled.mockResolvedValueOnce(true);
+    endorseReceivedChecksForPayableServer.mockResolvedValue({
+      paymentId: "payment-1",
+      paymentAmount: "50.0000",
+      paymentAmountArs: "60000.0000",
+      currency: "USD",
+      exchangeRate: "1200.0000",
+      newPendingBalance: "50.0000",
+      newStatus: "PARTIAL",
+      endorsedChecks: [{ numeroCheque: "123" }],
+    });
+    buildOrdenPago.mockReturnValue({ tipoEvento: "ORDEN_PAGO" });
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ap-1",
+      amount: 50,
+      paymentMethod: "cheque_endosado",
+      paymentDate: "2026-01-01",
+      receivedCheckIds: ["check-1"],
+      type: "payable",
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
+    expect(endorseReceivedChecksForPayableServer).toHaveBeenCalledWith(
+      expect.objectContaining({ receivedCheckIds: ["check-1"] })
+    );
+    expect(buildOrdenPago).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 60_000 }),
+      expect.anything(),
+      expect.objectContaining({
+        bancoAccountCode: "VALORES_A_DEPOSITAR",
+        moneda: "USD",
+        tipoCambio: "1200.0000",
+        montoUSD: "50.0000",
+      })
+    );
+    expect(from).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("rollback de créditos al fallar el cheque", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("restaura los créditos del cliente si no se puede registrar el cheque", async () => {
+    const creditUpdates: unknown[] = [];
+    const creditQuery = makeCreditsQuery({
+      credits: [{ id: "credit-1", remaining_amount: 50 }],
+      currentBalance: 0,
+      updates: creditUpdates,
+    });
+    const insertPayment = makeQuery(payment);
+    const deletePayment = makeQuery({ id: "payment-1" });
+    const insertApplications = makeQuery(null);
+    const deleteApplications = makeQuery(null);
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery(receivable);
+      }
+      if (table === "customer_credits") {
+        return creditQuery;
+      }
+      if (table === "customer_credit_applications") {
+        return {
+          insert: () => insertApplications,
+          delete: () => deleteApplications,
+        };
+      }
+      if (table === "receivable_payments") {
+        return {
+          insert: () => insertPayment,
+          delete: () => deletePayment,
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+    createChequeRecibidoServer.mockRejectedValue(new Error("boom"));
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ar-1",
+      amount: 50,
+      creditAmount: 50,
+      paymentMethod: "cheque",
+      paymentDate: "2026-01-01",
+      receivedCheckData,
+      type: "receivable",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "No se pudo registrar el cheque recibido: boom",
+    });
+    expect(creditUpdates).toEqual([
+      { remaining_amount: 0 },
+      { remaining_amount: 50 },
+    ]);
+  });
+
+  it("no restaura créditos si el pago no pudo eliminarse", async () => {
+    const creditUpdates: unknown[] = [];
+    const creditQuery = makeCreditsQuery({
+      credits: [{ id: "credit-1", remaining_amount: 50 }],
+      currentBalance: 0,
+      updates: creditUpdates,
+    });
+    const insertPayment = makeQuery(payment);
+    const deletePayment = makeQuery(null);
+    const insertApplications = makeQuery(null);
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_receivable") {
+        return makeQuery(receivable);
+      }
+      if (table === "customer_credits") {
+        return creditQuery;
+      }
+      if (table === "customer_credit_applications") {
+        return {
+          insert: () => insertApplications,
+          delete: () => makeQuery(null),
+        };
+      }
+      if (table === "receivable_payments") {
+        return {
+          insert: () => insertPayment,
+          delete: () => deletePayment,
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+    createChequeRecibidoServer.mockRejectedValue(new Error("boom"));
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ar-1",
+      amount: 50,
+      creditAmount: 50,
+      paymentMethod: "cheque",
+      paymentDate: "2026-01-01",
+      receivedCheckData,
+      type: "receivable",
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect((result as { error: string }).error).toContain("revisión manual");
+    expect(creditUpdates).toEqual([{ remaining_amount: 0 }]);
+  });
+
+  it("restaura los créditos del proveedor si no se puede registrar el cheque", async () => {
+    const creditUpdates: unknown[] = [];
+    const creditQuery = makeCreditsQuery({
+      credits: [{ id: "supplier-credit-1", remaining_amount: 50 }],
+      currentBalance: 0,
+      updates: creditUpdates,
+    });
+    const insertPayment = makeQuery({
+      ...payment,
+      account_receivable_id: null,
+      account_payable_id: "ap-1",
+    });
+    const deletePayment = makeQuery({ id: "payment-1" });
+    const from = vi.fn((table: string) => {
+      if (table === "accounts_payable") {
+        return makeQuery(payable);
+      }
+      if (table === "supplier_credits") {
+        return creditQuery;
+      }
+      if (table === "payable_payments") {
+        return {
+          insert: () => insertPayment,
+          delete: () => deletePayment,
+        };
+      }
+      throw new Error(`Unexpected query of ${table}`);
+    });
+    createClient.mockResolvedValue({ from });
+    createChequeEmitidoServer.mockRejectedValue(new Error("boom"));
+
+    const result = await registerPaymentAction({
+      orgSlug: "org",
+      accountId: "ap-1",
+      amount: 50,
+      creditAmount: 50,
+      paymentMethod: "cheque",
+      paymentDate: "2026-01-01",
+      issuedCheckData,
+      type: "payable",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "No se pudo registrar el cheque propio: boom",
+    });
+    expect(creditUpdates).toEqual([
+      { remaining_amount: 0 },
+      { remaining_amount: 50 },
+    ]);
+  });
+});

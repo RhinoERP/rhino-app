@@ -52,6 +52,7 @@ import type {
   PayableAccount,
   ReceivableAccount,
 } from "@/modules/collections/types";
+import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
 import { useCustomerCreditNotes } from "@/modules/credit-notes/hooks/use-credit-notes";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
@@ -556,32 +557,34 @@ function PaymentSubRow({
           ) : (
             <span className="text-muted-foreground text-xs">Sin factura</span>
           )}
-          <RegisterPaymentDialog
-            accountId={accountId}
-            counterpartyId={counterpartyId}
-            counterpartyName={counterpartyName}
-            currency={currency}
-            dueDate={dueDate}
-            existingPayment={{
-              id: payment.id,
-              amount: payment.amount,
-              payment_method: payment.payment_method,
-              payment_date: payment.payment_date,
-              reference_number: payment.reference_number,
-              notes: payment.notes,
-            }}
-            onCompleted={onEdited}
-            orgId={orgId}
-            orgSlug={orgSlug}
-            pendingBalance={pendingBalance}
-            totalAmount={totalAmount}
-            trigger={
-              <Button size="sm" type="button" variant="outline">
-                Editar
-              </Button>
-            }
-            type={type}
-          />
+          {isCheckPaymentMethod(payment.payment_method) ? null : (
+            <RegisterPaymentDialog
+              accountId={accountId}
+              counterpartyId={counterpartyId}
+              counterpartyName={counterpartyName}
+              currency={currency}
+              dueDate={dueDate}
+              existingPayment={{
+                id: payment.id,
+                amount: payment.amount,
+                payment_method: payment.payment_method,
+                payment_date: payment.payment_date,
+                reference_number: payment.reference_number,
+                notes: payment.notes,
+              }}
+              onCompleted={onEdited}
+              orgId={orgId}
+              orgSlug={orgSlug}
+              pendingBalance={pendingBalance}
+              totalAmount={totalAmount}
+              trigger={
+                <Button size="sm" type="button" variant="outline">
+                  Editar
+                </Button>
+              }
+              type={type}
+            />
+          )}
         </div>
       </TableCell>
     </TableRow>
