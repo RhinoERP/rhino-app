@@ -14,7 +14,7 @@ export async function handleRequestProxy(request: NextRequest) {
     request.method === "GET" &&
     pathname === "/api/internal/whatsapp-agent/audio-cleanup";
 
-  // These handlers authenticate Meta or the worker themselves. Neither caller
+  // These handlers authenticate Meta, the worker or the cron themselves. No caller
   // has a browser session, so redirecting them to login prevents integration.
   if (isWhatsAppWebhook || isWhatsAppTool || isWhatsAppAudioCleanup) {
     return NextResponse.next({ request });

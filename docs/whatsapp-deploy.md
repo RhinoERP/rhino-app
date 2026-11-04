@@ -56,6 +56,7 @@ El SQL usa una transacción e incluye, en orden:
    empresa `20261026000000_gate_whatsapp_modules.sql`.
 6. Pedidos recurrentes `20261027000000_whatsapp_recurring_orders.sql`: múltiples carritos y preventas por chat, una preventa por carrito, confirmaciones versionadas y conversión transaccional.
 7. Recomendaciones `20261030000000_whatsapp_product_recommendations.sql`: frecuencia de pedidos confirmados y compras conjuntas de los últimos 90 días, con ejecución exclusiva de servidor.
+8. Audios `20261103000000_whatsapp_audio_pipeline.sql`: almacenamiento privado, transcripción, cuotas, trabajos con lease y registro durable de envíos.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones
@@ -385,3 +386,40 @@ El sandbox no usa el daemon para responder; encenderlo no crea las columnas.
 El simulador comprueba el esquema antes de guardar una sesión o un mensaje.
 Si falta la actualización, informa que un administrador debe completar el
 despliegue y deja el detalle técnico en logs del servidor.
+
+## Actualización a audios
+
+1. Revisar las migraciones pendientes de recomendaciones y audios indicadas
+   arriba. En una instalación existente, aplicar únicamente las pendientes,
+   completas y en una transacción. Preparar el SQL antes de detener el worker.
+2. Si el daemon está activo, escalarlo a 0 y esperar su cierre antes de aplicar
+   la migración de audios: cambia el protocolo de reclamo y finalización de jobs.
+   El webhook puede seguir recibiendo mensajes durante la actualización.
+3. Desplegar la aplicación y la imagen nueva del worker. Para audios, configurar
+   `WHATSAPP_AUDIO_ENABLED=true` y la misma `OPENAI_API_KEY` existente. El modelo
+   se configura con `WHATSAPP_AGENT_TRANSCRIPTION_MODEL`; su valor por defecto
+   es `gpt-transcribe`. Los flags por organización nacen apagados.
+4. Para probar sólo sandbox, habilitar **Audios en este sandbox**, seleccionar
+   cliente y lista, grabar o adjuntar un audio de hasta 2 minutos y 4 MB y
+   comprobar transcripción y respuesta. Esto no requiere Meta ni daemon.
+5. Configurar `CRON_SECRET` en el servidor para autenticar la limpieza horaria
+   de archivos temporales declarada en `vercel.json`. La ruta verifica ese
+   secreto y no requiere una sesión de navegador.
+6. Antes de habilitar WhatsApp real, verificar el recorrido completo con el
+   número de prueba de Meta y los reintentos de descarga, transcripción y envío.
+   Activar expresamente `organizations.whatsapp_audio_enabled` para las
+   organizaciones elegidas y restaurar una instancia con la imagen nueva.
+
+El rol inicial del worker es `WHATSAPP_AGENT_WORKER_ROLE=all`, con concurrencia
+independiente para audio y procesamiento comercial, ambas inicialmente en 1.
+Los roles `transcription` y `commercial` permiten separar consumidores en
+deployments distintos sin cambiar el protocolo de jobs. Antes de aumentar
+instancias o concurrencia, validar exclusión por conversación, cuotas y
+recuperación de leases bajo carga. Un envío de resultado incierto queda en
+`UNKNOWN` para revisión operativa; no se reenvía automáticamente.
+
+Validación de la migración de audios en PostgreSQL descartable:
+`bash scripts/test-whatsapp-audio-db.sh`. La prueba aplica la migración dos veces
+y cubre deduplicación, dependencias audio/texto, exclusión y cuotas. El plan de
+evolución y los criterios completos de aceptación están en
+[el plan de audios](whatsapp-audio-plan.md).
