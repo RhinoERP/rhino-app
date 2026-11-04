@@ -461,7 +461,8 @@ export async function getCommercialAiSnapshot(
  */
 export async function getCommercialAiSnapshotForUser(
   organizationId: string,
-  userId: string
+  userId: string,
+  options: { ownPortfolioOnly?: boolean } = {}
 ): Promise<CommercialAiSnapshot | null> {
   const admin = createAdminClient();
   const resolved = await resolveCommercialAiAccessForUser(
@@ -472,7 +473,11 @@ export async function getCommercialAiSnapshotForUser(
   if (!resolved) {
     return null;
   }
-  return buildCommercialAiSnapshot(resolved.orgSlug, resolved.access, () =>
+  // Por WhatsApp un gerente ve solo su cartera salvo que tenga "toda la empresa".
+  const access: CommercialAiAccess = options.ownPortfolioOnly
+    ? { ...resolved.access, role: "vendedor" }
+    : resolved.access;
+  return buildCommercialAiSnapshot(resolved.orgSlug, access, () =>
     loadMembersWithAdmin(admin, organizationId)
   );
 }
@@ -549,7 +554,7 @@ async function loadSellerWhatsApp(
       .maybeSingle(),
     admin
       .from("commercial_ai_seller_phones")
-      .select("user_id, phone, daily_digest")
+      .select("user_id, phone, daily_digest, team_view")
       .eq("organization_id", access.organizationId),
   ]);
   return {
@@ -565,6 +570,7 @@ async function loadSellerWhatsApp(
         userId: row.user_id as string,
         phone: row.phone as string,
         dailyDigest: Boolean(row.daily_digest),
+        teamView: Boolean(row.team_view),
       })),
   };
 }

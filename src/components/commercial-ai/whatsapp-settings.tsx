@@ -53,8 +53,11 @@ export function WhatsAppSettings() {
         <div className="border-b p-4">
           <h3 className="font-semibold">Celulares de los vendedores</h3>
           <p className="text-muted-foreground text-sm">
-            Con &quot;Resumen diario&quot; prendido, cada mañana (lunes a
-            sábado, 8:30) le llega su día por WhatsApp.
+            Cada uno ve solo su cartera: sus clientes, sus ventas y su meta, y
+            solo puede cargar pedidos de sus clientes. Con &quot;Resumen
+            diario&quot; prendido, cada mañana (lunes a sábado, 8:30) le llega
+            su día por WhatsApp. &quot;Toda la empresa&quot; deja que un gerente
+            consulte los números de todo el equipo por WhatsApp.
           </p>
         </div>
         {snapshot.sellers.length === 0 ? (
@@ -76,10 +79,12 @@ function SellerPhoneRow({ seller }: { seller: CommercialAiSeller }) {
   const saved = snapshot.whatsapp.phones.find((p) => p.userId === seller.id);
   const [phone, setPhone] = useState(saved?.phone ?? "");
   const [dailyDigest, setDailyDigest] = useState(saved?.dailyDigest ?? true);
+  const [teamView, setTeamView] = useState(saved?.teamView ?? false);
   const [pending, startTransition] = useTransition();
   const changed =
     phone !== (saved?.phone ?? "") ||
-    dailyDigest !== (saved?.dailyDigest ?? true);
+    dailyDigest !== (saved?.dailyDigest ?? true) ||
+    teamView !== (saved?.teamView ?? false);
 
   const save = () =>
     startTransition(async () => {
@@ -87,6 +92,7 @@ function SellerPhoneRow({ seller }: { seller: CommercialAiSeller }) {
         userId: seller.id,
         phone,
         dailyDigest,
+        teamView,
       });
       if (result.success) {
         toast.success(
@@ -125,6 +131,20 @@ function SellerPhoneRow({ seller }: { seller: CommercialAiSeller }) {
           onCheckedChange={setDailyDigest}
         />
         <label htmlFor={`digest-${seller.id}`}>Resumen diario</label>
+      </div>
+      <div className="flex items-center gap-2 text-sm">
+        <Switch
+          aria-label={`${seller.name} ve toda la empresa por WhatsApp`}
+          checked={teamView}
+          id={`team-${seller.id}`}
+          onCheckedChange={setTeamView}
+        />
+        <label
+          htmlFor={`team-${seller.id}`}
+          title="Solo para gerentes. A un vendedor no le cambia nada."
+        >
+          Toda la empresa
+        </label>
       </div>
       <Button
         disabled={pending || !changed}

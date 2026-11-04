@@ -64,6 +64,8 @@ export type SellerTarget = {
   userId: string;
   phoneNumberId: string;
   phone: string;
+  /** Gerente con "toda la empresa" prendido; si no, ve solo su cartera. */
+  teamView?: boolean;
 };
 
 /** ¿Este mensaje lo mandó un vendedor de la organización dueña del número? */
@@ -81,7 +83,7 @@ export async function findSellerForInbound(
   }
   const { data: seller } = await admin
     .from("commercial_ai_seller_phones")
-    .select("user_id")
+    .select("user_id, team_view")
     .eq("organization_id", integration.organization_id)
     .eq("phone_key", phoneKey(message.customerPhone))
     .maybeSingle();
@@ -93,6 +95,7 @@ export async function findSellerForInbound(
     userId: seller.user_id as string,
     phoneNumberId: message.phoneNumberId,
     phone: message.customerPhone,
+    teamView: seller.team_view === true,
   };
 }
 
@@ -231,9 +234,11 @@ export async function sendDailyDigests(): Promise<DigestRunResult> {
       phone: seller.phone,
     };
     try {
+      // El resumen diario es personal: siempre la cartera propia.
       const snapshot = await getCommercialAiSnapshotForUser(
         target.organizationId,
-        target.userId
+        target.userId,
+        { ownPortfolioOnly: true }
       );
       if (!snapshot) {
         result.skipped += 1;
@@ -426,7 +431,8 @@ export async function processSellerMessage(
     }
     const snapshot = await getCommercialAiSnapshotForUser(
       target.organizationId,
-      target.userId
+      target.userId,
+      { ownPortfolioOnly: !target.teamView }
     );
     if (!snapshot) {
       await sendSellerText(

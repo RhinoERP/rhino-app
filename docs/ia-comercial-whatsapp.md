@@ -19,6 +19,18 @@ Ejemplos: "Pasé por El Obrero, pidieron 20 kg de muzza", "Recordame llamar a
 Morini el jueves", "¿Cuánto me compró Lácteos Catamarca este año?",
 "Armame un mensaje para el cliente en riesgo más grande".
 
+## Qué ve cada uno
+
+Por WhatsApp cada celular ve solo la cartera de su usuario: los clientes que
+tiene asignados en Rhinos, sus ventas, su deuda, sus pendientes y su meta. Las
+consultas de ventas también se filtran a esos clientes. Esto vale aunque el
+usuario sea gerente; para que un gerente consulte toda la empresa por WhatsApp
+se prende **Toda la empresa** en su fila (a un vendedor no le cambia nada).
+El resumen diario es siempre de la cartera propia.
+
+Los pedidos se cargan solo para clientes asignados a quien escribe, aunque
+tenga "Toda la empresa": la preventa sale a su nombre.
+
 ## Cargar pedidos
 
 El vendedor dicta el pedido ("Cargá 5 cremosos Cremac y 10 kg de muzza para
@@ -55,7 +67,8 @@ entendió. Hasta 4 MB (unos 2 minutos).
 ## Puesta en marcha
 
 1. Migraciones: `supabase/migrations/20261104000001_commercial_ai_whatsapp.sql`
-   y `20261104020000_commercial_ai_whatsapp_order_drafts.sql`.
+   `20261104020000_commercial_ai_whatsapp_order_drafts.sql` y
+   `20261104040000_commercial_ai_whatsapp_team_view.sql`.
 2. Variables de entorno (Vercel):
    - `WHATSAPP_META_ACCESS_TOKEN`, `WHATSAPP_META_APP_SECRET`,
      `WHATSAPP_WEBHOOK_VERIFY_TOKEN`: las mismas del agente de pedidos.

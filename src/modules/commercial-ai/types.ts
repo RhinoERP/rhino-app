@@ -280,7 +280,13 @@ export type SellerWhatsAppView = {
   connected: boolean;
   displayNumber: string | null;
   /** Gerente: todo el equipo; vendedor: solo el suyo. */
-  phones: { userId: string; phone: string; dailyDigest: boolean }[];
+  phones: {
+    userId: string;
+    phone: string;
+    dailyDigest: boolean;
+    /** Gerente que por WhatsApp consulta toda la empresa (no solo su cartera). */
+    teamView: boolean;
+  }[];
 };
 
 /* ============ Fase 2: rutas, prospección y aprendizajes ============ */

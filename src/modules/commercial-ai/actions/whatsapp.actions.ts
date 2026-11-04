@@ -14,6 +14,7 @@ const schema = z.object({
   userId: z.string().uuid(),
   phone: z.string().max(40),
   dailyDigest: z.boolean(),
+  teamView: z.boolean().default(false),
 });
 
 /**
@@ -59,6 +60,7 @@ export async function saveSellerPhoneAction(
           user_id: data.userId,
           phone,
           daily_digest: data.dailyDigest,
+          team_view: data.teamView,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "organization_id,user_id" }

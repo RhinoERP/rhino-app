@@ -283,13 +283,20 @@ const WHATSAPP_PROMPT = `CANAL: WhatsApp. El vendedor te escribe desde la calle.
 - Si pide un mensaje para un cliente, escribilo listo para reenviar.
 - PEDIDOS: si quiere cargar un pedido, identificá el cliente (buscar_clientes) y cada producto (buscar_productos con cliente_id). Si un producto tiene varias opciones parecidas, preguntá cuál antes de seguir. En productos por peso que cuentan piezas, si dijo "5 cremosos" u "hormas" son piezas (en_piezas true); si dijo kilos, en_piezas false. Después llamá preparar_pedido y respondé con el resumen_para_el_vendedor tal cual, sin agregar nada. Nunca digas que el pedido está cargado: se carga solo cuando él responde "sí". Si pide cambios, volvé a llamar preparar_pedido con el pedido completo.`;
 
+function scopeRule(snapshot: CommercialAiSnapshot): string {
+  if (snapshot.role === "gerente") {
+    return "- ALCANCE: este usuario es gerente y por WhatsApp ve toda la empresa. Igual, solo puede cargar pedidos de clientes asignados a él.";
+  }
+  return `- ALCANCE: solo tenés la cartera de ${snapshot.currentUserName} (clientes asignados a él en Rhinos) y las herramientas devuelven solo eso. Si pregunta por otros vendedores, clientes que no son suyos o totales de la empresa, decile que por acá solo ves su cartera; no estimes ni completes con otros datos.`;
+}
+
 /** Canal WhatsApp para askAssistant: prompt y herramientas de escritura. */
 export function whatsappChannel(
   snapshot: CommercialAiSnapshot
 ): AssistantChannel {
   const weekday = WEEKDAYS[new Date(`${snapshot.today}T12:00:00Z`).getUTCDay()];
   return {
-    prompt: `${WHATSAPP_PROMPT}\n- Hoy es ${weekday} ${snapshot.today}.`,
+    prompt: `${WHATSAPP_PROMPT}\n- Hoy es ${weekday} ${snapshot.today}.\n${scopeRule(snapshot)}`,
     tools: SELLER_TOOLS,
     runTool: (block) => {
       const handler = HANDLERS[block.name];

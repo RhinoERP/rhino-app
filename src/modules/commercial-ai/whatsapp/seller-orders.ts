@@ -114,6 +114,20 @@ function customerOf(snapshot: CommercialAiSnapshot, id: unknown) {
   return customer;
 }
 
+/**
+ * Solo se cargan pedidos de clientes asignados a quien escribe, aunque sea
+ * gerente con "toda la empresa": el pedido sale a su nombre.
+ */
+function ownCustomerOf(snapshot: CommercialAiSnapshot, id: unknown) {
+  const customer = customerOf(snapshot, id);
+  if (customer.sellerId !== snapshot.currentUserId) {
+    throw new OrderToolError(
+      `${niceName(customer.name)} no es cliente tuyo: solo podés cargar pedidos de tu cartera. Si te lo pasaron, pedile al gerente que te lo asigne en Rhinos.`
+    );
+  }
+  return customer;
+}
+
 type ProductRow = {
   id: string | null;
   name: string | null;
@@ -465,7 +479,7 @@ async function prepare(
   request: OrderRequest
 ): Promise<PreparedOrder> {
   const { customerId, items, note } = request;
-  const customer = customerOf(snapshot, customerId);
+  const customer = ownCustomerOf(snapshot, customerId);
   const pricing = await pricingFor(db, snapshot, customer.id);
   const ids = [...new Set(items.map((item) => item.productId))];
   const { data, error } = await db
