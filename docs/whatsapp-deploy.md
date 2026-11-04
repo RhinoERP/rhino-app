@@ -103,6 +103,26 @@ credenciales existentes de Supabase y OpenAI en Vercel. No necesita Meta ni
 Railway. El endpoint del sandbox tiene `maxDuration = 60`; verificar que la
 configuración del proyecto Vercel permita ese tiempo.
 
+### Privacidad y eliminación de datos en Meta
+
+La aplicación incluye dos páginas públicas, accesibles sin sesión:
+
+- `/privacidad`: política de privacidad de RhinosApp.
+- `/eliminacion-datos`: instrucciones para solicitar la eliminación por correo.
+
+Después de desplegar, comprobar ambas URLs con el dominio productivo y sin
+iniciar sesión. En **Configuración de la app > Básica** de Meta, usar la URL
+completa de `/privacidad` en **URL de la política de privacidad**. Para la
+eliminación de datos, elegir la modalidad de **URL de instrucciones** y usar
+`/eliminacion-datos`; esta página no es un callback de eliminación automática.
+
+Las solicitudes se dirigen a `comercial@rhinosapp.com` y requieren gestión
+manual, verificación de identidad y coordinación con la distribuidora responsable
+cuando corresponda. Los enlaces abren el cliente de correo del visitante; no
+registran una solicitud por sí solos. La política establece un criterio general
+de conservación según necesidad y obligaciones legales; estas páginas no crean
+plazos de borrado ni tareas de limpieza de datos.
+
 ## 3. Vercel Daemons: worker en el proyecto Pro de Rhinos
 
 Vercel Daemons ejecuta el proceso permanente del worker junto al frontend. Es

@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { isPublicLegalPath } from "@/lib/legal";
 import { createClient } from "@/lib/supabase/client";
 import {
   hasActiveBrowserSession,
@@ -21,7 +22,8 @@ export function SessionMonitor() {
   const checkingRef = useRef(false);
   const hasWarnedRef = useRef(false);
 
-  const isAuthRoute = pathname?.startsWith("/auth");
+  const skipSessionMonitoring =
+    pathname?.startsWith("/auth") || isPublicLegalPath(pathname ?? "");
 
   const showExpiredSessionWarning = useCallback(() => {
     if (hasWarnedRef.current) {
@@ -42,7 +44,7 @@ export function SessionMonitor() {
   }, []);
 
   const checkSession = useCallback(async () => {
-    if (isAuthRoute || checkingRef.current) {
+    if (skipSessionMonitoring || checkingRef.current) {
       return;
     }
 
@@ -61,7 +63,7 @@ export function SessionMonitor() {
     } finally {
       checkingRef.current = false;
     }
-  }, [isAuthRoute, showExpiredSessionWarning]);
+  }, [skipSessionMonitoring, showExpiredSessionWarning]);
 
   const scheduleSessionCheck = useCallback(() => {
     checkSession().catch(() => {
@@ -70,7 +72,8 @@ export function SessionMonitor() {
   }, [checkSession, showExpiredSessionWarning]);
 
   useEffect(() => {
-    if (isAuthRoute) {
+    if (skipSessionMonitoring) {
+      hasWarnedRef.current = false;
       toast.dismiss(sessionExpiredToastId);
       return;
     }
@@ -123,7 +126,7 @@ export function SessionMonitor() {
       window.removeEventListener("focus", handleFocus);
       window.clearInterval(intervalId);
     };
-  }, [isAuthRoute, scheduleSessionCheck, showExpiredSessionWarning]);
+  }, [skipSessionMonitoring, scheduleSessionCheck, showExpiredSessionWarning]);
 
   return null;
 }

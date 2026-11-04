@@ -1,10 +1,18 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { isPublicLegalPath } from "@/lib/legal";
 import { updateSession } from "@/lib/supabase/proxy";
 
 const WHATSAPP_TOOL_PATH = /^\/api\/internal\/whatsapp-agent\/tools\/[^/]+$/;
 
 export async function handleRequestProxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  if (
+    isPublicLegalPath(pathname) &&
+    (request.method === "GET" || request.method === "HEAD")
+  ) {
+    return NextResponse.next({ request });
+  }
+
   const isWhatsAppWebhook =
     pathname === "/api/webhooks/whatsapp" &&
     (request.method === "GET" || request.method === "POST");
