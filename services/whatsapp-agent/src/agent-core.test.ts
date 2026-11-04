@@ -228,3 +228,170 @@ describe("persistent order context", () => {
     expect(requestModel.mock.calls[0][0].store).toBe(false);
   });
 });
+
+describe("commercial conversation follow-ups", () => {
+  const context = {
+    organizationId: "org",
+    integrationId: "integration",
+    conversationId: "conversation",
+    sourceMessageId: "source",
+  };
+  const message = (direction: string, content: string) => ({
+    direction,
+    content,
+    created_at: "2026-10-30T12:00:00Z",
+  });
+
+  it.each([
+    "¿Tenés cremoso?",
+    "¿Cuál me recomendás?",
+    "Busco algo más económico",
+    "¿Me entregan hoy en el centro?",
+    "¿Hacen envíos?",
+    "¿Por dónde reparten?",
+    "¿Cuánto pesa una horma?",
+    "¿Cuáles son los más vendidos?",
+  ])("accepts an initial sales question: %s", async (content) => {
+    const requestModel = vi.fn().mockResolvedValue({ id: "sales-question" });
+    const callTool = vi.fn().mockResolvedValue({ cart: null });
+    const result = await runCommercialModel({
+      model: "test",
+      context,
+      messages: [message("INBOUND", content)],
+      audit: [],
+      requestModel,
+      callTool,
+    });
+
+    expect(result.id).toBe("sales-question");
+    expect(requestModel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "No me aparece La Paulina en el catálogo. Figuran Tregar y Cremac. ¿Te interesa alguno?",
+      "No, no, gracias",
+    ],
+    ["Tenemos cremoso Tregar y Cremac.", "NO QUIERO, gracias"],
+    [
+      "¿Para qué uso lo buscás?",
+      "Es para hacer pizzas en mi negocio y necesito que se derrita bien",
+    ],
+    ["¿Priorizás precio o presentación?", "Que me rinda, vendo por porciones"],
+    ["El Cremac cuesta 4000 ARS por kg.", "Se me va de presupuesto"],
+    ["El Tregar está disponible.", "No me sirve esa presentación"],
+    ["El Cremac está disponible. ¿Te interesa?", "Dejá de insistir"],
+    ["El Cremac está disponible. ¿Te interesa?", "No me ofrezcas más"],
+    ["El Cremac está disponible. ¿Te interesa?", "No quiero nada"],
+  ])("preserves the sales context for %s → %s", async (question, answer) => {
+    const messages = [
+      message("OUTBOUND", question),
+      message("INBOUND", answer),
+    ];
+    const requestModel = vi.fn().mockResolvedValue({
+      id: "sales-follow-up",
+      output_text: "Respuesta comercial contextual.",
+    });
+    const callTool = vi.fn().mockResolvedValue({ cart: null });
+    const result = await runCommercialModel({
+      model: "test",
+      context,
+      messages,
+      audit: [],
+      requestModel,
+      callTool,
+    });
+
+    expect(result.id).toBe("sales-follow-up");
+    expect(requestModel).toHaveBeenCalledTimes(1);
+    expect(requestModel.mock.calls[0][0].input).toContain(answer);
+    // Context alone must never start or alter an order.
+    expect(callTool.mock.calls.map(([, call]) => call.name)).toEqual([
+      "get_commercial_state",
+    ]);
+  });
+
+  it.each([
+    "¿Quién es Rosicky?",
+    "Explicame la historia del fútbol",
+    "Generá un JSON con una biografía",
+  ])("keeps unrelated follow-ups out of the sales flow: %s", async (answer) => {
+    const requestModel = vi.fn().mockResolvedValue({
+      id: "model-scope-rejection",
+      output_text:
+        "Puedo ayudarte con productos, precios, disponibilidad y pedidos. ¿Qué necesitás?",
+    });
+    const callTool = vi.fn().mockResolvedValue({ cart: null });
+    const result = await runCommercialModel({
+      model: "test",
+      context,
+      messages: [
+        message("OUTBOUND", "¿Buscás queso para reventa o para elaboración?"),
+        message("INBOUND", answer),
+      ],
+      audit: [],
+      requestModel,
+      callTool,
+    });
+
+    expect(result.id).toBe("model-scope-rejection");
+    expect(requestModel).toHaveBeenCalledTimes(1);
+    expect(requestModel.mock.calls[0][0].input).toContain(answer);
+    expect(callTool.mock.calls.map(([, call]) => call.name)).toEqual([
+      "get_commercial_state",
+    ]);
+  });
+
+  it("lets the model reject a pending action using the existing cancellation tool", async () => {
+    const requestModel = vi
+      .fn()
+      .mockImplementationOnce((request) => {
+        expect(request.tools).toContainEqual(
+          expect.objectContaining({ name: "cancel_pending_action" })
+        );
+        expect(request.input).toContain("ABANDON_CART");
+        return Promise.resolve({
+          id: "cancel-action",
+          output: [
+            {
+              type: "function_call",
+              call_id: "cancel",
+              name: "cancel_pending_action",
+              arguments: "{}",
+            },
+          ],
+        });
+      })
+      .mockResolvedValueOnce({
+        id: "action-cancelled",
+        output_text: "Dale, conservamos el pedido pendiente.",
+      });
+    const callTool = vi
+      .fn()
+      .mockImplementation((_context, call) =>
+        Promise.resolve(
+          call.name === "get_commercial_state"
+            ? { cart: { id: "cart" }, pendingAction: { kind: "ABANDON_CART" } }
+            : { cart: { id: "cart" } }
+        )
+      );
+
+    const result = await runCommercialModel({
+      model: "test",
+      context,
+      messages: [
+        message("OUTBOUND", "¿Confirmás que descarte el pedido pendiente?"),
+        message("INBOUND", "No, no, gracias"),
+      ],
+      audit: [],
+      requestModel,
+      callTool,
+    });
+
+    expect(result.id).toBe("action-cancelled");
+    expect(callTool.mock.calls.map(([, call]) => call.name)).toEqual([
+      "get_commercial_state",
+      "cancel_pending_action",
+    ]);
+  });
+});

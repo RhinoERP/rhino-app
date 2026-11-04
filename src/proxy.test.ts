@@ -26,6 +26,7 @@ describe.each([
     ["GET", "/api/webhooks/whatsapp"],
     ["POST", "/api/webhooks/whatsapp"],
     ["POST", "/api/internal/whatsapp-agent/tools/search_catalog"],
+    ["GET", "/api/internal/whatsapp-agent/audio-cleanup"],
   ])("lets %s %s reach its own authentication", async (method, pathname) => {
     const response = await proxy(
       new NextRequest(`https://rhinos.example${pathname}`, { method })
@@ -45,6 +46,8 @@ describe.each([
     ["POST", "/api/internal/whatsapp-agent/tools/search_catalog/extra"],
     ["GET", "/api/internal/whatsapp-agent/tools/search_catalog"],
     ["DELETE", "/api/webhooks/whatsapp"],
+    ["POST", "/api/internal/whatsapp-agent/audio-cleanup"],
+    ["GET", "/api/internal/whatsapp-agent/audio-cleanup/extra"],
   ])("keeps session authentication for %s %s", async (method, pathname) => {
     const request = new NextRequest(`https://rhinos.example${pathname}`, {
       method,

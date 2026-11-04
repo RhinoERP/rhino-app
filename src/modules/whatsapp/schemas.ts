@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { commercialGuidanceSchema } from "./commercial-guidance";
 import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
@@ -104,7 +105,11 @@ export const whatsappIntegrationConfigurationSchema = z
       .min(0)
       .max(120)
       .default(DEFAULT_WHATSAPP_RESPONSE_DELAY.maxMinutes),
-    commercialRules: z.record(z.string(), z.unknown()).default({}),
+    commercialRules: commercialGuidanceSchema.catchall(z.unknown()).default({
+      deliveryPolicy: "",
+      pickupPolicy: "",
+      salesGuidance: "",
+    }),
     handoffMessage: z
       .string()
       .trim()

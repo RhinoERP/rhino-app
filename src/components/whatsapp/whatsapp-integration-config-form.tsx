@@ -33,6 +33,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { saveWhatsAppIntegrationAction } from "@/modules/whatsapp/actions/save-whatsapp-integration.action";
+import {
+  commercialGuidanceSchema,
+  readCommercialGuidance,
+} from "@/modules/whatsapp/commercial-guidance";
 import type { WhatsAppIntegrationConfigurationInput } from "@/modules/whatsapp/schemas";
 import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
@@ -56,6 +60,7 @@ const formSchema = z.object({
   salesPriceListId: z.string(),
   responsibleUserId: z.string(),
   handoffMessage: z.string().trim().max(1000),
+  commercialGuidance: commercialGuidanceSchema.required(),
   businessHours: z.object({
     enabled: z.boolean(),
     timezone: z.string(),
@@ -100,6 +105,7 @@ function toFormValues(integration: WhatsAppIntegration | null): FormValues {
     salesPriceListId: integration?.salesPriceListId ?? NONE,
     responsibleUserId: integration?.responsibleUserId ?? NONE,
     handoffMessage: integration?.handoffMessage ?? "",
+    commercialGuidance: readCommercialGuidance(integration?.commercialRules),
     businessHours:
       integration?.businessHours ?? DEFAULT_WHATSAPP_BUSINESS_HOURS,
     responseDelayMinMinutes:
@@ -126,7 +132,10 @@ function toIntegrationInput(
     businessHours: values.businessHours,
     responseDelayMinMinutes: values.responseDelayMinMinutes,
     responseDelayMaxMinutes: values.responseDelayMaxMinutes,
-    commercialRules: integration?.commercialRules ?? {},
+    commercialRules: {
+      ...integration?.commercialRules,
+      ...values.commercialGuidance,
+    },
     handoffMessage: values.handoffMessage || null,
   };
 }
@@ -282,6 +291,59 @@ export function WhatsAppIntegrationConfigForm({
                 )}
               />
             </div>
+
+            <section className="space-y-4 rounded-lg border p-4">
+              <div>
+                <h2 className="font-medium">
+                  Información para vender y coordinar
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  El asistente usa estas condiciones para orientar al cliente.
+                  El equipo comercial reconfirma la entrega y el pedido.
+                </p>
+              </div>
+              {(
+                [
+                  {
+                    name: "deliveryPolicy",
+                    label: "Entregas",
+                    placeholder:
+                      "Zonas y días de reparto, horario límite para pedir, plazos orientativos, mínimos y costo de envío.",
+                  },
+                  {
+                    name: "pickupPolicy",
+                    label: "Retiro de mercadería",
+                    placeholder:
+                      "Dirección, días, horarios y condiciones para retirar.",
+                  },
+                  {
+                    name: "salesGuidance",
+                    label: "Criterio comercial y recomendaciones",
+                    placeholder:
+                      "Características verificadas, usos, alternativas y productos complementarios que recomienda el equipo. Indicá el producto o marca al que corresponde cada dato.",
+                  },
+                ] as const
+              ).map((input) => (
+                <FormField
+                  control={form.control}
+                  key={input.name}
+                  name={`commercialGuidance.${input.name}`}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{input.label}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={input.placeholder}
+                          rows={3}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ))}
+            </section>
 
             <FormField
               control={form.control}

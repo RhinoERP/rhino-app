@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { assertWhatsAppEnabled } from "./access";
+import { getOrganizationCommercialConfiguration } from "./commercial-configuration";
 import { createWhatsAppAdminClient } from "./supabase-admin";
 
 const localSimulatorIntegrationPrefix = "rhinos-local-simulator:";
@@ -121,6 +122,7 @@ export async function createLocalSimulatorSession(params: {
   actorId: string;
   customerId: string;
   priceListId: string;
+  conversationId?: string;
 }): Promise<SimulationState> {
   const supabase = createWhatsAppAdminClient();
   await assertWhatsAppEnabled(params.organizationId, "whatsapp_sandbox");
@@ -150,14 +152,17 @@ export async function createLocalSimulatorSession(params: {
     );
   }
 
+  const configuration = await getOrganizationCommercialConfiguration(
+    params.organizationId
+  );
   const integrationValues = {
     status: "DRAFT",
     display_phone_number: null,
     sales_price_list_id: params.priceListId,
     responsible_user_id: params.actorId,
-    business_hours: {},
-    commercial_rules: {},
-    handoff_message: null,
+    business_hours: configuration?.business_hours ?? {},
+    commercial_rules: configuration?.commercial_rules ?? {},
+    handoff_message: configuration?.handoff_message ?? null,
   };
   const integrationWrite = existingIntegration
     ? supabase
@@ -183,6 +188,7 @@ export async function createLocalSimulatorSession(params: {
   const { data: conversation, error: conversationError } = await supabase
     .from("whatsapp_conversations")
     .insert({
+      ...(params.conversationId ? { id: params.conversationId } : {}),
       organization_id: params.organizationId,
       integration_id: integration.id,
       customer_phone: `${localSimulatorPhonePrefix}${randomUUID()}`,
@@ -193,9 +199,7 @@ export async function createLocalSimulatorSession(params: {
     .select("id")
     .single();
   if (conversationError || !conversation) {
-    throw new Error(
-      `No se pudo crear la conversación local: ${conversationError?.message ?? "sin datos"}`
-    );
+    return recoverSimulatorSession(params, integration.id, conversationError);
   }
 
   return {
@@ -204,6 +208,31 @@ export async function createLocalSimulatorSession(params: {
     conversationId: conversation.id,
     customerId: params.customerId,
   };
+}
+
+async function recoverSimulatorSession(
+  params: {
+    organizationId: string;
+    actorId: string;
+    customerId: string;
+    conversationId?: string;
+  },
+  integrationId: string,
+  conversationError: { code?: string; message: string } | null
+): Promise<SimulationState> {
+  if (conversationError?.code === "23505" && params.conversationId) {
+    const state = {
+      organizationId: params.organizationId,
+      integrationId,
+      conversationId: params.conversationId,
+      customerId: params.customerId,
+    };
+    await verifyLocalSimulatorSession(state, params.actorId);
+    return state;
+  }
+  throw new Error(
+    `No se pudo crear la conversación local: ${conversationError?.message ?? "sin datos"}`
+  );
 }
 
 export async function verifyLocalSimulatorSession(
@@ -254,8 +283,24 @@ export async function recordSimulationMessage(params: {
   content: string;
   sourceMessageId?: string;
   orderPrompt?: boolean;
+  jobId?: string;
+  leaseToken?: string;
 }): Promise<string> {
   const supabase = createWhatsAppAdminClient();
+  if (params.direction === "OUTBOUND" && params.jobId) {
+    const result = await supabase.rpc("record_whatsapp_simulation_outbound", {
+      p_job_id: params.jobId,
+      p_lease_token: params.leaseToken,
+      p_text: params.content,
+      p_order_prompt: params.orderPrompt ?? false,
+    });
+    if (result.error || !result.data) {
+      throw new Error(
+        "No se pudo guardar la respuesta con una exclusión vigente."
+      );
+    }
+    return result.data as string;
+  }
   const messageId = randomUUID();
   const { error } = await supabase.from("whatsapp_messages").insert({
     id: messageId,

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
@@ -22,6 +23,11 @@ import {
   runCommercialModel,
   type ToolCallAudit,
 } from "../../../../../../../services/whatsapp-agent/src/agent-core";
+import {
+  claimJob,
+  executeJob,
+  workerDatabaseReady,
+} from "../../../../../../../services/whatsapp-agent/src/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -38,6 +44,7 @@ const stateSchema = z
 const requestSchema = z
   .object({
     message: z.string().trim().min(1).max(2000).optional(),
+    sourceMessageId: z.string().uuid().optional(),
     resume: z.boolean().optional(),
     customerId: z.string().uuid().optional(),
     priceListId: z.string().uuid().optional(),
@@ -45,7 +52,11 @@ const requestSchema = z
   })
   .strict()
   .refine(
-    (input) => (input.resume ? Boolean(input.state) : Boolean(input.message)),
+    (input) =>
+      input.resume
+        ? Boolean(input.state) && !input.message && !input.sourceMessageId
+        : Boolean(input.message) !== Boolean(input.sourceMessageId) &&
+          (!input.sourceMessageId || Boolean(input.state)),
     {
       message:
         "Para reactivar elegí una sesión; para conversar escribí un mensaje",
@@ -122,46 +133,22 @@ async function resumeSimulation(state: SimulationState, actorId: string) {
   };
 }
 
-async function runSimulationTurn(params: {
+type SimulationTurnParams = {
   orgSlug: string;
   organization: { id: string; name: string };
   input: z.infer<typeof requestSchema>;
-}) {
-  const actorId = await currentActorId();
-  await assertWhatsAppOrderSchema();
-  let state: SimulationState;
-  if (params.input.state) {
-    state = params.input.state;
-    if (state.organizationId !== params.organization.id) {
-      throw new Error("La sesión de simulación pertenece a otra organización");
-    }
-    await verifyLocalSimulatorSession(state, actorId);
-  } else {
-    if (!(params.input.customerId && params.input.priceListId)) {
-      throw new Error("Elegí un cliente y una lista de precios para empezar");
-    }
-    state = await createLocalSimulatorSession({
-      organizationId: params.organization.id,
-      actorId,
-      customerId: params.input.customerId,
-      priceListId: params.input.priceListId,
-    });
-  }
+};
 
-  if (params.input.resume) {
-    return resumeSimulation(state, actorId);
-  }
-  if (!params.input.message) {
-    throw new Error("Escribí un mensaje para continuar");
-  }
-  const sourceMessageId = await recordSimulationMessage({
-    state,
-    direction: "INBOUND",
-    content: params.input.message,
-  });
+async function runSimulationModel(
+  params: SimulationTurnParams,
+  state: SimulationState,
+  sourceMessageId: string,
+  leaseContext: { jobId?: string; leaseToken?: string } = {}
+) {
   const messages: ConversationMessage[] = await getSimulationMessages(state);
   const audit: ToolCallAudit[] = [];
   const context = {
+    ...leaseContext,
     organizationId: params.organization.id,
     integrationId: state.integrationId,
     conversationId: state.conversationId,
@@ -172,7 +159,7 @@ async function runSimulationTurn(params: {
   if (before.conversationStatus !== "ACTIVE") {
     return {
       response:
-        "La conversación está en atención humana. Reactivá el bot desde Rhinos para continuar.",
+        "Una persona del equipo comercial va a continuar la atención por este chat.",
       state,
       snapshot: before,
       toolCalls: audit,
@@ -216,6 +203,7 @@ async function runSimulationTurn(params: {
   }
 
   await recordSimulationMessage({
+    ...leaseContext,
     state,
     direction: "OUTBOUND",
     content: text,
@@ -233,6 +221,119 @@ async function runSimulationTurn(params: {
     usage: response.usage ?? null,
     simulated: true,
   };
+}
+
+async function resolveSimulationState(
+  params: SimulationTurnParams,
+  actorId: string
+): Promise<SimulationState> {
+  let state: SimulationState;
+  if (params.input.state) {
+    state = params.input.state;
+    if (state.organizationId !== params.organization.id) {
+      throw new Error("La sesión de simulación pertenece a otra organización");
+    }
+    await verifyLocalSimulatorSession(state, actorId);
+  } else {
+    if (!(params.input.customerId && params.input.priceListId)) {
+      throw new Error("Elegí un cliente y una lista de precios para empezar");
+    }
+    state = await createLocalSimulatorSession({
+      organizationId: params.organization.id,
+      actorId,
+      customerId: params.input.customerId,
+      priceListId: params.input.priceListId,
+    });
+  }
+
+  return state;
+}
+
+async function runSimulationTurn(params: SimulationTurnParams) {
+  const actorId = await currentActorId();
+  await assertWhatsAppOrderSchema();
+  const db = createWhatsAppAdminClient();
+  if (!(await workerDatabaseReady(db))) {
+    throw new Error(
+      "Falta completar la actualización de la base de datos de WhatsApp antes de iniciar la simulación."
+    );
+  }
+  const state = await resolveSimulationState(params, actorId);
+
+  if (params.input.resume) {
+    return resumeSimulation(state, actorId);
+  }
+  const sourceMessageId =
+    params.input.sourceMessageId ||
+    (await recordSimulationMessage({
+      state,
+      direction: "INBOUND",
+      content: params.input.message || "",
+    }));
+  if (params.input.sourceMessageId) {
+    const audio = await db
+      .from("whatsapp_audio_assets")
+      .select("status")
+      .eq("message_id", sourceMessageId)
+      .eq("organization_id", state.organizationId)
+      .eq("integration_id", state.integrationId)
+      .eq("conversation_id", state.conversationId)
+      .single();
+    if (audio.error || audio.data?.status !== "SUCCEEDED") {
+      throw new Error(
+        "El audio de esta sesión todavía no tiene una transcripción válida."
+      );
+    }
+    const previous = await db
+      .from("whatsapp_messages")
+      .select("content")
+      .eq("conversation_id", state.conversationId)
+      .eq("organization_id", state.organizationId)
+      .eq("direction", "OUTBOUND")
+      .contains("payload", { sourceMessageId })
+      .limit(1)
+      .maybeSingle();
+    if (previous.error) {
+      throw new Error("No se pudo recuperar la respuesta del audio.");
+    }
+    if (previous.data?.content) {
+      return {
+        response: previous.data.content,
+        state,
+        snapshot: await getSimulationSnapshot(state),
+        toolCalls: [],
+        simulated: true,
+      };
+    }
+  }
+  const runTurn = (
+    leaseContext: { jobId?: string; leaseToken?: string } = {}
+  ) => runSimulationModel(params, state, sourceMessageId, leaseContext);
+  const pending = await db
+    .from("agent_jobs")
+    .select("id")
+    .eq("source_message_id", sourceMessageId)
+    .eq("job_type", "PROCESS_CONVERSATION")
+    .eq("execution_mode", "INLINE")
+    .single();
+  if (pending.error || !pending.data) {
+    throw new Error("Falta preparar el trabajo comercial de la conversación.");
+  }
+  const job = await claimJob(db, "PROCESS_CONVERSATION", {
+    workerId: `sandbox-commercial-${randomUUID()}`,
+    mode: "INLINE",
+    jobId: pending.data.id,
+  });
+  if (!job) {
+    throw new Error(
+      "La conversación está procesándose. Reintentá en unos segundos."
+    );
+  }
+  let result: Awaited<ReturnType<typeof runTurn>> | undefined;
+  await executeJob(db, job, async (): Promise<undefined> => {
+    result = await runTurn({ jobId: job.id, leaseToken: job.lease_token });
+  });
+  return result;
 }
 
 export async function GET(
