@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
@@ -13,7 +14,13 @@ import {
   prevalidatePurchaseReceiptFiscalState,
   previewAtomicReceiptFiscalState,
 } from "../service/purchases.service";
+import { getReceiptWarehouseContext } from "../service/receipt-warehouse.service";
 import type { ReceivePurchaseActionInput } from "../types";
+import { hasPendingPurchaseReceipt } from "../utils/receipt-progress";
+import {
+  resolveReceiptRetryWarehouseId,
+  resolveReceiptWarehouseId,
+} from "../utils/receipt-warehouse";
 
 type IncomingItem = ReceivePurchaseActionInput["receivedItems"][number];
 
@@ -204,13 +211,28 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
       purchaseOrderId,
       receivedItems,
       receiptId,
+      warehouseId: requestedWarehouseId,
       closePurchase,
     } = input;
+    z.object({ receiptId: z.uuid(), warehouseId: z.uuid().optional() }).parse({
+      receiptId,
+      warehouseId: requestedWarehouseId,
+    });
     if (!receiptId || typeof closePurchase !== "boolean") {
       throw new Error("Falta identificar la recepción");
     }
 
-    const itemsToProcess = receivedItems.filter((item) => item.received);
+    const itemsToProcess = receivedItems.filter((item) => {
+      if (!item.received) {
+        return false;
+      }
+      const update = buildItemUpdates([item])[0];
+      return hasPendingPurchaseReceipt({
+        newItem: item.newItem,
+        quantity: update.quantity,
+        unitQuantity: update.unitQuantity,
+      });
+    });
 
     if (itemsToProcess.length === 0) {
       return {
@@ -241,16 +263,29 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
       throw new Error("El cierre de esta recepción ya fue decidido");
     }
     if (existingReceipt) {
+      const warehouseId = resolveReceiptRetryWarehouseId(
+        existingReceipt.warehouse_id,
+        requestedWarehouseId
+      );
       await applyAtomicPurchaseReceipt({
         orgSlug,
         purchaseOrderId,
         receiptId,
+        warehouseId,
         lines: buildReceiptLines(itemsToProcess),
         closePurchase,
         actorId: auth.user.id,
         fiscal: null,
       });
     } else {
+      const context = await getReceiptWarehouseContext(
+        orgSlug,
+        purchaseOrderId
+      );
+      const warehouseId = resolveReceiptWarehouseId(
+        context,
+        requestedWarehouseId
+      );
       await validatePendingReceipt({
         orgSlug,
         orgId: org.id,
@@ -266,6 +301,7 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
         orgSlug,
         purchaseOrderId,
         receiptId,
+        warehouseId,
         lines,
         closePurchase,
         actorId: auth.user.id,

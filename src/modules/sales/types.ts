@@ -125,6 +125,7 @@ export type CreatePreSaleOrderInput = {
   customerId: string;
   sellerId: string;
   saleDate: string;
+  warehouseId?: string | null;
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
@@ -155,6 +156,7 @@ export type DeliverSaleOrderInput = {
 export type UpdateSaleOrderInput = {
   orgSlug: string;
   saleId: string;
+  warehouseId?: string;
   customerId?: string;
   sellerId?: string;
   saleDate?: string;

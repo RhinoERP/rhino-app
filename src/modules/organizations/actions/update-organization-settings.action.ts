@@ -7,6 +7,7 @@ import {
   type OrganizationSettingsData,
   organizationSettingsSchema,
 } from "../types/organization-settings";
+import { ensure } from "../utils/with-permission-guard";
 
 type ActionResult = {
   success: boolean;
@@ -17,6 +18,7 @@ export async function updateOrganizationSettings(
   orgSlug: string,
   settings: Partial<OrganizationSettingsData>
 ): Promise<ActionResult> {
+  await ensure("organization.admin", orgSlug);
   try {
     const {
       remittance_mask_printing_enabled: _platformFeatureFlag,
@@ -77,6 +79,7 @@ export async function updateOrganizationSettings(
     }
 
     revalidatePath(`/org/${orgSlug}/configuracion`);
+    revalidatePath(`/org/${orgSlug}/configuracion/condiciones-de-venta`);
     revalidatePath(`/org/${orgSlug}/configuracion/preventa`);
     revalidatePath(`/org/${orgSlug}/configuracion/contabilidad`);
     revalidatePath(`/org/${orgSlug}/configuracion/comprobantes`);

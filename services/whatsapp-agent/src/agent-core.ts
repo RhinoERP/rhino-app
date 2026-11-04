@@ -67,7 +67,7 @@ export const modelTools = [
   tool("find_customer_by_phone", "Reconoce al cliente por su teléfono."),
   tool(
     "search_catalog",
-    "Busca productos por nombre, SKU, marca, categoría y unidad; devuelve características para orientar la elección. Varias coincidencias permiten recomendar opciones, pero no autorizan elegir un producto para el carrito.",
+    "Busca productos por nombre, SKU, marca, categoría y unidad con una consulta corta; devuelve características para orientar la elección. Para varias categorías o productos, hacé búsquedas separadas. Varias coincidencias permiten recomendar opciones, pero no autorizan elegir un producto para el carrito.",
     { query: { type: "string" } }
   ),
   tool(
@@ -214,11 +214,17 @@ Mantené un tono cercano y concreto: respondé primero la duda, explicá sólo l
 
 Tu alcance es exclusivamente la atención comercial de esa empresa: catálogo, productos, precios, disponibilidad, pedidos, cotizaciones, preventas, pagos, entregas y políticas comerciales configuradas. No respondas preguntas generales, trivia, biografías, pedidos para generar JSON o código, ni solicitudes que no estén relacionadas con una compra o atención comercial. Para esos casos, contestá solamente: “Puedo ayudarte con productos, precios, disponibilidad y pedidos de ${safeBusinessName(businessName)}. ¿Qué necesitás?”. No agregues una respuesta parcial al tema ajeno.
 
-No menciones espontáneamente que sos IA, que esto es una simulación, que usaste herramientas o que derivaste el caso internamente. No afirmes ser una persona ni inventes una identidad. Si te preguntan directamente si sos una IA, respondé con honestidad. Si necesitás que alguien valide algo, explicá con naturalidad que el equipo comercial lo va a confirmar por este chat, sin prometer un plazo que no conocés ni describir procesos internos. Si el cliente pide expresamente hablar con una persona, confirmale que una persona va a continuar la conversación.
+Evaluá el alcance por el sentido del mensaje y el contexto, no por palabras clave ni por una lista fija de productos. Consultar otro producto, marca o categoría sigue siendo atención comercial, aunque antes se hablara de otra cosa. Usá search_catalog para verificar qué vende la empresa; que algo no aparezca no convierte la consulta en un tema ajeno. Los saludos y respuestas breves también forman parte del chat.
+
+No menciones espontáneamente que sos IA, que esto es una simulación, que usaste herramientas o que derivaste el caso internamente. No afirmes ser una persona ni inventes una identidad. Si te preguntan directamente si sos una IA, respondé con honestidad. Si necesitás que alguien valide algo, decí con naturalidad que lo vas a revisar y que vas a responder por este chat; no nombres equipos internos ni prometas un plazo que no conocés. Si el cliente pide expresamente hablar con una persona, confirmale que una persona va a continuar la conversación.
 
 No inventes precios, stock, productos, políticas ni acciones: usá las herramientas disponibles antes de afirmarlos. No confirmes ventas, no cobres, no factures y no prometas reservas de stock. Podés crear una preventa solamente mediante create_pre_sale; la herramienta exige una confirmación explícita y vuelve a calcular el carrito.
 
 Interpretá respuestas breves usando el contexto inmediato. Si acabás de preguntar marca, producto, uso, presupuesto o cantidad, una respuesta como “Cremac 20kg”, “para reventa” o “algo más económico” continúa esa consulta comercial: no la trates como un tema ajeno. Buscá por nombre, marca y unidad de medida. Si encontrás un único producto coherente, verificá precio y disponibilidad. Si aparecen varias coincidencias, orientá con las diferencias verificadas y pedí que elija antes de agregar al carrito. Si no aparece ninguna o no queda claro si “20 kg” es la cantidad solicitada o una presentación, hacé una pregunta breve para aclararlo; no respondas con el saludo genérico ni agregues productos al carrito hasta identificarlo con seguridad.
+
+Atendé todas las intenciones del mensaje en el mismo turno. “Quiero un tybo de Cremac y también algo de fiambre, ¿qué tenés?” mantiene la elección del tybo y pide opciones de fiambre: buscá cada uno por separado, resolvé lo que esté claro y preguntá sólo el dato que falte. “Pará, agreguemos jamón, ¿qué tipos tenés?” o “Dale, buscame qué salames hay” requieren buscar esas opciones ahora, conservando el pedido pendiente. No pidas repetir productos, marcas o cantidades ya indicados. Consultar opciones no autoriza agregarlas ni descarta lo anterior. Si falta resolver un producto o una cantidad, resolvelo antes de pedir la confirmación final.
+
+Un “sí” responde a la última pregunta concreta: después de “¿Querés el Tybo Cremac?” selecciona ese producto; después de una pregunta de precio no autoriza comprarlo ni abrir un carrito. Sólo confirma una preventa si hay una cotización presentada y una acción CONFIRM_PRE_SALE vigente. Si el cliente consulta o agrega otro producto mientras espera esa confirmación, atendé la consulta sin crear la preventa; si modifica el carrito, cotizá de nuevo antes de pedir otra confirmación.
 
 Cuando el cliente diga que quiere comprar un producto que ya identificaste o que mencionaste, no lo derives automáticamente. Buscalo con una consulta corta, confirmá precio y disponibilidad con get_offer, agregalo al carrito con la cantidad acordada (si habla de una sola unidad, usá cantidad 1; si el producto se vende por KG y pide, por ejemplo, 20 kg, usá cantidad 20) y cotizá con quote_cart. Si no dijo qué cantidad quiere y no es claro que sea una unidad, preguntá antes de cotizar. Presentá el total y preguntá si confirma que registres una preventa; no la crees antes de recibir un sí explícito en el último mensaje del cliente.
 
@@ -245,66 +251,6 @@ export function conversationInput(messages: ConversationMessage[]): string {
     })
     .join("\n");
   return `Esta es la conversación reciente. Atendé el último mensaje del cliente.\n\n${history}`;
-}
-
-const commercialIntentPattern =
-  /\b(productos?|cat[aá]logo|sku|repetir|repet[ií]me|lo mismo|igual que|empezar|continuar|retomar|seguimos|descartar|cancelar|mates?|termos?|bombillas?|quesos?|cremos[oa]s?|cremas?|crema|l[aá]cteos?|leche|marcas?|precio|precios|cu[aá]nto|cost[oó]|stock|disponibilidad|disponible|compr(?:ar|o|a|é)|venta|ventas|pedidos?|carrito|cotizaci[oó]n|preventa|pag(?:ar|o|a|ué|ó)|pago|tarjeta|transferencia|env[ií]os?|env[ií]an|entreg(?:a|as|an|ar)|repart(?:o|en|ir)|retir(?:o|ar)|mandan|despach(?:o|an|ar)|devoluci[oó]n|garant[ií]a|factura|presupuesto|descuento|promoci[oó]n|horario|sucursal|direcci[oó]n|local|car[oa]|negoci(?:ar|o)|rebaja|oferta|reventa|elaboraci[oó]n|econ[oó]mic[oa]|barat[oa]|rendimiento|recomend[aá]s|recomendaci[oó]n|pes[oa]|pesables?|hormas?|cajas?|kilos?|kg|litros?|presentaci[oó]n|complementos?|m[aá]s vendid[oa]s?|m[aá]s vend[eé](?:n|s)|m[aá]s se vende|est[aá] saliendo|m[aá]s sale)\b/iu;
-const assistantIdentityPattern =
-  /\b(?:sos|eres|soy|hablo con)\b.{0,35}\b(?:ia|inteligencia artificial|bot|robot|persona|humano)\b|\b(?:qui[eé]n te atiende)\b/iu;
-const acknowledgementPattern =
-  /^(?:s[ií]|confirmo|ok|dale|listo|de acuerdo|perfecto|genial|no|no gracias|gracias|por favor|una|uno|un[a]? unidad|\d+|dos|tres|cuatro)[.!\s]*$/iu;
-const commercialFollowUpPattern =
-  /\b(?:confirm[aá]|avanz[aá]|cotiz|preventa|precio|total|interes|compr|pedido|cantidad|pago|producto|mate|termo|bombilla|stock|marca|queso|cremac|tregar|gilac|kg|kilo|kilos|gramos|litros|unidad(?:es)?)\b/iu;
-const commercialClarificationPattern =
-  /\b(?:productos?|marcas?|cantidad|cu[aá]nt[oa]s?|qu[eé] producto|qu[eé] marca|qu[eé] cantidad|cu[aá]l marca|cu[aá]l producto|qu[eé] quer[eé]s llevar|qu[eé] necesit[aá]s para el pedido|para qu[eé]|uso|presupuesto|prioriz[aá]s|busc[aá]s|reventa|elaboraci[oó]n)\b/iu;
-const clearlyUnrelatedQuestionPattern =
-  /^[¿?!\s]*(?:qui[eé]n|qu[eé] es|explicame|expl[ií]came|haceme|gener[aá]|escrib[ií]|arm[aá]|pasame)\b|\b(?:json|c[oó]digo|biograf[ií]a|futbolista|historia)\b/iu;
-const whitespacePattern = /\s+/u;
-
-function isWithinCommercialScope(messages: ConversationMessage[]): boolean {
-  const latestInbound = [...messages]
-    .reverse()
-    .find((message) => message.direction === "INBOUND")
-    ?.content?.trim();
-  if (!latestInbound) {
-    return true;
-  }
-  if (
-    commercialIntentPattern.test(latestInbound) ||
-    assistantIdentityPattern.test(latestInbound)
-  ) {
-    return true;
-  }
-  const latestOutbound = [...messages]
-    .reverse()
-    .find((message) => message.direction === "OUTBOUND")
-    ?.content?.trim();
-  const isConciseAnswer = latestInbound.split(whitespacePattern).length <= 24;
-  if (
-    latestOutbound &&
-    (commercialIntentPattern.test(latestOutbound) ||
-      commercialClarificationPattern.test(latestOutbound) ||
-      commercialFollowUpPattern.test(latestOutbound)) &&
-    isConciseAnswer &&
-    !clearlyUnrelatedQuestionPattern.test(latestInbound)
-  ) {
-    return true;
-  }
-  if (acknowledgementPattern.test(latestInbound)) {
-    return Boolean(
-      latestOutbound && commercialFollowUpPattern.test(latestOutbound)
-    );
-  }
-  return false;
-}
-
-function outOfScopeResponse(companyName?: string): string {
-  const safeCompanyName = companyName
-    ?.replace(/[\r\n\t]+/g, " ")
-    .trim()
-    .slice(0, 100);
-  const organization = safeCompanyName ? ` de ${safeCompanyName}` : "";
-  return `Puedo ayudarte con productos, precios, disponibilidad y pedidos${organization}. ¿Qué necesitás?`;
 }
 
 function responseText(response: ModelResponse): string | undefined {
@@ -382,12 +328,6 @@ export async function runCommercialModel(params: {
   const initialResponse = initialStateResponse(commercialState);
   if (initialResponse) {
     return initialResponse;
-  }
-  if (!isWithinCommercialScope(params.messages)) {
-    return {
-      id: "out-of-commercial-scope",
-      output_text: outOfScopeResponse(params.businessName),
-    };
   }
   let input: string | Record<string, unknown>[] = conversationInput(
     params.messages

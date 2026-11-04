@@ -389,7 +389,10 @@ function getTemplateHelpSections(options: {
   switch (templateId) {
     case "products":
     case "products_variants":
-      return [{ title: "Categorías válidas", values: clean(categories) }];
+      return [
+        { title: "Categorías válidas", values: clean(categories) },
+        { title: "Proveedores válidos", values: clean(suppliers) },
+      ];
     case "stock":
       return [{ title: "Proveedores válidos", values: clean(suppliers) }];
     case "customers":

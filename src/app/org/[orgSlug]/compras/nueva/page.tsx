@@ -293,6 +293,7 @@ function NewPurchaseContent() {
                 onFormChange={handleFormChange}
                 onSupplierChange={setSelectedSupplierId}
                 onTaxesChange={setSelectedTaxIds}
+                orgSlug={orgSlug}
                 selectedSupplierId={selectedSupplierId}
                 selectedTaxIds={selectedTaxIds}
                 suppliers={suppliers}

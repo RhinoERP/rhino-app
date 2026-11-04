@@ -26,6 +26,7 @@ import type {
   PayableAccount,
   ReceivableAccount,
 } from "@/modules/collections/types";
+import { receivableSupplierLabel } from "@/modules/collections/utils/receivable-suppliers";
 
 type CollectionRow = ReceivableAccount | PayableAccount;
 
@@ -107,7 +108,9 @@ const columnFormatters: Record<string, ColumnFormatter> = {
         "—"
       : "—",
   supplier: (_rawValue, row) =>
-    isReceivable(row) ? "—" : row.supplier.name || "—",
+    isReceivable(row)
+      ? receivableSupplierLabel(row.suppliers)
+      : row.supplier.name || "—",
   invoice: (_rawValue, row) => formatDocument(row),
   purchase_number: (_rawValue, row) => formatDocument(row),
   created_at: (_rawValue, row) => formatExportDate(row.created_at),

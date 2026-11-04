@@ -39,6 +39,8 @@ export type ReceivableAccount = {
     id: string;
     name: string;
   } | null;
+  /** Current suppliers of products in this sale; may contain several. */
+  suppliers?: Array<{ id: string; name: string }>;
   sale?: {
     invoice_number?: string | null;
     sale_date?: string | null;
@@ -180,6 +182,7 @@ export type ReceivablesPaginatedParams = {
   customerId?: string;
   customerIds?: string[];
   sellerIds?: string[];
+  supplierIds?: string[];
   statusFilter?: string[];
 };
 

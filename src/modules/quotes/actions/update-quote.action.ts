@@ -23,6 +23,7 @@ export async function updateQuoteAction(
   try {
     const input = {
       orgSlug,
+      warehouseId: values.warehouseId,
       customerId: values.customerId,
       currency: values.currency,
       exchangeRate: values.exchangeRate ?? null,

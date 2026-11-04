@@ -457,4 +457,3 @@ BEGIN
   RETURN NEXT;
 END;
 $$;
-

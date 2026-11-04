@@ -114,6 +114,7 @@ type ReceivablesTableProps = {
   orgSlug: string;
   pageCount: number;
   paymentAccountId?: string;
+  supplierOptions: Option[];
 };
 
 export function ReceivablesTable({
@@ -121,6 +122,7 @@ export function ReceivablesTable({
   orgSlug,
   pageCount,
   paymentAccountId,
+  supplierOptions,
 }: ReceivablesTableProps) {
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -134,6 +136,10 @@ export function ReceivablesTable({
     "status",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
+  const [supplier] = useQueryState(
+    "supplier",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
   const [directPaymentAccountId, setDirectPaymentAccountId] = useQueryState(
     "cobrar",
     parseAsString.withOptions({ shallow: false })
@@ -143,17 +149,12 @@ export function ReceivablesTable({
   );
 
   const currentStatus = status || "ALL";
-  const hasActiveFilters = search || status;
+  const hasActiveFilters = search || status || supplier;
 
   const handleStatusChange = (value: string) => {
     startTransition(() => {
       setStatus(value === "ALL" ? null : value);
     });
-  };
-
-  const handleClearFilters = () => {
-    setSearch(null);
-    setStatus(null);
   };
 
   const everHadData = useRef(false);
@@ -177,8 +178,14 @@ export function ReceivablesTable({
   }, [initialData]);
 
   const columns = useMemo(
-    () => createReceivableColumns(orgSlug, customerOptions, sellerOptions),
-    [orgSlug, customerOptions, sellerOptions]
+    () =>
+      createReceivableColumns(
+        orgSlug,
+        customerOptions,
+        sellerOptions,
+        supplierOptions
+      ),
+    [orgSlug, customerOptions, sellerOptions, supplierOptions]
   );
 
   const { table } = useDataTable<ReceivableAccount>({
@@ -200,6 +207,12 @@ export function ReceivablesTable({
       },
     },
   });
+
+  const handleClearFilters = () => {
+    setSearch(null);
+    setStatus(null);
+    table.resetColumnFilters();
+  };
 
   const isDataEmpty = initialData.length === 0;
 

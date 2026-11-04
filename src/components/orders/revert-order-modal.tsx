@@ -3,6 +3,7 @@
 import { ArrowFatLineLeftIcon } from "@phosphor-icons/react";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,6 +45,7 @@ export function RevertOrderModal({
   onSuccess,
 }: RevertOrderModalProps) {
   const [notes, setNotes] = useState("");
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const isUndoCreation = revertType === "undo_creation";
@@ -103,35 +105,37 @@ export function RevertOrderModal({
     return `Volver a ${previousStatusLabel}`;
   })();
 
-  function handleConfirm() {
+  function handleConfirm(allowDefaultFallback = false) {
     if (!notes.trim()) {
       return;
     }
 
     startTransition(async () => {
-      const result = await revertOrderStatusAction(
-        orgSlug,
-        orderId,
-        notes,
-        revertType
-      );
+      const result = await revertOrderStatusAction(orgSlug, orderId, notes, {
+        type: revertType,
+        allowDefaultFallback,
+      });
 
-      if (result.success) {
-        let message: string;
-        if (isUndoCreation) {
-          message = `Sub-pedido ${orderNumber} cancelado y items liberados`;
-        } else if (isCascadeRevert) {
-          message = `Pedido ${orderNumber} revertido y ${childCount} sub-pedido(s) cancelado(s)`;
+      if (!result.success) {
+        if (result.requiresDefaultFallback) {
+          setFallbackOpen(true);
         } else {
-          message = `Pedido ${orderNumber} vuelto a ${previousStatusLabel}`;
+          toast.error(result.error ?? "Error al revertir");
         }
-        toast.success(message);
-        setNotes("");
-        onOpenChange(false);
-        onSuccess?.();
-      } else {
-        toast.error(result.error ?? "Error al revertir");
+        return;
       }
+      let message: string;
+      if (isUndoCreation) {
+        message = `Sub-pedido ${orderNumber} cancelado y items liberados`;
+      } else if (isCascadeRevert) {
+        message = `Pedido ${orderNumber} revertido y ${childCount} sub-pedido(s) cancelado(s)`;
+      } else {
+        message = `Pedido ${orderNumber} vuelto a ${previousStatusLabel}`;
+      }
+      toast.success(message);
+      setNotes("");
+      onOpenChange(false);
+      onSuccess?.();
     });
   }
 
@@ -168,7 +172,7 @@ export function RevertOrderModal({
           </Button>
           <Button
             disabled={!notes.trim() || isPending}
-            onClick={handleConfirm}
+            onClick={() => handleConfirm()}
             variant={
               isUndoCreation || isCascadeRevert ? "destructive" : "default"
             }
@@ -178,6 +182,15 @@ export function RevertOrderModal({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <StockReentryFallbackDialog
+        onConfirm={() => {
+          setFallbackOpen(false);
+          handleConfirm(true);
+        }}
+        onOpenChange={setFallbackOpen}
+        open={fallbackOpen}
+        pending={isPending}
+      />
     </Dialog>
   );
 }

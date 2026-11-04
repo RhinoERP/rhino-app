@@ -14,6 +14,7 @@ import {
   TruckIcon,
   UserGearIcon,
   UsersIcon,
+  WarehouseIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -38,6 +39,12 @@ const configNavItems: ConfigNavItem[] = [
     url: (slug: string) => `/org/${slug}/configuracion`,
     icon: BuildingIcon,
     exact: true,
+    requiredPermission: ADMIN_PERMISSION,
+  },
+  {
+    title: "Depósitos",
+    url: (slug: string) => `/org/${slug}/configuracion/depositos`,
+    icon: WarehouseIcon,
     requiredPermission: ADMIN_PERMISSION,
   },
   {

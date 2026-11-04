@@ -7,7 +7,7 @@ export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type ProductVariant =
   Database["public"]["Tables"]["product_variants"]["Row"];
 export type ProductVariantWithStock = ProductVariant & {
-  product_lots?: { id: string; quantity_available: number } | null;
+  product_lots?: { quantity_available: number } | null;
 };
 export type DirectSalePrice =
   Database["public"]["Tables"]["direct_sale_prices"]["Row"];
@@ -132,6 +132,7 @@ export type StockMovementSource =
   | "SYSTEM";
 
 export type StockPaginatedParams = {
+  warehouseId?: string;
   page: number;
   pageSize: number;
   sort?: SortParam[];
@@ -142,12 +143,15 @@ export type StockPaginatedParams = {
 };
 
 export type StockMetrics = {
+  warehouseScoped: boolean;
   totalProducts: number;
   activeProducts: number;
   inactiveProducts: number;
   totalUnits: number;
   totalKg: number;
   totalLt: number;
-  totalStockValue: number;
   lowStockCount: number;
-};
+} & (
+  | { canViewCosts: true; totalStockValue: number }
+  | { canViewCosts: false; totalStockValue?: never }
+);

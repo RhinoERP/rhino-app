@@ -27,6 +27,7 @@ import { RemittanceMaskPrintModal } from "@/components/sales/remittance-mask-pri
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { RemittancePreviewModal } from "@/components/sales/remittance-preview-modal";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
+import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -91,6 +92,7 @@ import type { CreditNote } from "@/modules/credit-notes/types";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-invoice-email.action";
+import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -235,6 +237,7 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
+  warehouses: WarehouseOption[];
   initialMode?: "default" | "return";
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
@@ -851,6 +854,7 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
+  warehouses,
   initialMode,
   relatedOrder,
   remittanceSettings,
@@ -945,6 +949,9 @@ export function SaleDetail({
   );
   const [customerId, setCustomerId] = useState<string>(
     sale.customer?.id ?? sale.customer_id
+  );
+  const [warehouseId, setWarehouseId] = useState<string>(
+    sale.warehouse_id ?? ""
   );
   const [sellerId, setSellerId] = useState<string>(sale.user_id ?? "");
   const [saleDate, setSaleDate] = useState<Date>(() => {
@@ -1899,6 +1906,7 @@ export function SaleDetail({
     const internalPayload = {
       orgSlug,
       saleId: sale.id,
+      warehouseId,
       remittanceNumber: remittanceNumber || null,
       observations: observations || null,
     };
@@ -1909,10 +1917,22 @@ export function SaleDetail({
 
     return {
       ...buildFiscalSaleMutationPayload(),
+      warehouseId,
       remittanceNumber: remittanceNumber || null,
       advancePaymentPercentage:
         invoiceType === "NOTA_DE_VENTA" ? saleAdvancePercentage : null,
     };
+  };
+
+  const persistWarehouseChangeIfNeeded = async () => {
+    if (!(isDraftSale && warehouseId) || warehouseId === sale.warehouse_id) {
+      return;
+    }
+    await updateSale.mutateAsync({
+      orgSlug,
+      saleId: sale.id,
+      warehouseId,
+    });
   };
 
   const handleAccountingConfirm = async (informalEntryId: string) => {
@@ -1959,6 +1979,17 @@ export function SaleDetail({
 
     setError(null);
     setSuccessMessage(null);
+
+    try {
+      await persistWarehouseChangeIfNeeded();
+    } catch (warehouseError) {
+      setError(
+        warehouseError instanceof Error
+          ? warehouseError.message
+          : "No se pudo actualizar el depósito de la venta."
+      );
+      return;
+    }
 
     if (!accountingIntegrationEnabled) {
       try {
@@ -2999,6 +3030,22 @@ export function SaleDetail({
                   </p>
                 </div>
               </div>
+
+              <OperationalWarehouseField
+                description={
+                  relatedOrder
+                    ? "El depósito se hereda del pedido y no puede cambiarse."
+                    : "Podés cambiarlo mientras la preventa siga en borrador."
+                }
+                id="warehouse"
+                onValueChange={setWarehouseId}
+                readOnly={
+                  !(canEditInternalFields && isDraftSale) ||
+                  Boolean(relatedOrder)
+                }
+                value={warehouseId}
+                warehouses={warehouses}
+              />
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
