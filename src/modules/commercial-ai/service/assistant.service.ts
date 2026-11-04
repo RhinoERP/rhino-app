@@ -206,7 +206,7 @@ Cuando nombres un cliente escribilo así: [[cli:CID|Nombre]]; una oportunidad: [
 Montos en pesos argentinos abreviados ($1,2M, $350k). Podés usar viñetas con "- " y **negrita** para lo clave. Si te piden un mensaje para un cliente, escribilo listo para WhatsApp.`;
 }
 
-const MAX_TOOL_ROUNDS = 6;
+const MAX_TOOL_ROUNDS = 8;
 
 export async function askAssistant(
   snapshot: CommercialAiSnapshot,

@@ -121,6 +121,7 @@ export function helpText(name: string): string {
     "",
     "O contame en tus palabras, escrito o por audio 🎧, por ejemplo:",
     "• _Pasé por Lácteos Catamarca, pidieron 20 kg de muzza_",
+    "• _Cargá 5 cremosos y 10 kg de muzza para El Obrero_ (te muestro el total y lo cargo cuando me digas *sí*)",
     "• _Recordame llamar a El Obrero el jueves_",
     "• _¿Cuánto me compró Morini este año?_",
   ].join("\n");

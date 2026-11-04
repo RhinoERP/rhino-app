@@ -4,6 +4,11 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import type { AssistantChannel } from "../service/assistant.service";
 import type { CommercialAiSnapshot, VisitResult } from "../types";
+import {
+  OrderToolError,
+  prepareOrderDraft,
+  searchProducts,
+} from "./seller-orders";
 
 /**
  * Herramientas que el asistente solo tiene por WhatsApp: el vendedor cuenta lo
@@ -28,7 +33,7 @@ const RESULT_TEXT: Record<VisitResult, string> = {
 };
 const MAX_NOTE = 1000;
 
-class SellerToolError extends Error {}
+class SellerToolError extends OrderToolError {}
 
 const SELLER_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -74,6 +79,69 @@ const SELLER_TOOLS: Anthropic.Beta.BetaTool[] = [
         que: { type: "string", description: "Qué hay que hacer." },
       },
       required: ["cliente_id", "fecha", "que"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "buscar_productos",
+    description:
+      "Busca productos activos del catálogo por nombre, código o marca. Devuelve producto_id, unidad, si se vende por peso o cuenta piezas, stock y precio. Pasá cliente_id para ver el precio de ese cliente (su lista).",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        texto: {
+          type: "string",
+          description: "Lo que dijo el vendedor, ej. 'cremoso cremac'.",
+        },
+        cliente_id: {
+          type: ["string", "null"],
+          description: "Id del cliente si ya se sabe, para el precio.",
+        },
+      },
+      required: ["texto", "cliente_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "preparar_pedido",
+    description:
+      "Arma un pedido (preventa) para un cliente de la cartera con precios de su lista e impuestos, y lo deja esperando confirmación. NO lo carga: se carga recién cuando el vendedor responde 'sí'. Armar otro reemplaza al anterior, así que para corregir mandá el pedido completo de nuevo.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        cliente_id: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              producto_id: {
+                type: "string",
+                description: "De buscar_productos.",
+              },
+              cantidad: {
+                type: "number",
+                description:
+                  "Cantidad pedida: unidades, o kg/lt en productos por peso.",
+              },
+              en_piezas: {
+                type: "boolean",
+                description:
+                  "true si en un producto por peso que cuenta piezas el vendedor pidió piezas/hormas/unidades en vez de kilos.",
+              },
+            },
+            required: ["producto_id", "cantidad", "en_piezas"],
+            additionalProperties: false,
+          },
+        },
+        nota: {
+          type: ["string", "null"],
+          description: "Aclaración para el depósito, si la dijo.",
+        },
+      },
+      required: ["cliente_id", "items", "nota"],
       additionalProperties: false,
     },
   },
@@ -194,6 +262,8 @@ const HANDLERS: Record<
 > = {
   registrar_visita: registerVisit,
   crear_recordatorio: createReminder,
+  buscar_productos: searchProducts,
+  preparar_pedido: prepareOrderDraft,
 };
 
 const WEEKDAYS = [
@@ -210,7 +280,8 @@ const WHATSAPP_PROMPT = `CANAL: WhatsApp. El vendedor te escribe desde la calle.
 - Respondé corto (hasta 80 palabras), en texto plano de WhatsApp: *negrita* con un asterisco, viñetas con "• ". No uses links [[...]] ni tablas.
 - Si cuenta una visita o charla con un cliente, usá registrar_visita. Si dice que tiene que volver, llamar o mandar algo otro día, usá crear_recordatorio. Si no sabés qué cliente es, usá buscar_clientes; si hay más de uno parecido, preguntale cuál.
 - Después de guardar, confirmá en una línea qué anotaste. No inventes datos que no dijo.
-- Si pide un mensaje para un cliente, escribilo listo para reenviar.`;
+- Si pide un mensaje para un cliente, escribilo listo para reenviar.
+- PEDIDOS: si quiere cargar un pedido, identificá el cliente (buscar_clientes) y cada producto (buscar_productos con cliente_id). Si un producto tiene varias opciones parecidas, preguntá cuál antes de seguir. En productos por peso que cuentan piezas, si dijo "5 cremosos" u "hormas" son piezas (en_piezas true); si dijo kilos, en_piezas false. Después llamá preparar_pedido y respondé con el resumen_para_el_vendedor tal cual, sin agregar nada. Nunca digas que el pedido está cargado: se carga solo cuando él responde "sí". Si pide cambios, volvé a llamar preparar_pedido con el pedido completo.`;
 
 /** Canal WhatsApp para askAssistant: prompt y herramientas de escritura. */
 export function whatsappChannel(
@@ -237,7 +308,7 @@ export function whatsappChannel(
             content: JSON.stringify(result),
           };
         } catch (error) {
-          const known = error instanceof SellerToolError;
+          const known = error instanceof OrderToolError;
           if (!known) {
             console.error(`IA Comercial: falló ${block.name}`, error);
           }

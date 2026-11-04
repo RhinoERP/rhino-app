@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin-client";
+import { isExplicitConfirmation } from "@/modules/whatsapp/server/confirmation";
 import type { WhatsAppInboundMessage } from "@/modules/whatsapp/server/meta-webhook";
 import { isAiEnabled } from "../service/ai-client";
 import {
@@ -21,11 +22,13 @@ import {
   toWhatsAppText,
   whatsappRecipient,
 } from "./format";
+import { isCancel } from "./order-lines";
 import {
   SellerAudioError,
   sellerAudioEnabled,
   transcribeSellerAudio,
 } from "./seller-audio";
+import { confirmDraft, discardDraft, pendingDraft } from "./seller-orders";
 import { whatsappChannel } from "./seller-tools";
 
 /** Código y mensaje de error de la API de Meta, sin datos del mensaje. */
@@ -305,6 +308,18 @@ async function reply(
   text: string,
   admin: SupabaseClient
 ): Promise<string> {
+  // Un pedido armado espera el "sí": se carga sin pasar por la IA.
+  if (isExplicitConfirmation(text) || isCancel(text)) {
+    const draft = await pendingDraft(snapshot);
+    if (draft) {
+      if (isCancel(text)) {
+        await discardDraft(snapshot);
+        return "Listo, no lo cargo. 👍";
+      }
+      return confirmDraft(snapshot, draft);
+    }
+  }
+
   const command = parseQuickCommand(text);
   const firstName = snapshot.currentUserName.split(" ")[0] ?? "";
   switch (command) {
