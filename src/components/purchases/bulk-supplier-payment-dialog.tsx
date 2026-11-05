@@ -47,6 +47,7 @@ import { BulkSupplierPaymentPreview } from "./bulk-supplier-payment-preview";
 type BulkSupplierPaymentDistribution = {
   accountId: string;
   purchaseNumber: number | null;
+  invoiceReference?: string;
   dueDate: string;
   totalAmount: number;
   pendingBalance: number;

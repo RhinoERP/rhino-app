@@ -305,7 +305,8 @@ export type PublicAccountsPayableTable = {
   supplier_id: string;
   currency: string;
   exchange_rate: string | null;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  supplier_invoice_id: string | null;
   total_amount: ColumnType<string, string, string>;
   pending_balance: ColumnType<string, string, string>;
   due_date: ColumnType<Date, string, string>;
@@ -424,6 +425,9 @@ export type PublicSupplierInvoicesTable = {
   supplier_id: string;
   purchase_order_id: string | null;
   exchange_rate: string | null;
+  currency: string;
+  status: string;
+  payable_model: "INVOICE" | "LEGACY_OC" | "UNRESOLVED";
   created_at: ColumnType<Date, never, never>;
 };
 

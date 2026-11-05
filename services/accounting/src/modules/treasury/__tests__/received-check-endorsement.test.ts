@@ -381,14 +381,20 @@ describe("endorseReceivedChecksForPayableService", () => {
     );
   });
 
-  it("converts endorsed ARS checks to USD using the invoice rate and only consumes USD credits", async () => {
+  it.each([
+    false,
+    true,
+  ])("converts endorsed checks using the invoice rate (direct=%s)", async (direct) => {
     const invoiceQuery = {
       select: vi.fn(),
       where: vi.fn(),
       orderBy: vi.fn(),
-      executeTakeFirst: vi
-        .fn()
-        .mockResolvedValue({ exchange_rate: "1000.0000" }),
+      executeTakeFirst: vi.fn().mockResolvedValue({
+        exchange_rate: "1000.0000",
+        currency: "USD",
+        status: "REGISTERED",
+      }),
+      execute: vi.fn().mockResolvedValue([{ exchange_rate: "1000.0000" }]),
     };
     invoiceQuery.select.mockReturnValue(invoiceQuery);
     invoiceQuery.where.mockReturnValue(invoiceQuery);
@@ -408,7 +414,8 @@ describe("endorseReceivedChecksForPayableService", () => {
       supplier_id: "supplier-1",
       currency: "USD",
       exchange_rate: null,
-      purchase_order_id: "po-1",
+      purchase_order_id: direct ? null : "po-1",
+      supplier_invoice_id: direct ? "invoice-1" : null,
       total_amount: "150.0000",
       pending_balance: "150.0000",
       status: "PENDING",
@@ -459,6 +466,11 @@ describe("endorseReceivedChecksForPayableService", () => {
     });
 
     expect(selectFrom).toHaveBeenCalledWith("public.supplier_invoices");
+    expect(invoiceQuery.where).toHaveBeenCalledWith(
+      direct ? "id" : "purchase_order_id",
+      "=",
+      direct ? "invoice-1" : "po-1"
+    );
     expect(treasuryMocks.listSupplierCreditsForUpdateMock).toHaveBeenCalledWith(
       "org-1",
       "supplier-1",

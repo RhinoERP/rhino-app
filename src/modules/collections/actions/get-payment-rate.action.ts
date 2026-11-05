@@ -80,7 +80,9 @@ export async function getPaymentRateAction(
 
     const { data: payable } = await supabase
       .from("accounts_payable" as never)
-      .select("currency, supplier_id, purchase_order_id, exchange_rate")
+      .select(
+        "currency, supplier_id, purchase_order_id, supplier_invoice_id, exchange_rate"
+      )
       .eq("id", input.accountId)
       .eq("organization_id", org.id)
       .maybeSingle();

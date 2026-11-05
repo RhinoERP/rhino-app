@@ -26,6 +26,7 @@ import type {
   PayableAccount,
   ReceivableAccount,
 } from "@/modules/collections/types";
+import { formatPayableReference } from "@/modules/collections/utils/payable-reference";
 import { receivableSupplierLabel } from "@/modules/collections/utils/receivable-suppliers";
 
 type CollectionRow = ReceivableAccount | PayableAccount;
@@ -77,11 +78,7 @@ function formatDocument(row: CollectionRow): string {
     return `Venta ${row.sales_order_id.slice(0, 8)}`;
   }
 
-  const purchase = row.purchase?.purchase_number;
-  if (purchase) {
-    return purchase.toString().padStart(6, "0");
-  }
-  return `OC ${row.purchase_order_id.slice(0, 8)}`;
+  return formatPayableReference(row);
 }
 
 function formatFallbackValue(rawValue: unknown): string | number {

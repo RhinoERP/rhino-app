@@ -53,6 +53,7 @@ type PayableAccountRow = {
   status?: string | null;
   supplier_id: string;
   purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
   currency?: string | null;
   exchange_rate?: number | null;
 };
@@ -1482,7 +1483,7 @@ async function applyPayablePayment({
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
     .select(
-      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id, currency, exchange_rate"
+      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id, supplier_invoice_id, currency, exchange_rate"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)

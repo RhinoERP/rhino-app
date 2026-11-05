@@ -24,7 +24,9 @@ import type {
   ReceivablesMetrics,
   ReceivablesPaginatedParams,
 } from "../types";
+import { parsePayableInvoiceOrders } from "../utils/payable-reference";
 import { suppliersFromSaleItems } from "../utils/receivable-suppliers";
+import { getPayableInvoiceDocuments } from "./payable-documents.service";
 
 type ReceivableRow = Database["public"]["Tables"]["accounts_receivable"]["Row"];
 
@@ -133,7 +135,10 @@ type PayableRow = {
   id: string;
   organization_id: string;
   supplier_id: string;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
+  invoice?: PayableAccount["invoice"];
+  purchaseOrders?: PayableAccount["purchaseOrders"];
   total_amount: number;
   pending_balance: number;
   currency?: string | null;
@@ -383,6 +388,9 @@ function mapPayableAccount(
     organization_id: row.organization_id,
     supplier_id: row.supplier_id,
     purchase_order_id: row.purchase_order_id,
+    supplier_invoice_id: row.supplier_invoice_id,
+    invoice: row.invoice,
+    purchaseOrders: row.purchaseOrders,
     total_amount: total,
     pending_balance: pending,
     currency: row.currency ?? "ARS",
@@ -392,7 +400,9 @@ function mapPayableAccount(
     last_payment_date: lastPaymentDate,
     supplier: normalizeSupplier(row),
     purchase,
-    payableOrigin: purchase?.payable_origin ?? "PURCHASE_NOTE",
+    payableOrigin: row.supplier_invoice_id
+      ? "SUPPLIER_INVOICE"
+      : (purchase?.payable_origin ?? "PURCHASE_NOTE"),
     items: normalizePurchaseItems(row),
     type: "payable",
     hasDiscrepancy: discrepancy.hasDiscrepancy,
@@ -1203,6 +1213,7 @@ const PAYABLES_SELECT = `
   organization_id,
   supplier_id,
   purchase_order_id,
+  supplier_invoice_id,
   total_amount,
   pending_balance,
   currency,
@@ -1256,6 +1267,27 @@ export async function getPayablesByOrgSlug(
   }
 
   const payablesData = data as unknown as PayableWithRelations[];
+  const documents = await getPayableInvoiceDocuments(
+    supabase,
+    org.id,
+    payablesData.filter((row) => row.supplier_invoice_id).map((row) => row.id)
+  );
+  const documentsByAP = new Map(
+    documents.map((document) => [document.account_payable_id, document])
+  );
+  for (const row of payablesData) {
+    const document = documentsByAP.get(row.id);
+    if (document) {
+      row.invoice = {
+        id: document.supplier_invoice_id,
+        invoice_type: document.invoice_type,
+        point_of_sale: document.point_of_sale,
+        invoice_number: document.invoice_number,
+        invoice_date: document.invoice_date,
+      };
+      row.purchaseOrders = parsePayableInvoiceOrders(document.purchase_orders);
+    }
+  }
   const payableIds = payablesData
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);

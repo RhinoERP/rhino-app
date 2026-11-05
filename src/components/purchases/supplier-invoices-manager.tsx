@@ -25,6 +25,7 @@ import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import { getDocumentSignedUrlAction } from "@/modules/documents/actions/get-document-signed-url.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { createSupplierInvoiceAction } from "@/modules/purchases/actions/create-supplier-invoice.action";
+import { setSupplierInvoiceOrdersAction } from "@/modules/purchases/actions/set-supplier-invoice-orders.action";
 import {
   SUPPLIER_INVOICE_TYPES,
   type SupplierInvoicePurchaseOrderOption,
@@ -67,7 +68,11 @@ export function SupplierInvoicesManager({
         </Button>
       </div>
 
-      <SupplierInvoicesTable invoices={invoices} />
+      <SupplierInvoicesTable
+        invoices={invoices}
+        orgSlug={orgSlug}
+        purchaseOrders={purchaseOrders}
+      />
 
       <SupplierInvoiceDialog
         onOpenChange={setOpen}
@@ -80,10 +85,29 @@ export function SupplierInvoicesManager({
   );
 }
 
+function formatInvoiceOrders(invoice: SupplierInvoiceWithRelations): string {
+  if (invoice.purchase_orders?.length) {
+    return invoice.purchase_orders
+      .map(
+        (order) =>
+          `OC-${String(order.purchase_number ?? order.id.slice(0, 8)).padStart(4, "0")}`
+      )
+      .join(", ");
+  }
+  if (invoice.purchase_order?.purchase_number != null) {
+    return `OC-${String(invoice.purchase_order.purchase_number).padStart(4, "0")}`;
+  }
+  return "Sin OC";
+}
+
 function SupplierInvoicesTable({
   invoices,
+  orgSlug,
+  purchaseOrders,
 }: {
   invoices: SupplierInvoiceWithRelations[];
+  orgSlug: string;
+  purchaseOrders: SupplierInvoicePurchaseOrderOption[];
 }) {
   if (invoices.length === 0) {
     return (
@@ -104,7 +128,7 @@ function SupplierInvoicesTable({
             <th className="px-4 py-3 font-medium">Fecha</th>
             <th className="px-4 py-3 font-medium">Proveedor</th>
             <th className="px-4 py-3 font-medium">Comprobante</th>
-            <th className="px-4 py-3 font-medium">Orden de compra</th>
+            <th className="px-4 py-3 font-medium">Órdenes de compra</th>
             <th className="px-4 py-3 text-right font-medium">Total</th>
             <th className="px-4 py-3 text-center font-medium">PDF</th>
           </tr>
@@ -132,10 +156,14 @@ function SupplierInvoicesTable({
                   .join("-")}
               </td>
               <td className="px-4 py-3 font-mono">
-                {invoice.purchase_order?.purchase_number !== null &&
-                invoice.purchase_order?.purchase_number !== undefined
-                  ? `OC-${String(invoice.purchase_order.purchase_number).padStart(4, "0")}`
-                  : "Sin OC"}
+                {formatInvoiceOrders(invoice)}
+                {invoice.payable_model === "INVOICE" && (
+                  <InvoiceOrderEditor
+                    invoice={invoice}
+                    orgSlug={orgSlug}
+                    purchaseOrders={purchaseOrders}
+                  />
+                )}
               </td>
               <td className="px-4 py-3 text-right tabular-nums">
                 {formatCurrency(invoice.total_amount, invoice.currency)}
@@ -155,6 +183,107 @@ function SupplierInvoicesTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function InvoiceOrderEditor({
+  invoice,
+  orgSlug,
+  purchaseOrders,
+}: {
+  invoice: SupplierInvoiceWithRelations;
+  orgSlug: string;
+  purchaseOrders: SupplierInvoicePurchaseOrderOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pending, startTransition] = useTransition();
+  const availableOrders = purchaseOrders.filter(
+    (order) =>
+      order.supplier_id === invoice.supplier_id &&
+      order.status !== "DRAFT" &&
+      order.status !== "CANCELLED"
+  );
+  const existingOnlyOrders = (invoice.purchase_orders ?? []).filter(
+    (order) => !availableOrders.some((available) => available.id === order.id)
+  );
+  return (
+    <>
+      <Button
+        onClick={() => {
+          setSelected(invoice.purchase_orders?.map((order) => order.id) ?? []);
+          setOpen(true);
+        }}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        Vincular OC
+      </Button>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>OC de la factura {invoice.invoice_number}</DialogTitle>
+            <DialogDescription>
+              Solo cambia la trazabilidad. La deuda, sus pagos y el asiento
+              contable se conservan.
+            </DialogDescription>
+          </DialogHeader>
+          <Label htmlFor={`invoice-orders-${invoice.id}`}>
+            Órdenes del proveedor
+          </Label>
+          <select
+            className="min-h-40 w-full rounded border bg-background p-2"
+            id={`invoice-orders-${invoice.id}`}
+            multiple
+            onChange={(event) =>
+              setSelected(
+                Array.from(
+                  event.target.selectedOptions,
+                  (option) => option.value
+                )
+              )
+            }
+            value={selected}
+          >
+            {existingOnlyOrders.map((order) => (
+              <option key={order.id} value={order.id}>
+                OC-{order.purchase_number ?? order.id.slice(0, 8)} (vínculo
+                actual)
+              </option>
+            ))}
+            {availableOrders.map((order) => (
+              <option key={order.id} value={order.id}>
+                OC-{order.purchase_number ?? order.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+          <Button onClick={() => setSelected([])} type="button" variant="ghost">
+            Quitar todos los vínculos
+          </Button>
+          <Button
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await setSupplierInvoiceOrdersAction({
+                  orgSlug,
+                  invoiceId: invoice.id,
+                  purchaseOrderIds: selected,
+                });
+                if (!result.success) {
+                  toast.error(result.error);
+                  return;
+                }
+                toast.success("Vínculos actualizados; deuda sin cambios");
+                setOpen(false);
+              })
+            }
+          >
+            {pending ? "Guardando..." : "Guardar vínculos"}
+          </Button>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -220,6 +349,8 @@ function SupplierInvoiceDialog({
 }) {
   const [supplierId, setSupplierId] = useState("");
   const [purchaseOrderId, setPurchaseOrderId] = useState("");
+  const [purchaseOrderIds, setPurchaseOrderIds] = useState<string[]>([]);
+  const [invoiceCurrency, setInvoiceCurrency] = useState("ARS");
   const [subtotalAmount, setSubtotalAmount] = useState("0");
   const [taxAmount, setTaxAmount] = useState("0");
   const [exchangeRate, setExchangeRate] = useState("");
@@ -228,6 +359,8 @@ function SupplierInvoiceDialog({
     useState<EventoFacturaCompra | null>(null);
 
   const { data: orgSettings } = useOrgSettings(orgSlug);
+  const directInvoiceEnabled =
+    orgSettings?.invoice_backed_debt_enabled ?? false;
   const accountingIntegrationEnabled =
     orgSettings?.accounting_integration_enabled ?? false;
   const automaticAccountingEnabled =
@@ -257,7 +390,10 @@ function SupplierInvoiceDialog({
       )?.currency ?? "ARS",
     [purchaseOrders, purchaseOrderId]
   );
-  const isUsdPurchaseOrder = selectedPurchaseOrderCurrency === "USD";
+  const effectiveCurrency = directInvoiceEnabled
+    ? invoiceCurrency
+    : selectedPurchaseOrderCurrency;
+  const isUsdPurchaseOrder = effectiveCurrency === "USD";
 
   const equivalenteARS = useMemo(() => {
     const parsedRate = Number(exchangeRate);
@@ -301,6 +437,8 @@ function SupplierInvoiceDialog({
   function reset() {
     setSupplierId("");
     setPurchaseOrderId("");
+    setPurchaseOrderIds([]);
+    setInvoiceCurrency("ARS");
     setSubtotalAmount("0");
     setTaxAmount("0");
     setExchangeRate("");
@@ -400,28 +538,53 @@ function SupplierInvoiceDialog({
           <DialogHeader>
             <DialogTitle>Registrar factura de proveedor</DialogTitle>
             <DialogDescription>
-              El comprobante queda asociado a la orden de compra. Si la OC
-              estaba pendiente de factura o se creó como nota, su cuenta por
-              pagar se actualizará con el total facturado, sin modificar la
-              recepción de mercadería.
+              {directInvoiceEnabled
+                ? "Cada factura genera una cuenta por pagar. Las órdenes vinculadas son trazabilidad: no reparten importes ni modifican la recepción."
+                : "La factura actualiza la deuda consolidada de su orden de compra sin modificar la recepción de mercadería."}
             </DialogDescription>
           </DialogHeader>
 
           <form action={submit} className="grid gap-4">
             <input name="orgSlug" type="hidden" value={orgSlug} />
             <input name="totalAmount" type="hidden" value={totalAmount} />
+            <input name="currency" type="hidden" value={effectiveCurrency} />
+            {directInvoiceEnabled &&
+              purchaseOrderIds.map((id) => (
+                <input
+                  key={id}
+                  name="purchaseOrderIds"
+                  type="hidden"
+                  value={id}
+                />
+              ))}
 
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="purchaseOrderId">Orden de compra</Label>
+              <div className="order-2 space-y-2">
+                <Label htmlFor="purchaseOrderId">
+                  Órdenes de compra (opcional)
+                </Label>
                 <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  className="min-h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   id="purchaseOrderId"
-                  name="purchaseOrderId"
-                  onChange={(event) => selectPurchaseOrder(event.target.value)}
-                  value={purchaseOrderId}
+                  multiple={directInvoiceEnabled}
+                  name={directInvoiceEnabled ? undefined : "purchaseOrderId"}
+                  onChange={(event) =>
+                    directInvoiceEnabled
+                      ? setPurchaseOrderIds(
+                          Array.from(
+                            event.target.selectedOptions,
+                            (option) => option.value
+                          ).filter(Boolean)
+                        )
+                      : selectPurchaseOrder(event.target.value)
+                  }
+                  value={
+                    directInvoiceEnabled ? purchaseOrderIds : purchaseOrderId
+                  }
                 >
-                  <option value="">Sin vincular a una OC</option>
+                  {!directInvoiceEnabled && (
+                    <option value="">Sin vincular a una OC</option>
+                  )}
                   {supplierPurchaseOrders.map((purchaseOrder) => (
                     <option key={purchaseOrder.id} value={purchaseOrder.id}>
                       OC-
@@ -438,7 +601,7 @@ function SupplierInvoiceDialog({
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
+              <div className="order-1 space-y-2">
                 <Label htmlFor="supplierId">Proveedor</Label>
                 <select
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -447,6 +610,7 @@ function SupplierInvoiceDialog({
                   onChange={(event) => {
                     setSupplierId(event.target.value);
                     setPurchaseOrderId("");
+                    setPurchaseOrderIds([]);
                   }}
                   required
                   value={supplierId}
@@ -460,6 +624,35 @@ function SupplierInvoiceDialog({
                 </select>
               </div>
             </div>
+
+            {directInvoiceEnabled && (
+              <div className="space-y-2">
+                <Label htmlFor="invoiceCurrency">Moneda de la factura</Label>
+                <select
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  id="invoiceCurrency"
+                  onChange={(event) => {
+                    setInvoiceCurrency(event.target.value);
+                    setExchangeRate("");
+                  }}
+                  value={invoiceCurrency}
+                >
+                  <option value="ARS">ARS</option>
+                  <option value="USD">USD</option>
+                </select>
+                <p className="text-muted-foreground text-xs">
+                  Puede ser distinta de la moneda de costo de las OC.
+                  Seleccionar OC es opcional; usá Ctrl/Cmd para elegir varias.
+                </p>
+                <Button
+                  onClick={() => setPurchaseOrderIds([])}
+                  type="button"
+                  variant="ghost"
+                >
+                  Quitar vínculos
+                </Button>
+              </div>
+            )}
 
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
