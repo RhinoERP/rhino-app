@@ -34,11 +34,9 @@ import type { MySalesQuoteRequest } from "@/modules/sales-quote-requests/service
 export function MySalesQuoteRequestsList({
   orgSlug,
   requests,
-  showHistory,
 }: {
   orgSlug: string;
   requests: MySalesQuoteRequest[];
-  showHistory: boolean;
 }) {
   const [isNavigatingToNew, setIsNavigatingToNew] = useState(false);
 
@@ -115,7 +113,6 @@ export function MySalesQuoteRequestsList({
                     key={request.id}
                     orgSlug={orgSlug}
                     request={request}
-                    showHistory={showHistory}
                   />
                 ))}
               </tbody>
@@ -130,11 +127,9 @@ export function MySalesQuoteRequestsList({
 function RequestRow({
   orgSlug,
   request,
-  showHistory,
 }: {
   orgSlug: string;
   request: MySalesQuoteRequest;
-  showHistory: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -232,7 +227,7 @@ function RequestRow({
               </Link>
             </Button>
           )}
-          {showHistory && request.history.length > 0 && (
+          {request.history.length > 0 && (
             <details className="relative text-left">
               <summary className="cursor-pointer text-primary text-xs hover:underline">
                 Historial ({request.history.length})
@@ -247,13 +242,23 @@ function RequestRow({
                       }).format(new Date(entry.changed_at))}
                     </p>
                     <p className="text-muted-foreground text-xs">
-                      Versión anterior · {entry.items_snapshot.length} productos
-                      ·{" "}
+                      {historyEventLabel(entry.event_type)} ·{" "}
+                      {entry.items_snapshot.length} productos ·{" "}
                       {formatCurrency(
                         entry.request_snapshot.total_amount,
                         entry.request_snapshot.currency
                       )}
                     </p>
+                    {entry.changed_by_name && (
+                      <p className="text-muted-foreground text-xs">
+                        Por {entry.changed_by_name}
+                      </p>
+                    )}
+                    {entry.event_comment && (
+                      <p className="mt-1 whitespace-pre-wrap text-xs">
+                        {entry.event_comment}
+                      </p>
+                    )}
                     <ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
                       {entry.items_snapshot.map((item, index) => (
                         <li key={`${entry.id}-${index}`}>
@@ -266,9 +271,18 @@ function RequestRow({
               </div>
             </details>
           )}
-          {!canCancel && (!showHistory || request.history.length === 0) && (
-            <span className="text-muted-foreground">—</span>
+          {request.sales_order_id && (
+            <Button asChild size="sm" variant="link">
+              <Link href={`/org/${orgSlug}/ventas/${request.sales_order_id}`}>
+                Ver preventa
+              </Link>
+            </Button>
           )}
+          {!canCancel &&
+            request.history.length === 0 &&
+            !request.sales_order_id && (
+              <span className="text-muted-foreground">—</span>
+            )}
           {canCancel && (
             <AlertDialog
               onOpenChange={setCancelDialogOpen}
@@ -338,10 +352,22 @@ function statusLabel(status: string): string {
     RETURNED: "Devuelta para corrección",
     APPROVED: "Aprobada",
     REJECTED: "Rechazada",
-    CONVERTED: "Convertida",
+    CONVERTED: "Aprobada · Preventa creada",
     CANCELLED: "Dada de baja",
   };
   return labels[status] ?? status;
+}
+
+function historyEventLabel(eventType: string): string {
+  const labels: Record<string, string> = {
+    PREVIOUS_VERSION: "Versión anterior",
+    SUBMITTED: "Enviada a aprobación",
+    EDITED: "Modificada y reenviada",
+    RETURNED: "Devuelta para corrección",
+    APPROVED: "Aprobada · Preventa creada",
+    CANCELLED: "Dada de baja",
+  };
+  return labels[eventType] ?? "Actividad";
 }
 
 function statusVariant(

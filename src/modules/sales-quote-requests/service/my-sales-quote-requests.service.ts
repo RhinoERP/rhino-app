@@ -11,13 +11,21 @@ export type MySalesQuoteRequest = {
   created_at: string;
   review_comment: string | null;
   cancellation_observation: string | null;
+  sales_order_id: string | null;
   customer_name: string;
   item_count: number;
   history: Array<{
     id: string;
     changed_at: string;
+    changed_by_name: string | null;
+    event_type: string;
+    event_comment: string | null;
     items_snapshot: Array<{ product_name_snapshot?: string }>;
-    request_snapshot: { total_amount: number; currency: string };
+    request_snapshot: {
+      status?: string;
+      total_amount: number;
+      currency: string;
+    };
   }>;
 };
 
@@ -76,6 +84,21 @@ type HistoryRow = {
   items_snapshot: Array<{ product_name_snapshot?: string }>;
   request_snapshot: { total_amount: number; currency: string };
 };
+type EventRow = {
+  id: string;
+  request_id: string;
+  changed_at: string;
+  changed_by: string | null;
+  changed_by_name: string | null;
+  event_type: string;
+  event_comment: string | null;
+  items_snapshot: Array<{ product_name_snapshot?: string }>;
+  request_snapshot: {
+    status?: string;
+    total_amount: number;
+    currency: string;
+  };
+};
 type EditableRequestRow = {
   id: string;
   created_by: string;
@@ -118,6 +141,7 @@ export type SalesQuoteRequestDetail = {
   seller_observations: string | null;
   review_comment: string | null;
   cancellation_observation: string | null;
+  sales_order_id: string | null;
   subtotal_amount: number;
   tax_amount: number;
   total_amount: number;
@@ -153,6 +177,7 @@ async function executeQuery<T>(query: Query): Promise<QueryResult<T>> {
   >)) as QueryResult<T>;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: aggregates requests, customers, line counts, edits, and lifecycle events for the seller history.
 export async function getMySalesQuoteRequestsByOrgSlug(
   orgSlug: string,
   userId: string
@@ -166,7 +191,7 @@ export async function getMySalesQuoteRequestsByOrgSlug(
   const requestQuery = database
     .from("sales_quote_requests")
     .select(
-      "id, customer_id, status, currency, subtotal_amount, total_amount, created_at, review_comment, cancellation_observation"
+      "id, customer_id, status, currency, subtotal_amount, total_amount, created_at, review_comment, cancellation_observation, sales_order_id"
     )
     .eq("organization_id", organization.id)
     .eq("created_by", userId)
@@ -184,27 +209,39 @@ export async function getMySalesQuoteRequestsByOrgSlug(
   const customerIds = [
     ...new Set(requests.map((request) => request.customer_id)),
   ];
-  const [customersResult, itemsResult, historyResult] = await Promise.all([
-    executeQuery<CustomerRow[]>(
-      database
-        .from("customers")
-        .select("id, fantasy_name, business_name")
-        .in("id", customerIds)
-    ),
-    executeQuery<ItemRow[]>(
-      database
-        .from("sales_quote_request_items")
-        .select("request_id")
-        .in("request_id", requestIds)
-    ),
-    executeQuery<HistoryRow[]>(
-      database
-        .from("sales_quote_request_history")
-        .select("id, request_id, changed_at, items_snapshot, request_snapshot")
-        .in("request_id", requestIds)
-        .order("changed_at", { ascending: false })
-    ),
-  ]);
+  const [customersResult, itemsResult, historyResult, eventsResult] =
+    await Promise.all([
+      executeQuery<CustomerRow[]>(
+        database
+          .from("customers")
+          .select("id, fantasy_name, business_name")
+          .in("id", customerIds)
+      ),
+      executeQuery<ItemRow[]>(
+        database
+          .from("sales_quote_request_items")
+          .select("request_id")
+          .in("request_id", requestIds)
+      ),
+      executeQuery<HistoryRow[]>(
+        database
+          .from("sales_quote_request_history")
+          .select(
+            "id, request_id, changed_at, items_snapshot, request_snapshot"
+          )
+          .in("request_id", requestIds)
+          .order("changed_at", { ascending: false })
+      ),
+      executeQuery<EventRow[]>(
+        database
+          .from("sales_quote_request_events")
+          .select(
+            "id, request_id, changed_at, changed_by, changed_by_name, event_type, event_comment, items_snapshot, request_snapshot"
+          )
+          .in("request_id", requestIds)
+          .order("changed_at", { ascending: false })
+      ),
+    ]);
 
   if (customersResult.error) {
     throw new Error(
@@ -221,6 +258,11 @@ export async function getMySalesQuoteRequestsByOrgSlug(
       `No se pudo cargar el historial: ${historyResult.error.message}`
     );
   }
+  if (eventsResult.error) {
+    throw new Error(
+      `No se pudo cargar la actividad: ${eventsResult.error.message}`
+    );
+  }
 
   const customers = new Map(
     (customersResult.data ?? []).map((customer) => [customer.id, customer])
@@ -235,10 +277,33 @@ export async function getMySalesQuoteRequestsByOrgSlug(
     requestHistory.push({
       id: entry.id,
       changed_at: entry.changed_at,
+      changed_by_name: null,
+      event_type: "PREVIOUS_VERSION",
+      event_comment: null,
       items_snapshot: entry.items_snapshot ?? [],
       request_snapshot: entry.request_snapshot,
     });
     historyByRequest.set(entry.request_id, requestHistory);
+  }
+  for (const entry of eventsResult.data ?? []) {
+    const requestHistory = historyByRequest.get(entry.request_id) ?? [];
+    requestHistory.push({
+      id: entry.id,
+      changed_at: entry.changed_at,
+      changed_by_name: entry.changed_by_name,
+      event_type: entry.event_type,
+      event_comment: entry.event_comment,
+      items_snapshot: entry.items_snapshot ?? [],
+      request_snapshot: entry.request_snapshot,
+    });
+    historyByRequest.set(entry.request_id, requestHistory);
+  }
+  for (const entries of historyByRequest.values()) {
+    entries.sort(
+      (left, right) =>
+        new Date(right.changed_at).getTime() -
+        new Date(left.changed_at).getTime()
+    );
   }
 
   return requests.map(({ customer_id: customerId, ...request }) => {
@@ -336,7 +401,7 @@ export async function getOwnSalesQuoteRequestDetails(params: {
     database
       .from("sales_quote_requests")
       .select(
-        "id, customer_id, status, currency, created_at, seller_name_snapshot, seller_zone_snapshot, customer_segment, payment_method, payment_term, invoice_type, exchange_rate, seller_observations, review_comment, cancellation_observation, subtotal_amount, tax_amount, total_amount"
+        "id, customer_id, status, currency, created_at, seller_name_snapshot, seller_zone_snapshot, customer_segment, payment_method, payment_term, invoice_type, exchange_rate, seller_observations, review_comment, cancellation_observation, sales_order_id, subtotal_amount, tax_amount, total_amount"
       )
       .eq("id", params.requestId)
       .eq("organization_id", organization.id)

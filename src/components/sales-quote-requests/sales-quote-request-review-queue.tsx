@@ -91,7 +91,7 @@ function RequestReviewCard({
 
       toast.success(
         decision === "APPROVED"
-          ? "Solicitud aprobada"
+          ? "Solicitud aprobada y preventa creada"
           : "Solicitud devuelta para corrección"
       );
       setPendingDecision(null);

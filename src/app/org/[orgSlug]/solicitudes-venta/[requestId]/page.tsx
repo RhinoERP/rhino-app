@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SalesQuoteRequestBackButton } from "@/components/sales-quote-requests/sales-quote-request-back-button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -71,6 +73,13 @@ export default async function SalesQuoteRequestDetailPage({
             >
               {statusLabel(request.status)}
             </Badge>
+            {request.sales_order_id && (
+              <Button asChild size="sm" variant="outline">
+                <Link href={`/org/${orgSlug}/ventas/${request.sales_order_id}`}>
+                  Ver preventa
+                </Link>
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -235,7 +244,7 @@ function statusLabel(status: string): string {
     RETURNED: "Devuelta para corrección",
     APPROVED: "Aprobada",
     REJECTED: "Rechazada",
-    CONVERTED: "Convertida",
+    CONVERTED: "Aprobada · Preventa creada",
     CANCELLED: "Dada de baja",
   };
   return labels[status] ?? status;

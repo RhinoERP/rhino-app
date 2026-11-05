@@ -38,6 +38,8 @@ export async function reviewSalesQuoteRequestAction(
     }
 
     revalidatePath(`/org/${input.orgSlug}/solicitudes-venta/aprobacion`);
+    revalidatePath(`/org/${input.orgSlug}/solicitudes-venta`);
+    revalidatePath(`/org/${input.orgSlug}/ventas`);
     return { success: true };
   } catch (error) {
     return {
