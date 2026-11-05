@@ -34,6 +34,7 @@ export default async function SupplierInvoicesPage({
           .map((purchaseOrder) => ({
             id: purchaseOrder.id,
             purchase_number: purchaseOrder.purchase_number,
+            purchase_date: purchaseOrder.purchase_date,
             supplier_id: purchaseOrder.supplier_id,
             total_amount: purchaseOrder.total_amount,
             status: purchaseOrder.status,

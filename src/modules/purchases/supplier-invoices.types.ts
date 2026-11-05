@@ -41,6 +41,7 @@ export type SupplierInvoiceWithRelations = SupplierInvoice & {
 };
 
 export type SupplierInvoicePurchaseOrderOption = {
+  purchase_date?: string;
   id: string;
   purchase_number: number | null;
   supplier_id: string | null;
