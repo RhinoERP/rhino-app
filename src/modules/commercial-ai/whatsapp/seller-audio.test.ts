@@ -45,9 +45,10 @@ describe("transcribeSellerAudio", () => {
     const calls = stubFetch(
       Response.json({ text: " Pasé por El Obrero, pidieron 20 kilos " })
     );
-    await expect(transcribeSellerAudio(payload, "999")).resolves.toBe(
-      "Pasé por El Obrero, pidieron 20 kilos"
-    );
+    await expect(transcribeSellerAudio(payload, "999")).resolves.toEqual({
+      text: "Pasé por El Obrero, pidieron 20 kilos",
+      bytes: 3,
+    });
     expect(calls[0]).toContain("/123456?phone_number_id=999");
     expect(calls[2]).toBe("https://api.openai.com/v1/audio/transcriptions");
   });

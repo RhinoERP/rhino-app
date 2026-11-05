@@ -18,11 +18,10 @@ export default async function OrgAiUsagePage({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-heading text-xl">IA Comercial · consumo y topes</h2>
+        <h2 className="font-heading text-xl">IA Comercial · créditos</h2>
         <p className="text-muted-foreground text-sm">
-          Cuánto gasta {organization.name} en IA este mes y hasta cuánto puede
-          gastar. Al llegar al tope, la IA se apaga y el módulo sigue con
-          reglas.
+          Plan de créditos de {organization.name}, lo que consumió este mes y lo
+          que compró. Sin créditos, la IA y el asistente por WhatsApp se pausan.
         </p>
       </div>
       <UsagePanel

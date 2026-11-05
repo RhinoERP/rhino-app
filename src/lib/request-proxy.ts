@@ -14,12 +14,21 @@ export async function handleRequestProxy(request: NextRequest) {
   const isWhatsAppAudioCleanup =
     request.method === "GET" &&
     pathname === "/api/internal/whatsapp-agent/audio-cleanup";
+  // Mercado Pago: la ruta verifica la firma y consulta cada pago a la API.
+  const isMercadoPagoWebhook =
+    request.method === "POST" && pathname === "/api/webhooks/mercadopago";
   // Vercel Cron se autentica con CRON_SECRET dentro de cada ruta.
   const isCron = request.method === "GET" && CRON_PATH.test(pathname);
 
   // These handlers authenticate Meta, the worker or the cron themselves. No caller
   // has a browser session, so redirecting them to login prevents integration.
-  if (isWhatsAppWebhook || isWhatsAppTool || isWhatsAppAudioCleanup || isCron) {
+  if (
+    isWhatsAppWebhook ||
+    isWhatsAppTool ||
+    isWhatsAppAudioCleanup ||
+    isCron ||
+    isMercadoPagoWebhook
+  ) {
     return NextResponse.next({ request });
   }
 

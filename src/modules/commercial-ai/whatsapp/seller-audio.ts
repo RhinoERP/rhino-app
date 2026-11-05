@@ -143,11 +143,11 @@ async function downloadFromMeta(
   );
 }
 
-/** Baja la nota de voz y devuelve el texto. */
+/** Baja la nota de voz y devuelve el texto (y su tamaño, para cobrar los minutos). */
 export async function transcribeSellerAudio(
   payload: Record<string, unknown>,
   phoneNumberId: string
-): Promise<string> {
+): Promise<{ text: string; bytes: number }> {
   const { mediaId, mimeType } = audioRef(payload);
   const bytes = await downloadFromMeta(mediaId, phoneNumberId);
   const model =
@@ -185,5 +185,5 @@ export async function transcribeSellerAudio(
       "No te entendí bien el audio. Mandame uno más claro o escribime."
     );
   }
-  return text;
+  return { text, bytes: bytes.byteLength };
 }

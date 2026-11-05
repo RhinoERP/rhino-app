@@ -53,7 +53,7 @@ export function SettingsTab() {
             <TabsTrigger value="rutas">Rutas</TabsTrigger>
             <TabsTrigger value="prospeccion">Prospección</TabsTrigger>
             <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
-            <TabsTrigger value="consumo">Consumo IA</TabsTrigger>
+            <TabsTrigger value="consumo">Créditos</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -62,7 +62,9 @@ export function SettingsTab() {
       {section === "rutas" ? <RouteSettingsSection /> : null}
       {section === "prospeccion" ? <IcpSection /> : null}
       {section === "whatsapp" ? <WhatsAppSettings /> : null}
-      {section === "consumo" ? <UsagePanel usage={snapshot.usage} /> : null}
+      {section === "consumo" ? (
+        <UsagePanel orgSlug={snapshot.orgSlug} usage={snapshot.usage} />
+      ) : null}
     </div>
   );
 }

@@ -4,13 +4,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { isExplicitConfirmation } from "@/modules/whatsapp/server/confirmation";
 import type { WhatsAppInboundMessage } from "@/modules/whatsapp/server/meta-webhook";
+import { audioCost, WHATSAPP_MESSAGE_USD } from "../credits";
 import { isAiEnabled } from "../service/ai-client";
 import {
   type AssistantMessage,
   askAssistant,
 } from "../service/assistant.service";
 import { getCommercialAiSnapshotForUser } from "../service/commercial-ai.service";
-import { AiBudgetExceededError } from "../service/usage.service";
+import {
+  AiBudgetExceededError,
+  chargeUsage,
+  getCreditStatus,
+  OUT_OF_CREDITS_MESSAGE,
+} from "../service/usage.service";
 import type { CommercialAiSnapshot } from "../types";
 import {
   dayDigest,
@@ -66,7 +72,29 @@ export type SellerTarget = {
   phone: string;
   /** Gerente con "toda la empresa" prendido; si no, ve solo su cartera. */
   teamView?: boolean;
+  /** Para el detalle de consumo. */
+  userName?: string;
 };
+
+function meterOf(target: SellerTarget, feature: "whatsapp" | "audio") {
+  return {
+    organizationId: target.organizationId,
+    userId: target.userId,
+    userName: target.userName ?? "",
+    feature,
+  };
+}
+
+/** Cada mensaje que mandamos lo cobra Meta: descuenta créditos. */
+function chargeMessage(target: SellerTarget): Promise<void> {
+  return chargeUsage(meterOf(target, "whatsapp"), {
+    feature: "whatsapp",
+    model: "meta-whatsapp",
+    costUsd: WHATSAPP_MESSAGE_USD,
+  }).catch((error: unknown) => {
+    console.warn("IA Comercial: no se pudo cobrar el mensaje", error);
+  });
+}
 
 /** ¿Este mensaje lo mandó un vendedor de la organización dueña del número? */
 export async function findSellerForInbound(
@@ -141,6 +169,7 @@ export async function sendSellerText(
       external_message_id: json.messages?.[0]?.id ?? null,
       body: text,
     });
+  await chargeMessage(target);
 }
 
 const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -184,6 +213,9 @@ async function sendDigestTemplate(
       }),
     }
   );
+  if (response.ok) {
+    await chargeMessage(target);
+  }
   return response.ok;
 }
 
@@ -194,6 +226,50 @@ export type DigestRunResult = {
   skipped: number;
   failed: number;
 };
+
+type DigestOutcome = "sentText" | "sentTemplate" | "skipped";
+
+async function sendDigestTo(
+  admin: SupabaseClient,
+  target: SellerTarget
+): Promise<DigestOutcome> {
+  // El resumen diario es personal: siempre la cartera propia.
+  const snapshot = await getCommercialAiSnapshotForUser(
+    target.organizationId,
+    target.userId,
+    { ownPortfolioOnly: true }
+  );
+  // Sin créditos no se manda: cada mensaje cuesta.
+  if (
+    !snapshot ||
+    (await getCreditStatus(target.organizationId)).level === "agotado"
+  ) {
+    return "skipped";
+  }
+  target.userName = snapshot.currentUserName;
+  const { data: last } = await admin
+    .from("commercial_ai_whatsapp_messages")
+    .select("created_at")
+    .eq("organization_id", target.organizationId)
+    .eq("user_id", target.userId)
+    .eq("direction", "in")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const inWindow =
+    last &&
+    Date.now() - new Date(last.created_at as string).getTime() <
+      SESSION_WINDOW_MS;
+  if (inWindow) {
+    await sendSellerText(target, dayDigest(snapshot));
+    return "sentText";
+  }
+  const sent = await sendDigestTemplate(
+    target,
+    snapshot.currentUserName.split(" ")[0] ?? ""
+  );
+  return sent ? "sentTemplate" : "skipped";
+}
 
 /**
  * Resumen del día para todos los vendedores con WhatsApp cargado. Si el
@@ -234,42 +310,8 @@ export async function sendDailyDigests(): Promise<DigestRunResult> {
       phone: seller.phone,
     };
     try {
-      // El resumen diario es personal: siempre la cartera propia.
-      const snapshot = await getCommercialAiSnapshotForUser(
-        target.organizationId,
-        target.userId,
-        { ownPortfolioOnly: true }
-      );
-      if (!snapshot) {
-        result.skipped += 1;
-        continue;
-      }
-      const { data: last } = await admin
-        .from("commercial_ai_whatsapp_messages")
-        .select("created_at")
-        .eq("organization_id", target.organizationId)
-        .eq("user_id", target.userId)
-        .eq("direction", "in")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const inWindow =
-        last &&
-        Date.now() - new Date(last.created_at as string).getTime() <
-          SESSION_WINDOW_MS;
-      if (inWindow) {
-        await sendSellerText(target, dayDigest(snapshot));
-        result.sentText += 1;
-      } else if (
-        await sendDigestTemplate(
-          target,
-          snapshot.currentUserName.split(" ")[0] ?? ""
-        )
-      ) {
-        result.sentTemplate += 1;
-      } else {
-        result.skipped += 1;
-      }
+      const outcome = await sendDigestTo(admin, target);
+      result[outcome] += 1;
     } catch (error) {
       console.error("IA Comercial WhatsApp: falló el resumen diario", error);
       result.failed += 1;
@@ -376,10 +418,18 @@ async function resolveText(
     };
   }
   try {
-    const heard = await transcribeSellerAudio(
+    const transcription = await transcribeSellerAudio(
       message.payload,
       target.phoneNumberId
     );
+    const heard = transcription.text;
+    await chargeUsage(meterOf(target, "audio"), {
+      feature: "audio",
+      model: "gpt-transcribe",
+      costUsd: audioCost(transcription.bytes).usd,
+    }).catch((error: unknown) => {
+      console.warn("IA Comercial: no se pudo cobrar el audio", error);
+    });
     // El historial guarda lo que dijo, para que la IA tenga el contexto.
     await admin
       .from("commercial_ai_whatsapp_messages")
@@ -392,6 +442,36 @@ async function resolveText(
     }
     throw error;
   }
+}
+
+const OUT_OF_CREDITS_NOTICE_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Sin créditos no se procesa nada (ni IA ni respuesta). Se avisa una vez cada
+ * 12 h para no gastar un mensaje por cada intento.
+ */
+async function hasCreditsOrNotify(
+  admin: SupabaseClient,
+  target: SellerTarget
+): Promise<boolean> {
+  const status = await getCreditStatus(target.organizationId);
+  if (status.level !== "agotado") {
+    return true;
+  }
+  const since = new Date(Date.now() - OUT_OF_CREDITS_NOTICE_MS).toISOString();
+  const { data: notified } = await admin
+    .from("commercial_ai_whatsapp_messages")
+    .select("id")
+    .eq("organization_id", target.organizationId)
+    .eq("user_id", target.userId)
+    .eq("direction", "out")
+    .eq("body", OUT_OF_CREDITS_MESSAGE)
+    .gte("created_at", since)
+    .limit(1);
+  if (!notified?.length) {
+    await sendSellerText(target, OUT_OF_CREDITS_MESSAGE);
+  }
+  return false;
 }
 
 /** Atiende un mensaje de un vendedor. Pensado para correr después de responder a Meta. */
@@ -419,6 +499,9 @@ export async function processSellerMessage(
   }
 
   try {
+    if (!(await hasCreditsOrNotify(admin, target))) {
+      return;
+    }
     const input = await resolveText(
       admin,
       target,
@@ -441,6 +524,7 @@ export async function processSellerMessage(
       );
       return;
     }
+    target.userName = snapshot.currentUserName;
     const answer = await reply(snapshot, target, input.text, admin);
     const heard = input.heard
       ? `🎧 _Entendí:_ "${input.heard.length > HEARD_PREVIEW ? `${input.heard.slice(0, HEARD_PREVIEW)}…` : input.heard}"\n\n`
