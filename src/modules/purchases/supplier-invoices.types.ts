@@ -14,6 +14,8 @@ export type SupplierInvoice = {
   organization_id: string;
   supplier_id: string;
   purchase_order_id: string | null;
+  payable_model: "LEGACY_OC" | "INVOICE" | "UNRESOLVED";
+  legacy_account_payable_id: string | null;
   invoice_type: SupplierInvoiceType;
   point_of_sale: string | null;
   invoice_number: string;
@@ -35,6 +37,7 @@ export type SupplierInvoice = {
 export type SupplierInvoiceWithRelations = SupplierInvoice & {
   supplier: { id: string; name: string } | null;
   purchase_order: { id: string; purchase_number: number | null } | null;
+  purchase_orders?: { id: string; purchase_number: number | null }[];
 };
 
 export type SupplierInvoicePurchaseOrderOption = {

@@ -40,6 +40,12 @@ type GroupedPayment = {
 };
 
 const getPaymentLabel = (payment: SupplierPaymentEntry) => {
+  if (payment.invoice_reference) {
+    return payment.invoice_reference;
+  }
+  if (payment.supplier_invoice_id) {
+    return `Factura ${payment.supplier_invoice_id.slice(0, 8)}`;
+  }
   if (payment.purchase_number !== null) {
     return `Compra N° ${String(payment.purchase_number).padStart(6, "0")}`;
   }

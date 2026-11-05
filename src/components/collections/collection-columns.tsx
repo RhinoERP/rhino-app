@@ -17,6 +17,7 @@ import type {
   PayableAccount,
   ReceivableAccount,
 } from "@/modules/collections/types";
+import { formatPayableReference } from "@/modules/collections/utils/payable-reference";
 import { receivableSupplierLabel } from "@/modules/collections/utils/receivable-suppliers";
 import { CollectionActionsMenu } from "./collection-actions-menu";
 
@@ -506,22 +507,21 @@ export function createPayableColumns(
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Compra" />
       ),
-      cell: ({ row }) => {
-        const purchase = row.original.purchase;
-        if (purchase?.purchase_number) {
-          return (
-            <div className="font-mono text-xs">
-              {purchase.purchase_number.toString().padStart(6, "0")}
+      cell: ({ row }) => (
+        <div className="text-muted-foreground text-xs">
+          {formatPayableReference(row.original)}
+          {!!row.original.purchaseOrders?.length && (
+            <div>
+              {row.original.purchaseOrders
+                .map(
+                  (order) =>
+                    `OC-${order.purchase_number ?? order.id.slice(0, 8)}`
+                )
+                .join(", ")}
             </div>
-          );
-        }
-
-        return (
-          <div className="text-muted-foreground text-xs">
-            OC {row.original.purchase_order_id.slice(0, 8)}
-          </div>
-        );
-      },
+          )}
+        </div>
+      ),
       enableSorting: false,
       enableColumnFilter: false,
     },

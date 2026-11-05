@@ -1,6 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
+import { getPayableInvoiceDocuments } from "@/modules/collections/service/payable-documents.service";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
 import { resolvePaymentCurrencyFields } from "@/modules/collections/utils/payment-currency";
 import {
@@ -2121,7 +2122,9 @@ export async function getPurchaseOrderWithItems(
 // Helper functions for processBulkSupplierPayment
 type PendingPayableAccount = {
   id: string;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
+  invoiceReference?: string;
   total_amount: number;
   pending_balance: number;
   due_date: string;
@@ -2133,6 +2136,37 @@ type PendingPayableAccount = {
     | null;
 };
 
+async function attachPayableInvoiceReferences(
+  accounts: PendingPayableAccount[],
+  orgId: string
+): Promise<void> {
+  if (!accounts.some((account) => account.supplier_invoice_id)) {
+    return;
+  }
+  const data = await getPayableInvoiceDocuments(
+    await createClient(),
+    orgId,
+    accounts
+      .filter((account) => account.supplier_invoice_id)
+      .map((account) => account.id)
+  );
+  const byAP = new Map(
+    data.map((document) => [document.account_payable_id, document])
+  );
+  for (const account of accounts) {
+    const document = byAP.get(account.id);
+    if (document) {
+      account.invoiceReference = [
+        document.invoice_type,
+        document.point_of_sale,
+        document.invoice_number,
+      ]
+        .filter(Boolean)
+        .join("-");
+    }
+  }
+}
+
 function calculateSupplierPaymentDistributions(
   pendingAccounts: PendingPayableAccount[],
   totalAmount: number
@@ -2141,6 +2175,7 @@ function calculateSupplierPaymentDistributions(
   const distributions: Array<{
     accountId: string;
     purchaseNumber: number | null;
+    invoiceReference?: string;
     dueDate: string;
     totalAmount: number;
     pendingBalance: number;
@@ -2180,6 +2215,7 @@ function calculateSupplierPaymentDistributions(
     distributions.push({
       accountId: account.id,
       purchaseNumber: purchase?.purchase_number ?? null,
+      invoiceReference: account.invoiceReference,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
       pendingBalance,
@@ -2398,6 +2434,7 @@ export async function processBulkSupplierPayment(input: {
     .select(`
       id,
       purchase_order_id,
+      supplier_invoice_id,
       total_amount,
       pending_balance,
       due_date,
@@ -2420,6 +2457,7 @@ export async function processBulkSupplierPayment(input: {
 
   const payableAccounts = (pendingAccounts ??
     []) as unknown as PendingPayableAccount[];
+  await attachPayableInvoiceReferences(payableAccounts, org.id);
 
   if (payableAccounts.length === 0) {
     return {
@@ -2458,6 +2496,7 @@ export async function processBulkSupplierPayment(input: {
           currency: account.currency,
           supplier_id: supplierId,
           purchase_order_id: account.purchase_order_id,
+          supplier_invoice_id: account.supplier_invoice_id,
           exchange_rate: account.exchange_rate,
         },
       });
@@ -2642,6 +2681,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     .select(`
       id,
       purchase_order_id,
+      supplier_invoice_id,
       total_amount,
       pending_balance,
       due_date,
@@ -2661,6 +2701,7 @@ export async function calculateBulkSupplierPaymentDistribution(
 
   const payableAccounts = (pendingAccounts ??
     []) as unknown as PendingPayableAccount[];
+  await attachPayableInvoiceReferences(payableAccounts, org.id);
 
   if (payableAccounts.length === 0) {
     return [];
@@ -2686,6 +2727,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     newBalance: number;
     newStatus: CollectionAccountStatus;
     exchangeRate: number | null;
+    invoiceReference?: string;
   }> = [];
 
   for (const account of batchAccounts) {
@@ -2714,6 +2756,7 @@ export async function calculateBulkSupplierPaymentDistribution(
         currency: account.currency,
         supplier_id: supplierId,
         purchase_order_id: account.purchase_order_id,
+        supplier_invoice_id: account.supplier_invoice_id,
         exchange_rate: account.exchange_rate,
       },
     });
@@ -2721,6 +2764,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     distributions.push({
       accountId: account.id,
       purchaseNumber: purchase?.purchase_number ?? null,
+      invoiceReference: account.invoiceReference,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
       pendingBalance,

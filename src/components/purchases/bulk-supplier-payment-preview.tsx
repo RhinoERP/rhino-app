@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 type BulkSupplierPaymentDistribution = {
   accountId: string;
   purchaseNumber: number | null;
+  invoiceReference?: string;
   dueDate: string;
   totalAmount: number;
   pendingBalance: number;
@@ -32,9 +33,10 @@ function PreviewItem({
       <div className="flex items-center justify-between">
         <span className="font-medium text-sm">
           {index + 1}.{" "}
-          {dist.purchaseNumber
-            ? `Orden de Compra #${dist.purchaseNumber}`
-            : "Sin número"}
+          {dist.invoiceReference ??
+            (dist.purchaseNumber
+              ? `Orden de Compra #${dist.purchaseNumber}`
+              : "Sin número")}
         </span>
         <span
           className={cn(

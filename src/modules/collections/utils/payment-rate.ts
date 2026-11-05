@@ -72,6 +72,7 @@ export async function resolvePayableExchangeRate(params: {
     currency?: string | null | undefined;
     supplier_id: string;
     purchase_order_id: string | null | undefined;
+    supplier_invoice_id?: string | null;
     exchange_rate?: number | null;
   };
 }): Promise<number | null> {
@@ -84,25 +85,52 @@ export async function resolvePayableExchangeRate(params: {
     return payable.exchange_rate;
   }
 
+  if (payable.supplier_invoice_id) {
+    const { data: invoice, error: invoiceError } = await params.supabase
+      .from("supplier_invoices")
+      .select("exchange_rate, currency, status")
+      .eq("id", payable.supplier_invoice_id)
+      .eq("organization_id", params.orgId)
+      .eq("supplier_id", payable.supplier_id)
+      .maybeSingle();
+    if (invoiceError) {
+      throw new Error(
+        `No se pudo resolver la factura del pago: ${invoiceError.message}`
+      );
+    }
+    const rate = Number(invoice?.exchange_rate);
+    return invoice?.status === "REGISTERED" &&
+      invoice.currency === "USD" &&
+      isPositiveRate(rate)
+      ? rate
+      : null;
+  }
   if (!payable.purchase_order_id) {
     return null;
   }
 
-  const { data: invoice } = await params.supabase
+  const { data: invoices, error } = await params.supabase
     .from("supplier_invoices" as never)
-    .select("exchange_rate")
+    .select("exchange_rate, currency")
     .eq("purchase_order_id", payable.purchase_order_id)
     .eq("supplier_id", payable.supplier_id)
     .eq("organization_id", params.orgId)
-    .order("created_at", { ascending: false })
-    .maybeSingle();
-
-  const invoiceRate = Number(
-    (invoice as { exchange_rate?: number | null } | null)?.exchange_rate
-  );
-  if (invoice && isPositiveRate(invoiceRate)) {
-    return invoiceRate;
+    .eq("status", "REGISTERED");
+  if (error) {
+    throw new Error(
+      `No se pudo resolver la cotización legacy: ${error.message}`
+    );
   }
-
-  return null;
+  const rates = (invoices ?? []).map(
+    (invoice: { exchange_rate?: number | null; currency?: string }) =>
+      invoice.currency === "USD" ? Number(invoice.exchange_rate) : Number.NaN
+  );
+  if (
+    rates.length === 0 ||
+    rates.some((rate) => !isPositiveRate(rate)) ||
+    new Set(rates).size !== 1
+  ) {
+    return null;
+  }
+  return rates[0];
 }

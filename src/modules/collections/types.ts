@@ -64,7 +64,16 @@ export type PayableAccount = {
   id: string;
   organization_id: string;
   supplier_id: string;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
+  invoice?: {
+    id: string;
+    invoice_type: string;
+    point_of_sale: string | null;
+    invoice_number: string;
+    invoice_date: string;
+  } | null;
+  purchaseOrders?: { id: string; purchase_number: number | null }[];
   total_amount: number;
   pending_balance: number;
   currency?: string;
