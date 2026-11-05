@@ -58,6 +58,21 @@ beforeEach(() => {
   mocks.remove.mockResolvedValue({ error: null });
 });
 describe("invoice attachment transaction boundary", () => {
+  it("rejects an oversized file without uploading or creating debt", async () => {
+    const data = form();
+    data.set(
+      "file",
+      new File([new Uint8Array(10 * 1024 * 1024 + 1)], "large.pdf", {
+        type: "application/pdf",
+      })
+    );
+    expect(await createSupplierInvoiceAction(data)).toEqual({
+      success: false,
+      error: expect.stringContaining("10 MiB"),
+    });
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
   it("passes all OC IDs and revalidates each without multiplying registrations", async () => {
     const result = await createSupplierInvoiceAction(form());
     expect(result.success).toBe(true);

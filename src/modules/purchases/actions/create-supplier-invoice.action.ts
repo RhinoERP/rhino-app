@@ -11,13 +11,11 @@ import {
   SupplierInvoiceRegistrationError,
 } from "../service/supplier-invoices.service";
 import type { SupplierInvoice } from "../supplier-invoices.types";
+import { validateSupplierInvoicePdf } from "../utils/supplier-invoice-pdf";
 
 export type CreateSupplierInvoiceActionResult =
   | { success: true; invoice: SupplierInvoice }
   | { success: false; error: string };
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-
 function nullableValue(value: FormDataEntryValue | null): string | null {
   const text = typeof value === "string" ? value.trim() : "";
   return text || null;
@@ -57,13 +55,7 @@ function validatePdf(file: FormDataEntryValue | null): string | null {
   if (!(file instanceof File) || file.size === 0) {
     return null;
   }
-  if (file.type !== "application/pdf") {
-    return "El comprobante debe ser un PDF.";
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    return "El archivo no puede superar los 10 MB.";
-  }
-  return null;
+  return validateSupplierInvoicePdf(file);
 }
 
 async function uploadPdfIfPresent(params: {

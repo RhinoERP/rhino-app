@@ -28,9 +28,11 @@ import { createSupplierInvoiceAction } from "@/modules/purchases/actions/create-
 import { setSupplierInvoiceOrdersAction } from "@/modules/purchases/actions/set-supplier-invoice-orders.action";
 import {
   SUPPLIER_INVOICE_TYPES,
+  type SupplierInvoice,
   type SupplierInvoicePurchaseOrderOption,
   type SupplierInvoiceWithRelations,
 } from "@/modules/purchases/supplier-invoices.types";
+import { validateSupplierInvoicePdf } from "@/modules/purchases/utils/supplier-invoice-pdf";
 import type { Supplier } from "@/modules/suppliers/types";
 
 type SupplierInvoicesManagerProps = {
@@ -42,6 +44,87 @@ type SupplierInvoicesManagerProps = {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function InvoiceOrderSelection({
+  orders,
+  selected,
+  onChange,
+  disabled = false,
+}: {
+  orders: {
+    id: string;
+    purchase_number: number | null;
+    total_amount?: number;
+    currency?: string;
+    purchase_date?: string;
+  }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <fieldset className="space-y-2" disabled={disabled}>
+      <legend className="font-medium text-sm">
+        Órdenes de compra (opcional)
+      </legend>
+      <p className="text-muted-foreground text-xs">
+        Podés registrar la factura sin asociar órdenes de compra. La selección
+        no reparte el importe.
+      </p>
+      {orders.length ? (
+        <div className="max-h-48 overflow-y-auto rounded-md border p-2">
+          {orders.map((order) => (
+            <label
+              className="flex cursor-pointer items-center gap-3 rounded p-2 hover:bg-muted"
+              key={order.id}
+            >
+              <input
+                checked={selected.includes(order.id)}
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked
+                      ? [...selected, order.id]
+                      : selected.filter((id) => id !== order.id)
+                  )
+                }
+                type="checkbox"
+              />
+              <span className="text-sm">
+                OC-
+                {String(order.purchase_number ?? order.id.slice(0, 8)).padStart(
+                  4,
+                  "0"
+                )}
+                {order.purchase_date && ` · ${formatDate(order.purchase_date)}`}
+                {order.total_amount !== undefined &&
+                  ` · ${formatCurrency(order.total_amount, order.currency)}`}
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Este proveedor no tiene OC disponibles.
+        </p>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground text-xs">
+          {selected.length} OC seleccionadas
+        </span>
+        {selected.length > 0 && (
+          <Button
+            onClick={() => onChange([])}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Limpiar selección de OC
+          </Button>
+        )}
+      </div>
+    </fieldset>
+  );
 }
 
 export function SupplierInvoicesManager({
@@ -229,38 +312,12 @@ function InvoiceOrderEditor({
               contable se conservan.
             </DialogDescription>
           </DialogHeader>
-          <Label htmlFor={`invoice-orders-${invoice.id}`}>
-            Órdenes del proveedor
-          </Label>
-          <select
-            className="min-h-40 w-full rounded border bg-background p-2"
-            id={`invoice-orders-${invoice.id}`}
-            multiple
-            onChange={(event) =>
-              setSelected(
-                Array.from(
-                  event.target.selectedOptions,
-                  (option) => option.value
-                )
-              )
-            }
-            value={selected}
-          >
-            {existingOnlyOrders.map((order) => (
-              <option key={order.id} value={order.id}>
-                OC-{order.purchase_number ?? order.id.slice(0, 8)} (vínculo
-                actual)
-              </option>
-            ))}
-            {availableOrders.map((order) => (
-              <option key={order.id} value={order.id}>
-                OC-{order.purchase_number ?? order.id.slice(0, 8)}
-              </option>
-            ))}
-          </select>
-          <Button onClick={() => setSelected([])} type="button" variant="ghost">
-            Quitar todos los vínculos
-          </Button>
+          <InvoiceOrderSelection
+            disabled={pending}
+            onChange={setSelected}
+            orders={[...existingOnlyOrders, ...availableOrders]}
+            selected={selected}
+          />
           <Button
             disabled={pending}
             onClick={() =>
@@ -334,6 +391,7 @@ function SupplierInvoicePreviewButton({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: invoice form supports legacy/direct debt, attachments and a separate accounting step.
 function SupplierInvoiceDialog({
   onOpenChange,
   open,
@@ -355,6 +413,10 @@ function SupplierInvoiceDialog({
   const [taxAmount, setTaxAmount] = useState("0");
   const [exchangeRate, setExchangeRate] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [formError, setFormError] = useState<string | null>(null);
+  const [registeredInvoiceId, setRegisteredInvoiceId] = useState<string | null>(
+    null
+  );
   const [accountingPayload, setAccountingPayload] =
     useState<EventoFacturaCompra | null>(null);
 
@@ -370,7 +432,9 @@ function SupplierInvoiceDialog({
     () =>
       purchaseOrders.filter(
         (purchaseOrder) =>
-          !supplierId || purchaseOrder.supplier_id === supplierId
+          (!supplierId || purchaseOrder.supplier_id === supplierId) &&
+          purchaseOrder.status !== "DRAFT" &&
+          purchaseOrder.status !== "CANCELLED"
       ),
     [purchaseOrders, supplierId]
   );
@@ -435,6 +499,8 @@ function SupplierInvoiceDialog({
   }
 
   function reset() {
+    setFormError(null);
+    setRegisteredInvoiceId(null);
     setSupplierId("");
     setPurchaseOrderId("");
     setPurchaseOrderIds([]);
@@ -501,40 +567,59 @@ function SupplierInvoiceDialog({
     );
   }
 
-  function submit(formData: FormData) {
-    startTransition(async () => {
-      const result = await createSupplierInvoiceAction(formData);
-      if (!result.success) {
-        toast.error(result.error);
-        return;
-      }
-
-      const { invoice } = result;
-
-      if (accountingIntegrationEnabled && invoice.supplier_id) {
-        const payload = buildInvoiceAccountingPayload(invoice);
-
-        if (automaticAccountingEnabled && (await tryAutoAccounting(payload))) {
-          toast.success("Factura de proveedor registrada");
-          reset();
-          onOpenChange(false);
-          return;
-        }
-
+  async function finishInvoiceRegistration(invoice: SupplierInvoice) {
+    if (accountingIntegrationEnabled && invoice.supplier_id) {
+      const payload = buildInvoiceAccountingPayload(invoice);
+      if (!(automaticAccountingEnabled && (await tryAutoAccounting(payload)))) {
         setAccountingPayload(payload);
         return;
       }
+    }
+    toast.success("Factura de proveedor registrada");
+    reset();
+    onOpenChange(false);
+  }
 
-      toast.success("Factura de proveedor registrada");
-      reset();
-      onOpenChange(false);
+  function submit(formData: FormData) {
+    if (registeredInvoiceId) {
+      return;
+    }
+    const file = formData.get("file");
+    const fileError = validateSupplierInvoicePdf(
+      file instanceof File ? file : null
+    );
+    setFormError(fileError);
+    if (fileError) {
+      return;
+    }
+    startTransition(async () => {
+      let committedId: string | null = null;
+      try {
+        const result = await createSupplierInvoiceAction(formData);
+        if (!result.success) {
+          setFormError(result.error);
+          toast.error(result.error);
+          return;
+        }
+        const { invoice } = result;
+        committedId = invoice.id;
+        setRegisteredInvoiceId(invoice.id);
+        await finishInvoiceRegistration(invoice);
+      } catch (error) {
+        console.error("Falló el envío de factura de proveedor", error);
+        setFormError(
+          committedId
+            ? `La factura ${committedId} quedó registrada, pero no se pudo completar el paso contable. No vuelvas a cargarla; revisá su contabilidad.`
+            : "No se pudo confirmar el registro. Se conservaron los datos. Revisá el listado de facturas antes de reintentar para evitar duplicados."
+        );
+      }
     });
   }
 
   return (
     <>
       <Dialog onOpenChange={onOpenChange} open={open && !accountingPayload}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Registrar factura de proveedor</DialogTitle>
             <DialogDescription>
@@ -544,7 +629,13 @@ function SupplierInvoiceDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <form action={submit} className="grid gap-4">
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit(new FormData(event.currentTarget));
+            }}
+          >
             <input name="orgSlug" type="hidden" value={orgSlug} />
             <input name="totalAmount" type="hidden" value={totalAmount} />
             <input name="currency" type="hidden" value={effectiveCurrency} />
@@ -558,49 +649,39 @@ function SupplierInvoiceDialog({
                 />
               ))}
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="order-2 space-y-2">
-                <Label htmlFor="purchaseOrderId">
-                  Órdenes de compra (opcional)
-                </Label>
-                <select
-                  className="min-h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  id="purchaseOrderId"
-                  multiple={directInvoiceEnabled}
-                  name={directInvoiceEnabled ? undefined : "purchaseOrderId"}
-                  onChange={(event) =>
-                    directInvoiceEnabled
-                      ? setPurchaseOrderIds(
-                          Array.from(
-                            event.target.selectedOptions,
-                            (option) => option.value
-                          ).filter(Boolean)
-                        )
-                      : selectPurchaseOrder(event.target.value)
-                  }
-                  value={
-                    directInvoiceEnabled ? purchaseOrderIds : purchaseOrderId
-                  }
-                >
-                  {!directInvoiceEnabled && (
+            <div className="grid gap-4">
+              {!directInvoiceEnabled && (
+                <div className="order-2 space-y-2">
+                  <Label htmlFor="purchaseOrderId">
+                    Órdenes de compra (opcional)
+                  </Label>
+                  <select
+                    className="min-h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    id="purchaseOrderId"
+                    name="purchaseOrderId"
+                    onChange={(event) =>
+                      selectPurchaseOrder(event.target.value)
+                    }
+                    value={purchaseOrderId}
+                  >
                     <option value="">Sin vincular a una OC</option>
-                  )}
-                  {supplierPurchaseOrders.map((purchaseOrder) => (
-                    <option key={purchaseOrder.id} value={purchaseOrder.id}>
-                      OC-
-                      {String(purchaseOrder.purchase_number ?? 0).padStart(
-                        4,
-                        "0"
-                      )}{" "}
-                      ·{" "}
-                      {formatCurrency(
-                        purchaseOrder.total_amount,
-                        purchaseOrder.currency
-                      )}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                    {supplierPurchaseOrders.map((purchaseOrder) => (
+                      <option key={purchaseOrder.id} value={purchaseOrder.id}>
+                        OC-
+                        {String(purchaseOrder.purchase_number ?? 0).padStart(
+                          4,
+                          "0"
+                        )}{" "}
+                        ·{" "}
+                        {formatCurrency(
+                          purchaseOrder.total_amount,
+                          purchaseOrder.currency
+                        )}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="order-1 space-y-2">
                 <Label htmlFor="supplierId">Proveedor</Label>
                 <select
@@ -625,6 +706,21 @@ function SupplierInvoiceDialog({
               </div>
             </div>
 
+            {directInvoiceEnabled &&
+              (supplierId ? (
+                <InvoiceOrderSelection
+                  disabled={isPending || !!registeredInvoiceId}
+                  onChange={setPurchaseOrderIds}
+                  orders={supplierPurchaseOrders}
+                  selected={purchaseOrderIds}
+                />
+              ) : (
+                <p className="text-muted-foreground text-sm">
+                  Elegí un proveedor para ver sus órdenes de compra. Asociarlas
+                  es opcional.
+                </p>
+              ))}
+
             {directInvoiceEnabled && (
               <div className="space-y-2">
                 <Label htmlFor="invoiceCurrency">Moneda de la factura</Label>
@@ -642,15 +738,7 @@ function SupplierInvoiceDialog({
                 </select>
                 <p className="text-muted-foreground text-xs">
                   Puede ser distinta de la moneda de costo de las OC.
-                  Seleccionar OC es opcional; usá Ctrl/Cmd para elegir varias.
                 </p>
-                <Button
-                  onClick={() => setPurchaseOrderIds([])}
-                  type="button"
-                  variant="ghost"
-                >
-                  Quitar vínculos
-                </Button>
               </div>
             )}
 
@@ -767,8 +855,16 @@ function SupplierInvoiceDialog({
                 accept="application/pdf"
                 id="file"
                 name="file"
+                onChange={(event) =>
+                  setFormError(
+                    validateSupplierInvoicePdf(event.target.files?.[0] ?? null)
+                  )
+                }
                 type="file"
               />
+              <p className="text-muted-foreground text-xs">
+                Opcional. Solo PDF, máximo 10 MiB (10.485.760 bytes).
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="notes">Notas</Label>
@@ -779,16 +875,27 @@ function SupplierInvoiceDialog({
               />
             </div>
 
+            {formError && (
+              <p className="text-destructive text-sm" role="alert">
+                {formError}
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <Button
                 disabled={isPending}
-                onClick={() => onOpenChange(false)}
+                onClick={() => {
+                  reset();
+                  onOpenChange(false);
+                }}
                 type="button"
                 variant="outline"
               >
-                Cancelar
+                {registeredInvoiceId ? "Cerrar" : "Cancelar"}
               </Button>
-              <Button disabled={isPending} type="submit">
+              <Button
+                disabled={isPending || !!registeredInvoiceId}
+                type="submit"
+              >
                 {isPending ? "Guardando..." : "Registrar factura"}
               </Button>
             </div>
@@ -800,7 +907,12 @@ function SupplierInvoiceDialog({
         <AsientoModal
           eventoPayload={accountingPayload}
           mode="gate"
-          onCancel={() => setAccountingPayload(null)}
+          onCancel={() => {
+            setAccountingPayload(null);
+            setFormError(
+              "La factura ya quedó registrada. La revisión contable quedó pendiente; no vuelvas a cargar el comprobante."
+            );
+          }}
           onConfirm={() => {
             toast.success("Factura de proveedor registrada");
             setAccountingPayload(null);
