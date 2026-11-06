@@ -9,6 +9,10 @@ import {
   assertPaymentExchangeRate,
   resolvePaymentCurrencyFields,
 } from "@/modules/collections/utils/payment-currency";
+import {
+  resolvePayableExchangeRate,
+  resolveReceivableExchangeRate,
+} from "@/modules/collections/utils/payment-rate";
 import { recalculateCommissionsForPayment } from "@/modules/commissions/service/commissions-generation.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
@@ -38,7 +42,7 @@ export type UpdatePaymentInput = {
   accountId: string;
   type: "receivable" | "payable";
   amount: number;
-  /** Cotización USD→ARS usada al editar el pago de una deuda en dólares. */
+  /** @deprecated Ignored: the server inherits the quote from the source document. */
   exchangeRate?: number;
   paymentMethod: PaymentMethod;
   paymentDate?: string;
@@ -130,7 +134,7 @@ async function fetchReceivablePayment(
   return await supabase
     .from("receivable_payments")
     .select(
-      "id, amount, currency, exchange_rate, account_receivable_id, organization_id, payment_method"
+      "id, amount, currency, exchange_rate, created_at, account_receivable_id, organization_id, payment_method"
     )
     .eq("id", paymentId)
     .eq("organization_id", orgId)
@@ -169,7 +173,6 @@ type UpdatePaymentContext = {
   orgId: string;
   orgSlug: string;
   amount: number;
-  exchangeRate?: number;
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
@@ -293,7 +296,9 @@ async function handleReceivablePayment(
 
   const { data: account, error: accountError } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance, customer_id, currency")
+    .select(
+      "id, total_amount, pending_balance, customer_id, currency, sales_order_id, manual_fiscal_invoice_id"
+    )
     .eq("id", payment.account_receivable_id)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -319,7 +324,12 @@ async function handleReceivablePayment(
     newPendingBalance
   );
 
-  const effectiveExchangeRate = ctx.exchangeRate ?? payment.exchange_rate;
+  const effectiveExchangeRate = await resolveReceivableExchangeRate({
+    supabase,
+    orgId,
+    receivable: account,
+    existingPayment: payment,
+  });
   const exchangeRateError = assertPaymentExchangeRate(
     account.currency,
     amount,
@@ -472,13 +482,18 @@ async function handlePayablePayment(
 
   const { data: accountData, error: accountError } = await supabase
     .from("accounts_payable" as never)
-    .select("id, total_amount, pending_balance, supplier_id, currency")
+    .select(
+      "id, total_amount, pending_balance, supplier_id, currency, purchase_order_id, supplier_invoice_id, exchange_rate"
+    )
     .eq("id", payment.account_payable_id)
     .eq("organization_id", orgId)
     .maybeSingle();
   const account = accountData as
     | (PayableAccountRow & {
         supplier_id: string;
+        purchase_order_id: string | null;
+        supplier_invoice_id: string | null;
+        exchange_rate: number | null;
       })
     | null;
 
@@ -503,7 +518,11 @@ async function handlePayablePayment(
     newPendingBalance
   );
 
-  const effectiveExchangeRate = ctx.exchangeRate ?? payment.exchange_rate;
+  const effectiveExchangeRate = await resolvePayableExchangeRate({
+    supabase,
+    orgId,
+    payable: account,
+  });
   const exchangeRateError = assertPaymentExchangeRate(
     account.currency,
     amount,
@@ -635,7 +654,6 @@ export async function updatePaymentAction(
       orgId: org.id,
       orgSlug: input.orgSlug,
       amount,
-      exchangeRate: input.exchangeRate,
       paymentDate,
       referenceNumber,
       notes,

@@ -1040,7 +1040,7 @@ async function applyReceivablePayment({
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
     .select(
-      "id, organization_id, total_amount, pending_balance, status, customer_id, sales_order_id, currency"
+      "id, organization_id, total_amount, pending_balance, status, customer_id, sales_order_id, manual_fiscal_invoice_id, currency"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)

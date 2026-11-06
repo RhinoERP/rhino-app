@@ -24,6 +24,8 @@ const metrics = {
   totalKg: 15,
   totalLt: 6,
   totalStockValue: 100,
+  totalStockValueUsd: 200,
+  unpricedStockProducts: 1,
   lowStockCount: 1,
 };
 const warehouseId = "22222222-2222-4222-8222-222222222222";
@@ -83,6 +85,8 @@ describe("stock metrics endpoint", () => {
     const data = await response.json();
     expect(data.canViewCosts).toBe(false);
     expect(data).not.toHaveProperty("totalStockValue");
+    expect(data).not.toHaveProperty("totalStockValueUsd");
+    expect(data).not.toHaveProperty("unpricedStockProducts");
   });
 
   it.each([

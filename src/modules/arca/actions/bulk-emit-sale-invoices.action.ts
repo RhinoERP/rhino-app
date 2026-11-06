@@ -21,7 +21,11 @@ export type BulkArcaInvoiceActionResult = {
 
 export async function bulkEmitSaleInvoicesAction(
   orgSlug: string,
-  sales: Array<{ saleId: string; saleNumber: string }>
+  sales: Array<{
+    saleId: string;
+    saleNumber: string;
+    fiscalExchangeRate?: number;
+  }>
 ): Promise<BulkArcaInvoiceActionResult> {
   if (sales.length === 0) {
     return {
@@ -41,9 +45,13 @@ export async function bulkEmitSaleInvoicesAction(
 
   const results: BulkArcaInvoiceResult[] = [];
 
-  for (const { saleId, saleNumber } of sales) {
+  for (const { saleId, saleNumber, fiscalExchangeRate } of sales) {
     try {
-      const result = await emitSaleInvoice({ orgSlug, saleId });
+      const result = await emitSaleInvoice({
+        orgSlug,
+        saleId,
+        fiscalExchangeRate,
+      });
       results.push({
         saleId,
         saleNumber,

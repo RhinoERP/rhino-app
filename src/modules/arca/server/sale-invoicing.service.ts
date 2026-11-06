@@ -29,11 +29,8 @@ import {
   sanitizeArcaErrorMessage,
 } from "../errors";
 import {
-  type ArcaCurrencyQuoteClient,
   type AuthorizedArcaFiscalCurrency,
   buildArcaCurrencyRequestFields,
-  buildInvoiceFiscalCurrency,
-  resolveArcaFiscalCurrency,
 } from "../fiscal-currency";
 import { buildArcaReceiverDocument } from "../receiver-document";
 import { mapCustomerTaxConditionToArcaReceiverVatConditionId } from "../receiver-tax-conditions";
@@ -57,6 +54,7 @@ import {
   isArcaCertificateExpired,
   resolveArcaOrganizationCredentials,
 } from "./client-factory";
+import { resolveInvoiceExchangeRate } from "./invoice-exchange-rate";
 import {
   getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
@@ -1536,6 +1534,7 @@ export async function emitSaleInvoice(params: {
   orgSlug: string;
   saleId: string;
   formalAdvanceDocument?: "ADVANCE" | "BALANCE";
+  fiscalExchangeRate?: number;
 }): Promise<ArcaSaleInvoiceResult> {
   await assertCanIssueOrganizationArca(params.orgSlug);
   const validation = await validateSaleForArcaInvoicing(params);
@@ -1555,9 +1554,9 @@ export async function emitSaleInvoice(params: {
     key: context.resolvedCredentials.key,
     environment: context.resolvedCredentials.environment,
   });
-  const fiscalCurrency = await resolveArcaFiscalCurrency(
-    client as unknown as ArcaCurrencyQuoteClient,
-    buildInvoiceFiscalCurrency(context.sale.currency)
+  const fiscalCurrency = await resolveInvoiceExchangeRate(
+    context.sale.currency,
+    params.fiscalExchangeRate
   );
   const request = buildArcaVoucherRequestFromSale(context, fiscalCurrency);
   const requestJson = toJsonValue({

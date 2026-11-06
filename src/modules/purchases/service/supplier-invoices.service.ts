@@ -59,6 +59,13 @@ export const createSupplierInvoiceSchema = z
     notes: z.string().trim().max(2000).nullable(),
   })
   .superRefine((value, ctx) => {
+    if (value.currency === "USD" && !value.exchangeRate) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["exchangeRate"],
+        message: "Ingresá la cotización de la factura en USD.",
+      });
+    }
     const expectedTotal = truncateMoney(value.subtotalAmount + value.taxAmount);
     if (value.totalAmount !== expectedTotal) {
       ctx.addIssue({

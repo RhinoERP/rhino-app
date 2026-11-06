@@ -36,6 +36,7 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
+import { assertSaleRateUpdate } from "../exchange-rate-policy";
 import { hasFullFiscalReversal } from "../preventa-invoicing";
 import { uploadSalesDocument } from "../server/documents-storage.service";
 import { renderRemittancePdfDocument } from "../server/remittance-pdf-renderer.service";
@@ -96,13 +97,16 @@ const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
 const INFORMAL_ADVANCE_NOTA_DE_VENTA_ERROR =
   "El anticipo informal solo está disponible para notas de venta";
 
-function assertCommercialExchangeRate(rate: number | null | undefined): void {
+function assertExchangeRate(
+  rate: number | null | undefined,
+  kind: "comercial" | "fiscal"
+): void {
   if (
     rate !== undefined &&
     rate !== null &&
     (!Number.isFinite(rate) || rate <= 0)
   ) {
-    throw new Error("El tipo de cambio comercial debe ser mayor a cero.");
+    throw new Error(`El tipo de cambio ${kind} debe ser mayor a cero.`);
   }
 }
 
@@ -4161,7 +4165,8 @@ export async function confirmSaleOrder(
   input: ConfirmSaleOrderInput
 ): Promise<ConfirmSaleResult> {
   const { orgSlug, saleId, customerId, sellerId, saleDate } = input;
-  assertCommercialExchangeRate(input.commercialExchangeRate);
+  assertExchangeRate(input.commercialExchangeRate, "comercial");
+  assertExchangeRate(input.fiscalExchangeRate, "fiscal");
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -4193,7 +4198,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage, warehouse_id"
+      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage, warehouse_id, currency, exchange_rate, commercial_exchange_rate"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4210,6 +4215,17 @@ export async function confirmSaleOrder(
   }
 
   assertCanManageSale(accessContext, existingSale.user_id ?? null);
+  assertSaleRateUpdate(
+    {
+      currency: existingSale.currency,
+      arcaStatus: existingSale.arca_status,
+      invoiceType: existingSale.invoice_type,
+      invoiceNumber: existingSale.invoice_number,
+      exchangeRate: existingSale.exchange_rate,
+      commercialExchangeRate: existingSale.commercial_exchange_rate,
+    },
+    input
+  );
   await assertWholesaleWarehouseForOrganization(
     supabase,
     org.id,
@@ -4263,6 +4279,9 @@ export async function confirmSaleOrder(
         status: "CONFIRMED",
         ...(input.commercialExchangeRate !== undefined
           ? { commercial_exchange_rate: input.commercialExchangeRate }
+          : {}),
+        ...(input.fiscalExchangeRate !== undefined
+          ? { exchange_rate: input.fiscalExchangeRate }
           : {}),
         updated_at: new Date().toISOString(),
       })
@@ -4438,6 +4457,9 @@ export async function confirmSaleOrder(
       invoice_number: sanitizeText(input.invoiceNumber),
       ...(input.commercialExchangeRate !== undefined
         ? { commercial_exchange_rate: input.commercialExchangeRate }
+        : {}),
+      ...(input.fiscalExchangeRate !== undefined
+        ? { exchange_rate: input.fiscalExchangeRate }
         : {}),
       observations: sanitizeText(input.observations),
       sub_total: subTotalAmount,
@@ -5001,11 +5023,14 @@ async function validateSaleForUpdate(
   userId: string | null;
   warehouseId: string | null;
   advancePaymentPercentage: number | null;
+  currency: string | null;
+  exchangeRate: number | null;
+  commercialExchangeRate: number | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, warehouse_id, arca_status, advance_payment_percentage, document_type"
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, warehouse_id, arca_status, advance_payment_percentage, document_type, currency, exchange_rate, commercial_exchange_rate"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -5045,6 +5070,9 @@ async function validateSaleForUpdate(
   }
 
   return {
+    currency: existingSale.currency,
+    exchangeRate: existingSale.exchange_rate,
+    commercialExchangeRate: existingSale.commercial_exchange_rate,
     arcaStatus:
       typeof existingSale.arca_status === "string"
         ? existingSale.arca_status
@@ -5126,41 +5154,26 @@ function buildSaleUpdateData(
   if (input.saleDate) {
     updateData.sale_date = input.saleDate;
   }
-  if (input.expirationDate !== undefined) {
-    updateData.expiration_date = input.expirationDate;
-  }
-  if (input.creditDays !== undefined) {
-    updateData.credit_days = input.creditDays;
-  }
   if (input.invoiceType) {
     updateData.invoice_type = input.invoiceType;
   }
-  if (input.invoiceNumber !== undefined) {
-    updateData.invoice_number = input.invoiceNumber;
-  }
-  if (input.commercialExchangeRate !== undefined) {
-    updateData.commercial_exchange_rate = input.commercialExchangeRate;
-  }
-  if (input.remittanceNumber !== undefined) {
-    updateData.remittance_number = input.remittanceNumber;
-  }
-  if (input.observations !== undefined) {
-    updateData.observations = input.observations;
-  }
-  if (input.advancePaymentPercentage !== undefined) {
-    updateData.advance_payment_percentage = input.advancePaymentPercentage;
-  }
-  if (input.globalDiscountPercentage !== undefined) {
-    updateData.global_discount_percentage = input.globalDiscountPercentage;
-  }
-  if (input.salesPriceListId !== undefined) {
-    updateData.sales_price_list_id = input.salesPriceListId;
-  }
-  if (input.priceLevelId !== undefined) {
-    updateData.price_level_id = input.priceLevelId;
-  }
-  if (input.warehouseId !== undefined) {
-    updateData.warehouse_id = input.warehouseId;
+  for (const [field, value] of [
+    ["expiration_date", input.expirationDate],
+    ["credit_days", input.creditDays],
+    ["invoice_number", input.invoiceNumber],
+    ["commercial_exchange_rate", input.commercialExchangeRate],
+    ["exchange_rate", input.fiscalExchangeRate],
+    ["remittance_number", input.remittanceNumber],
+    ["observations", input.observations],
+    ["advance_payment_percentage", input.advancePaymentPercentage],
+    ["global_discount_percentage", input.globalDiscountPercentage],
+    ["sales_price_list_id", input.salesPriceListId],
+    ["price_level_id", input.priceLevelId],
+    ["warehouse_id", input.warehouseId],
+  ] as const) {
+    if (value !== undefined) {
+      updateData[field] = value;
+    }
   }
 
   return updateData;
@@ -5793,7 +5806,6 @@ async function updateSaleStockIfNeeded(params: {
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: builds payloads for optional fields and handles RPC fallback
 async function persistSaleUpdate(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -5824,57 +5836,6 @@ async function persistSaleUpdate(params: {
       extras: item.extras ?? [],
     }));
 
-    const rpcTaxes = (params.input.taxes ?? []).map((tax) => ({
-      taxId: tax.taxId,
-      name: tax.name,
-      rate: tax.rate,
-    }));
-
-    const { data: rpcData, error: rpcError } = await (
-      params.supabase as SupabaseServerClient & {
-        rpc: (
-          fn: string,
-          args?: Record<string, unknown>
-        ) => Promise<{
-          data: unknown;
-          error: { message: string } | null;
-        }>;
-      }
-    ).rpc("update_sale_order_with_extras_atomic", {
-      p_org_id: params.orgId,
-      p_sale_id: params.saleId,
-      p_customer_id: params.input.customerId ?? null,
-      p_user_id: params.input.sellerId ?? null,
-      p_sale_date: params.input.saleDate ?? null,
-      p_expiration_date:
-        params.input.expirationDate !== undefined
-          ? params.input.expirationDate
-          : null,
-      p_credit_days:
-        params.input.creditDays !== undefined ? params.input.creditDays : null,
-      p_invoice_type: params.input.invoiceType ?? null,
-      p_invoice_number:
-        params.input.invoiceNumber !== undefined
-          ? params.input.invoiceNumber
-          : null,
-      p_observations:
-        params.input.observations !== undefined
-          ? params.input.observations
-          : null,
-      p_global_discount_percentage:
-        params.input.globalDiscountPercentage !== undefined
-          ? params.input.globalDiscountPercentage
-          : null,
-      p_items: rpcItems,
-      p_taxes: rpcTaxes,
-    });
-
-    if (rpcError || !rpcData) {
-      throw new Error(
-        `Error actualizando la venta de forma atómica: ${rpcError?.message || "Not found"}`
-      );
-    }
-
     const fallbackTaxes = await resolveFallbackSaleTaxes({
       supabase: params.supabase,
       orgId: params.orgId,
@@ -5901,52 +5862,42 @@ async function persistSaleUpdate(params: {
       )
     );
 
-    await replaceSalesOrderTaxSnapshots({
-      supabase: params.supabase,
-      orgId: params.orgId,
-      saleOrderId: params.saleId,
-      taxPlan,
+    const { data: itemizedSale, error: itemizedSaleError } = await (
+      params.supabase as SupabaseServerClient & {
+        rpc: (
+          fn: string,
+          args: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message: string } | null }>;
+      }
+    ).rpc("update_sale_order_with_fiscal_quote_atomic", {
+      p_org_id: params.orgId,
+      p_sale_id: params.saleId,
+      p_items: rpcItems,
+      p_item_taxes: buildSalesOrderItemTaxesPayload({
+        orgId: params.orgId,
+        saleOrderId: params.saleId,
+        taxPlan,
+      }),
+      p_taxes: buildSalesOrderTaxesPayload({
+        orgId: params.orgId,
+        saleOrderId: params.saleId,
+        taxPlan,
+      }),
+      p_patch: {
+        ...params.updateData,
+        sub_total: params.totals?.subTotalAmount ?? 0,
+        total_tax_amount: taxPlan.aggregateTaxes.length
+          ? taxPlan.totalTaxAmount
+          : null,
+        global_discount_amount: globalDiscountAmount,
+        total_amount: totalAmount,
+      },
     });
-
-    const { data: itemizedSale, error: itemizedSaleError } =
-      await params.supabase
-        .from("sales_orders")
-        .update({
-          sub_total: params.totals?.subTotalAmount ?? 0,
-          total_tax_amount: taxPlan.aggregateTaxes.length
-            ? taxPlan.totalTaxAmount
-            : null,
-          global_discount_amount: globalDiscountAmount,
-          total_amount: totalAmount,
-          ...(params.input.commercialExchangeRate !== undefined
-            ? { commercial_exchange_rate: params.input.commercialExchangeRate }
-            : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", params.saleId)
-        .eq("organization_id", params.orgId)
-        .select("*")
-        .single();
 
     if (itemizedSaleError || !itemizedSale) {
       throw new Error(
         `Error actualizando los totales itemizados de la venta: ${itemizedSaleError?.message || "Not found"}`
       );
-    }
-
-    // The RPC does not handle remittance_number — update it separately if provided
-    if (params.input.remittanceNumber !== undefined) {
-      const { error: remittanceError } = await params.supabase
-        .from("sales_orders")
-        .update({ remittance_number: params.input.remittanceNumber })
-        .eq("id", params.saleId)
-        .eq("organization_id", params.orgId);
-
-      if (remittanceError) {
-        throw new Error(
-          `Error actualizando el N° de remito: ${remittanceError.message}`
-        );
-      }
     }
 
     return itemizedSale as SalesOrder;
@@ -6978,7 +6929,8 @@ export async function updateSaleOrder(
   input: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
   const { orgSlug, saleId } = input;
-  assertCommercialExchangeRate(input.commercialExchangeRate);
+  assertExchangeRate(input.commercialExchangeRate, "comercial");
+  assertExchangeRate(input.fiscalExchangeRate, "fiscal");
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -6996,6 +6948,7 @@ export async function updateSaleOrder(
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
+  assertSaleRateUpdate(existingSale, input);
   await applySaleWarehouseUpdate(orgSlug, existingSale, input);
   await assertEditedItemsIncludeExtras(supabase, org.id, saleId, input.items);
   assertNoAuthorizedSaleFiscalChanges(existingSale, input);

@@ -9,6 +9,7 @@ const AUTHORIZED_SALE_FISCAL_FIELDS: Array<keyof UpdateSaleOrderInput> = [
   "invoiceType",
   "invoiceNumber",
   "commercialExchangeRate",
+  "fiscalExchangeRate",
   "globalDiscountPercentage",
   "items",
   "taxes",

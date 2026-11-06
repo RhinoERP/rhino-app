@@ -172,7 +172,11 @@ describe("nominal ARS de cheques aplicados a deudas USD", () => {
         });
       }
       if (table === "sales_orders") {
-        return makeQuery({ exchange_rate: 1200, arca_request_json: null });
+        return makeQuery({
+          exchange_rate: 1200,
+          arca_request_json: null,
+          arca_status: "authorized",
+        });
       }
       if (table === "receivable_payments") {
         return {
@@ -194,6 +198,7 @@ describe("nominal ARS de cheques aplicados a deudas USD", () => {
       paymentDate: "2026-01-01",
       receivedCheckData,
       type: "receivable",
+      exchangeRate: 9999,
     });
 
     expect(result).toMatchObject({ success: true, paymentId: "payment-1" });
@@ -225,6 +230,14 @@ describe("nominal ARS de cheques aplicados a deudas USD", () => {
           ...payable,
           currency: "USD",
           exchange_rate: 1200,
+          supplier_invoice_id: "invoice-1",
+        });
+      }
+      if (table === "supplier_invoices") {
+        return makeQuery({
+          currency: "USD",
+          status: "REGISTERED",
+          exchange_rate: 1200,
         });
       }
       if (table === "payable_payments") {
@@ -247,6 +260,7 @@ describe("nominal ARS de cheques aplicados a deudas USD", () => {
       paymentDate: "2026-01-01",
       issuedCheckData,
       type: "payable",
+      exchangeRate: 9999,
     });
 
     expect(result).toMatchObject({ success: true, paymentId: "payment-1" });

@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
+import { FiscalExchangeRateInput } from "@/components/arca/fiscal-exchange-rate-input";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { SalesAdvanceCard } from "@/components/sales/detail/sales-advance-card";
 import { RemittanceMaskPrintModal } from "@/components/sales/remittance-mask-print-modal";
@@ -871,6 +872,9 @@ export function SaleDetail({
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
   const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
+  const [fiscalExchangeRate, setFiscalExchangeRate] = useState(
+    sale.invoice_number && sale.exchange_rate ? String(sale.exchange_rate) : ""
+  );
   const updateSale = useUpdateSaleMutation(orgSlug);
   const {
     generateRemittance,
@@ -1894,6 +1898,12 @@ export function SaleDetail({
     ),
     invoiceType,
     commercialExchangeRate,
+    fiscalExchangeRate:
+      sale.currency === "USD" &&
+      invoiceNumber &&
+      invoiceType.startsWith("FACTURA_")
+        ? Number(fiscalExchangeRate)
+        : undefined,
     invoiceNumber: invoiceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
@@ -2180,6 +2190,16 @@ export function SaleDetail({
   };
 
   const handleEmitInvoice = async () => {
+    if (
+      sale.currency === "USD" &&
+      !(
+        Number.isFinite(Number(fiscalExchangeRate)) &&
+        Number(fiscalExchangeRate) > 0
+      )
+    ) {
+      setArcaError("Ingresá la cotización fiscal antes de emitir.");
+      return;
+    }
     setError(null);
     setSuccessMessage(null);
     setArcaError(null);
@@ -2191,6 +2211,8 @@ export function SaleDetail({
       const result = await emitSaleInvoice.mutateAsync({
         orgSlug,
         saleId: sale.id,
+        fiscalExchangeRate:
+          sale.currency === "USD" ? Number(fiscalExchangeRate) : undefined,
       });
 
       setArcaSuccessMessage(
@@ -2645,6 +2667,13 @@ export function SaleDetail({
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {canEmitArcaInvoice && sale.currency === "USD" ? (
+              <FiscalExchangeRateInput
+                disabled={isEmittingInvoice}
+                onChange={setFiscalExchangeRate}
+                value={fiscalExchangeRate}
+              />
+            ) : null}
             {isArcaAuthorized ? (
               <div className="grid gap-3 md:grid-cols-4">
                 <div className="space-y-1">
@@ -3125,6 +3154,19 @@ export function SaleDetail({
                       {commercialRateHint}
                     </p>
                   </div>
+                ) : null}
+
+                {sale.currency === "USD" &&
+                invoiceNumber &&
+                invoiceType.startsWith("FACTURA_") ? (
+                  <FiscalExchangeRateInput
+                    disabled={
+                      !canEditFiscalFields ||
+                      Boolean(sale.invoice_number && sale.exchange_rate)
+                    }
+                    onChange={setFiscalExchangeRate}
+                    value={fiscalExchangeRate}
+                  />
                 ) : null}
 
                 <div className="space-y-2">
