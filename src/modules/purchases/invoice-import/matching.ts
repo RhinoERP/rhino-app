@@ -351,3 +351,28 @@ export function vatRates(invoice: ExtractedInvoice): number[] {
     .map((t) => Number(t.alicuota));
   return [...new Set(rates)];
 }
+
+export type ProductDraft = {
+  name: string;
+  sku: string;
+  unit_of_measure: "UN" | "KG" | "LT" | "MT";
+  /** Kilos/litros por pieza, para productos que se venden por peso. */
+  weight_per_unit: number | null;
+  units_per_box: number | null;
+};
+
+const SPACES = /\s+/g;
+
+/** Datos iniciales para dar de alta el producto de una línea que no existe. */
+export function productDraftFromLine(line: ExtractedInvoiceLine): ProductDraft {
+  const unit = MEASURE_UNITS.has(line.unidad)
+    ? (line.unidad as "KG" | "LT" | "MT")
+    : "UN";
+  return {
+    name: line.descripcion.replace(SPACES, " ").trim(),
+    sku: (line.codigo ?? "").trim(),
+    unit_of_measure: unit,
+    weight_per_unit: null,
+    units_per_box: null,
+  };
+}

@@ -156,3 +156,23 @@ describe("datos generales", () => {
     expect(vatRates(invoice)).toEqual([21, 10.5]);
   });
 });
+
+describe("productDraftFromLine", () => {
+  it("toma nombre, código y unidad de la línea", async () => {
+    const { productDraftFromLine } = await import("./matching");
+    expect(
+      productDraftFromLine(
+        line({ codigo: " DL-10 ", descripcion: "DULCE  DE LECHE 10 KG" })
+      )
+    ).toEqual({
+      name: "DULCE DE LECHE 10 KG",
+      sku: "DL-10",
+      unit_of_measure: "KG",
+      weight_per_unit: null,
+      units_per_box: null,
+    });
+    expect(productDraftFromLine(line({ unidad: "CAJA" })).unit_of_measure).toBe(
+      "UN"
+    );
+  });
+});

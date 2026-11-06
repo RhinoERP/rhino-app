@@ -1,7 +1,7 @@
 "use client";
 
 import { FileTextIcon, UploadIcon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import {
 import type { ExtractedInvoice } from "@/modules/purchases/invoice-import/schema";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import { CreateProductFromLine } from "./create-product-from-line";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const SKIP = "__omitir__";
@@ -285,6 +286,7 @@ function LineRow({
   suggested,
   rest,
   onChoose,
+  createSlot,
 }: {
   line: ExtractedInvoice["lineas"][number];
   match: LineMatch | undefined;
@@ -293,6 +295,8 @@ function LineRow({
   suggested: ProductWithPrice[];
   rest: ProductWithPrice[];
   onChoose: (value: string) => void;
+  /** Para crear el producto si no existe (solo en líneas sin producto). */
+  createSlot: ReactNode;
 }) {
   const how = chosen && match?.productId === chosen ? match.how : null;
   return (
@@ -337,6 +341,7 @@ function LineRow({
               {MATCH_LABEL[how]}
             </span>
           ) : null}
+          {chosen ? null : createSlot}
         </div>
       </TableCell>
     </TableRow>
@@ -445,6 +450,8 @@ export function InvoiceImportCard({
   const [choices, setChoices] = useState<Record<number, string>>({});
   const [registerInvoice, setRegisterInvoice] = useState(true);
   const [applied, setApplied] = useState(false);
+  /** Productos que se crearon desde esta factura. */
+  const [created, setCreated] = useState<ProductWithPrice[]>([]);
 
   const read = async (file: File) => {
     setReading(true);
@@ -459,6 +466,7 @@ export function InvoiceImportCard({
         )
       );
       setRegisterInvoice(!result.duplicate);
+      setCreated([]);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "No se pudo leer la factura."
@@ -470,13 +478,17 @@ export function InvoiceImportCard({
 
   const productsById = useMemo(() => {
     const map = new Map<string, ProductWithPrice>();
-    for (const product of [...(review?.products ?? []), ...supplierProducts]) {
+    for (const product of [
+      ...(review?.products ?? []),
+      ...supplierProducts,
+      ...created,
+    ]) {
       if (product.id) {
         map.set(product.id, product);
       }
     }
     return map;
-  }, [review, supplierProducts]);
+  }, [review, supplierProducts, created]);
 
   const items = useMemo(
     () => chosenItems(review, choices, productsById),
@@ -496,7 +508,12 @@ export function InvoiceImportCard({
       suggested: candidates
         .map((id) => productsById.get(id))
         .filter((p): p is ProductWithPrice => Boolean(p?.id)),
-      rest: supplierProducts.filter((p) => p.id && !candidates.includes(p.id)),
+      rest: [...created, ...supplierProducts].filter(
+        (p, i, all) =>
+          p.id &&
+          !candidates.includes(p.id) &&
+          all.findIndex((q) => q.id === p.id) === i
+      ),
     };
   };
 
@@ -584,6 +601,20 @@ export function InvoiceImportCard({
                 return (
                   <LineRow
                     chosen={chosen}
+                    createSlot={
+                      <CreateProductFromLine
+                        line={line}
+                        onCreated={(product) => {
+                          setCreated((prev) => [...prev, product]);
+                          setChoices((prev) => ({
+                            ...prev,
+                            [index]: product.id ?? "",
+                          }));
+                        }}
+                        orgSlug={orgSlug}
+                        supplierId={supplierId}
+                      />
+                    }
                     key={`${index}-${line.descripcion}`}
                     line={line}
                     match={review.lines[index]?.match}
