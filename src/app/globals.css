@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+.sales-quote-product-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 0.75rem;
+}
+
+@media (min-width: 1280px) {
+  .sales-quote-product-picker {
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.42fr) auto;
+  }
+}
+
 @plugin "tailwindcss-animate";
 
 @custom-variant dark (&:is(.dark *));
