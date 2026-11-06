@@ -46,6 +46,7 @@ const requestSchema = z
     message: z.string().trim().min(1).max(2000).optional(),
     sourceMessageId: z.string().uuid().optional(),
     resume: z.boolean().optional(),
+    expectedControlVersion: z.number().int().nonnegative().optional(),
     customerId: z.string().uuid().optional(),
     priceListId: z.string().uuid().optional(),
     state: stateSchema.optional(),
@@ -54,12 +55,15 @@ const requestSchema = z
   .refine(
     (input) =>
       input.resume
-        ? Boolean(input.state) && !input.message && !input.sourceMessageId
+        ? Boolean(input.state) &&
+          input.expectedControlVersion !== undefined &&
+          !input.message &&
+          !input.sourceMessageId
         : Boolean(input.message) !== Boolean(input.sourceMessageId) &&
           (!input.sourceMessageId || Boolean(input.state)),
     {
       message:
-        "Para reactivar elegí una sesión; para conversar escribí un mensaje",
+        "Para reactivar elegí una sesión y su versión de control; para conversar escribí un mensaje",
     }
   );
 
@@ -112,18 +116,25 @@ async function currentActorId(): Promise<string> {
   return data.user.id;
 }
 
-async function resumeSimulation(state: SimulationState, actorId: string) {
-  const { error } = await createWhatsAppAdminClient().rpc(
-    "set_whatsapp_automation",
+async function resumeSimulation(
+  state: SimulationState,
+  actorId: string,
+  expectedControlVersion: number | undefined
+) {
+  const { data, error } = await createWhatsAppAdminClient().rpc(
+    "control_whatsapp_conversation",
     {
       p_organization_id: state.organizationId,
       p_conversation_id: state.conversationId,
-      p_enabled: true,
       p_actor_id: actorId,
+      p_operation: "RESUME",
+      p_expected_control_version: expectedControlVersion,
     }
   );
-  if (error) {
-    throw new Error(error.message);
+  if (error || data?.success !== true) {
+    throw new Error(
+      "No se pudo reactivar: actualizá el estado y verificá que no haya envíos sin resolver."
+    );
   }
   return {
     state,
@@ -261,7 +272,11 @@ async function runSimulationTurn(params: SimulationTurnParams) {
   const state = await resolveSimulationState(params, actorId);
 
   if (params.input.resume) {
-    return resumeSimulation(state, actorId);
+    return resumeSimulation(
+      state,
+      actorId,
+      params.input.expectedControlVersion
+    );
   }
   const sourceMessageId =
     params.input.sourceMessageId ||

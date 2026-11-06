@@ -86,7 +86,7 @@ class Query implements PromiseLike<unknown> {
 }
 
 import { executeCommercialTool } from "./commercial-tools";
-import { getSimulationMessages } from "./simulation";
+import { getSimulationMessages, getSimulationSnapshot } from "./simulation";
 
 const org = "11111111-1111-4111-8111-111111111111";
 const integration = "22222222-2222-4222-8222-222222222222";
@@ -135,6 +135,7 @@ beforeEach(() => {
         customer_id: customer,
         current_pre_sale_id: null,
         pending_order_action: null,
+        control_version: 0,
       },
     ],
     whatsapp_messages: [
@@ -965,6 +966,29 @@ describe("recurring commercial tools", () => {
 });
 
 describe("commercial worker fencing", () => {
+  it("routes an unleased handoff through the same SQL episode instead of directly writing control", async () => {
+    await executeCommercialTool(context, "handoff_to_human", {
+      reason: "Pidió una persona",
+    });
+    expect(testDb.rpc).toHaveBeenCalledWith("handoff_whatsapp_conversation", {
+      p_organization_id: org,
+      p_integration_id: integration,
+      p_conversation_id: conversation,
+      p_source_message_id: source,
+      p_reason: "Pidió una persona",
+    });
+  });
+  it("includes the observed control version in the simulator snapshot", async () => {
+    testDb.tables.whatsapp_conversations[0].control_version = 4;
+    const snapshot = await getSimulationSnapshot({
+      ...context,
+      customerId: customer,
+    });
+    expect(snapshot).toMatchObject({
+      controlVersion: 4,
+      conversationStatus: "ACTIVE",
+    });
+  });
   const leasedContext = {
     ...context,
     jobId: "88888888-8888-4888-8888-888888888888",

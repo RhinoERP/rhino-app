@@ -1,6 +1,5 @@
 "use client";
 
-import { PaperPlaneTiltIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -12,115 +11,160 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { sendWhatsAppManualMessageAction } from "@/modules/whatsapp/actions/send-whatsapp-manual-message.action";
-import { setWhatsAppConversationAutomationAction } from "@/modules/whatsapp/actions/set-whatsapp-conversation-automation.action";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { controlWhatsAppConversationAction } from "@/modules/whatsapp/actions/control-whatsapp-conversation.action";
+import type { WhatsAppControlOperator } from "@/modules/whatsapp/server/conversation-control";
 import type { WhatsAppInboxConversation } from "@/modules/whatsapp/service/whatsapp-conversations.service";
 
+type ControlOperation = "CLAIM" | "TRANSFER" | "PAUSE" | "RESUME";
 type WhatsAppInboxProps = {
   conversations: WhatsAppInboxConversation[];
   orgSlug: string;
+  operators: WhatsAppControlOperator[];
+  currentUserId: string;
+  canManage: boolean;
+};
+type ControlProps = Pick<
+  WhatsAppInboxProps,
+  "operators" | "currentUserId" | "canManage"
+> & {
+  conversation: WhatsAppInboxConversation;
+  isPending: boolean;
+  onControl: (operation: ControlOperation, assignedUserId?: string) => void;
 };
 
-function statusLabel(status: WhatsAppInboxConversation["status"]): string {
+function statusLabel(conversation: WhatsAppInboxConversation): string {
+  if (conversation.humanClaimedAt) {
+    return "Atención humana aceptada";
+  }
   return {
-    ACTIVE: "Bot activo",
+    ACTIVE: "Atiende la IA",
     PAUSED: "Bot pausado",
-    HANDOFF: "Atención humana",
+    HANDOFF: "Esperando atención",
     CLOSED: "Cerrada",
-  }[status];
+  }[conversation.status];
 }
 
 function ConversationActions({
   conversation,
-  draft,
   isPending,
-  onDraftChange,
-  onSend,
-  onSetAutomation,
-}: {
-  conversation: WhatsAppInboxConversation;
-  draft: string;
-  isPending: boolean;
-  onDraftChange: (text: string) => void;
-  onSend: () => void;
-  onSetAutomation: (enabled: boolean) => void;
-}) {
-  if (conversation.isSimulator) {
-    return (
-      <div className="space-y-2">
-        <p className="text-muted-foreground text-xs">
-          Continuá la prueba desde el simulador.
-        </p>
-        {conversation.status !== "ACTIVE" &&
-        conversation.status !== "CLOSED" ? (
-          <Button
-            disabled={isPending}
-            onClick={() => onSetAutomation(true)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Reactivar bot
-          </Button>
-        ) : null}
-      </div>
-    );
+  onControl,
+  canManage,
+  operators,
+}: ControlProps) {
+  const [recipient, setRecipient] = useState("");
+  if (!canManage || conversation.status === "CLOSED") {
+    return <p className="text-muted-foreground text-xs">Sólo lectura</p>;
   }
-
   return (
-    <>
-      <Textarea
-        aria-label={`Responder a ${conversation.customerName ?? conversation.customerPhone}`}
-        onChange={(event) => onDraftChange(event.target.value)}
-        placeholder="Escribí una respuesta manual…"
-        value={draft}
-      />
-      <div className="flex justify-between gap-2">
-        {conversation.status !== "CLOSED" ? (
+    <div className="space-y-3">
+      {conversation.deliveryBlock ? (
+        <output className="block text-amber-700 text-sm">
+          {conversation.deliveryBlock === "SENDING"
+            ? "Finalizando un envío en curso. Puede llegar al cliente aunque tomes la conversación."
+            : "Envío sin confirmar: requiere revisión antes de devolver a la IA."}
+        </output>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {conversation.humanClaimedAt ? null : (
           <Button
             disabled={isPending}
-            onClick={() => onSetAutomation(conversation.status !== "ACTIVE")}
+            onClick={() => onControl("CLAIM")}
+            size="sm"
+            type="button"
+          >
+            Tomar conversación
+          </Button>
+        )}
+        {conversation.status === "ACTIVE" ? (
+          <Button
+            disabled={isPending}
+            onClick={() => onControl("PAUSE")}
             size="sm"
             type="button"
             variant="outline"
           >
-            {conversation.status === "ACTIVE" ? "Pausar bot" : "Reactivar bot"}
+            Pausar bot
           </Button>
         ) : (
-          <span />
+          <Button
+            disabled={isPending || Boolean(conversation.deliveryBlock)}
+            onClick={() => onControl("RESUME")}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Devolver a la IA
+          </Button>
         )}
-        <Button
-          disabled={isPending || conversation.status === "CLOSED"}
-          onClick={onSend}
-          size="sm"
-          type="button"
-        >
-          <PaperPlaneTiltIcon className="mr-2 size-4" />
-          Enviar
-        </Button>
       </div>
-    </>
+      {conversation.status === "HANDOFF" ? (
+        <div className="space-y-2">
+          <Select
+            disabled={isPending}
+            onValueChange={setRecipient}
+            value={recipient}
+          >
+            <SelectTrigger aria-label="Nuevo responsable">
+              <SelectValue placeholder="Elegí un responsable" />
+            </SelectTrigger>
+            <SelectContent>
+              {operators
+                .filter(
+                  (operator) => operator.id !== conversation.assignedUserId
+                )
+                .map((operator) => (
+                  <SelectItem key={operator.id} value={operator.id}>
+                    {operator.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-xs">
+            Reasignar transfiere la atención si ya fue aceptada; una derivación
+            pendiente sigue esperando aceptación.
+          </p>
+          <Button
+            disabled={
+              isPending ||
+              !recipient ||
+              recipient === conversation.assignedUserId
+            }
+            onClick={() => onControl("TRANSFER", recipient)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Reasignar
+          </Button>
+        </div>
+      ) : null}
+      <p className="text-muted-foreground text-xs">
+        Al devolver, la IA atenderá sólo mensajes nuevos. El envío manual está
+        deshabilitado hasta integrar la outbox humana persistente.
+      </p>
+    </div>
   );
 }
 
 function ConversationCard({
   conversation,
   orgSlug,
-  draft,
   isPending,
-  onDraftChange,
-  onSend,
-  onSetAutomation,
-}: {
-  conversation: WhatsAppInboxConversation;
-  orgSlug: string;
-  draft: string;
-  isPending: boolean;
-  onDraftChange: (text: string) => void;
-  onSend: () => void;
-  onSetAutomation: (enabled: boolean) => void;
-}) {
+  onControl,
+  canManage,
+  operators,
+  currentUserId,
+}: ControlProps & { orgSlug: string }) {
+  const assignedName = operators.find(
+    (operator) => operator.id === conversation.assignedUserId
+  )?.name;
   return (
     <Card>
       <CardHeader className="gap-1 pb-3">
@@ -137,11 +181,18 @@ function ConversationCard({
             ) : null}
           </div>
           <span className="rounded-full bg-muted px-2 py-1 text-xs">
-            {statusLabel(conversation.status)}
+            {statusLabel(conversation)}
           </span>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {conversation.assignedUserId ? (
+          <p className="text-sm">
+            {conversation.humanClaimedAt ? "Atiende" : "Responsable asignado"}:{" "}
+            {assignedName ?? "Responsable no disponible"}
+            {conversation.assignedUserId === currentUserId ? " (vos)" : ""}
+          </p>
+        ) : null}
         <div className="rounded-md bg-muted/50 p-3 text-sm">
           <p className="mb-1 text-muted-foreground text-xs">
             {conversation.lastMessage?.direction === "OUTBOUND"
@@ -185,54 +236,45 @@ function ConversationCard({
           </details>
         ) : null}
         <ConversationActions
+          canManage={canManage}
           conversation={conversation}
-          draft={draft}
+          currentUserId={currentUserId}
           isPending={isPending}
-          onDraftChange={onDraftChange}
-          onSend={onSend}
-          onSetAutomation={onSetAutomation}
+          onControl={onControl}
+          operators={operators}
         />
       </CardContent>
     </Card>
   );
 }
 
-export function WhatsAppInbox({ conversations, orgSlug }: WhatsAppInboxProps) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+export function WhatsAppInbox({
+  conversations,
+  orgSlug,
+  operators,
+  currentUserId,
+  canManage,
+}: WhatsAppInboxProps) {
   const [isPending, startTransition] = useTransition();
 
-  function send(conversationId: string) {
-    const text = drafts[conversationId]?.trim() ?? "";
-    if (!text) {
-      return;
-    }
+  function control(
+    conversation: WhatsAppInboxConversation,
+    operation: ControlOperation,
+    assignedUserId?: string
+  ) {
     startTransition(async () => {
-      const result = await sendWhatsAppManualMessageAction({
+      const result = await controlWhatsAppConversationAction({
         orgSlug,
-        conversationId,
-        text,
+        conversationId: conversation.id,
+        expectedControlVersion: conversation.controlVersion,
+        operation,
+        assignedUserId,
       });
       if (!result.success) {
-        toast.error(result.error ?? "No se pudo enviar el mensaje");
+        toast.error(result.error ?? "No se pudo actualizar el control");
         return;
       }
-      setDrafts((current) => ({ ...current, [conversationId]: "" }));
-      toast.success("Mensaje enviado por WhatsApp");
-    });
-  }
-
-  function setAutomation(conversationId: string, enabled: boolean) {
-    startTransition(async () => {
-      const result = await setWhatsAppConversationAutomationAction({
-        orgSlug,
-        conversationId,
-        enabled,
-      });
-      if (!result.success) {
-        toast.error(result.error ?? "No se pudo actualizar la automatización");
-        return;
-      }
-      toast.success(enabled ? "Bot reactivado" : "Bot pausado");
+      toast.success("Control de conversación actualizado");
     });
   }
 
@@ -250,15 +292,15 @@ export function WhatsAppInbox({ conversations, orgSlug }: WhatsAppInboxProps) {
     <div className="grid gap-4 lg:grid-cols-2">
       {conversations.map((conversation) => (
         <ConversationCard
+          canManage={canManage}
           conversation={conversation}
-          draft={drafts[conversation.id] ?? ""}
+          currentUserId={currentUserId}
           isPending={isPending}
           key={conversation.id}
-          onDraftChange={(text) =>
-            setDrafts((current) => ({ ...current, [conversation.id]: text }))
+          onControl={(operation, assignedUserId) =>
+            control(conversation, operation, assignedUserId)
           }
-          onSend={() => send(conversation.id)}
-          onSetAutomation={(enabled) => setAutomation(conversation.id, enabled)}
+          operators={operators}
           orgSlug={orgSlug}
         />
       ))}

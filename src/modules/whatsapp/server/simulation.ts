@@ -23,6 +23,7 @@ export type SimulationSnapshot = {
   cartStatus: string;
   preSaleCreated: boolean;
   conversationStatus: string;
+  controlVersion: number;
   handoffReason: string | null;
 };
 
@@ -379,7 +380,7 @@ export async function getSimulationSnapshot(
   ] = await Promise.all([
     supabase
       .from("whatsapp_conversations")
-      .select("status, handoff_reason, current_pre_sale_id")
+      .select("status, handoff_reason, current_pre_sale_id, control_version")
       .eq("id", state.conversationId)
       .eq("organization_id", state.organizationId)
       .eq("integration_id", state.integrationId)
@@ -415,6 +416,7 @@ export async function getSimulationSnapshot(
     cartStatus: cart?.status ?? "EMPTY",
     preSaleCreated: Boolean(conversation.current_pre_sale_id),
     conversationStatus: conversation.status,
+    controlVersion: conversation.control_version,
     handoffReason: conversation.handoff_reason,
   };
 }

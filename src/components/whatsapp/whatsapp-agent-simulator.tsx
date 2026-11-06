@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { controlWhatsAppConversationAction } from "@/modules/whatsapp/actions/control-whatsapp-conversation.action";
 import type {
   SimulationOptions,
   SimulationSnapshot,
@@ -48,7 +49,6 @@ async function postSimulation(params: {
   orgSlug: string;
   message?: string;
   sourceMessageId?: string;
-  resume?: boolean;
   customerId?: string;
   priceListId?: string;
   state: SimulationState | undefined;
@@ -61,7 +61,6 @@ async function postSimulation(params: {
       body: JSON.stringify({
         message: params.message,
         sourceMessageId: params.sourceMessageId,
-        resume: params.resume,
         customerId: params.customerId,
         priceListId: params.priceListId,
         state: params.state,
@@ -265,18 +264,31 @@ export function WhatsAppAgentSimulator({
   }
 
   async function resumeAutomation() {
-    if (!state || busy) {
+    if (!(state && snapshot) || busy) {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const result = await postSimulation({ orgSlug, state, resume: true });
-      setSnapshot(result.snapshot ?? null);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "No se pudo reactivar el bot"
-      );
+      const result = await controlWhatsAppConversationAction({
+        orgSlug,
+        conversationId: state.conversationId,
+        expectedControlVersion: snapshot.controlVersion,
+        operation: "RESUME",
+      });
+      if (result.control) {
+        setSnapshot({
+          ...snapshot,
+          conversationStatus: result.control.status,
+          controlVersion: result.control.controlVersion,
+          handoffReason: result.success ? null : snapshot.handoffReason,
+        });
+      }
+      if (!result.success) {
+        setError(result.error ?? "No se pudo reactivar el bot");
+      }
+    } catch {
+      setError("No se pudo reactivar el bot. Volvé a intentar.");
     } finally {
       setBusy(false);
     }
