@@ -125,7 +125,12 @@ En iOS se muestran instrucciones Share > Add to Home Screen. No se intenta usar 
 ## Actualizaciones
 
 - `skipWaiting: false`: el worker nuevo espera.
-- Evento `waiting`: toast persistente "Nueva version disponible".
+- Evento `waiting`: toast persistente "Nueva version disponible", deduplicado
+  por la URL del worker hasta que el nuevo worker tome control.
+- La revision de las rutas precacheadas usa un identificador estable del build
+  (commit/build ID), nunca un UUID generado al importar el route handler.
+- La comprobacion inicial consulta el registro de scope `/` usado por la app y
+  solo acepta el script `/serwist/sw.js`.
 - Accion "Actualizar": `messageSkipWaiting()`.
 - `clientsClaim: true`: el worker activado toma control.
 - Evento `controlling`: recarga una sola vez con el nuevo build.
