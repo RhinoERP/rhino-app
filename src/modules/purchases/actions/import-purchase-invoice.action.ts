@@ -1,9 +1,11 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { getCurrentUser } from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { AiBudgetExceededError } from "@/modules/commercial-ai/service/usage.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -39,6 +41,31 @@ function validPath(orgSlug: string, path: string): boolean {
   return (
     SAFE_PATH.test(path) && path.startsWith(`${orgSlug}/${IMPORT_FOLDER}/`)
   );
+}
+
+/**
+ * Lugar para subir el PDF directo a Storage (sin pasar por el servidor, que
+ * tiene límite de 1 MB). La URL firmada sirve para un solo archivo.
+ */
+export async function createInvoiceUploadAction(
+  orgSlug: string
+): Promise<
+  | { success: true; path: string; token: string }
+  | { success: false; error: string }
+> {
+  if (!orgSlug) {
+    return { success: false, error: "Organización no especificada" };
+  }
+  await ensure("purchases.manage", orgSlug);
+  const path = `${orgSlug}/${IMPORT_FOLDER}/${randomUUID()}.pdf`;
+  const { data, error } = await createAdminClient()
+    .storage.from("documents")
+    .createSignedUploadUrl(path);
+  if (error || !data) {
+    console.error("Compras: no se pudo preparar la subida", error);
+    return { success: false, error: "No se pudo preparar la subida del PDF." };
+  }
+  return { success: true, path: data.path, token: data.token };
 }
 
 export type ImportedInvoiceLine = {
@@ -117,9 +144,9 @@ function failure(error: unknown): { success: false; error: string } {
 }
 
 /** Baja el PDF que subió el navegador y controla que sea un PDF razonable. */
-async function readUploadedPdf(supabase: Supabase, path: string) {
-  const { data: blob, error } = await supabase.storage
-    .from("documents")
+async function readUploadedPdf(path: string) {
+  const { data: blob, error } = await createAdminClient()
+    .storage.from("documents")
     .download(path);
   if (error || !blob) {
     throw new ImportInputError("No se pudo leer el PDF subido.");
@@ -204,7 +231,7 @@ export async function importPurchaseInvoiceAction(
 
   try {
     const supabase = await createClient();
-    const bytes = await readUploadedPdf(supabase, path);
+    const bytes = await readUploadedPdf(path);
     const [org, user] = await Promise.all([
       getOrganizationBySlug(orgSlug),
       getCurrentUser(),
@@ -302,7 +329,7 @@ export async function finishPurchaseInvoiceImportAction(
   }
 
   if (!data.registerInvoice) {
-    await supabase.storage.from("documents").remove([data.path]);
+    await createAdminClient().storage.from("documents").remove([data.path]);
     return { success: true };
   }
 
@@ -334,8 +361,8 @@ export async function finishPurchaseInvoiceImportAction(
     const filename =
       data.filename.normalize("NFD").replace(SAFE_NAME, "_") || "factura.pdf";
     const target = `${data.orgSlug}/${invoice.id}/facturas_proveedor/${filename}`;
-    const { error: moveError } = await supabase.storage
-      .from("documents")
+    const { error: moveError } = await createAdminClient()
+      .storage.from("documents")
       .move(data.path, target);
     if (!moveError) {
       await attachSupplierInvoicePdf({

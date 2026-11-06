@@ -18,6 +18,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import {
+  createInvoiceUploadAction,
   type ImportPurchaseInvoiceResult,
   importPurchaseInvoiceAction,
 } from "@/modules/purchases/actions/import-purchase-invoice.action";
@@ -104,10 +105,16 @@ async function uploadAndRead(orgSlug: string, file: File): Promise<Review> {
   if (file.size > MAX_FILE_SIZE) {
     throw new Error("El PDF no puede superar los 10 MB.");
   }
-  const path = `${orgSlug}/facturas_importadas/${crypto.randomUUID()}.pdf`;
+  const slot = await createInvoiceUploadAction(orgSlug);
+  if (!slot.success) {
+    throw new Error(slot.error);
+  }
+  const { path } = slot;
   const { error } = await createClient()
     .storage.from("documents")
-    .upload(path, file, { contentType: "application/pdf" });
+    .uploadToSignedUrl(path, slot.token, file, {
+      contentType: "application/pdf",
+    });
   if (error) {
     throw new Error(`No se pudo subir el PDF: ${error.message}`);
   }
