@@ -1681,7 +1681,9 @@ export async function emitSaleInvoice(params: {
     authorization,
     requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
-    preventaSale: context.sale.status === "DRAFT" ? context.sale : undefined,
+    preventaSale: isEarlyBillablePreventaStatus(context.sale.status)
+      ? context.sale
+      : undefined,
   });
 
   const supabase = await createClient();

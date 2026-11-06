@@ -9,6 +9,7 @@ import {
   assertPaymentExchangeRate,
   resolvePaymentCurrencyFields,
 } from "@/modules/collections/utils/payment-currency";
+import { recalculateCommissionsForPayment } from "@/modules/commissions/service/commissions-generation.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
@@ -401,6 +402,24 @@ async function handleReceivablePayment(
       currency: account.currency ?? "ARS",
     });
   }
+
+  try {
+    await recalculateCommissionsForPayment(
+      supabase,
+      orgId,
+      payment.id,
+      currencyFields.amountArs
+    );
+  } catch (error) {
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
+    revalidatePath(`/org/${orgSlug}/comisiones`);
+    return {
+      success: false,
+      error: `El pago y el saldo se actualizaron, pero no se pudo recalcular la comisión. Volvé a guardar el pago para reintentar. ${error instanceof Error ? error.message : ""}`,
+    };
+  }
+
+  revalidatePath(`/org/${orgSlug}/comisiones`);
 
   return {
     success: true,
