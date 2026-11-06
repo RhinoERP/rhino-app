@@ -135,6 +135,14 @@ function buildPermissionTooltip(
     return "Permite gestionar movimientos de tesorería, cuentas bancarias y cheques.";
   }
 
+  if (key === "commercial_ai.read") {
+    return "Vendedor: ve su propia cartera en IA Comercial, sus oportunidades, metas y el asistente.";
+  }
+
+  if (key === "commercial_ai.manage") {
+    return "Gerente: ve a todo el equipo en IA Comercial, fija objetivos por vendedor y ajusta las reglas del análisis.";
+  }
+
   if (key === "pos.returns.manage") {
     return "Permite gestionar las devoluciones de venta directa.";
   }
@@ -215,6 +223,7 @@ function humanizeResource(resource: string): string {
     quotes: "Presupuestos",
     distributor: "Distribuidores",
     mercadolibre: "MercadoLibre",
+    commercial_ai: "IA Comercial",
   };
 
   return map[resource] ?? resource;
@@ -289,6 +298,8 @@ function humanizeAction(
       "pricing.view_margin": "Ver columna Margen (Precios)",
       "distributor.catalog": "Ver catálogo",
       "mercadolibre.access": "Acceso MercadoLibre",
+      "commercial_ai.read": "Vendedor (cartera propia)",
+      "commercial_ai.manage": "Gerente (todo el equipo)",
     };
 
     if (specialLabels[key]) {

@@ -8,7 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,12 @@ type PurchaseFormProps = {
   onFormChange: (values: Partial<PurchaseFormValues>) => void;
   selectedTaxIds?: string[];
   onTaxesChange?: (taxIds: string[]) => void;
+  /** Valores que llegan de una factura importada (cambia `version` por cada una). */
+  importedValues?: {
+    version: number;
+    purchase_date: Date;
+    expiration_days: number | null;
+  };
 };
 
 export function PurchaseForm({
@@ -73,6 +79,7 @@ export function PurchaseForm({
   onFormChange,
   selectedTaxIds = [],
   onTaxesChange,
+  importedValues,
 }: PurchaseFormProps) {
   const [openSupplier, setOpenSupplier] = useState(false);
   const { data: orgSettings, isPending: settingsPending } =
@@ -90,6 +97,17 @@ export function PurchaseForm({
   });
 
   const { watch, setValue, formState } = form;
+
+  useEffect(() => {
+    if (!importedValues) {
+      return;
+    }
+    setValue("purchase_date", importedValues.purchase_date);
+    setValue("expiration_days", importedValues.expiration_days);
+    if (selectedSupplierId) {
+      setValue("supplier_id", selectedSupplierId);
+    }
+  }, [importedValues, selectedSupplierId, setValue]);
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
 
