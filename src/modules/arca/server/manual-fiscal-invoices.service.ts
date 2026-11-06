@@ -17,12 +17,7 @@ import {
   ArcaValidationError,
   sanitizeArcaErrorMessage,
 } from "../errors";
-import {
-  type ArcaCurrencyQuoteClient,
-  buildArcaCurrencyRequestFields,
-  buildInvoiceFiscalCurrency,
-  resolveArcaFiscalCurrency,
-} from "../fiscal-currency";
+import { buildArcaCurrencyRequestFields } from "../fiscal-currency";
 import { buildArcaReceiverDocument } from "../receiver-document";
 import { mapCustomerTaxConditionToArcaReceiverVatConditionId } from "../receiver-tax-conditions";
 import { validateOrganizationCuit } from "../validation";
@@ -32,6 +27,7 @@ import {
   isArcaCertificateExpired,
   resolveArcaOrganizationCredentials,
 } from "./client-factory";
+import { resolveInvoiceExchangeRate } from "./invoice-exchange-rate";
 import { toArcaStatus } from "./settings.service";
 
 const lineSchema = z.object({
@@ -301,7 +297,7 @@ export async function createManualFiscalInvoice(
       due_date: input.dueDate ?? null,
       invoice_type: input.invoiceType,
       currency: input.currency,
-      exchange_rate: input.exchangeRate ?? null,
+      exchange_rate: input.currency === "USD" ? input.exchangeRate : null,
       sub_total: subTotal,
       total_tax_amount: tax,
       total_amount: truncateMoney(subTotal + tax),
@@ -387,6 +383,7 @@ export async function getManualFiscalInvoiceById(params: {
 export async function emitManualFiscalInvoice(params: {
   orgSlug: string;
   invoiceId: string;
+  fiscalExchangeRate?: number;
 }): Promise<ManualFiscalInvoice> {
   const organization = await assertCanIssueOrganizationArca(params.orgSlug);
   const supabase = await createClient();
@@ -452,9 +449,9 @@ export async function emitManualFiscalInvoice(params: {
     key: credentials.key,
     environment: credentials.environment,
   });
-  const fiscalCurrency = await resolveArcaFiscalCurrency(
-    client as unknown as ArcaCurrencyQuoteClient,
-    buildInvoiceFiscalCurrency(invoice.currency)
+  const fiscalCurrency = await resolveInvoiceExchangeRate(
+    invoice.currency,
+    params.fiscalExchangeRate ?? invoice.exchange_rate
   );
   const iva = new Map<number, { BaseImp: number; Importe: number }>();
   for (const item of invoice.items) {
@@ -503,6 +500,7 @@ export async function emitManualFiscalInvoice(params: {
   const { data: locked } = await table(supabase)
     .update({
       status: "pending",
+      exchange_rate: invoice.currency === "USD" ? fiscalCurrency.rate : null,
       arca_last_error: null,
       arca_request_json: requestJson,
     } as never)
@@ -542,6 +540,7 @@ export async function emitManualFiscalInvoice(params: {
     const now = new Date().toISOString();
     const patch = {
       status: "authorized",
+      exchange_rate: invoice.currency === "USD" ? fiscalCurrency.rate : null,
       invoice_number: formatNumber(credentials.pointOfSale, voucherNumber),
       arca_cae: String(authorization.CAE),
       arca_cae_expires_at: caeDate(String(authorization.CAEFchVto)),

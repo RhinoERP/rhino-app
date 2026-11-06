@@ -17,6 +17,8 @@ const stockMetricsSchema = z.discriminatedUnion("canViewCosts", [
     ...metricFields,
     canViewCosts: z.literal(true),
     totalStockValue: z.number(),
+    totalStockValueUsd: z.number().optional(),
+    unpricedStockProducts: z.number().int().nonnegative().optional(),
   }),
   z.object({ ...metricFields, canViewCosts: z.literal(false) }),
 ]);

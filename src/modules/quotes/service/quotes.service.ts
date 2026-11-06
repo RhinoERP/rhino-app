@@ -1142,8 +1142,7 @@ export async function convertQuoteToSalesOrder(
       invoice_type: (quote.invoice_type ??
         "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
       currency: quote.currency,
-      exchange_rate:
-        quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
+      exchange_rate: null,
       commercial_exchange_rate:
         quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
       sub_total: quote.sub_total,

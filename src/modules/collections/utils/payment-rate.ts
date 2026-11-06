@@ -1,69 +1,116 @@
 import type { SupabaseServerClient } from "@/lib/supabase/server";
-import { readAuthorizedFiscalCurrency } from "@/modules/arca/fiscal-currency";
+import {
+  isPositiveExchangeRate as isPositiveRate,
+  readFiscalInvoiceRate,
+  readSaleDocumentRate,
+} from "@/modules/sales/document-exchange-rate";
 
 export const NO_RECEIVABLE_INVOICE_RATE_MESSAGE =
-  "La venta no tiene una factura emitida con cotización. Facturá la venta antes de cobrar.";
+  "No se encontró la cotización de la factura o la cotización acordada en el presupuesto/venta. Completala en el documento de origen antes de cobrar.";
 
 export const NO_PAYABLE_INVOICE_RATE_MESSAGE =
   "El pago no tiene una factura de compra registrada con cotización. Registrá la factura antes de pagar.";
 
-function isPositiveRate(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
 /**
  * Resuelve la cotización fijada por la factura de venta de una deuda USD.
- * Primero usa `sales_orders.exchange_rate` (persistida al emitir la factura);
- * como respaldo lee el snapshot fiscal autorizado de ARCA para ventas ya
- * facturadas antes de persistir la tasa.
+ * La factura autorizada es la fuente fiscal. Sin factura se utiliza únicamente
+ * el acuerdo comercial; nunca la cotización actual ni un valor enviado al pagar.
  */
-export async function resolveReceivableExchangeRate(params: {
+type ReceivableRateParams = {
   supabase: SupabaseServerClient;
   orgId: string;
   receivable: {
     currency: string | null | undefined;
     sales_order_id: string | null | undefined;
+    manual_fiscal_invoice_id?: string | null;
   };
-}): Promise<number | null> {
+  existingPayment?: {
+    exchange_rate?: number | null;
+    created_at?: string | null;
+  };
+};
+
+async function manualInvoiceRate(params: ReceivableRateParams) {
+  const { data, error } = await params.supabase
+    .from("manual_fiscal_invoices" as never)
+    .select("currency, status, exchange_rate, arca_request_json")
+    .eq("id", params.receivable.manual_fiscal_invoice_id as string)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  const invoice = data as {
+    currency: string;
+    status: string;
+    exchange_rate: number | null;
+    arca_request_json: unknown;
+  } | null;
+  if (invoice?.currency !== "USD" || invoice.status !== "authorized") {
+    return null;
+  }
+  return readFiscalInvoiceRate(
+    invoice.arca_request_json,
+    invoice.exchange_rate
+  );
+}
+
+/** Resolve from the invoice, or the commercial agreement for an uninvoiced AR. */
+export async function resolveReceivableExchangeRate(
+  params: ReceivableRateParams
+): Promise<number | null> {
   const { receivable } = params;
-  if ((receivable.currency ?? "ARS") !== "USD" || !receivable.sales_order_id) {
+  if ((receivable.currency ?? "ARS") !== "USD") {
+    return null;
+  }
+  if (receivable.manual_fiscal_invoice_id) {
+    return manualInvoiceRate(params);
+  }
+  if (!receivable.sales_order_id) {
     return null;
   }
 
-  const { data: sale } = await params.supabase
+  const { data: sale, error } = await params.supabase
     .from("sales_orders")
-    .select("exchange_rate, arca_request_json")
+    .select(
+      "exchange_rate, commercial_exchange_rate, commercial_snapshot, arca_status, arca_authorized_at, invoice_number, invoice_type, arca_request_json"
+    )
     .eq("id", receivable.sales_order_id)
     .eq("organization_id", params.orgId)
     .maybeSingle();
 
+  if (error) {
+    throw new Error(error.message);
+  }
   if (!sale) {
     return null;
   }
 
-  const storedRate = Number(
-    (sale as { exchange_rate?: number | null }).exchange_rate
-  );
-  if (isPositiveRate(storedRate)) {
-    return storedRate;
+  const invoiced =
+    sale.arca_status === "authorized" ||
+    (Boolean(sale.invoice_number?.trim()) &&
+      sale.invoice_type?.startsWith("FACTURA_"));
+  // A later invoice must not revalue collections already recorded commercially.
+  const payment = params.existingPayment;
+  const confirmedAt =
+    sale.arca_authorized_at ??
+    (sale.arca_request_json as { fiscalRateConfirmedAt?: string } | null)
+      ?.fiscalRateConfirmedAt;
+  if (
+    invoiced &&
+    payment?.created_at &&
+    confirmedAt &&
+    Date.parse(payment.created_at) < Date.parse(confirmedAt) &&
+    isPositiveRate(payment.exchange_rate)
+  ) {
+    return payment.exchange_rate;
   }
-
-  const requestJson = (sale as { arca_request_json?: unknown })
-    .arca_request_json;
-  if (requestJson) {
-    const fiscal = readAuthorizedFiscalCurrency(requestJson);
-    if (fiscal.code === "DOL" && isPositiveRate(fiscal.rate)) {
-      return fiscal.rate;
-    }
-  }
-
-  return null;
+  return readSaleDocumentRate(sale);
 }
 
 /**
  * Resuelve la cotización fijada por la factura de compra de una deuda USD.
- * Primero usa `accounts_payable.exchange_rate` (si ya se registró) y como
- * respaldo la factura de compra ligada a la orden de compra.
+ * La factura vinculada tiene prioridad; una copia en AP no sustituye una factura.
  */
 export async function resolvePayableExchangeRate(params: {
   supabase: SupabaseServerClient;
@@ -79,10 +126,6 @@ export async function resolvePayableExchangeRate(params: {
   const { payable } = params;
   if ((payable.currency ?? "ARS") !== "USD") {
     return null;
-  }
-
-  if (isPositiveRate(payable.exchange_rate)) {
-    return payable.exchange_rate;
   }
 
   if (payable.supplier_invoice_id) {

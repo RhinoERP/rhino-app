@@ -8,6 +8,7 @@ import type { ArcaActionResult, ArcaSaleInvoiceResult } from "../types";
 export async function emitSaleInvoiceAction(input: {
   orgSlug: string;
   saleId: string;
+  fiscalExchangeRate?: number;
 }): Promise<ArcaActionResult<ArcaSaleInvoiceResult>> {
   const detailPath = `/org/${input.orgSlug}/ventas/${input.saleId}`;
   const listPath = `/org/${input.orgSlug}/ventas`;

@@ -3,6 +3,7 @@
 import { PlusIcon } from "@phosphor-icons/react";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { FiscalExchangeRateInput } from "@/components/arca/fiscal-exchange-rate-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -62,6 +63,9 @@ export function ManualFiscalInvoicesPanel({
   >("FACTURA_B");
   const [currency, setCurrency] = useState<"ARS" | "USD">("ARS");
   const [exchangeRate, setExchangeRate] = useState("");
+  const [invoiceToIssue, setInvoiceToIssue] =
+    useState<ManualFiscalInvoice | null>(null);
+  const [issueRate, setIssueRate] = useState("");
   const [message, setMessage] = useState("");
   const [emailRecipients, setEmailRecipients] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -95,7 +99,14 @@ export function ManualFiscalInvoicesPanel({
     setLines((current) =>
       current.map((line, i) => (i === index ? { ...line, [key]: value } : line))
     );
-  const save = () =>
+  const hasValidUsdRate =
+    currency !== "USD" ||
+    (Number.isFinite(Number(exchangeRate)) && Number(exchangeRate) > 0);
+  const save = () => {
+    if (!hasValidUsdRate) {
+      toast.error("Ingresá una cotización fiscal válida para la factura USD.");
+      return;
+    }
     startTransition(async () => {
       const result = await createManualFiscalInvoiceAction({
         orgSlug,
@@ -103,7 +114,8 @@ export function ManualFiscalInvoicesPanel({
         issueDate: new Date().toISOString().slice(0, 10),
         invoiceType,
         currency,
-        exchangeRate: exchangeRate ? Number(exchangeRate) : null,
+        exchangeRate:
+          currency === "USD" && exchangeRate ? Number(exchangeRate) : null,
         customMessage: message || null,
         emailRecipients: emailRecipients || null,
         emailSubject: emailSubject || null,
@@ -123,17 +135,20 @@ export function ManualFiscalInvoicesPanel({
       reset();
       setOpen(false);
     });
-  const issue = (id: string) =>
+  };
+  const issue = (id: string, fiscalExchangeRate?: number) =>
     startTransition(async () => {
       const result = await emitManualFiscalInvoiceAction({
         orgSlug,
         invoiceId: id,
+        fiscalExchangeRate,
       });
       if (!result.success) {
         toast.error(result.error);
         return;
       }
       toast.success("Factura autorizada por ARCA");
+      setInvoiceToIssue(null);
     });
   const downloadPdf = (id: string) =>
     startTransition(async () => {
@@ -208,7 +223,18 @@ export function ManualFiscalInvoicesPanel({
                         invoice.status === "error") && (
                         <Button
                           disabled={pending}
-                          onClick={() => issue(invoice.id)}
+                          onClick={() => {
+                            if (invoice.currency === "USD") {
+                              setIssueRate(
+                                invoice.exchange_rate
+                                  ? String(invoice.exchange_rate)
+                                  : ""
+                              );
+                              setInvoiceToIssue(invoice);
+                            } else {
+                              issue(invoice.id);
+                            }
+                          }}
                           size="sm"
                         >
                           Emitir ARCA
@@ -274,9 +300,12 @@ export function ManualFiscalInvoicesPanel({
                 <Label>Moneda</Label>
                 <select
                   className="mt-1 h-9 w-full rounded-md border bg-background px-2"
-                  onChange={(e) =>
-                    setCurrency(e.target.value as typeof currency)
-                  }
+                  onChange={(e) => {
+                    setCurrency(e.target.value as typeof currency);
+                    if (e.target.value === "ARS") {
+                      setExchangeRate("");
+                    }
+                  }}
                   value={currency}
                 >
                   <option value="ARS">ARS</option>
@@ -285,16 +314,11 @@ export function ManualFiscalInvoicesPanel({
               </div>
             </div>
             {currency === "USD" && (
-              <div>
-                <Label>Tipo de cambio comercial USD → ARS</Label>
-                <Input
-                  min="0"
-                  onChange={(e) => setExchangeRate(e.target.value)}
-                  step="any"
-                  type="number"
-                  value={exchangeRate}
-                />
-              </div>
+              <FiscalExchangeRateInput
+                disabled={pending}
+                onChange={setExchangeRate}
+                value={exchangeRate}
+              />
             )}
             <div className="space-y-2">
               <Label>Renglones</Label>
@@ -400,11 +424,51 @@ export function ManualFiscalInvoicesPanel({
               >
                 Cancelar
               </Button>
-              <Button disabled={pending || !customerId} onClick={save}>
+              <Button
+                disabled={pending || !(customerId && hasValidUsdRate)}
+                onClick={save}
+              >
                 Guardar borrador
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        onOpenChange={(value) => {
+          if (!(value || pending)) {
+            setInvoiceToIssue(null);
+          }
+        }}
+        open={invoiceToIssue !== null}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar cotización fiscal</DialogTitle>
+            <DialogDescription>
+              Podés corregir la cotización del borrador antes de emitir. Una vez
+              autorizada queda fija.
+            </DialogDescription>
+          </DialogHeader>
+          <FiscalExchangeRateInput
+            disabled={pending}
+            key={invoiceToIssue?.id}
+            onChange={setIssueRate}
+            value={issueRate}
+          />
+          <Button
+            disabled={
+              pending ||
+              !(Number.isFinite(Number(issueRate)) && Number(issueRate) > 0)
+            }
+            onClick={() => {
+              if (invoiceToIssue) {
+                issue(invoiceToIssue.id, Number(issueRate));
+              }
+            }}
+          >
+            Emitir ARCA
+          </Button>
         </DialogContent>
       </Dialog>
     </div>

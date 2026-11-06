@@ -23,6 +23,15 @@ vi.mock("@/modules/commissions/service/commissions-generation.service", () => ({
 
 import { updatePaymentAction } from "./update-payment.action";
 
+vi.mock("@/modules/collections/utils/payment-rate", () => ({
+  resolveReceivableExchangeRate: async ({
+    receivable,
+  }: {
+    receivable: { currency: string };
+  }) => (receivable.currency === "USD" ? 1100.123_456 : null),
+  resolvePayableExchangeRate: vi.fn(),
+}));
+
 function setupClient(currency: string, accountError = false) {
   const results = [
     {
@@ -86,7 +95,7 @@ beforeEach(() => {
 describe("payment edits synchronize commissions", () => {
   it.each([
     ["ARS", undefined, 100],
-    ["USD", 1200, 120_000],
+    ["USD", 9999, 110_012.34],
   ])("passes the edited %s payment valuation in ARS", async (currency, rate, amountArs) => {
     const client = setupClient(currency);
     const result = await updatePaymentAction({ ...input, exchangeRate: rate });

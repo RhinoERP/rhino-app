@@ -32,6 +32,7 @@ export async function createManualFiscalInvoiceAction(
 export async function emitManualFiscalInvoiceAction(input: {
   orgSlug: string;
   invoiceId: string;
+  fiscalExchangeRate?: number;
 }) {
   try {
     const invoice = await emitManualFiscalInvoice(input);

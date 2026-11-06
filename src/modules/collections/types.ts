@@ -234,7 +234,7 @@ export type RegisterPaymentInput = {
   creditAmount?: number;
   /** Apply this exact customer credit instead of consuming the FIFO balance. */
   customerCreditId?: string;
-  /** Cotización USD→ARS usada al registrar el pago de una deuda en dólares. */
+  /** @deprecated Ignored: the server inherits the quote from the source document. */
   exchangeRate?: number;
   paymentMethod: PaymentMethod;
   operationId?: string;

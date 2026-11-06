@@ -965,6 +965,7 @@ export async function issuePreventaBalanceInvoice(
       orgSlug: input.orgSlug,
       saleId: balanceDocument.id,
       formalAdvanceDocument: "BALANCE",
+      fiscalExchangeRate: input.fiscalExchangeRate,
     });
   }
   await ensureReceivable({
@@ -1474,7 +1475,11 @@ export async function issueSalesAdvance(
   try {
     await assertAdvanceInvoiceAccountingReady({
       orgSlug: input.orgSlug,
-      sale: advanceSaleForAccess as Raw,
+      sale: {
+        ...advanceSaleForAccess,
+        exchange_rate:
+          input.fiscalExchangeRate ?? advanceSaleForAccess?.exchange_rate,
+      } as Raw,
     });
     await updateAdvance(supabase, org.id, advance.id, {
       status: "ISSUE_SUBMITTED",
@@ -1484,6 +1489,7 @@ export async function issueSalesAdvance(
       orgSlug: input.orgSlug,
       saleId: advance.advance_sales_order_id,
       formalAdvanceDocument: "ADVANCE",
+      fiscalExchangeRate: input.fiscalExchangeRate,
     });
     const { data: sale } = await supabase
       .from("sales_orders")
@@ -1641,7 +1647,11 @@ export async function settleSalesAdvance(
         "La liquidación requiere Factura A, Factura B o Factura C final"
       );
     }
-    await emitSaleInvoice({ orgSlug: input.orgSlug, saleId: finalSale.id });
+    await emitSaleInvoice({
+      orgSlug: input.orgSlug,
+      saleId: finalSale.id,
+      fiscalExchangeRate: input.fiscalExchangeRate,
+    });
     const finalReceivableId = await ensureReceivable({
       supabase,
       orgId: org.id,
