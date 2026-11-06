@@ -33,6 +33,8 @@ type MessageInput = {
   schema?: Record<string, unknown>;
   /** Herramientas que el modelo puede pedir (consultas a la base). */
   tools?: Anthropic.Beta.BetaToolUnion[];
+  /** Otro modelo para esta llamada (por defecto, el del módulo). */
+  model?: string;
 };
 
 export type AiResult =
@@ -45,7 +47,7 @@ export async function createAiTurn(
 ): Promise<Anthropic.Beta.BetaMessage> {
   await assertWithinBudget(input.meter);
   const client = new Anthropic();
-  const model = commercialAiModel();
+  const model = input.model ?? commercialAiModel();
   const useFallbacks = SERVER_FALLBACK_MODELS.has(model);
 
   const response = await client.beta.messages.create({

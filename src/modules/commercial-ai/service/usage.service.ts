@@ -16,7 +16,8 @@ export type AiFeature =
   | "campana"
   | "prueba"
   | "whatsapp"
-  | "audio";
+  | "audio"
+  | "factura";
 
 /** Quién consume: se registra en cada llamada y se usa para chequear el tope. */
 export type AiMeter = {
@@ -387,6 +388,7 @@ export const FEATURE_LABELS: Record<AiFeature, string> = {
   prueba: "Prueba de conexión",
   whatsapp: "Mensajes de WhatsApp",
   audio: "Audios transcriptos",
+  factura: "Facturas leídas (Compras)",
 };
 const RECENT_LIMIT = 20;
 const HISTORY_LIMIT = 10;

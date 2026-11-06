@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   PurchaseForm,
   type PurchaseFormValues,
@@ -12,11 +13,16 @@ import {
   type PurchaseItem,
   PurchaseItemsList,
 } from "@/components/purchases/forms/purchase-items-list";
+import {
+  type AppliedInvoiceImport,
+  InvoiceImportCard,
+} from "@/components/purchases/invoice-import/invoice-import-card";
 import { PurchaseSummary } from "@/components/purchases/shared/purchase-summary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCategories } from "@/modules/categories/hooks/use-categories";
+import { finishPurchaseInvoiceImportAction } from "@/modules/purchases/actions/import-purchase-invoice.action";
 import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
@@ -24,6 +30,34 @@ import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
 import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
 import { toFallbackItemTaxes } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
+
+type PendingInvoiceImport = AppliedInvoiceImport["finish"] & {
+  supplierId: string;
+};
+
+/** Después de guardar: registra la factura con el PDF y recuerda equivalencias. */
+async function finishInvoiceImport(
+  orgSlug: string,
+  purchaseOrderId: string | undefined,
+  pending: PendingInvoiceImport | null
+) {
+  if (!(pending && purchaseOrderId)) {
+    return;
+  }
+  const finished = await finishPurchaseInvoiceImportAction({
+    orgSlug,
+    purchaseOrderId,
+    supplierId: pending.supplierId,
+    path: pending.path,
+    filename: pending.filename,
+    registerInvoice: pending.registerInvoice,
+    invoice: pending.invoice,
+    aliases: pending.aliases,
+  });
+  if (!finished.success && finished.error) {
+    toast.warning(finished.error);
+  }
+}
 
 function NewPurchaseContent() {
   const params = useParams();
@@ -42,6 +76,13 @@ function NewPurchaseContent() {
   const [error, setError] = useState<string | null>(null);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
   const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const [importedValues, setImportedValues] = useState<{
+    version: number;
+    purchase_date: Date;
+    expiration_days: number | null;
+  }>();
+  const [pendingImport, setPendingImport] =
+    useState<PendingInvoiceImport | null>(null);
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } =
     useSuppliers(orgSlug);
@@ -95,6 +136,33 @@ function NewPurchaseContent() {
 
   const handleRemoveItem = (index: number) => {
     setPurchaseItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleInvoiceImport = (imported: AppliedInvoiceImport) => {
+    const purchaseDate = new Date(`${imported.purchaseDate}T12:00:00`);
+    setSelectedSupplierId(imported.supplierId);
+    setFormValues((prev) => ({
+      ...prev,
+      supplier_id: imported.supplierId,
+      purchase_date: purchaseDate,
+      expiration_days: imported.expirationDays,
+    }));
+    setImportedValues((prev) => ({
+      version: (prev?.version ?? 0) + 1,
+      purchase_date: purchaseDate,
+      expiration_days: imported.expirationDays,
+    }));
+    setPurchaseItems(imported.items);
+    setGlobalDiscountPercent(imported.globalDiscountPercent);
+    const vatTaxIds = taxes
+      .filter(
+        (tax) =>
+          tax.name.toLowerCase().includes("iva") &&
+          imported.vatRates.includes(Number(tax.rate))
+      )
+      .map((tax) => tax.id);
+    setSelectedTaxIds(vatTaxIds);
+    setPendingImport({ ...imported.finish, supplierId: imported.supplierId });
   };
 
   const handleFormChange = (values: Partial<PurchaseFormValues>) => {
@@ -214,6 +282,13 @@ function NewPurchaseContent() {
       const result = await createPurchase.mutateAsync(purchaseData);
 
       if (result.success) {
+        await finishInvoiceImport(
+          orgSlug,
+          (result.data as { id?: string } | undefined)?.id,
+          pendingImport?.supplierId === selectedSupplierId
+            ? pendingImport
+            : null
+        );
         router.push(`/org/${orgSlug}/compras`);
       } else {
         setError(result.error ?? "Error al crear la compra");
@@ -227,7 +302,15 @@ function NewPurchaseContent() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [validateForm, preparePurchaseData, createPurchase, router, orgSlug]);
+  }, [
+    validateForm,
+    preparePurchaseData,
+    createPurchase,
+    router,
+    orgSlug,
+    pendingImport,
+    selectedSupplierId,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -286,10 +369,18 @@ function NewPurchaseContent() {
       {/* Main Content */}
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
+          <InvoiceImportCard
+            onApply={handleInvoiceImport}
+            orgSlug={orgSlug}
+            supplierProducts={products}
+            suppliers={suppliers}
+          />
+
           {/* Purchase Form */}
           <Card>
             <CardContent className="pt-6">
               <PurchaseForm
+                importedValues={importedValues}
                 onFormChange={handleFormChange}
                 onSupplierChange={setSelectedSupplierId}
                 onTaxesChange={setSelectedTaxIds}

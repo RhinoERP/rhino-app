@@ -48,6 +48,7 @@ const FEATURE_TEXT: Record<string, string> = {
   prueba: "Prueba",
   whatsapp: "Mensaje de WhatsApp",
   audio: "Audio",
+  factura: "Factura leída (Compras)",
 };
 const PURCHASE_STATUS: Record<string, string> = {
   pendiente: "Pendiente",
