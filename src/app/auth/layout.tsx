@@ -1,4 +1,6 @@
 import Image from "next/image";
+import Link from "next/link";
+import { DATA_DELETION_PATH, PRIVACY_PATH } from "@/lib/legal";
 
 export default function AuthLayout({
   children,
@@ -18,6 +20,23 @@ export default function AuthLayout({
           />
         </div>
         {children}
+        <nav
+          aria-label="Información legal"
+          className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-2 text-muted-foreground text-xs"
+        >
+          <Link
+            className="underline-offset-4 hover:underline"
+            href={PRIVACY_PATH}
+          >
+            Política de privacidad
+          </Link>
+          <Link
+            className="underline-offset-4 hover:underline"
+            href={DATA_DELETION_PATH}
+          >
+            Eliminación de datos
+          </Link>
+        </nav>
       </div>
     </div>
   );

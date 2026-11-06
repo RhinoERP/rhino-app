@@ -64,7 +64,22 @@ export async function hasRegisteredPurchaseInvoice(
   if (error) {
     throw new Error(`No se pudo consultar la factura: ${error.message}`);
   }
-  return (data?.length ?? 0) > 0;
+  if ((data?.length ?? 0) > 0) {
+    return true;
+  }
+  const linked = await supabase
+    .from("supplier_invoice_purchase_orders")
+    .select("supplier_invoice_id, invoice:supplier_invoices!inner(status)")
+    .eq("organization_id", org.id)
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("invoice.status", "REGISTERED")
+    .limit(1);
+  if (linked.error) {
+    throw new Error(
+      `No se pudo consultar la factura vinculada: ${linked.error.message}`
+    );
+  }
+  return !!linked.data?.length;
 }
 
 /** Compare physical receipts with the frozen ordered quantities/variants. */

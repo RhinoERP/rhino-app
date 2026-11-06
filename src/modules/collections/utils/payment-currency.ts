@@ -56,7 +56,7 @@ export function resolvePaymentCurrencyFields(
   if (isUsdDebt(debtCurrency) && hasValidExchangeRate(exchangeRate)) {
     return {
       currency: "USD",
-      exchangeRate: truncateMoney(exchangeRate),
+      exchangeRate,
       amountArs: truncateMoney(normalizedAmount * exchangeRate),
     };
   }

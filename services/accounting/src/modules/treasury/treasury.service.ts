@@ -251,6 +251,7 @@ async function resolveEndorsementExchangeRate(
   payable: {
     exchange_rate: string | null;
     purchase_order_id: string | null;
+    supplier_invoice_id?: string | null;
     supplier_id: string;
   },
   orgId: string
@@ -259,18 +260,45 @@ async function resolveEndorsementExchangeRate(
   if (storedRate.gt(0)) {
     return storedRate;
   }
-  if (payable.purchase_order_id) {
+  if (payable.supplier_invoice_id) {
     const invoice = await trx
+      .selectFrom("public.supplier_invoices")
+      .select(["exchange_rate", "currency", "status"])
+      .where("id", "=", payable.supplier_invoice_id)
+      .where("organization_id", "=", orgId)
+      .where("supplier_id", "=", payable.supplier_id)
+      .executeTakeFirst();
+    const rate = new Decimal(invoice?.exchange_rate ?? 0);
+    if (
+      invoice?.currency === "USD" &&
+      invoice.status === "REGISTERED" &&
+      rate.isFinite() &&
+      rate.gt(0)
+    ) {
+      return rate;
+    }
+    throw AppError.unprocessable(
+      "La factura directa no tiene cotización válida"
+    );
+  }
+  if (payable.purchase_order_id) {
+    const invoices = await trx
       .selectFrom("public.supplier_invoices")
       .select("exchange_rate")
       .where("purchase_order_id", "=", payable.purchase_order_id)
       .where("supplier_id", "=", payable.supplier_id)
       .where("organization_id", "=", orgId)
-      .orderBy("created_at", "desc")
-      .executeTakeFirst();
-    const invoiceRate = new Decimal(invoice?.exchange_rate ?? 0);
-    if (invoiceRate.gt(0)) {
-      return invoiceRate;
+      .where("status", "=", "REGISTERED")
+      .where("payable_model", "=", "LEGACY_OC")
+      .execute();
+    const rates = invoices.map(
+      (invoice) => new Decimal(invoice.exchange_rate ?? 0)
+    );
+    if (
+      rates.length &&
+      rates.every((rate) => rate.isFinite() && rate.gt(0) && rate.eq(rates[0]))
+    ) {
+      return rates[0];
     }
   }
   throw AppError.unprocessable(

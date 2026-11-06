@@ -152,6 +152,11 @@ export type StockMetrics = {
   totalLt: number;
   lowStockCount: number;
 } & (
-  | { canViewCosts: true; totalStockValue: number }
+  | {
+      canViewCosts: true;
+      totalStockValue: number;
+      totalStockValueUsd?: number;
+      unpricedStockProducts?: number;
+    }
   | { canViewCosts: false; totalStockValue?: never }
 );

@@ -89,6 +89,93 @@ describe("WhatsApp outbound authorization", () => {
     );
   });
 
+  it("retries an Argentine test recipient without 9 after explicit allowlist rejection", async () => {
+    const db = database(true);
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: 131_030 } }), {
+        status: 400,
+      })
+    );
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).resolves.toBe("wamid.test");
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.map(([, options]) => JSON.parse(String(options?.body)).to)
+    ).toEqual(["5491100000000", "541100000000"]);
+    expect(db.from).toHaveBeenCalledWith("whatsapp_conversations");
+    expect(db.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [400, 131_030, "541100000000"],
+    [400, 131_030, "15550000000"],
+    [400, 131_047, input.recipient],
+    [401, 190, input.recipient],
+  ])("does not retry unrelated rejections (%i, %i, %s)", async (status, code, recipient) => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: { code } }), { status })
+    );
+    await expect(
+      sendWhatsAppText(database(true) as unknown as SupabaseClient, {
+        ...input,
+        recipient,
+      })
+    ).rejects.toThrow(`código ${code}`);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after one canonical retry and reports the Meta code", async () => {
+    vi.mocked(fetch).mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: { code: 131_030 } }), {
+          status: 400,
+        })
+    );
+    await expect(
+      sendWhatsAppText(database(true) as unknown as SupabaseClient, input)
+    ).rejects.toThrow("código 131030");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("persists uncertainty if the canonical retry loses its connection", async () => {
+    const db = database(true);
+    db.rpc.mockImplementation((name) =>
+      Promise.resolve({
+        data:
+          name === "prepare_whatsapp_outbox"
+            ? { status: "SENDING", text: "Saved response" }
+            : true,
+        error: null,
+      })
+    );
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 131_030 } }), {
+          status: 400,
+        })
+      )
+      .mockRejectedValueOnce(new Error("Connection lost"));
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, {
+        ...input,
+        sourceMessageId: "source",
+        jobId: "job",
+        leaseToken: "lease",
+      })
+    ).rejects.toMatchObject({ code: "DELIVERY_UNKNOWN" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(db.rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_outbox",
+      expect.objectContaining({ p_status: "UNKNOWN" })
+    );
+    expect(db.rpc).not.toHaveBeenCalledWith(
+      "complete_whatsapp_outbox",
+      expect.objectContaining({ p_status: "CANCELLED" })
+    );
+  });
+
   it("persists an uncertain result and never resends it automatically", async () => {
     const db = database(true);
     const durableInput = {

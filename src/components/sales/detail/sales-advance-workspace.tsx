@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { FiscalExchangeRateInput } from "@/components/arca/fiscal-exchange-rate-input";
 import { ArcaInvoiceDownloadButton } from "@/components/arca/invoices/arca-invoice-download-button";
 import { ArcaInvoicePreviewButton } from "@/components/arca/invoices/arca-invoice-preview-button";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +63,7 @@ export function SalesAdvanceWorkspace({
   const { data, refetch } = useSalesAdvanceById(orgSlug, advanceId);
   const advance = data ?? initialAdvance;
   const [pending, setPending] = useState(false);
+  const [fiscalRate, setFiscalRate] = useState("");
   const displayCurrency = advance.currency ?? sale.currency ?? "ARS";
   const finalBalance = Math.max(0, sale.totalAmount - advance.amount);
   const canRetryIssuance =
@@ -99,6 +101,8 @@ export function SalesAdvanceWorkspace({
     const result = await issueSalesAdvanceAction({
       orgSlug,
       advanceId: advance.id,
+      fiscalExchangeRate:
+        displayCurrency === "USD" ? Number(fiscalRate) : undefined,
     });
     if (!result.success) {
       throw new Error(result.error);
@@ -228,6 +232,15 @@ export function SalesAdvanceWorkspace({
             </div>
           ) : null}
 
+          {displayCurrency === "USD" &&
+          (canRetryIssuance || canContinueSettlement) &&
+          canManage ? (
+            <FiscalExchangeRateInput
+              disabled={pending}
+              onChange={setFiscalRate}
+              value={fiscalRate}
+            />
+          ) : null}
           <div className="flex flex-wrap gap-2">
             {canRetryIssuance && canManage && canIssueArca ? (
               <Button disabled={pending} onClick={() => run(issueAdvance)}>
@@ -257,7 +270,14 @@ export function SalesAdvanceWorkspace({
                 disabled={pending}
                 onClick={() =>
                   run(() =>
-                    settleSalesAdvanceAction({ orgSlug, advanceId: advance.id })
+                    settleSalesAdvanceAction({
+                      orgSlug,
+                      advanceId: advance.id,
+                      fiscalExchangeRate:
+                        displayCurrency === "USD"
+                          ? Number(fiscalRate)
+                          : undefined,
+                    })
                   )
                 }
               >

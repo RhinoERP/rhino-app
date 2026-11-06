@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { getStockMetrics } from "@/modules/inventory/service/inventory.service";
+import { parseStockMetrics } from "@/modules/inventory/utils/stock-metrics-schema";
 import { getStockReadScope } from "@/modules/inventory/utils/stock-read-scope";
 import { WarehouseAccessError } from "@/modules/inventory/utils/warehouse-access-error";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
@@ -39,9 +40,8 @@ export async function GET(
       ["organization.admin", "inventory.manage"].includes(permission)
     );
     if (!canViewCosts) {
-      const { totalStockValue: _restricted, ...publicMetrics } = metrics;
       return NextResponse.json(
-        { ...publicMetrics, canViewCosts: false },
+        parseStockMetrics({ ...metrics, canViewCosts: false }),
         { headers: privateHeaders }
       );
     }

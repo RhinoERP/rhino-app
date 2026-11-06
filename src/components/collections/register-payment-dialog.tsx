@@ -606,14 +606,15 @@ export function RegisterPaymentDialog({
   const isUsdDebt = currency === "USD";
 
   const rateQuery = useQuery({
-    queryKey: ["payment-rate", type, accountId],
+    queryKey: ["payment-rate", orgSlug, type, accountId, existingPayment?.id],
     queryFn: () =>
       getPaymentRateAction({
         orgSlug,
         type,
         accountId,
+        paymentId: existingPayment?.id,
       }),
-    enabled: Boolean(open && !isEditMode && isUsdDebt && accountId),
+    enabled: Boolean(open && isUsdDebt && accountId),
   });
 
   const missingInvoice = rateQuery.data?.missingInvoice ?? false;
@@ -654,7 +655,7 @@ export function RegisterPaymentDialog({
     if (rateQuery.isLoading) {
       return (
         <p className="text-muted-foreground text-xs">
-          Cargando cotización de la factura...
+          Cargando cotización del documento de origen...
         </p>
       );
     }
@@ -662,7 +663,7 @@ export function RegisterPaymentDialog({
       return (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-800 text-xs dark:bg-amber-900/20 dark:text-amber-400">
           {type === "receivable"
-            ? "La venta no tiene una factura emitida con cotización. Facturá la venta antes de cobrar."
+            ? "Falta la cotización fiscal o la acordada en el presupuesto/venta. Completala en el documento de origen."
             : "El pago no tiene una factura de compra registrada con cotización. Registrá la factura antes de pagar."}
         </p>
       );
@@ -672,7 +673,8 @@ export function RegisterPaymentDialog({
         <>
           <p className="font-medium text-sm">{String(invoiceRate)} ARS/USD</p>
           <p className="text-muted-foreground text-xs">
-            Cotización fijada por la factura.
+            Cotización fijada en la factura o acordada en el presupuesto/venta.
+            No editable en el pago.
           </p>
           {equivalenteARS !== null ? (
             <p className="text-muted-foreground text-xs">
@@ -1007,21 +1009,25 @@ export function RegisterPaymentDialog({
   };
 
   const validateExchangeRate = ({ parsedAmount }: { parsedAmount: number }) => {
-    if (isEditMode || !isUsdDebt || parsedAmount <= 0) {
+    if (!isUsdDebt || parsedAmount <= 0) {
       return null;
     }
 
     if (rateQuery.isLoading) {
-      return null;
+      return "Esperá a que se cargue la cotización del documento de origen.";
     }
 
     if (missingInvoice) {
-      return type === "receivable"
-        ? "La venta no tiene una factura emitida con cotización. Facturá la venta antes de cobrar."
-        : "El pago no tiene una factura de compra registrada con cotización. Registrá la factura antes de pagar.";
+      return "Falta la cotización de la factura o del acuerdo comercial. Completala en el documento de origen.";
     }
 
-    const parsedExchangeRate = Number(exchangeRate);
+    if (!rateQuery.data?.success) {
+      return (
+        rateQuery.data?.error ??
+        "No se pudo consultar la cotización del documento de origen."
+      );
+    }
+    const parsedExchangeRate = Number(invoiceRate);
     if (!Number.isFinite(parsedExchangeRate) || parsedExchangeRate <= 0) {
       return "No se pudo obtener la cotización de la factura para esta deuda.";
     }
@@ -1059,12 +1065,6 @@ export function RegisterPaymentDialog({
     parsedAmount: number;
     parsedCredit: number;
   }) => {
-    const parsedExchangeRate = Number(exchangeRate);
-    const normalizedExchangeRate =
-      isUsdDebt && Number.isFinite(parsedExchangeRate) && parsedExchangeRate > 0
-        ? parsedExchangeRate
-        : undefined;
-
     if (existingPayment) {
       return updatePaymentAction({
         orgSlug,
@@ -1072,7 +1072,6 @@ export function RegisterPaymentDialog({
         paymentId: existingPayment.id,
         type,
         amount: params.parsedAmount,
-        exchangeRate: normalizedExchangeRate,
         paymentMethod,
         paymentDate,
         referenceNumber,
@@ -1108,7 +1107,6 @@ export function RegisterPaymentDialog({
       type,
       amount: params.parsedAmount,
       creditAmount: params.parsedCredit,
-      exchangeRate: normalizedExchangeRate,
       paymentMethod,
       operationId: getOperationId(),
       paymentDate,
@@ -1672,7 +1670,7 @@ export function RegisterPaymentDialog({
                   />
                 </div>
 
-                {!isEditMode && isUsdDebt ? (
+                {isUsdDebt ? (
                   <div className="grid gap-2">
                     <Label>Tipo de cambio (USD → ARS)</Label>
                     {renderRateStatus()}
