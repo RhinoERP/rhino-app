@@ -48,6 +48,12 @@ volver a primer plano y cada 20 minutos. Si el servidor confirma que el acceso
 fue revocado, muestran una pantalla de bloqueo y el evento limpia vistas offline
 abiertas en otras pestañas.
 
+El aviso de actualizacion se muestra cuando Serwist informa un worker instalado
+en espera. Se deduplica usando `localStorage` hasta que `controlling` confirma
+que la actualizacion se activo; si vuelve a aparecer repetidamente sin un nuevo
+deploy, revisar que la revision de `/~offline*` en `/serwist/sw.js` sea estable
+y que el registro del navegador tenga scope `/` y script `/serwist/sw.js`.
+
 Al recibir un 401, 403, 404 o 422 del endpoint de snapshot, el cliente elimina
 snapshot, borradores y comandos locales del usuario para esa organizacion; los
 datos de las otras organizaciones quedan intactos. Sin conectividad no puede
