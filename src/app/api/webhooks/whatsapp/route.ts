@@ -79,12 +79,15 @@ export async function POST(request: Request) {
     }
 
     for (const delivery of deliveryStatuses) {
-      const { error } = await supabase.rpc("record_whatsapp_delivery_status", {
-        p_external_message_id: delivery.externalMessageId,
-        p_delivery_status: delivery.status,
-        p_status_at: delivery.occurredAt,
-        p_payload: delivery.payload,
-      });
+      const { error } = await supabase.rpc(
+        "record_whatsapp_delivery_status_scoped",
+        {
+          p_phone_number_id: delivery.phoneNumberId,
+          p_external_message_id: delivery.externalMessageId,
+          p_delivery_status: delivery.status,
+          p_status_at: delivery.occurredAt,
+        }
+      );
       if (error) {
         throw error;
       }

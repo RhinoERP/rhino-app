@@ -23,6 +23,8 @@ const subsequent = [
   "20261104000000_whatsapp_rpc_permissions.sql",
   "20261104010000_whatsapp_audio_review_fixes.sql",
   "20261106202224_whatsapp_human_control.sql",
+  "20261106205901_whatsapp_human_outbox.sql",
+  "20261107185748_whatsapp_human_inbox.sql",
 ].map((name) =>
   name === "20260907000000_prevent_duplicate_whatsapp_pre_sales.sql"
     ? `DO $legacy_unique$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sales_orders' AND column_name='whatsapp_cart_id') THEN ${migration(name)} END IF; END $legacy_unique$;`

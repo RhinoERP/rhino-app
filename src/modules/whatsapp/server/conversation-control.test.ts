@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { controlWhatsAppConversationAction } from "../actions/control-whatsapp-conversation.action";
+import { reviewWhatsAppDeliveryAction } from "../actions/review-whatsapp-delivery.action";
 import { sendWhatsAppManualMessageAction } from "../actions/send-whatsapp-manual-message.action";
 import { setWhatsAppConversationAutomationAction } from "../actions/set-whatsapp-conversation-automation.action";
 import { getWhatsAppUserAccess } from "./conversation-control";
@@ -33,6 +34,9 @@ vi.mock("./supabase-admin", () => ({
   createWhatsAppAdminClient: () => ({ rpc: mocks.rpc }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
+
+const privateFields = /private|secret|payload|lease/;
+const privateErrors = /private|SQL|payload/;
 
 const org = "11111111-1111-4111-8111-111111111111";
 const actor = "22222222-2222-4222-8222-222222222222";
@@ -257,7 +261,7 @@ describe("human conversation control boundary", () => {
     ).toMatchObject({ success: false });
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
-  it("keeps the legacy direct human send disabled until durable sending is implemented", async () => {
+  it("rejects a legacy human send without request identity or expected version", async () => {
     expect(
       await sendWhatsAppManualMessageAction({
         orgSlug: "rhino",
@@ -266,5 +270,161 @@ describe("human conversation control boundary", () => {
       })
     ).toMatchObject({ success: false });
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+});
+
+const messageInput = {
+  orgSlug: "rhino",
+  conversationId: chat,
+  expectedControlVersion: 1,
+  clientRequestId: "55555555-5555-4555-8555-555555555555",
+  text: "Hola",
+};
+const command = {
+  id: recipient,
+  clientRequestId: messageInput.clientRequestId,
+  status: "PENDING",
+  reasonCode: null,
+  messageId: null,
+  createdAt: "2026-11-06T20:00:00Z",
+  updatedAt: "2026-11-06T20:00:00Z",
+};
+function commandRpc() {
+  mocks.rpc.mockImplementation((name) =>
+    Promise.resolve({
+      data:
+        name === "whatsapp_human_outbox_protocol_version"
+          ? 1
+          : {
+              success: true,
+              replayed: false,
+              command: {
+                ...command,
+                lease_token: "private",
+                payload: { token: "secret" },
+              },
+            },
+      error: null,
+    })
+  );
+}
+
+describe("human command boundary", () => {
+  it("persists with authenticated tenant/actor and returns only the public DTO", async () => {
+    commandRpc();
+    const result = await sendWhatsAppManualMessageAction({
+      ...messageInput,
+      actorId: recipient,
+      organizationId: recipient,
+      payload: "forged",
+    });
+    expect(result).toEqual({
+      success: true,
+      replayed: false,
+      command,
+      error: undefined,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("enqueue_whatsapp_human_message", {
+      p_organization_id: org,
+      p_actor_id: actor,
+      p_conversation_id: chat,
+      p_expected_control_version: 1,
+      p_client_request_id: messageInput.clientRequestId,
+      p_text: "Hola",
+    });
+    expect(JSON.stringify(result)).not.toMatch(privateFields);
+  });
+  it("does not accept a command without a session", async () => {
+    commandRpc();
+    mocks.user.mockResolvedValue({ data: { user: null }, error: null });
+    expect(await sendWhatsAppManualMessageAction(messageInput)).toMatchObject({
+      success: false,
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("does not accept commands from a read-only member", async () => {
+    mocks.permissions.mockResolvedValue({
+      data: ["whatsapp.read"],
+      error: null,
+    });
+    expect(await sendWhatsAppManualMessageAction(messageInput)).toMatchObject({
+      success: false,
+      error: expect.stringContaining("whatsapp.manage"),
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("fails closed when the human protocol is not installed", async () => {
+    expect(await sendWhatsAppManualMessageAction(messageInput)).toMatchObject({
+      success: false,
+      error: expect.stringContaining("migración"),
+    });
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    "WINDOW_EXPIRED",
+    "CONTROL_CONFLICT",
+    "IDEMPOTENCY_CONFLICT",
+    "DELIVERY_UNRESOLVED",
+  ])("returns a safe recoverable conflict: %s", async (code) => {
+    mocks.rpc.mockImplementation((name) =>
+      Promise.resolve({
+        data:
+          name === "whatsapp_human_outbox_protocol_version"
+            ? 1
+            : { success: false, code, payload: "secret" },
+        error: null,
+      })
+    );
+    expect(await sendWhatsAppManualMessageAction(messageInput)).toMatchObject({
+      success: false,
+      code,
+      error: expect.any(String),
+    });
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+  it("sanitizes database errors", async () => {
+    mocks.rpc.mockImplementation((name) =>
+      Promise.resolve({
+        data: name === "whatsapp_human_outbox_protocol_version" ? 1 : null,
+        error:
+          name === "whatsapp_human_outbox_protocol_version"
+            ? null
+            : { code: "P0001", message: "private SQL payload" },
+      })
+    );
+    const result = await sendWhatsAppManualMessageAction(messageInput);
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(privateErrors);
+  });
+  it("requires explicit review reason and known Meta ID for SENT", async () => {
+    const result = await reviewWhatsAppDeliveryAction({
+      ...messageInput,
+      commandId: recipient,
+      resolution: "SENT",
+      reason: "Revisado en Meta",
+    });
+    expect(result.success).toBe(false);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("delegates review to the same authenticated command service", async () => {
+    commandRpc();
+    expect(
+      await reviewWhatsAppDeliveryAction({
+        ...messageInput,
+        commandId: recipient,
+        resolution: "SENT",
+        reason: "Revisado en Meta",
+        externalMessageId: "wamid.known",
+      })
+    ).toMatchObject({ success: true });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "resolve_whatsapp_unknown",
+      expect.objectContaining({
+        p_actor_id: actor,
+        p_organization_id: org,
+        p_resolution: "SENT",
+        p_external_message_id: "wamid.known",
+      })
+    );
   });
 });

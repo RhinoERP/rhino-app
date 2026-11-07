@@ -1,5 +1,7 @@
 # WhatsApp: control humano y permisos (fase 1)
 
+> Continuación implementada: [fase 2 — outbox humana](whatsapp-human-outbox.md). Este documento conserva la evidencia y los límites de su entrega original.
+
 Implementación local del 6 de noviembre de 2026. Alcance confirmado por el usuario:
 control humano, permisos, auditoría y carreras. No se implementan las fases 2–6
 del adjunto. El plan recibido es una referencia de producto, no una autorización

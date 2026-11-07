@@ -1,17 +1,36 @@
 "use server";
 
-// Human sends must not bypass the conversation lock via the legacy direct POST.
-// Re-enable only with the common, idempotent outbox (human inbox phase 2).
-// biome-ignore lint/suspicious/useAwait: Next.js server actions must be async.
+import { revalidatePath } from "next/cache";
+import { WhatsAppControlAccessError } from "../server/conversation-control";
+import {
+  enqueueWhatsAppHumanMessage,
+  humanMessageInputSchema,
+  type WhatsAppCommandResult,
+} from "../server/human-outbox";
+
 export async function sendWhatsAppManualMessageAction(
-  _input: unknown
-): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  return {
-    success: false,
-    error:
-      "El envío manual estará disponible al habilitar la outbox humana persistente",
-  };
+  input: unknown
+): Promise<WhatsAppCommandResult> {
+  const parsed = humanMessageInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "El envío requiere texto, clave y versión de control válidos.",
+    };
+  }
+  try {
+    const result = await enqueueWhatsAppHumanMessage(parsed.data);
+    if (result.success) {
+      revalidatePath(`/org/${parsed.data.orgSlug}/whatsapp/conversaciones`);
+    }
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof WhatsAppControlAccessError
+          ? error.message
+          : "No se pudo registrar el envío.",
+    };
+  }
 }

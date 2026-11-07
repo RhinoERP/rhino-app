@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseMetaWebhook, verifyMetaSignature } from "./meta-webhook";
 
 describe("parseMetaWebhook", () => {
@@ -40,8 +40,54 @@ describe("parseMetaWebhook", () => {
       { phoneNumberId: "receiver-1", content: "Hola", messageType: "TEXT" },
     ]);
     expect(result.deliveryStatuses).toMatchObject([
-      { externalMessageId: "wamid.outbound", status: "DELIVERED" },
+      {
+        phoneNumberId: "receiver-1",
+        externalMessageId: "wamid.outbound",
+        status: "DELIVERED",
+      },
     ]);
+  });
+
+  it.each([
+    undefined,
+    "invalid",
+    "0",
+    "-1",
+    "99999999999999999999",
+    "9999999999",
+  ])("keeps invalid/future timestamps as raw evidence with a safe display fallback: %s", (timestamp) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-06T20:00:00Z"));
+    try {
+      const { messages } = parseMetaWebhook({
+        object: "whatsapp_business_account",
+        entry: [
+          {
+            changes: [
+              {
+                field: "messages",
+                value: {
+                  metadata: { phone_number_id: "receiver" },
+                  messages: [
+                    {
+                      id: "incoming",
+                      from: "54911",
+                      timestamp,
+                      type: "text",
+                      text: { body: "Hola" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(messages[0].receivedAt).toBe("2026-11-06T20:00:00.000Z");
+      expect(messages[0].payload.timestamp).toBe(timestamp);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("validates Meta's sha256 signature without accepting malformed values", () => {

@@ -15,7 +15,7 @@ CREATE SEQUENCE review_phone;
 CREATE FUNCTION pg_temp.review_job(label text, kind text DEFAULT 'TEXT') RETURNS agent_jobs LANGUAGE plpgsql AS $$
 DECLARE source_id uuid; j agent_jobs%ROWTYPE;
 BEGIN
-  SELECT message_id INTO source_id FROM ingest_whatsapp_inbound_message('123456','54911'||nextval('review_phone'),label,kind,'Quiero comprar queso','{"audio":{"id":"789"}}');
+  SELECT message_id INTO source_id FROM ingest_whatsapp_inbound_message('123456','54911'||nextval('review_phone'),label,kind,'Quiero comprar queso',jsonb_build_object('id',label,'timestamp',floor(extract(epoch FROM clock_timestamp()))::text,'audio',jsonb_build_object('id','789')));
   SELECT * INTO j FROM claim_whatsapp_job_v2('review',CASE WHEN kind='AUDIO' THEN 'TRANSCRIBE_AUDIO' ELSE 'PROCESS_CONVERSATION' END,'DAEMON',
     (SELECT id FROM agent_jobs WHERE source_message_id=source_id AND job_type=CASE WHEN kind='AUDIO' THEN 'TRANSCRIBE_AUDIO' ELSE 'PROCESS_CONVERSATION' END));
   IF j.id IS NULL THEN RAISE EXCEPTION 'Fixture could not claim %',label; END IF;

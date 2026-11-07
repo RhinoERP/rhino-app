@@ -1,5 +1,7 @@
 # Contrato de bandeja humana de WhatsApp — fase 0
 
+> Continuaciones implementadas: [outbox humana](whatsapp-human-outbox.md) y [bandeja operativa](#bandeja-operativa-en-el-checkout-actual). Las secciones de fase 0 conservan su evidencia histórica.
+
 Fecha: 6 de noviembre de 2026. Alcance elegido: **contrato y diagnóstico local**.
 Este documento define la implementación siguiente; no acredita que las capacidades
 propuestas existan o estén desplegadas. Esta entrega agrega documentación y una
@@ -523,3 +525,102 @@ Como referencia de permisos, se contrastaron las guías oficiales de
 [grants + Data API](https://supabase.com/docs/guides/api/securing-your-api), además
 del changelog vigente. La evidencia de este informe proviene de SQL y código
 locales, no de asumir que esas guías describen un despliegue concreto.
+
+## Bandeja operativa en el checkout actual
+
+Al inicio del trabajo, `HEAD` era `0834ae1205ca8977dbc8b93ed5677ed8feadefa4`,
+descendiente de `40bf0a2b965dd231bdb433864fe467c679620781`. El commit incorporó
+control versionado, asignación, aceptación, auditoría y cierres de acceso
+directo. El árbol local ya incluía la outbox humana persistente, recuperación
+de estados de Meta, ventana de 24 h y consumidor del mismo worker. La bandeja
+usa esos contratos y reemplaza la consulta anterior, que limitaba el listado a
+100 conversaciones y descargaba sus mensajes para elegir las vistas previas.
+
+- `src/app/api/org/[orgSlug]/whatsapp/conversaciones` sirve lista, detalle,
+  historial y reproducción. El POST del detalle registra lectura personal.
+  Toma, pausa, transferencia, devolución, texto y revisión usan las acciones
+  existentes con versión de control. La lista separa simulaciones y acota cada
+  página a 30 conversaciones. El historial ordena mensajes y eventos en
+  páginas de 50. Los no leídos se muestran hasta 99+ y el contador de
+  derivaciones sigue el estado de control.
+- `src/modules/whatsapp/inbox-contract.ts` y `server/inbox.ts` validan entradas
+  y salidas explícitas. Cada operación deriva organización y actor de la sesión
+  y la consulta revalida membresía, permiso y flags. El audio sale por el ERP
+  desde el bucket privado, con expiración, sin URL firmada en la respuesta y
+  con `Cache-Control: private, no-store`. No se alteró la política offline.
+- `src/components/whatsapp/whatsapp-*.tsx` presenta lista, historial, ficha
+  lateral y compositor en la misma ruta con enlace `?chat=<uuid>`. Conserva el
+  borrador y la clave de un intento incierto en memoria por chat. La aceptación
+  se muestra como comando pendiente hasta que el worker registre el resultado.
+  Los cambios de tamaño conservan el final del chat si el operador estaba al
+  día. La lista consulta cada 10 s, y el detalle y la ventana de 50 eventos y
+  mensajes cada 3 s con pestaña visible. Un hueco se recupera por cursor hacia
+  adelante. Las páginas antiguas cargadas se actualizan al volver al foco,
+  reconectar o invalidar tras una acción.
+- `20261107185748_whatsapp_human_inbox.sql` agrega lecturas personales,
+  índices, funciones de lectura y un reloj de sincronización por conversación.
+  Conserva la fecha original para mostrarla y la usa como cursor para datos
+  históricos. Los nuevos elementos se ordenan con un timestamp asignado bajo
+  el lock de conversación, para que un insert tardío con una fecha de proveedor
+  anterior quede visible en la recuperación incremental.
+- Un evento nuevo de derivación real inserta el aviso de campana en su misma
+  transacción. Si el destinatario asignado puede leer y gestionar, recibe el
+  aviso. En caso contrario se avisa a los operadores con ambos permisos. La
+  deduplicación se apoya en la unicidad del evento por conversación y origen.
+  Leer un aviso usa la sesión y verifica su propietario. La creación genérica
+  de avisos queda disponible para el rol de servicio que usan los pedidos. Los eventos históricos
+  siguen en el historial sin generar avisos retroactivos.
+
+### Validación local
+
+- `WHATSAPP_PG_BIN=/opt/homebrew/opt/postgresql@17/bin bash scripts/test-whatsapp-human-control.sh`.
+  PostgreSQL 17 descartable con socket privado. Pasaron actualización con datos
+  y reaplicación, grants efectivos, carreras de dos sesiones, pedido recurrente,
+  flags y audio. La fixture de bandeja usa 750 conversaciones y 2.500 mensajes
+  generados. Valida cursores, lectura monotónica por persona, aislamiento,
+  alertas deduplicadas y audio con flag y expiración. También recorre derivación,
+  toma, reserva, aceptación simulada, callbacks tempranos y fuera de orden,
+  devolución a la IA y nuevo entrante. `EXPLAIN (ANALYZE, BUFFERS)` usó los
+  índices de cursor para las consultas de listado e historial de la fixture.
+- `node_modules/.bin/vitest run src/modules/whatsapp src/components/whatsapp
+services/whatsapp-agent/src 'src/app/api/internal/whatsapp-agent/tools/[tool]/route.test.ts'`.
+  243 pruebas en 21 archivos.
+- `node_modules/.bin/biome check .`, `git diff --check` y `bash -n` de los
+  dos runners SQL. Typecheck y emisión del worker con su `tsconfig.json`.
+- Build de Next con el lockfile instalado en una copia temporal, variables
+  ficticias apuntando a localhost y `NODE_OPTIONS=--max-old-space-size=8192`.
+  El build incluye la comprobación de tipos de Next. El contador de usuarios
+  de la página pública registró un rechazo de conexión a localhost durante
+  la generación estática y el build terminó con código 0.
+- Chromium con la UI del repo y respuestas/actions simuladas en localhost.
+  Escritorio de 1.440 px, móvil de 390 px y reducción de viewport que emula la
+  altura disponible con teclado. Se comprobó el enlace directo, el borrador,
+  el envío bloqueado hasta tomar, el reintento con la misma clave, la devolución,
+  el scroll al cargar y al recibir, los cambios de estado sin mensajes nuevos,
+  la ficha y la desconexión/reconexión.
+
+### Compatibilidad y piloto
+
+El bundle requiere el esquema previo de notificaciones del ERP y conserva las
+firmas de jobs y outbox v2. Antes de habilitar intervención en un piloto, verificar
+la migración, el consumidor humano y el webhook de estados. La UI verifica el
+protocolo de la outbox. La disponibilidad del consumidor se comprueba mediante
+sus logs y el avance de comandos; los pendientes quedan durables si el worker no
+está consumiendo. Coordinar el cambio de la campana con el servidor actualizado
+que usa la sesión del usuario.
+
+Para el piloto, usar un número/cliente de prueba, revisar que el aviso llegue al
+operador, tomar el chat, enviar dentro de la ventana, comprobar el callback y
+devolver el control antes de enviar un nuevo mensaje desde el teléfono. Si hay
+que revertir, detener nuevas intervenciones y preservar comandos, eventos y
+claims para resolver los estados inciertos antes de reactivar. Los comandos ya
+reservados pueden completar su envío.
+
+El pipeline de audio conserva sus reglas actuales: la bandeja muestra y
+reproduce los audios disponibles. La transcripción sigue sujeta a que el
+worker pueda reclamar el trabajo, con la conversación activa. No se agregaron
+plantillas, medios salientes ni suscripciones Realtime. El historial reciente
+se sondea y la campana conserva su intervalo existente. Queda pendiente el
+piloto con Meta/LLM y Auth/PostgREST reales y el teclado de un teléfono físico.
+Docker no estaba activo. `supabase db advisors --type security` no pudo conectar
+al stack local; las comprobaciones de grants corrieron en PostgreSQL nativo.

@@ -102,7 +102,7 @@ DO $$ DECLARE f whatsapp_control_fixture%ROWTYPE; actor uuid; result jsonb; src 
     EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   UPDATE organizations SET is_active=true WHERE id=f.org;
 
-  SELECT message_id INTO src FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000101','control-source','TEXT','Quiero hablar con alguien','{}');
+  SELECT message_id INTO src FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000101','control-source','TEXT','Quiero hablar con alguien',jsonb_build_object('id','control-source','timestamp',floor(extract(epoch FROM clock_timestamp()))::text));
   SELECT * INTO job FROM claim_whatsapp_job_v2('control-tests','PROCESS_CONVERSATION','DAEMON',(SELECT id FROM agent_jobs WHERE source_message_id=src));
   INSERT INTO conversation_carts(id,organization_id,conversation_id,status) VALUES(cart,f.org,f.c,'OPEN');
   UPDATE whatsapp_conversations SET pending_order_action='{"kind":"CONFIRM_PRE_SALE"}' WHERE id=f.c;
@@ -139,8 +139,8 @@ DO $$ DECLARE f whatsapp_control_fixture%ROWTYPE; actor uuid; result jsonb; src 
   UPDATE agent_jobs SET status='CANCELLED' WHERE id=job.id;
 
   -- Fresh source may run, then a claim while SENDING keeps the result unresolved.
-  INSERT INTO whatsapp_messages(organization_id,integration_id,conversation_id,external_message_id,direction,message_type,content,created_at)
-    VALUES(f.org,f.wi,f.c,'control-fresh-source','INBOUND','TEXT','Hola de nuevo',clock_timestamp()) RETURNING id INTO src;
+  INSERT INTO whatsapp_messages(organization_id,integration_id,conversation_id,external_message_id,direction,message_type,content,created_at,payload)
+    VALUES(f.org,f.wi,f.c,'control-fresh-source','INBOUND','TEXT','Hola de nuevo',clock_timestamp(),jsonb_build_object('id','control-fresh-source','timestamp',floor(extract(epoch FROM clock_timestamp()))::text)) RETURNING id INTO src;
   INSERT INTO agent_jobs(organization_id,integration_id,conversation_id,source_message_id,job_type,execution_mode)
     VALUES(f.org,f.wi,f.c,src,'PROCESS_CONVERSATION','DAEMON') ON CONFLICT DO NOTHING;
   SELECT * INTO job FROM claim_whatsapp_job_v2('fresh-source','PROCESS_CONVERSATION','DAEMON',(SELECT id FROM agent_jobs WHERE source_message_id=src));

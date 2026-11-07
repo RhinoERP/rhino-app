@@ -16,12 +16,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON T
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$ SELECT current_setting('request.jwt.claim.role', true) $$;
 CREATE TABLE auth.users (id uuid PRIMARY KEY, email text, raw_user_meta_data jsonb DEFAULT '{}');
-CREATE TABLE organizations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), is_active boolean DEFAULT true);
+CREATE TABLE organizations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), is_active boolean DEFAULT true, slug text DEFAULT gen_random_uuid()::text);
 CREATE TABLE platform_admins (user_id uuid PRIMARY KEY);
-CREATE TABLE customers (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id));
+CREATE TABLE customers (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), fantasy_name text, business_name text);
 CREATE TABLE sales_orders (
  id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), created_at timestamptz DEFAULT now(),
- customer_id uuid, user_id uuid, sale_date date, credit_days integer, expiration_date date,
+ customer_id uuid, user_id uuid, sale_number integer, sale_date date, credit_days integer, expiration_date date,
  invoice_type text, invoice_number text, observations text, sub_total numeric, total_tax_amount numeric,
  global_discount_percentage numeric, global_discount_amount numeric, total_amount numeric,
  sales_price_list_id uuid, price_level_id uuid, advance_payment_percentage numeric, status text DEFAULT 'DRAFT', created_by uuid
@@ -45,3 +45,7 @@ CREATE FUNCTION public.update_updated_at_column() RETURNS trigger LANGUAGE plpgs
 CREATE SCHEMA IF NOT EXISTS storage;
 CREATE TABLE IF NOT EXISTS storage.buckets(id text PRIMARY KEY,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
 CREATE TABLE IF NOT EXISTS storage.objects(bucket_id text,name text);
+
+-- The bell schema installs a cron schedule. The fixture never runs scheduled jobs.
+CREATE SCHEMA cron;
+CREATE FUNCTION cron.schedule(text,text,text) RETURNS bigint LANGUAGE sql AS $$ SELECT 1::bigint $$;

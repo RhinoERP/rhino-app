@@ -13,6 +13,8 @@ unset PGSERVICE PGSERVICEFILE PGOPTIONS
 run_sql() { psql -XqAt -v ON_ERROR_STOP=1 "$@"; }
 node scripts/build-whatsapp-release-sql.mjs > "$task_pg_dir/release.sql"
 run_sql -f scripts/fixtures/whatsapp/bootstrap.sql > "$task_pg_dir/bootstrap.log" 2>&1
+run_sql -f supabase/migrations/20260701000000_create_notifications.sql > "$task_pg_dir/notifications.log" 2>&1
+run_sql -f supabase/migrations/20260703000000_add_notification_archiving.sql > "$task_pg_dir/notifications-archive.log" 2>&1
 # Upgrade real pre-control rows, including a HANDOFF that was never accepted.
 node --input-type=module - "$task_pg_dir/release.sql" "$task_pg_dir/legacy.sql" <<'JS'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -32,6 +34,12 @@ INSERT INTO whatsapp_integrations(id,organization_id,phone_number_id) SELECT wi,
 INSERT INTO whatsapp_conversations(id,organization_id,integration_id,customer_phone,status,assigned_user_id)
   SELECT chat,org,wi,'legacy-control','HANDOFF',actor FROM control_legacy_fixture;
 INSERT INTO conversation_carts(id,organization_id,conversation_id) SELECT cart,org,chat FROM control_legacy_fixture;
+INSERT INTO whatsapp_messages(organization_id,integration_id,conversation_id,external_message_id,direction,content,payload)
+  SELECT org,wi,chat,'legacy-control-inbound','INBOUND','Hola',jsonb_build_object('id','legacy-control-inbound','timestamp',floor(extract(epoch FROM clock_timestamp()))::text)
+  FROM control_legacy_fixture;
+INSERT INTO whatsapp_outbox(source_message_id,organization_id,conversation_id,text,status,lease_token)
+  SELECT id,organization_id,conversation_id,'Envío anterior','SENDING',gen_random_uuid() FROM whatsapp_messages
+  WHERE external_message_id='legacy-control-inbound';
 GRANT SELECT(payload) ON whatsapp_messages TO authenticated;
 CREATE POLICY legacy_bypass ON whatsapp_conversations FOR ALL TO authenticated USING(true) WITH CHECK(true);
 SQL
@@ -41,6 +49,10 @@ DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM whatsapp_conversations c JOIN control_legacy_fixture f ON c.id=f.chat
    WHERE c.status='HANDOFF' AND c.assigned_user_id=f.actor AND c.human_claimed_at IS NULL AND c.control_version=0)
    OR NOT EXISTS(SELECT 1 FROM conversation_carts c JOIN control_legacy_fixture f ON c.id=f.cart AND c.status='OPEN')
+   OR NOT EXISTS(SELECT 1 FROM whatsapp_outbox x JOIN control_legacy_fixture f ON x.conversation_id=f.chat
+     JOIN whatsapp_messages m ON m.id=x.source_message_id WHERE x.id IS NOT NULL AND x.integration_id=f.wi
+       AND x.status='SENDING' AND x.origin='AGENT' AND x.lease_expires_at IS NOT NULL AND m.external_message_id='legacy-control-inbound')
+   OR NOT EXISTS(SELECT 1 FROM whatsapp_conversations c JOIN control_legacy_fixture f ON c.id=f.chat WHERE c.last_customer_message_at IS NOT NULL)
    OR has_column_privilege('authenticated','whatsapp_messages','payload','SELECT') THEN
    RAISE EXCEPTION 'Upgrade inferred acceptance, lost data or retained a column grant';
  END IF;
@@ -50,8 +62,8 @@ run_sql -f scripts/fixtures/whatsapp/human-control.sql > "$task_pg_dir/control.l
 
 # Simulate a model already running for both lock orders below.
 run_sql <<'SQL'
-INSERT INTO whatsapp_messages(organization_id,integration_id,conversation_id,external_message_id,direction,content)
-  SELECT f.org,f.wi,chat,chat::text,'INBOUND','Hola' FROM whatsapp_control_fixture f
+INSERT INTO whatsapp_messages(organization_id,integration_id,conversation_id,external_message_id,direction,content,payload)
+  SELECT f.org,f.wi,chat,chat::text,'INBOUND','Hola',jsonb_build_object('id',chat::text,'timestamp',floor(extract(epoch FROM clock_timestamp()))::text) FROM whatsapp_control_fixture f
   CROSS JOIN LATERAL (VALUES(f.race_c),(f.sending_race_c)) v(chat);
 INSERT INTO agent_jobs(organization_id,integration_id,conversation_id,source_message_id,status,job_type,execution_mode,lease_token,lease_expires_at)
   SELECT m.organization_id,m.integration_id,m.conversation_id,m.id,'PROCESSING','PROCESS_CONVERSATION','DAEMON',gen_random_uuid(),clock_timestamp()+interval '180 seconds'
@@ -116,11 +128,65 @@ assert.equal(response.control.deliveryBlock, 'SENDING');
 assert.equal(response.control.controlVersion, 1);
 JS
 
+# Phase 2 acceptance plus independent backend sessions with one stable request key.
+run_sql -f scripts/fixtures/whatsapp/human-outbox.sql > "$task_pg_dir/human-outbox.log" 2>&1 || { cat "$task_pg_dir/human-outbox.log"; exit 1; }
+run_sql > "$task_pg_dir/enqueue-a.log" <<'SQL' &
+BEGIN;
+SELECT enqueue_whatsapp_human_message(org,race_chat,a,1,race_request,'Mismo comando') FROM whatsapp_human_fixture;
+\echo enqueue-lock-held
+SELECT pg_sleep(1);
+COMMIT;
+SQL
+first_pid=$!
+for attempt in {1..100}; do if rg -q 'enqueue-lock-held' "$task_pg_dir/enqueue-a.log"; then break; fi; sleep 0.05; done
+rg -q 'enqueue-lock-held' "$task_pg_dir/enqueue-a.log"
+run_sql -c "SELECT enqueue_whatsapp_human_message(org,race_chat,a,1,race_request,'Mismo comando') FROM whatsapp_human_fixture" > "$task_pg_dir/enqueue-b.log" &
+second_pid=$!
+wait "$first_pid"
+wait "$second_pid"
+run_sql > "$task_pg_dir/human-reserve-a.log" <<'SQL' &
+BEGIN;
+SELECT claim_whatsapp_human_outbox();
+\echo human-reserve-held
+SELECT pg_sleep(1);
+COMMIT;
+SQL
+first_pid=$!
+for attempt in {1..100}; do if rg -q 'human-reserve-held' "$task_pg_dir/human-reserve-a.log"; then break; fi; sleep 0.05; done
+rg -q 'human-reserve-held' "$task_pg_dir/human-reserve-a.log"
+run_sql -c "SELECT claim_whatsapp_human_outbox() IS NULL" > "$task_pg_dir/human-reserve-b.log"
+wait "$first_pid"
+node --input-type=module - "$task_pg_dir/enqueue-b.log" "$task_pg_dir/human-reserve-b.log" <<'JS'
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+assert.equal(JSON.parse(readFileSync(process.argv[2], 'utf8').trim()).replayed, true);
+assert.equal(readFileSync(process.argv[3], 'utf8').trim(), 't');
+JS
+run_sql <<'SQL'
+DO $$ DECLARE f whatsapp_human_fixture%ROWTYPE; x whatsapp_outbox%ROWTYPE; BEGIN
+  SELECT * INTO f FROM whatsapp_human_fixture;
+  IF (SELECT count(*) FROM whatsapp_outbox WHERE organization_id=f.org AND client_request_id=f.race_request)<>1 THEN
+    RAISE EXCEPTION 'Concurrent enqueue duplicated command'; END IF;
+  SELECT * INTO x FROM whatsapp_outbox WHERE organization_id=f.org AND client_request_id=f.race_request;
+  PERFORM control_whatsapp_conversation(f.org,f.race_chat,f.a,1,'PAUSE');
+  IF NOT complete_whatsapp_command(x.id,x.lease_token,'SENT','human-race-accepted') THEN
+    RAISE EXCEPTION 'Result after pause was lost'; END IF;
+END $$;
+SQL
+# Reapply the complete release after human commands/events/facts exist.
+run_sql -f "$task_pg_dir/release.sql" > "$task_pg_dir/human-populated-upgrade.log" 2>&1
+run_sql -c "SELECT CASE WHEN count(*)=1 THEN true ELSE null END FROM whatsapp_messages WHERE external_message_id='human-race-accepted'" > "$task_pg_dir/human-upgrade-check.log"
+rg -qx t "$task_pg_dir/human-upgrade-check.log"
+
+run_sql -f scripts/fixtures/whatsapp/human-inbox.sql > "$task_pg_dir/inbox.log" 2>&1 || { cat "$task_pg_dir/inbox.log"; exit 1; }
+
 # Regression suites live in separate DBs because their fixtures share fixed IDs.
 for suite in recurring audio; do
   createdb "$suite"
   export PGDATABASE="$suite"
   run_sql -f scripts/fixtures/whatsapp/bootstrap.sql > "$task_pg_dir/$suite-bootstrap.log" 2>&1
+  run_sql -f supabase/migrations/20260701000000_create_notifications.sql > "$task_pg_dir/$suite-notifications.log" 2>&1
+  run_sql -f supabase/migrations/20260703000000_add_notification_archiving.sql > "$task_pg_dir/$suite-notifications-archive.log" 2>&1
   run_sql -f "$task_pg_dir/release.sql" > "$task_pg_dir/$suite-release.log" 2>&1
   if [[ "$suite" == recurring ]]; then
     run_sql -f scripts/fixtures/whatsapp/module-gates.sql > "$task_pg_dir/gates.log" 2>&1
@@ -134,4 +200,4 @@ for suite in recurring audio; do
     run_sql -f scripts/fixtures/whatsapp/audio-review.sql > "$task_pg_dir/audio-review.log" 2>&1
   fi
 done
-printf 'PASS: human control, two-session races, repeat/populated upgrade, module flags, recurring orders and audio.\nLogs: %s\n' "$task_pg_dir"
+printf 'PASS: human control/outbox/inbox, two-session enqueue/reservation/control races, repeat/populated upgrade, module flags, recurring orders and audio.\nLogs: %s\n' "$task_pg_dir"
