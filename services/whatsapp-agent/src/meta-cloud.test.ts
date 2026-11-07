@@ -20,12 +20,16 @@ const reservation = {
   lease_expires_at: new Date(Date.now() + 120_000).toISOString(),
 };
 
-function database(organizationEnabled: boolean, conversationAvailable = true) {
+function database(
+  organizationEnabled: boolean,
+  conversationAvailable = true,
+  lastCustomerMessageAt = new Date().toISOString()
+) {
   const rows: Record<string, unknown> = {
     whatsapp_integrations: { organization_id: "org", phone_number_id: "12345" },
     organizations: organizationEnabled ? { id: "org" } : null,
     whatsapp_conversations: conversationAvailable
-      ? { id: "conversation" }
+      ? { last_customer_message_at: lastCustomerMessageAt }
       : null,
   };
   return {
@@ -67,6 +71,7 @@ describe("WhatsApp outbound authorization", () => {
     );
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -383,6 +388,53 @@ describe("WhatsApp outbound authorization", () => {
       sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
     ).resolves.toBe(false);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    false,
+    true,
+  ])("cancels a human send when the window closes before an HTTP attempt (fallback: %s)", async (fallback) => {
+    const now = Date.now();
+    const deadline = fallback ? now + 10_000 : now - 1;
+    const db = database(
+      true,
+      true,
+      new Date(deadline - 24 * 60 * 60 * 1000).toISOString()
+    );
+    db.rpc.mockImplementation(async (name) => ({
+      data:
+        name === "claim_whatsapp_human_outbox"
+          ? {
+              id: "command",
+              integration_id: input.integrationId,
+              conversation_id: input.conversationId,
+              phone_number_id: input.phoneNumberId,
+              recipient: input.recipient,
+              text: "Human saved text",
+              lease_token: "human-lease",
+              lease_expires_at: new Date(now + 60_000).toISOString(),
+            }
+          : true,
+      error: null,
+    }));
+    if (fallback) {
+      vi.mocked(fetch).mockImplementationOnce(() => {
+        vi.spyOn(Date, "now").mockReturnValue(deadline);
+        return Promise.resolve(
+          Response.json({ error: { code: 131_030 } }, { status: 400 })
+        );
+      });
+    }
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).rejects.toMatchObject({ code: "WINDOW_EXPIRED" });
+    expect(fetch).toHaveBeenCalledTimes(fallback ? 1 : 0);
+    expect(db.rpc).toHaveBeenCalledWith("complete_whatsapp_command", {
+      p_command_id: "command",
+      p_lease_token: "human-lease",
+      p_status: "WINDOW_EXPIRED",
+      p_external_message_id: null,
+    });
   });
   it("never dispatches a reservation for a different conversation", async () => {
     const db = database(true);

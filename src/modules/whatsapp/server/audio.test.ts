@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testDb = vi.hoisted(() => ({
@@ -14,19 +15,12 @@ vi.mock("./supabase-admin", () => ({
     storage: { from: () => ({ createSignedUploadUrl: testDb.sign }) },
   }),
 }));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: () => ({
-    auth: {
-      getUser: () => Promise.resolve({ data: { user: { id: "actor" } } }),
-    },
-  }),
-}));
-vi.mock("@/modules/organizations/utils/with-permission-guard", () => ({
-  ensure: vi.fn(),
-}));
-vi.mock("@/modules/organizations/service/organizations.service", () => ({
-  getOrganizationBySlug: () =>
-    Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
+vi.mock("./access", () => ({
+  getWhatsAppSandboxAccess: () =>
+    Promise.resolve({
+      organization: { id: "11111111-1111-4111-8111-111111111111" },
+      userId: "actor",
+    }),
 }));
 vi.mock("./simulation", () => ({
   verifyLocalSimulatorSession: testDb.verify,
@@ -93,7 +87,11 @@ class Query implements PromiseLike<unknown> {
   }
 }
 
-import { audioCapabilities, reserveAudioUpload } from "./audio";
+import {
+  audioCapabilities,
+  getAudioMessage,
+  reserveAudioUpload,
+} from "./audio";
 
 const state = {
   organizationId: "11111111-1111-4111-8111-111111111111",
@@ -101,6 +99,7 @@ const state = {
   conversationId: "33333333-3333-4333-8333-333333333333",
   customerId: "44444444-4444-4444-8444-444444444444",
 };
+const request = new NextRequest("http://localhost");
 const input = {
   clientMessageId: "55555555-5555-4555-8555-555555555555",
   state,
@@ -149,6 +148,40 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("sandbox audio upload capabilities", () => {
+  it("returns a safe transcription failure without provider diagnostics or job ID", async () => {
+    const id = input.clientMessageId;
+    testDb.tables.whatsapp_audio_assets = [
+      {
+        message_id: id,
+        organization_id: state.organizationId,
+        conversation_id: state.conversationId,
+        integration_id: state.integrationId,
+        status: "FAILED",
+        error_message: "private provider response",
+        storage_path: "private object key",
+      },
+    ];
+    testDb.tables.whatsapp_messages = [
+      { id, organization_id: state.organizationId, content: null },
+    ];
+    testDb.tables.agent_jobs = [
+      {
+        id: "private job ID",
+        source_message_id: id,
+        job_type: "TRANSCRIBE_AUDIO",
+        status: "FAILED",
+        last_error: "private job diagnostics",
+      },
+    ];
+    const result = await getAudioMessage("demo", id, request);
+    expect(result).toMatchObject({
+      messageId: id,
+      status: "FAILED",
+      error: "No se pudo transcribir este audio.",
+    });
+    expect(result).not.toHaveProperty("jobId");
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
   it("requires the corrective migration before enabling audio", async () => {
     testDb.unavailableSchema = true;
     await expect(
@@ -163,7 +196,9 @@ describe("sandbox audio upload capabilities", () => {
       );
       return Promise.resolve({ data: { path, token: "test" }, error: null });
     });
-    await expect(reserveAudioUpload("demo", input)).resolves.toMatchObject({
+    await expect(
+      reserveAudioUpload("demo", input, request)
+    ).resolves.toMatchObject({
       uploadId: input.clientMessageId,
       state,
     });
@@ -175,7 +210,7 @@ describe("sandbox audio upload capabilities", () => {
     testDb.beforeUpsert.mockImplementation(() => {
       testDb.tables.whatsapp_audio_uploads.push(reservation(other));
     });
-    await expect(reserveAudioUpload("demo", input)).rejects.toThrow(
+    await expect(reserveAudioUpload("demo", input, request)).rejects.toThrow(
       "otra sesión"
     );
     expect(testDb.sign).not.toHaveBeenCalled();
@@ -185,7 +220,7 @@ describe("sandbox audio upload capabilities", () => {
     { message_id: "completed" },
   ])("does not reopen a completed or retiring upload: %j", async (overrides) => {
     testDb.tables.whatsapp_audio_uploads.push(reservation(overrides));
-    await expect(reserveAudioUpload("demo", input)).rejects.toThrow(
+    await expect(reserveAudioUpload("demo", input, request)).rejects.toThrow(
       "completada o pertenece"
     );
     expect(testDb.sign).not.toHaveBeenCalled();

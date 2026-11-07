@@ -43,7 +43,7 @@ function messageAuthor(message: Message): string {
   return message.audio ? "Cliente · Audio transcripto" : "Cliente";
 }
 
-type ToolCall = { name: string; arguments: unknown };
+type ToolCall = { name: string };
 
 async function postSimulation(params: {
   orgSlug: string;
@@ -491,9 +491,6 @@ export function WhatsAppAgentSimulator({
                       key={`${call.name}-${index}`}
                     >
                       {call.name}
-                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-muted-foreground">
-                        {JSON.stringify(call.arguments)}
-                      </pre>
                     </li>
                   ))}
                 </ul>

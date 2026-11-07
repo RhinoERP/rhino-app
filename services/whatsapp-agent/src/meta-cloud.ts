@@ -14,9 +14,15 @@ export type SendWhatsAppTextInput = {
   jobId?: string;
   leaseToken?: string;
   deliveryLeaseExpiresAt?: string;
+  customerWindowEndsAt?: number;
 };
 
-type DeliveryStatus = "PENDING" | "SENT" | "UNKNOWN" | "CANCELLED";
+type DeliveryStatus =
+  | "PENDING"
+  | "SENT"
+  | "UNKNOWN"
+  | "CANCELLED"
+  | "WINDOW_EXPIRED";
 type FinishDelivery = (
   status: DeliveryStatus,
   externalId?: string
@@ -25,7 +31,7 @@ type FinishDelivery = (
 async function authorizeDelivery(
   supabase: SupabaseClient,
   input: SendWhatsAppTextInput
-): Promise<void> {
+): Promise<string | null> {
   // Re-check after model/tool execution: superadmin may have disabled the
   // tenant or a human may have paused the conversation in the meantime.
   const { data: integration, error: integrationError } = await supabase
@@ -55,7 +61,7 @@ async function authorizeDelivery(
       .maybeSingle(),
     supabase
       .from("whatsapp_conversations")
-      .select("id")
+      .select("last_customer_message_at")
       .eq("id", input.conversationId)
       .eq("organization_id", integration.organization_id)
       .eq("integration_id", input.integrationId)
@@ -73,6 +79,7 @@ async function authorizeDelivery(
       "El canal está deshabilitado o la conversación fue pausada"
     );
   }
+  return conversation.last_customer_message_at as string | null;
 }
 
 async function prepareDelivery(
@@ -142,6 +149,16 @@ async function dispatchToMeta(
     )
   ) {
     throw new AudioError("DELIVERY_REVIEW", "La reserva de envío venció.");
+  }
+  if (
+    input.customerWindowEndsAt !== undefined &&
+    !(input.customerWindowEndsAt > Date.now())
+  ) {
+    await finish("WINDOW_EXPIRED");
+    throw new AudioError(
+      "WINDOW_EXPIRED",
+      "Venció la ventana de 24 horas antes de despachar el mensaje."
+    );
   }
   const recipient = input.recipient;
   const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
@@ -299,9 +316,11 @@ export async function sendNextWhatsAppHumanMessage(
     leaseToken: command.lease_token,
     deliveryLeaseExpiresAt: command.lease_expires_at,
   };
-  // The SQL reservation has already checked actor, version, flags and window.
-  // Any failure after reserving is left fenced, then recovered as UNKNOWN.
-  await authorizeDelivery(db, input);
+  // Read the latest inbound after reservation and recheck its deadline before
+  // each HTTP attempt, including the fallback for explicitly rejected numbers.
+  const lastCustomerMessage = await authorizeDelivery(db, input);
+  input.customerWindowEndsAt =
+    Date.parse(lastCustomerMessage ?? "") + 24 * 60 * 60 * 1000;
   await deliverPreparedText(db, input, token, command.id);
   return true;
 }

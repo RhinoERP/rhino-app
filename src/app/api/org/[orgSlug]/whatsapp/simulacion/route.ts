@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { getWhatsAppSandboxAccess } from "@/modules/whatsapp/server/access";
 import { executeCommercialTool } from "@/modules/whatsapp/server/commercial-tools";
+import { inboxJson, inboxResponse } from "@/modules/whatsapp/server/inbox";
 import { assertWhatsAppOrderSchema } from "@/modules/whatsapp/server/order-schema";
 import {
   createLocalSimulatorSession,
@@ -89,31 +88,9 @@ async function requestModel(
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    const rawError = await response.text();
-    let message = "El modelo no pudo procesar la consulta";
-    try {
-      const payload = JSON.parse(rawError) as {
-        error?: { message?: string; code?: string };
-      };
-      message = payload.error?.message?.trim() || message;
-      if (payload.error?.code) {
-        message = `${message} (${payload.error.code})`;
-      }
-    } catch {
-      // Conserva un mensaje seguro si OpenAI no devuelve JSON.
-    }
-    throw new Error(`${message} [OpenAI ${response.status}]`);
+    throw new Error("El modelo no pudo procesar la consulta");
   }
   return (await response.json()) as ModelResponse;
-}
-
-async function currentActorId(): Promise<string> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) {
-    throw new Error("Iniciá sesión para usar el simulador");
-  }
-  return data.user.id;
 }
 
 async function resumeSimulation(
@@ -145,7 +122,8 @@ async function resumeSimulation(
 }
 
 type SimulationTurnParams = {
-  orgSlug: string;
+  actorId: string;
+  canManageSales: boolean;
   organization: { id: string; name: string };
   input: z.infer<typeof requestSchema>;
 };
@@ -185,8 +163,8 @@ async function runSimulationModel(
     requestModel,
     callTool: async (_context, call: ModelFunctionCall) => {
       try {
-        if (call.name === "create_pre_sale") {
-          await ensure("sales.manage", params.orgSlug);
+        if (call.name === "create_pre_sale" && !params.canManageSales) {
+          return { error: "Necesitás el permiso sales.manage" };
         }
         return await executeCommercialTool(
           context,
@@ -225,11 +203,7 @@ async function runSimulationModel(
     response: text,
     state,
     snapshot: await getSimulationSnapshot(state),
-    toolCalls: audit.map(({ name, arguments: args }) => ({
-      name,
-      arguments: args,
-    })),
-    usage: response.usage ?? null,
+    toolCalls: audit.map(({ name }) => ({ name })),
     simulated: true,
   };
 }
@@ -261,7 +235,7 @@ async function resolveSimulationState(
 }
 
 async function runSimulationTurn(params: SimulationTurnParams) {
-  const actorId = await currentActorId();
+  const { actorId } = params;
   await assertWhatsAppOrderSchema();
   const db = createWhatsAppAdminClient();
   if (!(await workerDatabaseReady(db))) {
@@ -351,86 +325,39 @@ async function runSimulationTurn(params: SimulationTurnParams) {
   return result;
 }
 
-export async function GET(
-  _request: Request,
+export function GET(
+  request: NextRequest,
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
-  const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
-  const organization = await getOrganizationBySlug(orgSlug);
-  if (!organization) {
-    return NextResponse.json(
-      { error: "Organización no encontrada" },
-      { status: 404 }
+  return inboxResponse(async () => {
+    const { orgSlug } = await params;
+    const { organization } = await getWhatsAppSandboxAccess(
+      orgSlug,
+      request,
+      "whatsapp.read"
     );
-  }
-  try {
-    const options = await getWhatsAppSimulationOptions(organization.id);
-    return NextResponse.json(options);
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "No se pudieron cargar los datos reales de la organización",
-      },
-      { status: 422 }
-    );
-  }
+    return inboxJson(await getWhatsAppSimulationOptions(organization.id));
+  });
 }
 
-export async function POST(
-  request: Request,
+export function POST(
+  request: NextRequest,
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
-  const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
-  await ensure("whatsapp.manage", orgSlug, "whatsapp_sandbox");
-  const organization = await getOrganizationBySlug(orgSlug);
-  if (!organization) {
-    return NextResponse.json(
-      { error: "Organización no encontrada" },
-      { status: 404 }
-    );
-  }
-
-  let rawBody: unknown;
-  try {
-    rawBody = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "El cuerpo de la solicitud no es válido" },
-      { status: 400 }
-    );
-  }
-  const parsed = requestSchema.safeParse(rawBody);
-  if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error:
-          parsed.error.issues[0]?.message ?? "Datos de simulación no válidos",
-      },
-      { status: 400 }
-    );
-  }
-
-  try {
+  return inboxResponse(async () => {
+    const { orgSlug } = await params;
+    const { organization, userId, hasPermission } =
+      await getWhatsAppSandboxAccess(orgSlug, request, [
+        "whatsapp.read",
+        "whatsapp.manage",
+      ]);
+    const input = requestSchema.parse(await request.json().catch(() => null));
     const result = await runSimulationTurn({
-      orgSlug,
+      actorId: userId,
+      canManageSales: hasPermission("sales.manage"),
       organization: { id: organization.id, name: organization.name },
-      input: parsed.data,
+      input,
     });
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "No se pudo procesar la simulación",
-      },
-      { status: 422 }
-    );
-  }
+    return inboxJson(result);
+  });
 }

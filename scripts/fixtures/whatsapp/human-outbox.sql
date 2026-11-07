@@ -108,6 +108,15 @@ DO $$ DECLARE f whatsapp_human_fixture%ROWTYPE; r jsonb; retry jsonb; cmd uuid; 
   x:=claim_whatsapp_human_outbox();
   PERFORM pg_temp.assert_true(x IS NULL AND (SELECT reason_code='WINDOW_EXPIRED' FROM whatsapp_outbox WHERE id=cmd),'Expiry at dispatch cancels command');
   UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp() WHERE id=f.chat;
+  r:=enqueue_whatsapp_human_message(f.org,f.chat,f.b,2,gen_random_uuid(),'Vence después de la reserva');
+  cmd:=(r->'command'->>'id')::uuid; x:=claim_whatsapp_human_outbox();
+  UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp()-interval '24 hours' WHERE id=f.chat;
+  PERFORM pg_temp.assert_true(NOT complete_whatsapp_command(cmd,gen_random_uuid(),'WINDOW_EXPIRED'),'Expiry requires the dispatch lease');
+  PERFORM pg_temp.assert_true(complete_whatsapp_command(cmd,(x->>'lease_token')::uuid,'WINDOW_EXPIRED'),'Worker can record expiry before HTTP');
+  PERFORM pg_temp.assert_true(complete_whatsapp_command(cmd,(x->>'lease_token')::uuid,'WINDOW_EXPIRED'),'Expiry completion is idempotent');
+  PERFORM pg_temp.assert_true((SELECT status='CANCELLED' AND reason_code='WINDOW_EXPIRED' AND external_message_id IS NULL
+    FROM whatsapp_outbox WHERE id=cmd) AND claim_whatsapp_human_outbox() IS NULL,'Expired command is terminal without a provider ID');
+  UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp() WHERE id=f.chat;
   r:=enqueue_whatsapp_human_message(f.org,f.chat,f.b,2,gen_random_uuid(),'No por permiso'); cmd:=(r->'command'->>'id')::uuid;
   UPDATE organization_members SET is_active=false WHERE organization_id=f.org AND user_id=f.b;
   x:=claim_whatsapp_human_outbox();

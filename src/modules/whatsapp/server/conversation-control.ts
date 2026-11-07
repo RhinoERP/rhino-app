@@ -63,7 +63,7 @@ export async function getWhatsAppControlOperators(
 
 export async function getWhatsAppUserAccess(
   orgSlug: string,
-  permission: "whatsapp.read" | "whatsapp.manage",
+  required: string | string[],
   request?: NextRequest
 ) {
   const client = await createClient(request);
@@ -95,13 +95,21 @@ export async function getWhatsAppUserAccess(
   }
   const keys = (permissions.data ?? []) as string[];
   const admin = member.data.is_owner || keys.includes("organization.admin");
-  if (!(admin || keys.includes(permission))) {
-    throw new WhatsAppControlAccessError(`Necesitás el permiso ${permission}`);
+  const hasPermission = (permission: string) =>
+    admin || keys.includes(permission);
+  const requiredPermissions =
+    typeof required === "string" ? [required] : required;
+  const missing = requiredPermissions.find(
+    (permission) => !hasPermission(permission)
+  );
+  if (missing) {
+    throw new WhatsAppControlAccessError(`Necesitás el permiso ${missing}`);
   }
   return {
     organization,
     userId: data.user.id,
-    canManage: admin || keys.includes("whatsapp.manage"),
+    canManage: hasPermission("whatsapp.manage"),
+    hasPermission,
   };
 }
 

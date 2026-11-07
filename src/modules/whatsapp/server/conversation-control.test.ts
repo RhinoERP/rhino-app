@@ -1,8 +1,10 @@
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { controlWhatsAppConversationAction } from "../actions/control-whatsapp-conversation.action";
 import { reviewWhatsAppDeliveryAction } from "../actions/review-whatsapp-delivery.action";
 import { sendWhatsAppManualMessageAction } from "../actions/send-whatsapp-manual-message.action";
 import { setWhatsAppConversationAutomationAction } from "../actions/set-whatsapp-conversation-automation.action";
+import { getWhatsAppSandboxAccess } from "./access";
 import { getWhatsAppUserAccess } from "./conversation-control";
 
 const mocks = vi.hoisted(() => ({
@@ -12,20 +14,24 @@ const mocks = vi.hoisted(() => ({
   organization: vi.fn(),
   rpc: vi.fn(),
   revalidate: vi.fn(),
+  client: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: () => ({
-    auth: { getUser: mocks.user },
-    rpc: mocks.permissions,
-    from: () => {
-      const query = {
-        select: () => query,
-        eq: () => query,
-        maybeSingle: mocks.member,
-      };
-      return query;
-    },
-  }),
+  createClient: (request: unknown) => {
+    mocks.client(request);
+    return {
+      auth: { getUser: mocks.user },
+      rpc: mocks.permissions,
+      from: () => {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: mocks.member,
+        };
+        return query;
+      },
+    };
+  },
 }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
   getOrganizationBySlug: mocks.organization,
@@ -76,6 +82,26 @@ beforeEach(() => {
 });
 
 describe("human conversation control boundary", () => {
+  it("uses the request session and requires the sandbox flag and every operation permission", async () => {
+    const request = new NextRequest("http://localhost");
+    const required = ["whatsapp.read", "whatsapp.manage", "whatsapp.configure"];
+    await expect(
+      getWhatsAppSandboxAccess("rhino", request, "whatsapp.read")
+    ).rejects.toThrow("deshabilitado");
+    mocks.organization.mockResolvedValue({
+      id: org,
+      is_active: true,
+      whatsapp_enabled: false,
+      whatsapp_sandbox_enabled: true,
+    });
+    await expect(
+      getWhatsAppSandboxAccess("rhino", request, required)
+    ).rejects.toThrow("whatsapp.configure");
+    await expect(
+      getWhatsAppSandboxAccess("rhino", request, required.slice(0, 2))
+    ).resolves.toMatchObject({ userId: actor, canManage: true });
+    expect(mocks.client).toHaveBeenLastCalledWith(request);
+  });
   it("requires whatsapp.read for reads and keeps a reader in observation mode", async () => {
     mocks.permissions.mockResolvedValueOnce({ data: [], error: null });
     await expect(

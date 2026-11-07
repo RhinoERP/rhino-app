@@ -1,5 +1,5 @@
+import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   audioCapabilities,
   audioContext,
@@ -8,21 +8,23 @@ import { audioResponse } from "@/modules/whatsapp/server/audio-response";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ orgSlug: string }> };
-export function GET(_request: Request, { params }: Context) {
+export function GET(request: NextRequest, { params }: Context) {
   return audioResponse(async () => {
-    const { organization } = await audioContext((await params).orgSlug);
+    const { organization } = await audioContext(
+      (await params).orgSlug,
+      request
+    );
     return audioCapabilities(organization.id);
   });
 }
-export function PATCH(request: Request, { params }: Context) {
+export function PATCH(request: NextRequest, { params }: Context) {
   return audioResponse(async () => {
     const { orgSlug } = await params;
-    await ensure("whatsapp.configure", orgSlug, "whatsapp_sandbox");
     const input = z
       .object({ enabled: z.boolean() })
       .strict()
       .parse(await request.json());
-    const { organization, db } = await audioContext(orgSlug);
+    const { organization, db } = await audioContext(orgSlug, request, true);
     const { error } = await db
       .from("organizations")
       .update({ whatsapp_sandbox_audio_enabled: input.enabled })
