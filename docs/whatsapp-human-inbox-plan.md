@@ -624,3 +624,38 @@ se sondea y la campana conserva su intervalo existente. Queda pendiente el
 piloto con Meta/LLM y Auth/PostgREST reales y el teclado de un teléfono físico.
 Docker no estaba activo. `supabase db advisors --type security` no pudo conectar
 al stack local; las comprobaciones de grants corrieron en PostgreSQL nativo.
+
+### Validación desde la aplicación principal
+
+El commit `75fccbc2` ya montaba la bandeja en el layout autenticado. La
+vista de prueba anterior montaba los componentes en un servidor separado
+con respuestas simuladas. Para comprobar el recorrido real se inició
+Rhinos con Next en `http://127.0.0.1:4319`, GoTrue, PostgREST y un PostgreSQL
+17 descartable con el bundle de WhatsApp. Se sembraron organizaciones,
+roles, clientes y mensajes ficticios. El menú ahora muestra **Conversaciones
+de WhatsApp** junto a **Simulador WhatsApp** con sus flags independientes.
+
+La primera navegación real encontró un HTTP 503 en el listado. El handler
+de Next no disponía del contexto de `cookies()`. Los endpoints de la bandeja
+leen la sesión desde el `NextRequest` y usan ese cliente de usuario también
+para buscar la organización y verificar el permiso. El proxy conserva el
+refresco de la sesión. Las acciones de atención siguen haciendo la
+validación en el servidor y la base conserva sus controles de organización.
+
+Se inició sesión desde el formulario de Rhinos y se entró haciendo clic en
+el menú de `/org/rhino-pruebas`. En `/org/rhino-pruebas/whatsapp/conversaciones`,
+el operador cargó el historial, tomó la conversación, envió un texto y
+devolvió el control. El consumidor real de la outbox recibió un ID de Graph
+simulado. Un callback firmado al webhook local actualizó la burbuja a
+`Entregado`. Una segunda sesión con sólo `whatsapp.read` pudo leer el
+historial. El servidor rechazó toma, envío y devolución al repetir las
+solicitudes de las Server Actions con la sesión lectora y respondió 403 al
+pedir el detalle de un chat de otra organización.
+
+También se abrió la ruta del simulador desde el menú. En una organización
+con sólo el flag de sandbox apareció únicamente esa entrada. La consulta de
+capacidades de audio del simulador devolvió 500 en el entorno local. La
+validación del simulador cubrió navegación y flags, y queda pendiente probar
+su ejecución de audio y LLM. Queda pendiente usar un número real de prueba
+con Meta Cloud, incluidas las credenciales, la entrega y los callbacks del
+proveedor. La validación se hizo en localhost.

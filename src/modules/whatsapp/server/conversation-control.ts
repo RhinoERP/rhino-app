@@ -1,3 +1,4 @@
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -62,16 +63,17 @@ export async function getWhatsAppControlOperators(
 
 export async function getWhatsAppUserAccess(
   orgSlug: string,
-  permission: "whatsapp.read" | "whatsapp.manage"
+  permission: "whatsapp.read" | "whatsapp.manage",
+  request?: NextRequest
 ) {
-  const client = await createClient();
+  const client = await createClient(request);
   const { data, error } = await client.auth.getUser();
   if (error || !data.user) {
     throw new WhatsAppControlAccessError(
       "Iniciá sesión para acceder a WhatsApp"
     );
   }
-  const organization = await getOrganizationBySlug(orgSlug);
+  const organization = await getOrganizationBySlug(orgSlug, client);
   if (!organization?.is_active) {
     throw new WhatsAppControlAccessError("La organización no está disponible");
   }

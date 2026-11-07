@@ -1,10 +1,9 @@
+import type { NextRequest } from "next/server";
 import { inboxResponse, listInbox } from "@/modules/whatsapp/server/inbox";
 
 export function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
-  return inboxResponse(async () =>
-    listInbox((await params).orgSlug, new URL(request.url).searchParams)
-  );
+  return inboxResponse(async () => listInbox((await params).orgSlug, request));
 }

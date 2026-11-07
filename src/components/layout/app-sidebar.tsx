@@ -62,6 +62,7 @@ type NavItem = {
   requiresSalesAdvances?: boolean;
   requiresProductionDisabledOrMercadoLibre?: boolean;
   comingSoon?: boolean;
+  wrapLabel?: boolean;
 };
 
 type NavCategory = {
@@ -187,7 +188,8 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: ["customers.read", "customers.read.all"],
         },
         {
-          title: "WhatsApp",
+          title: "Conversaciones de WhatsApp",
+          wrapLabel: true,
           url: `/org/${orgSlug}/whatsapp/conversaciones`,
           module: "whatsapp",
           icon: <WhatsappLogoIcon weight="duotone" />,

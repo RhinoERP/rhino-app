@@ -1,3 +1,4 @@
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import {
   inboxCursorSchema,
@@ -52,10 +53,11 @@ export async function inboxResponse(handler: () => Promise<Response>) {
   }
 }
 
-async function inboxScope(orgSlug: string) {
+async function inboxScope(orgSlug: string, request: NextRequest) {
   const { organization, userId } = await getWhatsAppUserAccess(
     orgSlug,
-    "whatsapp.read"
+    "whatsapp.read",
+    request
   );
   return {
     db: createWhatsAppAdminClient(),
@@ -84,7 +86,8 @@ function cursor(params: URLSearchParams) {
   return { p_at: parsed.at, p_id: parsed.id };
 }
 
-export async function listInbox(orgSlug: string, params: URLSearchParams) {
+export async function listInbox(orgSlug: string, request: NextRequest) {
+  const params = request.nextUrl.searchParams;
   const filter = inboxFilterSchema.parse(params.get("filter") ?? "all");
   const search = z
     .string()
@@ -92,7 +95,7 @@ export async function listInbox(orgSlug: string, params: URLSearchParams) {
     .max(100)
     .parse(params.get("q") ?? "");
   const page = cursor(params);
-  const { db, args } = await inboxScope(orgSlug);
+  const { db, args } = await inboxScope(orgSlug, request);
   const raw = rpcData(
     await db.rpc("list_whatsapp_inbox", {
       ...args,
@@ -117,9 +120,13 @@ export async function listInbox(orgSlug: string, params: URLSearchParams) {
   });
 }
 
-export async function readInboxChat(orgSlug: string, conversationId: string) {
+export async function readInboxChat(
+  orgSlug: string,
+  conversationId: string,
+  request: NextRequest
+) {
   const chat = z.uuid().parse(conversationId);
-  const { db, args } = await inboxScope(orgSlug);
+  const { db, args } = await inboxScope(orgSlug, request);
   const result = inboxDetailSchema.safeParse(
     rpcData(
       await db.rpc("get_whatsapp_inbox_detail", { ...args, p_chat: chat })
@@ -134,8 +141,9 @@ export async function readInboxChat(orgSlug: string, conversationId: string) {
 export async function readInboxHistory(
   orgSlug: string,
   conversationId: string,
-  params: URLSearchParams
+  request: NextRequest
 ) {
+  const params = request.nextUrl.searchParams;
   const chat = z.uuid().parse(conversationId);
   const page = cursor(params);
   const after =
@@ -144,7 +152,7 @@ export async function readInboxHistory(
   if (after && page.p_at === null) {
     return inboxJson({ error: "Falta el cursor de sincronización." }, 400);
   }
-  const { db, args } = await inboxScope(orgSlug);
+  const { db, args } = await inboxScope(orgSlug, request);
   const result = inboxHistorySchema.safeParse(
     rpcData(
       await db.rpc("get_whatsapp_inbox_history", {
@@ -168,13 +176,13 @@ export async function readInboxHistory(
 export async function markInboxChatRead(
   orgSlug: string,
   conversationId: string,
-  request: Request
+  request: NextRequest
 ) {
   const chat = z.uuid().parse(conversationId);
   const { messageId } = z
     .object({ messageId: z.uuid() })
     .parse(await request.json().catch(() => null));
-  const { db, args } = await inboxScope(orgSlug);
+  const { db, args } = await inboxScope(orgSlug, request);
   rpcData(
     await db.rpc("mark_whatsapp_inbox_read", {
       ...args,
@@ -188,11 +196,12 @@ export async function markInboxChatRead(
 export async function playInboxAudio(
   orgSlug: string,
   conversationId: string,
-  messageId: string
+  messageId: string,
+  request: NextRequest
 ) {
   const chat = z.uuid().parse(conversationId);
   const message = z.uuid().parse(messageId);
-  const { db, args } = await inboxScope(orgSlug);
+  const { db, args } = await inboxScope(orgSlug, request);
   const result = z
     .object({ path: z.string().min(1), mime: z.string().nullable() })
     .safeParse(

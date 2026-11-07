@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   inboxResponse,
@@ -65,15 +66,20 @@ describe("WhatsApp inbox HTTP", () => {
         ],
       },
     });
-    const response = await inboxResponse(() =>
-      listInbox("rhino", new URLSearchParams({ organizationId: "foreign" }))
-    );
+    const request = new NextRequest("http://localhost?organizationId=foreign", {
+      headers: { cookie: "sb-local-auth-token=fixture" },
+    });
+    const response = await inboxResponse(() => listInbox("rhino", request));
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     const result = await response.json();
     expect(result.rows[0].preview.content).toBe("Hola");
     expect(JSON.stringify(result)).not.toContain("hidden");
-    expect(mocks.access).toHaveBeenCalledWith("rhino", "whatsapp.read");
+    expect(mocks.access).toHaveBeenCalledWith(
+      "rhino",
+      "whatsapp.read",
+      request
+    );
     expect(mocks.rpc).toHaveBeenCalledWith(
       "list_whatsapp_inbox",
       expect.objectContaining({
@@ -89,7 +95,9 @@ describe("WhatsApp inbox HTTP", () => {
       readInboxHistory(
         "rhino",
         chat,
-        new URLSearchParams({ at, direction: "after" })
+        new NextRequest(
+          `http://localhost?${new URLSearchParams({ at, direction: "after" })}`
+        )
       )
     );
     expect(response.status).toBe(400);
@@ -101,7 +109,7 @@ describe("WhatsApp inbox HTTP", () => {
       error: { code: "42501", message: "hidden database state" },
       data: null,
     });
-    const request = new Request("http://localhost", {
+    const request = new NextRequest("http://localhost", {
       method: "POST",
       body: JSON.stringify({ messageId: message, actor: "other" }),
     });
@@ -120,7 +128,10 @@ describe("WhatsApp inbox HTTP", () => {
 
   it("checks scope before touching storage and proxies only authorized bytes", async () => {
     mocks.rpc.mockResolvedValueOnce({ error: null, data: null });
-    expect((await playInboxAudio("rhino", chat, message)).status).toBe(404);
+    const request = new NextRequest("http://localhost");
+    expect((await playInboxAudio("rhino", chat, message, request)).status).toBe(
+      404
+    );
     expect(mocks.download).not.toHaveBeenCalled();
     mocks.rpc.mockResolvedValueOnce({
       error: null,
@@ -130,7 +141,7 @@ describe("WhatsApp inbox HTTP", () => {
       error: null,
       data: new Blob(["ogg fixture"]),
     });
-    const response = await playInboxAudio("rhino", chat, message);
+    const response = await playInboxAudio("rhino", chat, message, request);
     expect(response.headers.get("content-type")).toBe("audio/ogg");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await response.text()).toBe("ogg fixture");

@@ -1,7 +1,8 @@
+import type { NextRequest } from "next/server";
 import { inboxResponse, playInboxAudio } from "@/modules/whatsapp/server/inbox";
 
 export function GET(
-  _request: Request,
+  request: NextRequest,
   {
     params,
   }: {
@@ -14,6 +15,6 @@ export function GET(
 ) {
   return inboxResponse(async () => {
     const { orgSlug, conversationId, messageId } = await params;
-    return playInboxAudio(orgSlug, conversationId, messageId);
+    return playInboxAudio(orgSlug, conversationId, messageId, request);
   });
 }
