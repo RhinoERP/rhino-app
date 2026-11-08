@@ -287,10 +287,12 @@ function ownedBy(
 }
 
 const COMPROBANTE: Record<string, string> = {
-  A: "Factura A",
-  B: "Factura B",
-  C: "Factura C",
-  X: "Remito / sin factura",
+  FACTURA_A: "Factura A",
+  FACTURA_B: "Factura B",
+  FACTURA_C: "Factura C",
+  FACTURA_E: "Factura E",
+  FACTURA_A_RETENCION: "Factura A",
+  NOTA_DE_VENTA: "Nota de venta (sin factura)",
 };
 
 const STATUS_TEXT: Record<string, string> = {
@@ -321,7 +323,7 @@ const loadVentas: Loader = async (ctx, lookups, range) => {
       ctx.db
         .from("sales_orders")
         .select(
-          "id, customer_id, user_id, sale_date, status, currency, exchange_rate, total_amount, sub_total, total_tax_amount, global_discount_amount, tipo_factura, warehouse_id"
+          "id, customer_id, user_id, sale_date, status, currency, exchange_rate, total_amount, sub_total, total_tax_amount, global_discount_amount, invoice_type, warehouse_id"
         )
         .eq("organization_id", ctx.organizationId)
         .in("status", SOLD_STATUSES)
@@ -347,7 +349,7 @@ const loadVentas: Loader = async (ctx, lookups, range) => {
       ...customerFields(customer, members, o.customer_id as string),
       condicion_iva: customer?.taxCondition ?? null,
       comprobante:
-        COMPROBANTE[String(o.tipo_factura)] ?? (o.tipo_factura as string),
+        COMPROBANTE[String(o.invoice_type)] ?? (o.invoice_type as string),
       deposito: warehouses.get(String(o.warehouse_id)) ?? null,
       estado: STATUS_TEXT[String(o.status)] ?? (o.status as string),
       total: toArs(o.total_amount, currency, rate),
