@@ -136,7 +136,7 @@ function buildPermissionTooltip(
   }
 
   if (key === "commercial_ai.read") {
-    return "Vendedor: ve su propia cartera en IA Comercial, sus oportunidades, metas y el asistente.";
+    return "Vendedor: ve su propia cartera en IA Comercial, sus oportunidades, metas y RHINO, el asistente.";
   }
 
   if (key === "commercial_ai.manage") {

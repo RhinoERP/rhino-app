@@ -3,17 +3,18 @@
 import {
   BriefcaseIcon,
   CalendarCheckIcon,
+  ChartBarIcon,
   GearSixIcon,
   GraduationCapIcon,
   type Icon,
   MapTrifoldIcon,
   MegaphoneIcon,
-  SparkleIcon,
   StackIcon,
   StorefrontIcon,
   TargetIcon,
 } from "@phosphor-icons/react";
-import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { OPEN_STAGES } from "@/modules/commercial-ai/constants";
@@ -28,6 +29,8 @@ import { OpportunitySheet } from "./opportunity-sheet";
 import { PortfolioTab } from "./portfolio-tab";
 import { ProspectSheet } from "./prospect-sheet";
 import { ProspectsTab } from "./prospects-tab";
+import { ReportsTab } from "./reports/reports-tab";
+import { RhinoAvatar } from "./rhino/rhino-avatar";
 import { RoutesTab } from "./routes-tab";
 import { SettingsTab } from "./settings-tab";
 import { CommercialAiContext, formatDate } from "./shared";
@@ -36,6 +39,7 @@ import { TodayTab } from "./today-tab";
 type Section =
   | "hoy"
   | "asistente"
+  | "reportes"
   | "oportunidades"
   | "objetivos"
   | "rutas"
@@ -48,7 +52,7 @@ type Section =
 type NavItem = {
   key: Section;
   label: string;
-  icon: Icon;
+  icon: Icon | "rhino";
   managerOnly?: boolean;
 };
 
@@ -57,12 +61,16 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     title: "Día a día",
     items: [
       { key: "hoy", label: "Hoy", icon: CalendarCheckIcon },
-      { key: "asistente", label: "Asistente", icon: SparkleIcon },
+      { key: "asistente", label: "RHINO", icon: "rhino" },
       { key: "oportunidades", label: "Oportunidades", icon: StackIcon },
       { key: "objetivos", label: "Objetivos", icon: TargetIcon },
       { key: "rutas", label: "Rutas", icon: MapTrifoldIcon },
       { key: "aprendizajes", label: "Aprendizajes", icon: GraduationCapIcon },
     ],
+  },
+  {
+    title: "Análisis",
+    items: [{ key: "reportes", label: "Reportes", icon: ChartBarIcon }],
   },
   {
     title: "Prospección",
@@ -91,6 +99,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 const SECTION_VIEWS: Record<Section, () => React.ReactNode> = {
   hoy: () => <TodayTab />,
   asistente: () => <AssistantTab />,
+  reportes: () => <ReportsTab />,
   oportunidades: () => <OpportunitiesTab />,
   objetivos: () => <GoalsTab />,
   rutas: () => <RoutesTab />,
@@ -143,6 +152,27 @@ export function CommercialAiApp({
     },
     [closeAll]
   );
+
+  // Enlaces desde RHINO u otras pantallas: ?seccion=reportes, ?cliente=ID…
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const target = searchParams.get("seccion");
+    const aliases: Record<string, Section> = { rhino: "asistente" };
+    const next = target ? (aliases[target] ?? target) : null;
+    if (next && next in SECTION_VIEWS) {
+      setSection(next as Section);
+    }
+    const customer = searchParams.get("cliente");
+    const opportunity = searchParams.get("oportunidad");
+    const prospect = searchParams.get("prospecto");
+    if (customer) {
+      openCustomer(customer);
+    } else if (opportunity) {
+      openOpportunity(opportunity);
+    } else if (prospect) {
+      openProspect(prospect);
+    }
+  }, [searchParams, openCustomer, openOpportunity, openProspect]);
 
   const context = useMemo(
     () => ({
@@ -223,7 +253,11 @@ export function CommercialAiApp({
                       onClick={() => setSection(item.key)}
                       type="button"
                     >
-                      <ItemIcon className="size-4" weight="duotone" />
+                      {ItemIcon === "rhino" ? (
+                        <RhinoAvatar size={18} />
+                      ) : (
+                        <ItemIcon className="size-4" weight="duotone" />
+                      )}
                       {item.label}
                       {counts[item.key] ? (
                         <span className="ml-auto rounded-full bg-muted px-1.5 text-xs tabular-nums">

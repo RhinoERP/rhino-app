@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { PermissionsProvider } from "@/components/auth/permissions-provider";
+import { RhinoWidget } from "@/components/commercial-ai/rhino/rhino-widget";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { MobileOrganizationSwitcher } from "@/components/layout/mobile-organization-switcher";
@@ -85,6 +86,7 @@ async function OrganizationLayoutContent({
           <PwaInstallBanner
             wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
           />
+          <RhinoWidget orgSlug={orgSlug} userId={ownerUserId} />
         </SidebarInset>
       </SidebarProvider>
     </PermissionsProvider>

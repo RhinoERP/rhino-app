@@ -43,12 +43,13 @@ const moneyFormat = new Intl.NumberFormat("es-AR", {
 });
 const PCT = 100;
 const FEATURE_TEXT: Record<string, string> = {
-  asistente: "Asistente (IA)",
+  asistente: "RHINO (chat)",
   campana: "Campañas (IA)",
   prueba: "Prueba",
   whatsapp: "Mensaje de WhatsApp",
   audio: "Audio",
   factura: "Factura leída (Compras)",
+  reporte: "Reporte de RHINO",
 };
 const PURCHASE_STATUS: Record<string, string> = {
   pendiente: "Pendiente",
@@ -213,13 +214,13 @@ function BalanceCard({ usage }: { usage: UsageSummary }) {
       </div>
       {status.level === "agotado" ? (
         <p className="rounded-md bg-destructive/10 p-2 text-destructive text-sm">
-          Se terminaron los créditos: el asistente por WhatsApp y la IA están en
-          pausa. Comprá un paquete para seguir hoy mismo.
+          Se terminaron los créditos: RHINO por WhatsApp y la IA están en pausa.
+          Comprá un paquete para seguir hoy mismo.
         </p>
       ) : null}
       {status.level === "bajo" ? (
         <p className="rounded-md bg-amber-50 p-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
-          Quedan pocos créditos. Si se terminan, el asistente se pausa hasta que
+          Quedan pocos créditos. Si se terminan, RHINO se pausa hasta que
           compres más o se renueve el plan.
         </p>
       ) : null}

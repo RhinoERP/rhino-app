@@ -2,6 +2,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { reportsChannel } from "../reports/rhino-tool";
+import { resolveReportAccess } from "../reports/run-report";
 import {
   commercialAiModel,
   createAiMessage,
@@ -11,6 +13,7 @@ import { answerWithRules, askAssistant } from "../service/assistant.service";
 import {
   getCommercialAiSnapshot,
   requireCommercialAiAccess,
+  resolveCommercialAiAccess,
 } from "../service/commercial-ai.service";
 import { AiBudgetExceededError } from "../service/usage.service";
 
@@ -50,12 +53,20 @@ export async function askAssistantAction(
       : {
           success: false,
           error:
-            "El asistente con IA todavía no está activado. Las preguntas sugeridas funcionan igual.",
+            "RHINO con IA todavía no está activado. Las preguntas sugeridas funcionan igual.",
         };
   }
 
   try {
-    const text = await askAssistant(snapshot, parsed.data);
+    // RHINO consulta cualquier dato del negocio con el motor de reportes.
+    const channel = await resolveReportAccess(orgSlug)
+      .then(reportsChannel)
+      .catch(() => null);
+    const text = await askAssistant(
+      snapshot,
+      parsed.data,
+      channel ?? undefined
+    );
     return { success: true, text, source: "ai" };
   } catch (error) {
     return assistantFailure(error, rules);
@@ -157,5 +168,28 @@ export async function testAiConnectionAction(
     };
   } catch (error) {
     return { success: false, error: connectionErrorMessage(error) };
+  }
+}
+
+export type RhinoWidgetInfo =
+  | { enabled: true; isManager: boolean; aiEnabled: boolean }
+  | { enabled: false };
+
+/** Lo mínimo para la burbuja de RHINO en cualquier pantalla. */
+export async function getRhinoWidgetAction(
+  orgSlug: string
+): Promise<RhinoWidgetInfo> {
+  try {
+    const access = await resolveCommercialAiAccess(orgSlug);
+    if (!access) {
+      return { enabled: false };
+    }
+    return {
+      enabled: true,
+      isManager: access.role === "gerente",
+      aiEnabled: isAiEnabled(),
+    };
+  } catch {
+    return { enabled: false };
   }
 }

@@ -17,7 +17,8 @@ export type AiFeature =
   | "prueba"
   | "whatsapp"
   | "audio"
-  | "factura";
+  | "factura"
+  | "reporte";
 
 /** Quién consume: se registra en cada llamada y se usa para chequear el tope. */
 export type AiMeter = {
@@ -383,12 +384,13 @@ export type UsageSummary = {
 };
 
 export const FEATURE_LABELS: Record<AiFeature, string> = {
-  asistente: "Asistente (IA)",
+  asistente: "RHINO (chat)",
   campana: "Campañas (IA)",
   prueba: "Prueba de conexión",
   whatsapp: "Mensajes de WhatsApp",
   audio: "Audios transcriptos",
   factura: "Facturas leídas (Compras)",
+  reporte: "Reportes armados por RHINO",
 };
 const RECENT_LIMIT = 20;
 const HISTORY_LIMIT = 10;

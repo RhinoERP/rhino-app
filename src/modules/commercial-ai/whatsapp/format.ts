@@ -112,7 +112,7 @@ export function parseQuickCommand(text: string): QuickCommand | null {
 
 export function helpText(name: string): string {
   return [
-    `Hola ${name}, soy tu asistente comercial de Rhinos.`,
+    `Hola ${name}, soy RHINO, tu asistente comercial.`,
     "",
     "Escribime:",
     "• *hoy* · tu día: ruta, a quién llamar y pendientes",

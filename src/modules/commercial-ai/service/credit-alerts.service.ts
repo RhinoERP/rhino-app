@@ -121,7 +121,7 @@ export async function notifyLowCredits(
     ? `${organization.name}: se terminaron los créditos de IA Comercial`
     : `${organization.name}: quedan pocos créditos de IA Comercial`;
   const body = out
-    ? "Se terminaron los créditos de IA Comercial. El asistente por WhatsApp y la IA de la app quedan en pausa hasta que compres más o empiece el mes que viene."
+    ? "Se terminaron los créditos de IA Comercial. RHINO por WhatsApp y la IA de la app quedan en pausa hasta que compres más o empiece el mes que viene."
     : `Quedan ${numberFormat.format(status.available ?? 0)} créditos de IA Comercial (unas ${numberFormat.format(Math.floor((status.available ?? 0) / 3))} respuestas por WhatsApp).`;
   await createResendClient().emails.send({
     from: process.env.RESEND_FROM_EMAIL || "team@rhinos.app",

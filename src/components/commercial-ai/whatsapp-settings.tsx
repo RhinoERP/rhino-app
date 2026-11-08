@@ -20,16 +20,16 @@ export function WhatsAppSettings() {
     <div className="space-y-4">
       <Card className="gap-2 p-4 text-sm">
         <h3 className="font-semibold text-base">
-          Asistente del vendedor por WhatsApp
+          RHINO por WhatsApp para vendedores
         </h3>
         <p className="text-muted-foreground">
           El vendedor le escribe al WhatsApp de la empresa
           {whatsapp.displayNumber ? ` (${whatsapp.displayNumber})` : ""} y le
-          responde el asistente comercial: su día, a quién llamar, el mensaje
-          listo para el cliente y sus pendientes. Si le cuenta una visita
-          (&quot;pasé por El Obrero, pidieron 20 kg de muzza&quot;) o algo para
-          otro día (&quot;recordame llamar a Morini el jueves&quot;), queda
-          anotado en Rhinos.
+          responde RHINO, el asistente comercial: su día, a quién llamar, el
+          mensaje listo para el cliente y sus pendientes. Si le cuenta una
+          visita (&quot;pasé por El Obrero, pidieron 20 kg de muzza&quot;) o
+          algo para otro día (&quot;recordame llamar a Morini el jueves&quot;),
+          queda anotado en Rhinos.
         </p>
         <p className="text-muted-foreground">
           Solo responde a los celulares cargados acá. Los demás números siguen
@@ -97,7 +97,7 @@ function SellerPhoneRow({ seller }: { seller: CommercialAiSeller }) {
       if (result.success) {
         toast.success(
           phone.trim()
-            ? `Listo: ${seller.shortName} ya puede escribirle al asistente.`
+            ? `Listo: ${seller.shortName} ya puede escribirle a RHINO.`
             : `Se quitó el celular de ${seller.shortName}.`
         );
       } else {
