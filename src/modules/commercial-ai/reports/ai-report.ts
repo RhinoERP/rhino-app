@@ -176,7 +176,7 @@ Reglas:
     meter: meterOf(access),
     system,
     messages: [{ role: "user", content }],
-    maxTokens: 1500,
+    maxTokens: 4000,
     schema: specSchema(datasets),
   });
   if (!result.ok || result.truncated) {
@@ -247,10 +247,10 @@ export async function explainReport(
     meter: meterOf(access),
     system: `Sos RHINO, el analista comercial de una distribuidora. Te paso un reporte ya calculado. Escribí en español rioplatense, con voseo, 3 a 5 viñetas ("- ") con lo más importante: qué subió o bajó y cuánto, quién concentra más, alertas, y una acción concreta al final. Usá **negrita** para lo clave. Montos abreviados en pesos ($1,2M, $350k). No inventes nada que no esté en los datos. Máximo 130 palabras.`,
     messages: [{ role: "user", content: JSON.stringify(payload) }],
-    maxTokens: 700,
+    maxTokens: 3000,
   });
-  if (!result.ok) {
-    throw new ReportAiError("No pude analizar este reporte.");
+  if (!(result.ok && result.text.trim())) {
+    throw new ReportAiError("No pude analizar este reporte. Probá de nuevo.");
   }
   return result.text;
 }
