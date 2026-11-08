@@ -250,7 +250,15 @@ export function CommercialAiApp({
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       )}
                       key={item.key}
-                      onClick={() => setSection(item.key)}
+                      onClick={() => {
+                        setSection(item.key);
+                        // Queda en la dirección: si la pantalla se recarga, vuelve acá.
+                        window.history.replaceState(
+                          null,
+                          "",
+                          `?seccion=${item.key}`
+                        );
+                      }}
                       type="button"
                     >
                       {ItemIcon === "rhino" ? (

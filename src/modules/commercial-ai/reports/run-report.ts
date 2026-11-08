@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import {
   requireCommercialAiAccess,
@@ -189,7 +190,10 @@ export async function runReport(
   const today = todayInArgentina();
   const scoped = dataset.sellerScoped && !access.isManager;
   const read = createDatasetReader({
-    db: (await createClient()) as unknown as SupabaseClient,
+    // Lectura con la clave de servicio: el permiso a la fuente ya se chequeó
+    // arriba y cada consulta filtra por organización (y cartera si es vendedor).
+    db: createAdminClient() as unknown as SupabaseClient,
+    userDb: (await createClient()) as unknown as SupabaseClient,
     organizationId: access.organizationId,
     orgSlug: access.orgSlug,
     today,
@@ -201,7 +205,12 @@ export async function runReport(
   const [current, previous] = await Promise.all([
     read(dataset.id, range ?? { from: today, to: today }),
     prev ? read(dataset.id, prev) : Promise.resolve(null),
-  ]);
+  ]).catch((error: unknown) => {
+    console.error(`Reportes: no se pudo leer ${dataset.id}`, error);
+    throw new ReportError(
+      `No pude leer ${dataset.label.toLowerCase()}: ${error instanceof Error ? error.message : "error de la base"}`
+    );
+  });
 
   const filtered = applyFilters(
     current.rows,

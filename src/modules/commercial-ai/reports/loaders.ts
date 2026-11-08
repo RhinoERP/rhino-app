@@ -7,13 +7,15 @@ import type { DateRange } from "./periods";
 /**
  * Generador de reportes · lectura de datos. Cada fuente devuelve filas planas
  * con los nombres ya resueltos (cliente, producto, vendedor…), listas para
- * agrupar. Se leen con la sesión del usuario (sus permisos), filtradas por
- * organización y, para un vendedor, por su cartera.
+ * agrupar. Siempre filtradas por organización y, para un vendedor, por su
+ * cartera.
  */
 
 export type LoaderContext = {
-  /** Cliente con la sesión del usuario: Supabase aplica sus permisos (RLS). */
+  /** Lectura de datos (clave de servicio: siempre filtrar por organización). */
   db: SupabaseClient;
+  /** Con la sesión del usuario, para lo que depende de quién pregunta. */
+  userDb: SupabaseClient;
   organizationId: string;
   orgSlug: string;
   today: string;
@@ -209,7 +211,7 @@ class Lookups {
   }
 
   private async loadMembers() {
-    const { data } = await this.ctx.db.rpc(
+    const { data } = await this.ctx.userDb.rpc(
       "get_organization_members_with_users",
       {
         org_slug_param: this.ctx.orgSlug,
