@@ -63,7 +63,14 @@ const CHART_ICONS: { key: ChartKind; label: string; icon: Icon }[] = [
   { key: "table", label: "Solo tabla", icon: TableIcon },
 ];
 
-const LIMITS = [5, 10, 20, 50, 100];
+const LIMITS = [5, 10, 20, 25, 30, 50, 100];
+
+/** Las opciones de top, más la que trae el reporte si es otra (por ejemplo, 40). */
+function limitOptions(current: number | null): number[] {
+  return current && !LIMITS.includes(current)
+    ? [...LIMITS, current].sort((a, b) => a - b)
+    : LIMITS;
+}
 
 function Field({
   label,
@@ -247,7 +254,7 @@ function ViewOptions({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {LIMITS.map((n) => (
+              {limitOptions(spec.limit).map((n) => (
                 <SelectItem key={n} value={String(n)}>
                   Top {n}
                 </SelectItem>
