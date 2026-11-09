@@ -110,13 +110,24 @@ const SECTION_VIEWS: Record<Section, () => React.ReactNode> = {
   configuracion: () => <SettingsTab />,
 };
 
+const SECTION_ALIASES: Record<string, Section> = { rhino: "asistente" };
+
+function sectionFrom(value: string | null): Section | null {
+  const next = value ? (SECTION_ALIASES[value] ?? value) : null;
+  return next && next in SECTION_VIEWS ? (next as Section) : null;
+}
+
 export function CommercialAiApp({
   snapshot,
 }: {
   snapshot: CommercialAiSnapshot;
 }) {
   const isManager = snapshot.role === "gerente";
-  const [section, setSection] = useState<Section>("hoy");
+  // Enlaces desde RHINO u otras pantallas: ?seccion=reportes, ?cliente=ID…
+  const searchParams = useSearchParams();
+  const [section, setSection] = useState<Section>(
+    () => sectionFrom(searchParams.get("seccion")) ?? "hoy"
+  );
   const [opportunityKey, setOpportunityKey] = useState<string | null>(null);
   const [queue, setQueue] = useState<string[]>([]);
   const [customerId, setCustomerId] = useState<string | null>(null);
@@ -153,14 +164,10 @@ export function CommercialAiApp({
     [closeAll]
   );
 
-  // Enlaces desde RHINO u otras pantallas: ?seccion=reportes, ?cliente=ID…
-  const searchParams = useSearchParams();
   useEffect(() => {
-    const target = searchParams.get("seccion");
-    const aliases: Record<string, Section> = { rhino: "asistente" };
-    const next = target ? (aliases[target] ?? target) : null;
-    if (next && next in SECTION_VIEWS) {
-      setSection(next as Section);
+    const next = sectionFrom(searchParams.get("seccion"));
+    if (next) {
+      setSection(next);
     }
     const customer = searchParams.get("cliente");
     const opportunity = searchParams.get("oportunidad");
