@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendWhatsAppText } from "./meta-cloud";
+import { sendNextWhatsAppHumanMessage, sendWhatsAppText } from "./meta-cloud";
 
 const input = {
   integrationId: "integration",
@@ -8,6 +8,16 @@ const input = {
   phoneNumberId: "12345",
   recipient: "5491100000000",
   text: "Hola",
+  jobId: "job",
+  leaseToken: "lease",
+  sourceMessageId: "source",
+};
+
+const reservation = {
+  conversation_id: input.conversationId,
+  integration_id: input.integrationId,
+  source_message_id: input.sourceMessageId,
+  lease_expires_at: new Date(Date.now() + 120_000).toISOString(),
 };
 
 function database(organizationEnabled: boolean, conversationAvailable = true) {
@@ -32,9 +42,47 @@ function database(organizationEnabled: boolean, conversationAvailable = true) {
       async (
         _name: string,
         _args: Record<string, unknown>
-      ): Promise<{ data?: unknown; error: null }> => ({ error: null })
+      ): Promise<{ data?: unknown; error: unknown }> => ({
+        data:
+          _name === "prepare_whatsapp_outbox"
+            ? { ...reservation, status: "SENDING", text: "Hola" }
+            : true,
+        error: null,
+      })
     ),
   };
+}
+
+function humanDatabase(deadline = Date.now() + 60_000) {
+  const db = database(true);
+  const guard = vi.fn(
+    async (): Promise<{ data: string | null; error: unknown }> => ({
+      data: new Date(deadline).toISOString(),
+      error: null,
+    })
+  );
+  db.rpc.mockImplementation((name) => {
+    if (name === "guard_whatsapp_human_dispatch") {
+      return guard();
+    }
+    return Promise.resolve({
+      data:
+        name === "reserve_whatsapp_human_dispatch"
+          ? {
+              id: "command",
+              integration_id: input.integrationId,
+              conversation_id: input.conversationId,
+              phone_number_id: input.phoneNumberId,
+              recipient: input.recipient,
+              text: "Human saved text",
+              lease_token: "human-lease",
+              lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+            }
+          : true,
+      error: null,
+    });
+  });
+  return { db, guard };
 }
 
 describe("WhatsApp outbound authorization", () => {
@@ -51,6 +99,7 @@ describe("WhatsApp outbound authorization", () => {
     );
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -84,7 +133,7 @@ describe("WhatsApp outbound authorization", () => {
     ).resolves.toBe("wamid.test");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(db.rpc).toHaveBeenCalledWith(
-      "record_whatsapp_outbound_message",
+      "complete_whatsapp_outbox",
       expect.objectContaining({ p_external_message_id: "wamid.test" })
     );
   });
@@ -105,7 +154,7 @@ describe("WhatsApp outbound authorization", () => {
         .mock.calls.map(([, options]) => JSON.parse(String(options?.body)).to)
     ).toEqual(["5491100000000", "541100000000"]);
     expect(db.from).toHaveBeenCalledWith("whatsapp_conversations");
-    expect(db.rpc).toHaveBeenCalledTimes(1);
+    expect(db.rpc).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -145,7 +194,7 @@ describe("WhatsApp outbound authorization", () => {
       Promise.resolve({
         data:
           name === "prepare_whatsapp_outbox"
-            ? { status: "SENDING", text: "Saved response" }
+            ? { ...reservation, status: "SENDING", text: "Saved response" }
             : true,
         error: null,
       })
@@ -188,7 +237,7 @@ describe("WhatsApp outbound authorization", () => {
     db.rpc.mockImplementation((name, args) => {
       if (name === "prepare_whatsapp_outbox") {
         return Promise.resolve({
-          data: { status, text: "Persisted response" },
+          data: { ...reservation, status, text: "Persisted response" },
           error: null,
         });
       }
@@ -212,7 +261,7 @@ describe("WhatsApp outbound authorization", () => {
       Promise.resolve({
         data:
           name === "prepare_whatsapp_outbox"
-            ? { status: "SENDING", text: "Saved quote" }
+            ? { ...reservation, status: "SENDING", text: "Saved quote" }
             : true,
         error: null,
       })
@@ -234,5 +283,256 @@ describe("WhatsApp outbound authorization", () => {
         p_external_message_id: "wamid.test",
       })
     );
+  });
+  it("rejects a send without a durable reservation", async () => {
+    await expect(
+      sendWhatsAppText(database(true) as unknown as SupabaseClient, {
+        ...input,
+        jobId: undefined,
+        leaseToken: undefined,
+      })
+    ).rejects.toThrow("lease");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "error",
+    "throw",
+    "lost acknowledgement",
+  ])("retries only persistence after acceptance: %s", async (failure) => {
+    const db = database(true);
+    let writes = 0;
+    db.rpc.mockImplementation((name) => {
+      if (name === "prepare_whatsapp_outbox") {
+        return Promise.resolve({
+          data: { ...reservation, status: "SENDING", text: "Saved" },
+          error: null,
+        });
+      }
+      writes += 1;
+      if (writes === 1) {
+        if (failure !== "error") {
+          return Promise.reject(new Error(failure));
+        }
+        return Promise.resolve({ data: null, error: { code: "08006" } });
+      }
+      return Promise.resolve({ data: true, error: null });
+    });
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).resolves.toBe("wamid.test");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(writes).toBe(2);
+  });
+
+  it("never repeats POST when every persistence attempt fails", async () => {
+    const db = database(true);
+    db.rpc.mockImplementation(async (name) => ({
+      data:
+        name === "prepare_whatsapp_outbox"
+          ? { ...reservation, status: "SENDING", text: "Saved" }
+          : null,
+      error: name === "prepare_whatsapp_outbox" ? null : { code: "08006" },
+    }));
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).rejects.toMatchObject({ code: "DELIVERY_PERSISTENCE" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(
+      db.rpc.mock.calls.filter(([name]) => name === "complete_whatsapp_outbox")
+    ).toHaveLength(3);
+  });
+
+  it.each([
+    500, 503, 429, 400,
+  ])("persists the appropriate result on Meta %i", async (status) => {
+    const db = database(true);
+    vi.mocked(fetch).mockResolvedValue(new Response("{}", { status }));
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).rejects.toMatchObject({ code: "DELIVERY_REJECTED" });
+    expect(db.rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_outbox",
+      expect.objectContaining({
+        p_status: new Map([
+          [500, "UNKNOWN"],
+          [503, "UNKNOWN"],
+          [429, "PENDING"],
+          [400, "CANCELLED"],
+        ]).get(status),
+      })
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists UNKNOWN on an accepted response without a message ID", async () => {
+    const db = database(true);
+    vi.mocked(fetch).mockResolvedValue(new Response("{}", { status: 200 }));
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).rejects.toMatchObject({ code: "DELIVERY_UNKNOWN" });
+    expect(db.rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_outbox",
+      expect.objectContaining({ p_status: "UNKNOWN" })
+    );
+  });
+
+  it("dispatches the human command from the SQL reservation with the common transport", async () => {
+    const { db } = humanDatabase();
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).resolves.toBe(true);
+    expect(
+      JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).text.body
+    ).toBe("Human saved text");
+    expect(db.rpc).toHaveBeenNthCalledWith(2, "guard_whatsapp_human_dispatch", {
+      p_command_id: "command",
+      p_lease_token: "human-lease",
+      p_phone_number_id: input.phoneNumberId,
+      p_recipient: input.recipient,
+    });
+    expect(db.rpc).toHaveBeenCalledWith("complete_whatsapp_command", {
+      p_command_id: "command",
+      p_lease_token: "human-lease",
+      p_status: "SENT",
+      p_external_message_id: "wamid.test",
+    });
+  });
+
+  it("does not dispatch when no human command is claimable", async () => {
+    const db = database(true);
+    db.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).resolves.toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("authorizes the same conversation again before using Meta's test-number fallback", async () => {
+    const { db } = humanDatabase();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ error: { code: 131_030 } }, { status: 400 })
+    );
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).resolves.toBe(true);
+    const guards = db.rpc.mock.calls.filter(
+      ([name]) => name === "guard_whatsapp_human_dispatch"
+    );
+    expect(guards).toHaveLength(2);
+    expect(guards[1]).toEqual(guards[0]);
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.map(([, init]) => JSON.parse(String(init?.body)).to)
+    ).toEqual([input.recipient, "541100000000"]);
+  });
+
+  it("does not reserve with the legacy RPC when the guard migration is absent", async () => {
+    const db = database(true);
+    db.rpc.mockResolvedValue({ data: null, error: { code: "PGRST202" } });
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).rejects.toThrow("No se pudo reservar");
+    expect(db.rpc.mock.calls).toEqual([["reserve_whatsapp_human_dispatch"]]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    false,
+    true,
+  ])("cancels a human send when the window closes before an HTTP attempt (fallback: %s)", async (fallback) => {
+    const now = Date.now();
+    const deadline = fallback ? now + 10_000 : now - 1;
+    const { db } = humanDatabase(deadline);
+    if (fallback) {
+      vi.mocked(fetch).mockImplementationOnce(() => {
+        vi.spyOn(Date, "now").mockReturnValue(deadline);
+        return Promise.resolve(
+          Response.json({ error: { code: 131_030 } }, { status: 400 })
+        );
+      });
+    }
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).resolves.toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(fallback ? 1 : 0);
+    expect(db.rpc).toHaveBeenCalledWith("complete_whatsapp_command", {
+      p_command_id: "command",
+      p_lease_token: "human-lease",
+      p_status: "WINDOW_EXPIRED",
+      p_external_message_id: null,
+    });
+  });
+
+  it.each([
+    false,
+    true,
+  ])("honors guard cancellation without marking UNKNOWN (fallback: %s)", async (fallback) => {
+    const { db, guard } = humanDatabase();
+    if (fallback) {
+      guard.mockResolvedValueOnce({
+        data: new Date(Date.now() + 60_000).toISOString(),
+        error: null,
+      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        Response.json({ error: { code: 131_030 } }, { status: 400 })
+      );
+    }
+    guard.mockResolvedValueOnce({ data: null, error: null });
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).resolves.toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(fallback ? 1 : 0);
+    expect(guard).toHaveBeenCalledTimes(fallback ? 2 : 1);
+    expect(db.rpc.mock.calls.map(([name]) => name)).not.toContain(
+      "complete_whatsapp_command"
+    );
+  });
+
+  it("requeues a known unsent command when the dispatch guard is unavailable", async () => {
+    const { db, guard } = humanDatabase();
+    guard.mockResolvedValueOnce({ data: null, error: { code: "connection" } });
+    await expect(
+      sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
+    ).rejects.toMatchObject({ code: "DELIVERY_PREFLIGHT" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(db.rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_command",
+      expect.objectContaining({ p_status: "PENDING" })
+    );
+  });
+
+  it("never dispatches a reservation for a different conversation", async () => {
+    const db = database(true);
+    db.rpc.mockResolvedValue({
+      data: {
+        ...reservation,
+        status: "SENDING",
+        conversation_id: "other-tenant-chat",
+        text: "private",
+      },
+      error: null,
+    });
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).rejects.toThrow("reserva");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("never posts after the dispatch lease has expired", async () => {
+    const db = database(true);
+    db.rpc.mockResolvedValue({
+      data: {
+        ...reservation,
+        status: "SENDING",
+        lease_expires_at: "2020-01-01T00:00:00Z",
+        text: "Expired",
+      },
+      error: null,
+    });
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, input)
+    ).rejects.toMatchObject({ code: "DELIVERY_REVIEW" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

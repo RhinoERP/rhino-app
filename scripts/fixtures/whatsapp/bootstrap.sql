@@ -15,13 +15,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, au
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO anon, authenticated, service_role;
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$ SELECT current_setting('request.jwt.claim.role', true) $$;
-CREATE TABLE auth.users (id uuid PRIMARY KEY);
-CREATE TABLE organizations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), is_active boolean DEFAULT true);
+CREATE TABLE auth.users (id uuid PRIMARY KEY, email text, raw_user_meta_data jsonb DEFAULT '{}');
+CREATE TABLE organizations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), is_active boolean DEFAULT true, slug text DEFAULT gen_random_uuid()::text);
 CREATE TABLE platform_admins (user_id uuid PRIMARY KEY);
-CREATE TABLE customers (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id));
+CREATE TABLE customers (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), fantasy_name text, business_name text);
 CREATE TABLE sales_orders (
  id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), created_at timestamptz DEFAULT now(),
- customer_id uuid, user_id uuid, sale_date date, credit_days integer, expiration_date date,
+ customer_id uuid, user_id uuid, sale_number integer, sale_date date, credit_days integer, expiration_date date,
  invoice_type text, invoice_number text, observations text, sub_total numeric, total_tax_amount numeric,
  global_discount_percentage numeric, global_discount_amount numeric, total_amount numeric,
  sales_price_list_id uuid, price_level_id uuid, advance_payment_percentage numeric, status text DEFAULT 'DRAFT', created_by uuid
@@ -31,14 +31,21 @@ CREATE TABLE sales_order_items (id uuid PRIMARY KEY, organization_id uuid, sales
 CREATE TABLE sales_order_taxes (organization_id uuid,sales_order_id uuid REFERENCES sales_orders(id),tax_id uuid NOT NULL,name text,rate numeric,base_amount numeric,tax_amount numeric,tax_code_snapshot text);
 CREATE TABLE sales_order_item_taxes (organization_id uuid,sales_order_id uuid REFERENCES sales_orders(id),sales_order_item_id uuid REFERENCES sales_order_items(id),product_id uuid,tax_id uuid NOT NULL,name text,rate numeric,base_amount numeric,tax_amount numeric,tax_code_snapshot text,source text);
 CREATE TABLE sales_price_lists (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id));
-CREATE TABLE organization_members (user_id uuid REFERENCES auth.users(id), organization_id uuid REFERENCES organizations(id), is_active boolean DEFAULT true);
+CREATE TABLE roles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid REFERENCES organizations(id));
+CREATE TABLE organization_members (user_id uuid REFERENCES auth.users(id), organization_id uuid REFERENCES organizations(id), is_active boolean DEFAULT true,
+ role_id uuid REFERENCES roles(id), is_owner boolean NOT NULL DEFAULT false);
 CREATE TABLE categories (id uuid PRIMARY KEY, organization_id uuid, name text);
 CREATE TABLE products (id uuid PRIMARY KEY, organization_id uuid, is_active boolean DEFAULT true,
  name text, brand text, description text, category_id uuid);
 CREATE TABLE product_variants (id uuid PRIMARY KEY,product_id uuid REFERENCES products(id));
-CREATE TABLE permissions (key text PRIMARY KEY, description text);
+CREATE TABLE permissions (id uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(), key text PRIMARY KEY, description text);
+CREATE TABLE role_permissions (role_id uuid REFERENCES roles(id), permission_id uuid REFERENCES permissions(id), PRIMARY KEY(role_id,permission_id));
 CREATE FUNCTION public.update_updated_at_column() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=now(); RETURN NEW; END; $$;
 
 CREATE SCHEMA IF NOT EXISTS storage;
 CREATE TABLE IF NOT EXISTS storage.buckets(id text PRIMARY KEY,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
 CREATE TABLE IF NOT EXISTS storage.objects(bucket_id text,name text);
+
+-- The bell schema installs a cron schedule. The fixture never runs scheduled jobs.
+CREATE SCHEMA cron;
+CREATE FUNCTION cron.schedule(text,text,text) RETURNS bigint LANGUAGE sql AS $$ SELECT 1::bigint $$;

@@ -1528,21 +1528,18 @@ async function handoffToHuman(context: VerifiedContext, reason: string) {
         "Te conectamos con una persona del equipo comercial para continuar.",
     };
   }
-  const { error } = await createWhatsAppAdminClient()
-    .from("whatsapp_conversations")
-    .update({
-      status: "HANDOFF",
-      handoff_reason: reason,
-      pending_order_action: null,
-      bot_paused_at: new Date().toISOString(),
-      assigned_user_id: context.responsibleUserId,
-    })
-    .eq("id", context.conversationId)
-    .eq("organization_id", context.organizationId)
-    .eq("integration_id", context.integrationId)
-    .eq("status", "ACTIVE");
+  const { error } = await createWhatsAppAdminClient().rpc(
+    "handoff_whatsapp_conversation",
+    {
+      p_organization_id: context.organizationId,
+      p_integration_id: context.integrationId,
+      p_conversation_id: context.conversationId,
+      p_source_message_id: context.sourceMessageId,
+      p_reason: reason,
+    }
+  );
   if (error) {
-    throw new Error(`No se pudo derivar la conversación: ${error.message}`);
+    throw new Error("No se pudo derivar la conversación");
   }
   return {
     handedOff: true,

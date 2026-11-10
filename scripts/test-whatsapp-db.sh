@@ -41,6 +41,8 @@ SQL
 
 docker exec "$whatsapp_db_container" createdb -U postgres whatsapp_bundle
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/bootstrap.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < supabase/migrations/20260701000000_create_notifications.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < supabase/migrations/20260703000000_add_notification_archiving.sql
 for pass in 1 2; do
   node scripts/build-whatsapp-release-sql.mjs | docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1
 done

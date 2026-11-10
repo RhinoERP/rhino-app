@@ -13,9 +13,15 @@ export type SendWhatsAppTextInput = {
   orderPrompt?: boolean;
   jobId?: string;
   leaseToken?: string;
+  deliveryLeaseExpiresAt?: string;
 };
 
-type DeliveryStatus = "PENDING" | "SENT" | "UNKNOWN" | "CANCELLED";
+type DeliveryStatus =
+  | "PENDING"
+  | "SENT"
+  | "UNKNOWN"
+  | "CANCELLED"
+  | "WINDOW_EXPIRED";
 type FinishDelivery = (
   status: DeliveryStatus,
   externalId?: string
@@ -78,15 +84,10 @@ async function prepareDelivery(
   db: SupabaseClient,
   input: SendWhatsAppTextInput
 ) {
-  const durable = Boolean(
-    input.jobId && input.leaseToken && input.sourceMessageId
-  );
-  if (!durable) {
-    return {
-      durable,
-      text: input.text,
-      sentId: undefined as string | undefined,
-    };
+  if (!(input.jobId && input.leaseToken && input.sourceMessageId)) {
+    throw new Error(
+      "El envío requiere un trabajo con lease y outbox persistente."
+    );
   }
   const prepared = await db.rpc("prepare_whatsapp_outbox", {
     p_job_id: input.jobId,
@@ -97,9 +98,15 @@ async function prepareDelivery(
   if (prepared.error || !prepared.data) {
     throw new Error("No se pudo preparar el envío persistente.");
   }
+  if (
+    prepared.data.conversation_id !== input.conversationId ||
+    prepared.data.integration_id !== input.integrationId ||
+    prepared.data.source_message_id !== input.sourceMessageId
+  ) {
+    throw new Error("La reserva no pertenece al mensaje y canal esperados.");
+  }
   if (prepared.data.status === "SENT") {
     return {
-      durable,
       text: prepared.data.text as string,
       sentId: prepared.data.external_message_id as string,
     };
@@ -111,8 +118,8 @@ async function prepareDelivery(
     );
   }
   return {
-    durable,
     text: prepared.data.text as string,
+    deliveryLeaseExpiresAt: prepared.data.lease_expires_at as string,
     sentId: undefined as string | undefined,
   };
 }
@@ -130,9 +137,28 @@ function rejectionStatus(status: number): DeliveryStatus {
 async function dispatchToMeta(
   input: SendWhatsAppTextInput,
   token: string,
-  text: string,
-  finish: FinishDelivery
+  finish: FinishDelivery,
+  guard?: () => Promise<number>
 ): Promise<string> {
+  const customerWindowEndsAt = await guard?.();
+  if (
+    !(
+      input.deliveryLeaseExpiresAt &&
+      Date.parse(input.deliveryLeaseExpiresAt) > Date.now()
+    )
+  ) {
+    throw new AudioError("DELIVERY_REVIEW", "La reserva de envío venció.");
+  }
+  if (
+    customerWindowEndsAt !== undefined &&
+    !(customerWindowEndsAt > Date.now())
+  ) {
+    await finish("WINDOW_EXPIRED");
+    throw new AudioError(
+      "WINDOW_EXPIRED",
+      "Venció la ventana de 24 horas antes de despachar el mensaje."
+    );
+  }
   const recipient = input.recipient;
   const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
   let response: Response;
@@ -149,7 +175,7 @@ async function dispatchToMeta(
           messaging_product: "whatsapp",
           to: recipient,
           type: "text",
-          text: { body: text },
+          text: { body: input.text },
         }),
         signal: AbortSignal.timeout(20_000),
       }
@@ -177,8 +203,8 @@ async function dispatchToMeta(
       return dispatchToMeta(
         { ...input, recipient: `54${recipient.slice(3)}` },
         token,
-        text,
-        finish
+        finish,
+        guard
       );
     }
     await finish(rejectionStatus(response.status));
@@ -216,41 +242,121 @@ export async function sendWhatsAppText(
   if (delivery.sentId) {
     return delivery.sentId;
   }
-  const finish: FinishDelivery = async (status, externalId) => {
-    if (!delivery.durable) {
-      return;
-    }
-    const result = await supabase.rpc("complete_whatsapp_outbox", {
-      p_source_message_id: input.sourceMessageId,
-      p_lease_token: input.leaseToken,
-      p_status: status,
-      p_external_message_id: externalId || null,
-    });
-    if (result.error || !result.data) {
-      throw new Error("No se pudo registrar el resultado del envío.");
-    }
-  };
-  const id = await dispatchToMeta(input, token, delivery.text, finish);
-  if (delivery.durable) {
-    await finish("SENT", id);
-    return id;
-  }
-  const result = await supabase.rpc("record_whatsapp_outbound_message", {
-    p_conversation_id: input.conversationId,
-    p_integration_id: input.integrationId,
-    p_external_message_id: id,
-    p_message_type: "TEXT",
-    p_content: input.text,
-    p_payload: {
-      provider: "META_CLOUD",
-      sourceMessageId: input.sourceMessageId,
-      orderPrompt: input.orderPrompt ?? false,
+  return deliverPreparedText(
+    supabase,
+    {
+      ...input,
+      text: delivery.text,
+      deliveryLeaseExpiresAt: delivery.deliveryLeaseExpiresAt,
     },
-  });
-  if (result.error) {
-    throw new Error(
-      `No se pudo registrar el mensaje saliente: ${result.error.message}`
+    token
+  );
+}
+
+async function deliverPreparedText(
+  supabase: SupabaseClient,
+  input: SendWhatsAppTextInput,
+  token: string,
+  commandId?: string
+): Promise<string> {
+  const target = commandId
+    ? { p_command_id: commandId }
+    : { p_source_message_id: input.sourceMessageId };
+  const finish: FinishDelivery = async (status, externalId) => {
+    // A known Meta ID is retried only here: never repeat the provider POST.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const result = await supabase.rpc(
+          commandId ? "complete_whatsapp_command" : "complete_whatsapp_outbox",
+          {
+            ...target,
+            p_lease_token: input.leaseToken,
+            p_status: status,
+            p_external_message_id: externalId || null,
+          }
+        );
+        if (!result.error && result.data === true) {
+          return;
+        }
+      } catch {
+        // Retry persistence, including an acknowledgement lost after commit.
+      }
+    }
+    throw new AudioError(
+      "DELIVERY_PERSISTENCE",
+      "No se pudo registrar el resultado del envío; requiere revisión."
     );
-  }
+  };
+  const guard = commandId
+    ? async () => {
+        const { data, error } = await supabase.rpc(
+          "guard_whatsapp_human_dispatch",
+          {
+            ...target,
+            p_lease_token: input.leaseToken,
+            p_phone_number_id: input.phoneNumberId,
+            // The provider fallback changes only the HTTP address.
+            p_recipient: input.recipient,
+          }
+        );
+        if (error) {
+          // This attempt has not contacted Meta. The existing backoff can retry.
+          await finish("PENDING");
+          throw new AudioError(
+            "DELIVERY_PREFLIGHT",
+            "No se pudo autorizar el envío."
+          );
+        }
+        if (data === null) {
+          throw new AudioError(
+            "DELIVERY_NOT_AUTHORIZED",
+            "El envío ya no está autorizado."
+          );
+        }
+        return Date.parse(data);
+      }
+    : undefined;
+  const id = await dispatchToMeta(input, token, finish, guard);
+  await finish("SENT", id);
   return id;
+}
+
+export async function sendNextWhatsAppHumanMessage(
+  db: SupabaseClient
+): Promise<boolean> {
+  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
+  }
+  const { data: command, error: reservationError } = await db.rpc(
+    "reserve_whatsapp_human_dispatch"
+  );
+  if (reservationError) {
+    throw new Error("No se pudo reservar un envío humano");
+  }
+  if (!command) {
+    return false;
+  }
+  const input: SendWhatsAppTextInput = {
+    integrationId: command.integration_id,
+    conversationId: command.conversation_id,
+    phoneNumberId: command.phone_number_id,
+    recipient: command.recipient,
+    text: command.text,
+    leaseToken: command.lease_token,
+    deliveryLeaseExpiresAt: command.lease_expires_at,
+  };
+  try {
+    await deliverPreparedText(db, input, token, command.id);
+  } catch (error) {
+    if (
+      !(
+        error instanceof AudioError &&
+        ["DELIVERY_NOT_AUTHORIZED", "WINDOW_EXPIRED"].includes(error.code)
+      )
+    ) {
+      throw error;
+    }
+  }
+  return true;
 }
