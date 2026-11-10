@@ -14,7 +14,6 @@ export type SendWhatsAppTextInput = {
   jobId?: string;
   leaseToken?: string;
   deliveryLeaseExpiresAt?: string;
-  customerWindowEndsAt?: number;
 };
 
 type DeliveryStatus =
@@ -31,7 +30,7 @@ type FinishDelivery = (
 async function authorizeDelivery(
   supabase: SupabaseClient,
   input: SendWhatsAppTextInput
-): Promise<string | null> {
+): Promise<void> {
   // Re-check after model/tool execution: superadmin may have disabled the
   // tenant or a human may have paused the conversation in the meantime.
   const { data: integration, error: integrationError } = await supabase
@@ -61,7 +60,7 @@ async function authorizeDelivery(
       .maybeSingle(),
     supabase
       .from("whatsapp_conversations")
-      .select("last_customer_message_at")
+      .select("id")
       .eq("id", input.conversationId)
       .eq("organization_id", integration.organization_id)
       .eq("integration_id", input.integrationId)
@@ -79,7 +78,6 @@ async function authorizeDelivery(
       "El canal está deshabilitado o la conversación fue pausada"
     );
   }
-  return conversation.last_customer_message_at as string | null;
 }
 
 async function prepareDelivery(
@@ -139,9 +137,10 @@ function rejectionStatus(status: number): DeliveryStatus {
 async function dispatchToMeta(
   input: SendWhatsAppTextInput,
   token: string,
-  text: string,
-  finish: FinishDelivery
+  finish: FinishDelivery,
+  guard?: () => Promise<number>
 ): Promise<string> {
+  const customerWindowEndsAt = await guard?.();
   if (
     !(
       input.deliveryLeaseExpiresAt &&
@@ -151,8 +150,8 @@ async function dispatchToMeta(
     throw new AudioError("DELIVERY_REVIEW", "La reserva de envío venció.");
   }
   if (
-    input.customerWindowEndsAt !== undefined &&
-    !(input.customerWindowEndsAt > Date.now())
+    customerWindowEndsAt !== undefined &&
+    !(customerWindowEndsAt > Date.now())
   ) {
     await finish("WINDOW_EXPIRED");
     throw new AudioError(
@@ -176,7 +175,7 @@ async function dispatchToMeta(
           messaging_product: "whatsapp",
           to: recipient,
           type: "text",
-          text: { body: text },
+          text: { body: input.text },
         }),
         signal: AbortSignal.timeout(20_000),
       }
@@ -204,8 +203,8 @@ async function dispatchToMeta(
       return dispatchToMeta(
         { ...input, recipient: `54${recipient.slice(3)}` },
         token,
-        text,
-        finish
+        finish,
+        guard
       );
     }
     await finish(rejectionStatus(response.status));
@@ -288,7 +287,36 @@ async function deliverPreparedText(
       "No se pudo registrar el resultado del envío; requiere revisión."
     );
   };
-  const id = await dispatchToMeta(input, token, input.text, finish);
+  const guard = commandId
+    ? async () => {
+        const { data, error } = await supabase.rpc(
+          "guard_whatsapp_human_dispatch",
+          {
+            ...target,
+            p_lease_token: input.leaseToken,
+            p_phone_number_id: input.phoneNumberId,
+            // The provider fallback changes only the HTTP address.
+            p_recipient: input.recipient,
+          }
+        );
+        if (error) {
+          // This attempt has not contacted Meta. The existing backoff can retry.
+          await finish("PENDING");
+          throw new AudioError(
+            "DELIVERY_PREFLIGHT",
+            "No se pudo autorizar el envío."
+          );
+        }
+        if (data === null) {
+          throw new AudioError(
+            "DELIVERY_NOT_AUTHORIZED",
+            "El envío ya no está autorizado."
+          );
+        }
+        return Date.parse(data);
+      }
+    : undefined;
+  const id = await dispatchToMeta(input, token, finish, guard);
   await finish("SENT", id);
   return id;
 }
@@ -300,8 +328,10 @@ export async function sendNextWhatsAppHumanMessage(
   if (!token) {
     throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
   }
-  const { data: command, error } = await db.rpc("claim_whatsapp_human_outbox");
-  if (error) {
+  const { data: command, error: reservationError } = await db.rpc(
+    "reserve_whatsapp_human_dispatch"
+  );
+  if (reservationError) {
     throw new Error("No se pudo reservar un envío humano");
   }
   if (!command) {
@@ -316,11 +346,17 @@ export async function sendNextWhatsAppHumanMessage(
     leaseToken: command.lease_token,
     deliveryLeaseExpiresAt: command.lease_expires_at,
   };
-  // Read the latest inbound after reservation and recheck its deadline before
-  // each HTTP attempt, including the fallback for explicitly rejected numbers.
-  const lastCustomerMessage = await authorizeDelivery(db, input);
-  input.customerWindowEndsAt =
-    Date.parse(lastCustomerMessage ?? "") + 24 * 60 * 60 * 1000;
-  await deliverPreparedText(db, input, token, command.id);
+  try {
+    await deliverPreparedText(db, input, token, command.id);
+  } catch (error) {
+    if (
+      !(
+        error instanceof AudioError &&
+        ["DELIVERY_NOT_AUTHORIZED", "WINDOW_EXPIRED"].includes(error.code)
+      )
+    ) {
+      throw error;
+    }
+  }
   return true;
 }

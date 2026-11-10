@@ -316,8 +316,11 @@ const command = {
   updatedAt: "2026-11-06T20:00:00Z",
 };
 function commandRpc() {
-  mocks.rpc.mockImplementation((name) =>
-    Promise.resolve({
+  mocks.rpc.mockImplementation((name) => {
+    if (name === "whatsapp_guarded_dispatch_ready") {
+      return Promise.resolve({ data: true, error: null });
+    }
+    return Promise.resolve({
       data:
         name === "whatsapp_human_outbox_protocol_version"
           ? 1
@@ -331,8 +334,8 @@ function commandRpc() {
               },
             },
       error: null,
-    })
-  );
+    });
+  });
 }
 
 describe("human command boundary", () => {
@@ -379,12 +382,13 @@ describe("human command boundary", () => {
     });
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
-  it("fails closed when the human protocol is not installed", async () => {
+  it("fails closed on the legacy schema without guarded dispatch", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: "PGRST202" } });
     expect(await sendWhatsAppManualMessageAction(messageInput)).toMatchObject({
       success: false,
       error: expect.stringContaining("migración"),
     });
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc.mock.calls).toEqual([["whatsapp_guarded_dispatch_ready"]]);
   });
   it.each([
     "WINDOW_EXPIRED",
@@ -395,8 +399,8 @@ describe("human command boundary", () => {
     mocks.rpc.mockImplementation((name) =>
       Promise.resolve({
         data:
-          name === "whatsapp_human_outbox_protocol_version"
-            ? 1
+          name === "whatsapp_guarded_dispatch_ready"
+            ? true
             : { success: false, code, payload: "secret" },
         error: null,
       })
@@ -411,9 +415,9 @@ describe("human command boundary", () => {
   it("sanitizes database errors", async () => {
     mocks.rpc.mockImplementation((name) =>
       Promise.resolve({
-        data: name === "whatsapp_human_outbox_protocol_version" ? 1 : null,
+        data: name === "whatsapp_guarded_dispatch_ready" ? true : null,
         error:
-          name === "whatsapp_human_outbox_protocol_version"
+          name === "whatsapp_guarded_dispatch_ready"
             ? null
             : { code: "P0001", message: "private SQL payload" },
       })

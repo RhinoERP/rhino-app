@@ -11,6 +11,7 @@ import {
   getWhatsAppUserAccess,
   WhatsAppControlAccessError,
 } from "./conversation-control";
+import { guardedDispatchReady } from "./human-outbox";
 import { createWhatsAppAdminClient } from "./supabase-admin";
 
 const LIST_SIZE = 30;
@@ -135,7 +136,10 @@ export async function readInboxChat(
   if (!result.success) {
     throw new Error("Contrato de conversación inválido");
   }
-  return inboxJson(result.data);
+  return inboxJson({
+    ...result.data,
+    canSend: result.data.canSend && (await guardedDispatchReady(db)),
+  });
 }
 
 export async function readInboxHistory(

@@ -173,6 +173,34 @@ DO $$ DECLARE f whatsapp_human_fixture%ROWTYPE; x whatsapp_outbox%ROWTYPE; BEGIN
     RAISE EXCEPTION 'Result after pause was lost'; END IF;
 END $$;
 SQL
+# Transfer holds the same conversation lock as the final preflight. The worker
+# must see the new owner after it waits, even if its reservation is still valid.
+run_sql > "$task_pg_dir/preflight-setup.log" <<'SQL'
+SELECT control_whatsapp_conversation(org,race_chat,a,2,'CLAIM') FROM whatsapp_human_fixture;
+SELECT enqueue_whatsapp_human_message(org,race_chat,a,3,gen_random_uuid(),'Transferido antes del HTTP') FROM whatsapp_human_fixture;
+SELECT reserve_whatsapp_human_dispatch()->>'id';
+SQL
+run_sql > "$task_pg_dir/transfer-before-http.log" <<'SQL' &
+BEGIN;
+SELECT control_whatsapp_conversation(org,race_chat,a,3,'TRANSFER',b) FROM whatsapp_human_fixture;
+\echo transfer-lock-held
+SELECT pg_sleep(1);
+COMMIT;
+SQL
+first_pid=$!
+for attempt in {1..100}; do if rg -q 'transfer-lock-held' "$task_pg_dir/transfer-before-http.log"; then break; fi; sleep 0.05; done
+rg -q 'transfer-lock-held' "$task_pg_dir/transfer-before-http.log"
+run_sql > "$task_pg_dir/preflight-after-transfer.log" <<'SQL'
+SELECT guard_whatsapp_human_dispatch(x.id,x.lease_token,wi.phone_number_id,c.customer_phone) IS NULL
+FROM whatsapp_outbox x JOIN whatsapp_conversations c ON c.id=x.conversation_id
+JOIN whatsapp_integrations wi ON wi.id=x.integration_id
+WHERE x.conversation_id=(SELECT race_chat FROM whatsapp_human_fixture) AND x.status='SENDING';
+SQL
+wait "$first_pid"
+rg -qx t "$task_pg_dir/preflight-after-transfer.log"
+run_sql -c "SELECT count(*)=1 FROM whatsapp_outbox WHERE conversation_id=(SELECT race_chat FROM whatsapp_human_fixture) AND status='CANCELLED' AND reason_code='CONTROL_CONFLICT'" > "$task_pg_dir/preflight-result.log"
+rg -qx t "$task_pg_dir/preflight-result.log"
+
 # Reapply the complete release after human commands/events/facts exist.
 run_sql -f "$task_pg_dir/release.sql" > "$task_pg_dir/human-populated-upgrade.log" 2>&1
 run_sql -c "SELECT CASE WHEN count(*)=1 THEN true ELSE null END FROM whatsapp_messages WHERE external_message_id='human-race-accepted'" > "$task_pg_dir/human-upgrade-check.log"
@@ -200,4 +228,4 @@ for suite in recurring audio; do
     run_sql -f scripts/fixtures/whatsapp/audio-review.sql > "$task_pg_dir/audio-review.log" 2>&1
   fi
 done
-printf 'PASS: human control/outbox/inbox, two-session enqueue/reservation/control races, repeat/populated upgrade, module flags, recurring orders and audio.\nLogs: %s\n' "$task_pg_dir"
+printf 'PASS: human control/outbox/inbox, two-session enqueue/reservation/control/preflight races, repeat/populated upgrade, module flags, recurring orders and audio.\nLogs: %s\n' "$task_pg_dir"

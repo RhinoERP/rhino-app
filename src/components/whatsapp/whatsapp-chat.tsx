@@ -576,10 +576,12 @@ function ComposerNote({
   } else if (chat.assignedUserId !== currentUserId) {
     note = "Otro operador atiende esta conversación.";
   }
-  if (!(chat.canManage && chat.canSend) || chat.status === "CLOSED") {
-    note = chat.isSimulator
-      ? "Simulación local · sólo observación de mensajes."
-      : "Sólo lectura.";
+  if (chat.isSimulator) {
+    note = "Simulación local · sólo observación de mensajes.";
+  } else if (!chat.canManage || chat.status === "CLOSED") {
+    note = "Sólo lectura.";
+  } else if (!chat.canSend) {
+    note = "El envío humano no está disponible en este chat.";
   }
   return <p className="text-muted-foreground text-xs">{note}</p>;
 }

@@ -659,3 +659,54 @@ validación del simulador cubrió navegación y flags, y queda pendiente probar
 su ejecución de audio y LLM. Queda pendiente usar un número real de prueba
 con Meta Cloud, incluidas las credenciales, la entrega y los callbacks del
 proveedor. La validación se hizo en localhost.
+
+### Autorización del envío humano antes de Meta
+
+El checkout `2d381780`, comparado con `40bf0a2`, ya incluía la bandeja, el
+control versionado, las alertas y la outbox común. También validaba el
+vencimiento de la ventana entre la reserva humana y el HTTP. En ese tramo
+todavía podía cambiar el vendedor responsable o su permiso, y un canal
+deshabilitado podía dejar un envío sin confirmar aunque no se hubiera
+contactado a Meta.
+
+La migración `20261110005932_whatsapp_human_dispatch_guard.sql` agrega RPC
+exclusivas del rol de servicio. El worker vuelve a verificar el lease, el canal y destinatario
+reservados, el permiso del vendedor, la versión de control y la ventana con
+el mismo bloqueo de conversación que usa una transferencia. La consulta
+termina antes de cada POST, incluido el fallback ante el rechazo explícito
+del número de prueba. Si detecta una revocación o vencimiento, cancela el
+comando con el motivo correspondiente. Los resultados ambiguos de Meta
+siguen usando `UNKNOWN`.
+
+El detalle de la bandeja y la acción de envío consultan `whatsapp_guarded_dispatch_ready`
+antes de habilitar o aceptar envíos humanos nuevos. La comprobación también protege
+la reserva nueva y verifica las firmas y permisos de las RPC. Si falta la migración
+o los grants son incorrectos, el historial sigue disponible y el compositor indica
+que el envío humano está deshabilitado. La revisión de comandos previos conserva
+el protocolo anterior. Esta capacidad describe el esquema y sus permisos.
+
+Instalar la migración antes de actualizar el worker. El consumidor nuevo
+sólo reserva por la RPC nueva. Las firmas de jobs, reserva y finalización
+anteriores siguen disponibles, por lo que un worker viejo puede seguir
+operando con su comportamiento previo. La nueva garantía se aplica cuando
+todos los consumidores humanos usan la comprobación nueva. Un cambio de
+control posterior a esa comprobación puede coincidir con un POST en curso.
+
+Validación local de este cambio:
+
+- `WHATSAPP_PG_BIN=/opt/homebrew/opt/postgresql@17/bin bash scripts/test-whatsapp-human-control.sh`:
+  aprobó reaplicación con datos, permisos, pedido recurrente, flags y audio.
+  Dos sesiones verificaron que la comprobación espera el lock de transferencia
+  y cancela el comando con `CONTROL_CONFLICT` al ver la versión nueva.
+  Un grant incorrecto bloqueó la reserva nueva y dejó el comando pendiente.
+- Vitest del módulo, componentes, worker y endpoint interno: 255 pruebas en
+  21 archivos, con Meta simulado. Incluye cancelación antes del primer POST,
+  revocación y autorización antes del fallback, y bloqueo de envíos nuevos
+  con la migración ausente mientras el detalle sigue disponible.
+- Biome del repositorio, sintaxis del runner, typecheck y build del worker
+  aprobados.
+- Build de Next con chequeo de tipos aprobado en una copia temporal, usando
+  `node scripts/clean-next-build.mjs && node_modules/.bin/next build` con
+  credenciales ficticias y Supabase apuntando a localhost. El contador de
+  usuarios de la página pública registró un error de conexión esperado y el
+  build terminó con código 0.

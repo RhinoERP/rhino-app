@@ -5,6 +5,7 @@ import {
   listInbox,
   markInboxChatRead,
   playInboxAudio,
+  readInboxChat,
   readInboxHistory,
 } from "./inbox";
 
@@ -102,6 +103,47 @@ describe("WhatsApp inbox HTTP", () => {
     );
     expect(response.status).toBe(400);
     expect(mocks.access).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ data: true, error: null }, true],
+    [{ data: false, error: null }, false],
+    [{ data: null, error: { code: "PGRST202" } }, false],
+  ])("keeps chat detail readable with guarded dispatch readiness %j", async (readiness, canSend) => {
+    mocks.rpc
+      .mockResolvedValueOnce({
+        error: null,
+        data: {
+          id: chat,
+          customerName: null,
+          customerPhone: "54911",
+          status: "ACTIVE",
+          assignedUserId: null,
+          humanClaimedAt: null,
+          handoffReason: null,
+          controlVersion: 0,
+          deliveryBlock: null,
+          windowEndsAt: null,
+          isSimulator: false,
+          canManage: true,
+          canSend: true,
+          audioEnabled: false,
+          readCursor: null,
+          operators: [],
+          pendingOrder: null,
+          preSales: [],
+          commands: [],
+          payload: "private",
+        },
+      })
+      .mockResolvedValueOnce(readiness);
+    const response = await inboxResponse(() =>
+      readInboxChat("rhino", chat, new NextRequest("http://localhost"))
+    );
+    expect(response.status).toBe(200);
+    const detail = await response.json();
+    expect(detail).toMatchObject({ id: chat, canSend });
+    expect(detail).not.toHaveProperty("payload");
   });
 
   it("does not disclose internal Postgres errors or use a caller's actor for a read", async () => {

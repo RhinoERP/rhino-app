@@ -66,6 +66,13 @@ export type WhatsAppCommandResult = z.infer<typeof resultSchema> & {
   error?: string;
 };
 
+export async function guardedDispatchReady(
+  db: ReturnType<typeof createWhatsAppAdminClient>
+) {
+  const { data, error } = await db.rpc("whatsapp_guarded_dispatch_ready");
+  return !error && data === true;
+}
+
 async function runCommand(
   orgSlug: string,
   name: "enqueue_whatsapp_human_message" | "resolve_whatsapp_unknown",
@@ -76,8 +83,13 @@ async function runCommand(
     "whatsapp.manage"
   );
   const db = createWhatsAppAdminClient();
-  const protocol = await db.rpc("whatsapp_human_outbox_protocol_version");
-  if (protocol.error || protocol.data !== 1) {
+  const ready =
+    name === "enqueue_whatsapp_human_message"
+      ? await guardedDispatchReady(db)
+      : await db
+          .rpc("whatsapp_human_outbox_protocol_version")
+          .then((protocol) => !protocol.error && protocol.data === 1);
+  if (!ready) {
     return {
       success: false,
       error: "La outbox humana requiere completar la migración compatible.",

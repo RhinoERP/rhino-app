@@ -11,6 +11,7 @@ INSERT INTO whatsapp_conversations(id,organization_id,integration_id,customer_ph
 DO $$ DECLARE fn record; BEGIN
   FOR fn IN SELECT oid,proname FROM pg_proc WHERE pronamespace='public'::regnamespace
     AND proname IN ('enqueue_whatsapp_human_message','claim_whatsapp_human_outbox','complete_whatsapp_command',
+      'reserve_whatsapp_human_dispatch','guard_whatsapp_human_dispatch','whatsapp_guarded_dispatch_ready',
       'resolve_whatsapp_unknown','whatsapp_command_dto','record_whatsapp_delivery_status_scoped','reconcile_whatsapp_delivery') LOOP
     PERFORM pg_temp.assert_true(NOT has_function_privilege('authenticated',fn.oid,'EXECUTE')
       AND NOT has_function_privilege('anon',fn.oid,'EXECUTE') AND has_function_privilege('service_role',fn.oid,'EXECUTE'),'Server-only function: '||fn.proname);
@@ -20,6 +21,7 @@ END $$;
 GRANT EXECUTE ON FUNCTION complete_whatsapp_command(uuid,uuid,text,text) TO authenticated;
 SELECT pg_temp.assert_true(whatsapp_human_outbox_protocol_version()=0,'Unsafe new grants stop human dispatch');
 REVOKE EXECUTE ON FUNCTION complete_whatsapp_command(uuid,uuid,text,text) FROM authenticated;
+SELECT pg_temp.assert_true(whatsapp_guarded_dispatch_ready(),'Guarded dispatch is available with private RPCs');
 SET ROLE authenticated;
 DO $$ BEGIN
   BEGIN PERFORM claim_whatsapp_human_outbox(); RAISE EXCEPTION 'DIRECT_CLAIM';
@@ -170,6 +172,60 @@ DO $$ DECLARE f whatsapp_human_fixture%ROWTYPE; j agent_jobs%ROWTYPE; src uuid; 
   result:=prepare_whatsapp_outbox(j.id,j.lease_token,'No enviar fuera de ventana');
   PERFORM pg_temp.assert_true(result->>'status'='CANCELLED','Agent shares the real customer window');
 END $$;
+BEGIN;
+SELECT control_whatsapp_conversation(org,other_chat,a,0,'CLAIM') FROM whatsapp_human_fixture;
+UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp() WHERE id=(SELECT other_chat FROM whatsapp_human_fixture);
+SELECT enqueue_whatsapp_human_message(org,other_chat,a,1,gen_random_uuid(),'Grant incorrecto') FROM whatsapp_human_fixture;
+GRANT EXECUTE ON FUNCTION guard_whatsapp_human_dispatch(uuid,uuid,text,text) TO authenticated;
+SELECT pg_temp.assert_true(NOT whatsapp_guarded_dispatch_ready() AND reserve_whatsapp_human_dispatch() IS NULL,
+  'Unsafe guard grants disable the protocol and block new reservations');
+SELECT pg_temp.assert_true(EXISTS(SELECT 1 FROM whatsapp_outbox WHERE conversation_id=(SELECT other_chat FROM whatsapp_human_fixture)
+  AND text='Grant incorrecto' AND status='PENDING' AND lease_token IS NULL),'Blocked reservations leave commands pending');
+ROLLBACK;
+-- Exercise the guard after reservation, with the same service role as the worker.
+BEGIN;
+SET LOCAL ROLE service_role;
+SET LOCAL "request.jwt.claim.role" = 'service_role';
+DO $$
+DECLARE
+  f whatsapp_human_fixture%ROWTYPE;
+  x jsonb;
+  command_id uuid;
+  lease uuid;
+  reason text;
+BEGIN
+  SELECT * INTO f FROM whatsapp_human_fixture;
+  PERFORM control_whatsapp_conversation(f.org,f.other_chat,f.a,0,'CLAIM');
+  FOREACH reason IN ARRAY ARRAY['ACCESS_REVOKED','CHANNEL_UNAVAILABLE','WINDOW_EXPIRED','CONTROL_CONFLICT'] LOOP
+    UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp() WHERE id=f.other_chat;
+    x:=enqueue_whatsapp_human_message(f.org,f.other_chat,f.a,1,gen_random_uuid(),'Antes del HTTP');
+    command_id:=(x->'command'->>'id')::uuid;
+    x:=reserve_whatsapp_human_dispatch();
+    lease:=(x->>'lease_token')::uuid;
+    PERFORM pg_temp.assert_true((x->>'id')::uuid=command_id,'New reservation RPC works as service_role');
+    PERFORM pg_temp.assert_true(guard_whatsapp_human_dispatch(command_id,gen_random_uuid(),x->>'phone_number_id',x->>'recipient') IS NULL,
+      'A stale lease cannot authorize or cancel a reservation');
+    UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp() WHERE id=f.other_chat;
+    PERFORM pg_temp.assert_true(
+      guard_whatsapp_human_dispatch(command_id,lease,x->>'phone_number_id',x->>'recipient')
+        =(SELECT last_customer_message_at+interval '24 hours' FROM whatsapp_conversations WHERE id=f.other_chat),
+      'Guard returns the current deadline, including inbound after reservation');
+
+    CASE reason
+      WHEN 'ACCESS_REVOKED' THEN UPDATE organization_members SET is_active=false WHERE organization_id=f.org AND user_id=f.a;
+      WHEN 'CHANNEL_UNAVAILABLE' THEN UPDATE organizations SET whatsapp_enabled=false WHERE id=f.org;
+      WHEN 'WINDOW_EXPIRED' THEN UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp()-interval '24 hours' WHERE id=f.other_chat;
+      WHEN 'CONTROL_CONFLICT' THEN PERFORM control_whatsapp_conversation(f.org,f.other_chat,f.a,1,'TRANSFER',f.b);
+    END CASE;
+    PERFORM pg_temp.assert_true(guard_whatsapp_human_dispatch(command_id,lease,x->>'phone_number_id',x->>'recipient') IS NULL,
+      'Guard denies an unsent command: '||reason);
+    PERFORM pg_temp.assert_true((SELECT status='CANCELLED' AND reason_code=reason AND external_message_id IS NULL
+      FROM whatsapp_outbox WHERE id=command_id),'Known rejection is terminal: '||reason);
+    UPDATE organization_members SET is_active=true WHERE organization_id=f.org AND user_id=f.a;
+    UPDATE organizations SET whatsapp_enabled=true WHERE id=f.org;
+  END LOOP;
+END $$;
+ROLLBACK;
 -- Prepare a separate accepted chat for real two-session enqueue/claim races.
 UPDATE whatsapp_conversations SET last_customer_message_at=clock_timestamp() WHERE id=(SELECT race_chat FROM whatsapp_human_fixture);
 SELECT control_whatsapp_conversation(org,race_chat,a,0,'CLAIM') FROM whatsapp_human_fixture;
