@@ -79,6 +79,10 @@ async function OrganizationLayoutContent({
             {children}
           </div>
           <BottomNav
+            canManageSales={
+              permissions.includes("sales.manage") ||
+              permissions.includes("sales.manage.all")
+            }
             orgSlug={orgSlug}
             wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
           />

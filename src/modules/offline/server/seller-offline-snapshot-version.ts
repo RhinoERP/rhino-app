@@ -15,7 +15,7 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-export function getSellerOfflineSnapshotEtag(
+export function getSellerOfflineSnapshotContentHash(
   snapshot: SellerOfflineSnapshotV1
 ): string {
   const {
@@ -27,7 +27,13 @@ export function getSellerOfflineSnapshotEtag(
   const digest = createHash("sha256")
     .update(JSON.stringify(canonicalize(content)))
     .digest("base64url");
-  return `"${digest}"`;
+  return digest;
+}
+
+export function getSellerOfflineSnapshotEtag(
+  snapshot: SellerOfflineSnapshotV1
+): string {
+  return `"${getSellerOfflineSnapshotContentHash(snapshot)}"`;
 }
 
 export function etagMatches(header: string | null, etag: string): boolean {

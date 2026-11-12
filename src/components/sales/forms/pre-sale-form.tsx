@@ -114,6 +114,10 @@ import {
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
+import {
+  normalizePreSaleSearch,
+  searchPreSaleCustomers,
+} from "./pre-sale-customer-search";
 
 type PreSaleFormProps = {
   orgSlug: string;
@@ -522,14 +526,6 @@ function buildSellerLabel(member: OrganizationMember): string {
   return "Usuario sin nombre";
 }
 
-const normalizeSearchValue = (value: string) =>
-  value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
 function composePaymentObservations(
   observations: string,
   options: Array<{ value: string; label: string }>,
@@ -546,7 +542,7 @@ function composePaymentObservations(
 }
 
 const toSearchTokens = (value: string) => {
-  const normalized = normalizeSearchValue(value);
+  const normalized = normalizePreSaleSearch(value);
   if (!normalized) {
     return [];
   }
@@ -559,7 +555,7 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
   }
 
   const nameTokens = toSearchTokens(product.name);
-  const sku = normalizeSearchValue(product.sku);
+  const sku = normalizePreSaleSearch(product.sku);
 
   return searchTokens.every((token) => {
     if (sku.includes(token)) {
@@ -666,6 +662,11 @@ export function PreSaleForm({
       return false;
     });
   }, [customers, sellerId]);
+
+  const customerSearchResults = useMemo(
+    () => searchPreSaleCustomers(filteredCustomers, customerSearch),
+    [customerSearch, filteredCustomers]
+  );
 
   useEffect(() => {
     if (sellerId || sellerOptions.length === 0) {
@@ -1799,16 +1800,21 @@ export function PreSaleForm({
                       className="w-[320px] max-w-[90vw] p-0"
                       sideOffset={8}
                     >
-                      <Command>
+                      <Command disablePointerSelection shouldFilter={false}>
                         <CommandInput
                           onValueChange={setCustomerSearch}
                           placeholder="Buscar cliente..."
                           value={customerSearch}
                         />
-                        <CommandList>
-                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                        {/* Remount the scroll container for each query: cmdk can otherwise retain its previous scroll position. */}
+                        <CommandList key={customerSearch}>
+                          {customerSearchResults.length === 0 && (
+                            <p className="py-6 text-center text-sm">
+                              Sin resultados.
+                            </p>
+                          )}
                           <CommandGroup>
-                            {filteredCustomers.map((customer) => {
+                            {customerSearchResults.map((customer) => {
                               const primaryLabel =
                                 customer.fantasy_name ||
                                 customer.business_name ||
@@ -1828,16 +1834,6 @@ export function PreSaleForm({
                               ].filter(Boolean);
                               const metadataLabel =
                                 metadataParts.join(" · ") || "Sin ubicación";
-                              const searchTerms = normalizeSearchValue(
-                                [
-                                  primaryLabel,
-                                  customer.fantasy_name ?? "",
-                                  customer.business_name ?? "",
-                                  customer.city ?? "",
-                                  customer.address ?? "",
-                                ].join(" ")
-                              );
-
                               return (
                                 <CommandItem
                                   className="items-start"
@@ -1845,7 +1841,7 @@ export function PreSaleForm({
                                   onSelect={() =>
                                     handleCustomerSelect(customer.id)
                                   }
-                                  value={searchTerms}
+                                  value={customer.id}
                                 >
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium">
@@ -2133,7 +2129,8 @@ export function PreSaleForm({
                   </div>
                 ) : null}
 
-                <div className="space-y-2">
+                {/* Keep the configured payment method in the submitted payload, without exposing an editor. */}
+                <div className="hidden">
                   <Label htmlFor="paymentMethod">Método de pago</Label>
                   <Select
                     onValueChange={(value) =>
@@ -2155,8 +2152,9 @@ export function PreSaleForm({
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
+              {/* Taxes still come from product/organization settings and remain in totals. */}
+              <div className="hidden">
+                <div>
                   <Label htmlFor="taxes">Impuestos</Label>
                   <Popover
                     onOpenChange={setIsTaxesPickerOpen}
@@ -2260,7 +2258,7 @@ export function PreSaleForm({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <div className="grid gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="supplierFilter">Proveedor</Label>
                   <Popover
@@ -2336,7 +2334,7 @@ export function PreSaleForm({
                   </Popover>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="hidden">
                   <Label htmlFor="brandFilter">Marca</Label>
                   <Popover
                     onOpenChange={setIsBrandFilterOpen}
@@ -2409,7 +2407,7 @@ export function PreSaleForm({
                   </Popover>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="hidden">
                   <Label htmlFor="categoryFilter">Categoría</Label>
                   <Popover
                     onOpenChange={setIsCategoryFilterOpen}
@@ -2990,7 +2988,7 @@ export function PreSaleForm({
                                 <PopoverTrigger asChild>
                                   <Button
                                     aria-label={`Cambiar impuestos de ${item.name}`}
-                                    className="h-7 w-7 shrink-0 text-muted-foreground"
+                                    className="hidden"
                                     size="icon"
                                     type="button"
                                     variant="ghost"

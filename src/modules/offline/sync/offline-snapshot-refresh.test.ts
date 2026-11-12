@@ -42,6 +42,7 @@ const responseForSnapshot = () =>
     status: 200,
     headers: {
       ETag: '"version-1"',
+      "X-Snapshot-Signature": "v1.initial.signature",
       "X-Snapshot-Expires-At": snapshot.expiresAt,
       "X-Snapshot-Generated-At": snapshot.generatedAt,
     },
@@ -94,6 +95,7 @@ describe("offline snapshot refresh", () => {
         status: 304,
         headers: {
           ETag: '"version-1"',
+          "X-Snapshot-Signature": "v1.refreshed.signature",
           "X-Snapshot-Expires-At": expiresAt,
           "X-Snapshot-Generated-At": generatedAt,
         },
@@ -110,9 +112,24 @@ describe("offline snapshot refresh", () => {
 
     expect(result.status).toBe("unchanged");
     expect(requestHeaders.get("if-none-match")).toBe('"version-1"');
+    expect(requestHeaders.get("x-snapshot-id")).toBe(snapshot.snapshotId);
     expect(result.record?.snapshot.snapshotId).toBe(snapshot.snapshotId);
+    expect(result.record?.signature).toBe("v1.refreshed.signature");
     expect(result.record?.snapshot.expiresAt).toBe(expiresAt);
     expect(result.record?.lastCheckedAt).toBe(generatedAt);
+  });
+
+  it("persists the signature returned with a full snapshot", async () => {
+    fetchMock.mockResolvedValueOnce(responseForSnapshot());
+
+    const result = await refreshSellerOfflineSnapshot({
+      organizationId,
+      orgSlug: "acme",
+      ownerUserId,
+      now: initialTime,
+    });
+
+    expect(result.record?.signature).toBe("v1.initial.signature");
   });
 
   it("preserves the previous snapshot when refresh fails", async () => {

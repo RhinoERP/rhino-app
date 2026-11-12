@@ -4,6 +4,8 @@
     "dev": "next dev",
     "build": "node scripts/clean-next-build.mjs && next build",
     "start": "next start",
+    "pwa:serve": "pnpm build && pnpm start",
+    "pwa:test": "node scripts/test-pwa-offline.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "test": "pnpm lint",

@@ -79,11 +79,19 @@ async function refreshUnlocked(
   if (current?.etag) {
     headers.set("If-None-Match", current.etag);
   }
+  if (current?.snapshot.snapshotId) {
+    headers.set("X-Snapshot-Id", current.snapshot.snapshotId);
+  }
   const response = await fetch(
     `/api/v1/org/${encodeURIComponent(options.orgSlug)}/seller-offline-snapshot`,
-    { cache: "no-store", headers, signal: options.signal }
+    {
+      cache: "no-store",
+      headers,
+      signal: options.signal,
+    }
   );
   const etag = response.headers.get("etag");
+  const signature = response.headers.get("x-snapshot-signature");
 
   if (response.status === 304) {
     if (!current) {
@@ -94,6 +102,7 @@ async function refreshUnlocked(
       ...validity,
       checkedAt: new Date(now).toISOString(),
       etag: etag ?? current.etag,
+      signature,
       organizationId: options.organizationId,
       ownerUserId: options.ownerUserId,
     });
@@ -128,12 +137,13 @@ async function refreshUnlocked(
     throw new Error("El snapshot no corresponde a la sesion actual");
   }
 
-  const record = await saveSellerSnapshot(
-    snapshot,
-    new Blob([body]).size,
+  const record = await saveSellerSnapshot({
+    value: snapshot,
+    byteSize: new Blob([body]).size,
     etag,
-    new Date(now).toISOString()
-  );
+    checkedAt: new Date(now).toISOString(),
+    signature,
+  });
   return { status: "updated", record };
 }
 

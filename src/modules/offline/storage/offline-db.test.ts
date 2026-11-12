@@ -7,6 +7,7 @@ import {
   claimOfflineCommand,
   deleteOfflineCommand,
   enqueueOfflineCommand,
+  enqueueOfflineSalesQuoteCommand,
   getActiveOfflinePreSaleDraft,
   getActiveSellerSnapshot,
   getSellerSnapshot,
@@ -14,6 +15,7 @@ import {
   isSellerSnapshotExpired,
   listOfflineCommands,
   listOfflinePreSaleDrafts,
+  listOfflineSalesQuoteCommands,
   maintainOfflineDataForOwner,
   purgeAllOfflineData,
   purgeOfflineDataForOrganization,
@@ -115,8 +117,8 @@ describe("offline snapshot storage rules", () => {
     await purgeAllOfflineData();
     const snapshotA = makeSnapshot(organizationAId, "org-a");
     const snapshotB = makeSnapshot(organizationBId, "org-b");
-    await saveSellerSnapshot(snapshotA, 10);
-    await saveSellerSnapshot(snapshotB, 20);
+    await saveSellerSnapshot({ value: snapshotA, byteSize: 10 });
+    await saveSellerSnapshot({ value: snapshotB, byteSize: 20 });
 
     const draftA = makeDraft(
       "00000000-0000-4000-8000-000000000013",
@@ -283,6 +285,29 @@ describe("offline command storage", () => {
     );
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ status: "queued" });
+  });
+
+  it("stores offline quote commands and purges them with their organization", async () => {
+    await purgeAllOfflineData();
+    await enqueueOfflineSalesQuoteCommand({
+      commandId: "00000000-0000-4000-8000-000000000019",
+      ownerUserId,
+      organizationId: organizationAId,
+      orgSlug: "acme",
+      signature: "v1.claims.mac",
+      snapshot: makeSnapshot(organizationAId, "acme"),
+      quote: { customerId: "customer", items: [] },
+      createdAt: generatedAt,
+    });
+    await expect(
+      listOfflineSalesQuoteCommands(ownerUserId)
+    ).resolves.toHaveLength(1);
+
+    await purgeOfflineDataForOrganization(ownerUserId, organizationAId);
+
+    await expect(
+      listOfflineSalesQuoteCommands(ownerUserId)
+    ).resolves.toHaveLength(0);
   });
 });
 

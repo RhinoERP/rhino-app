@@ -11,6 +11,7 @@ import {
   ShoppingCartIcon,
   TrashIcon,
   WarningCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -43,6 +44,12 @@ import {
   revalidateOfflinePreSaleDraft,
 } from "@/modules/offline/pricing/offline-pre-sale-pricing";
 import {
+  normalizeOfflineProductQuery,
+  OFFLINE_PRODUCT_SEARCH_DEFAULT_LIMIT,
+  OFFLINE_PRODUCT_SEARCH_LIMIT,
+  searchOfflineProducts,
+} from "@/modules/offline/search/offline-product-search";
+import {
   deleteOfflineCommandForDraft,
   deleteOfflinePreSaleDraft,
   enqueueOfflineCommand,
@@ -56,12 +63,6 @@ type OfflinePreSaleFormProps = {
   snapshot: SellerOfflineSnapshotV1;
   initialDraft: OfflinePreSaleDraft | null;
 };
-
-const normalize = (value: string | null | undefined) =>
-  (value ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
 
 function formatMoney(value: number, currency = "ARS") {
   return new Intl.NumberFormat("es-AR", {
@@ -129,19 +130,16 @@ export function OfflinePreSaleForm({
     () => new Map(snapshot.products.map((product) => [product.id, product])),
     [snapshot.products]
   );
-  const filteredProducts = useMemo(() => {
-    const query = normalize(productSearch);
-    if (!query) {
-      return snapshot.products.slice(0, 12);
-    }
-    return snapshot.products
-      .filter((product) =>
-        normalize(
-          [product.name, product.sku, product.brand].join(" ")
-        ).includes(query)
-      )
-      .slice(0, 20);
-  }, [productSearch, snapshot.products]);
+  const matchingProducts = useMemo(
+    () => searchOfflineProducts(snapshot.products, productSearch),
+    [productSearch, snapshot.products]
+  );
+  const filteredProducts = matchingProducts.slice(
+    0,
+    normalizeOfflineProductQuery(productSearch).length > 0
+      ? OFFLINE_PRODUCT_SEARCH_LIMIT
+      : OFFLINE_PRODUCT_SEARCH_DEFAULT_LIMIT
+  );
   const subtotal = truncateMoney(
     draft.payload.items.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
@@ -551,7 +549,7 @@ export function OfflinePreSaleForm({
           <CardHeader>
             <CardTitle className="text-base">Condiciones</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
+          <CardContent className="grid gap-3">
             <select
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               onChange={(event) =>
@@ -573,8 +571,16 @@ export function OfflinePreSaleForm({
                 </option>
               ))}
             </select>
+            {/* Only expose this editor if an older draft must fix a disabled method to migrate. */}
             <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+              aria-label="Elegir método de pago válido"
+              className={
+                migration.issues.some(
+                  (issue) => issue.kind === "payment-method"
+                )
+                  ? "h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  : "hidden"
+              }
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
@@ -611,16 +617,36 @@ export function OfflinePreSaleForm({
             <div className="relative">
               <MagnifyingGlassIcon className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
               <Input
-                className="pl-9"
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="pr-10 pl-9"
                 onChange={(event) => setProductSearch(event.target.value)}
-                placeholder="Buscar por nombre o SKU"
+                placeholder="Nombre, SKU, marca o proveedor"
+                spellCheck={false}
                 value={productSearch}
               />
+              {productSearch && (
+                <Button
+                  aria-label="Limpiar búsqueda de productos"
+                  className="-translate-y-1/2 absolute top-1/2 right-1"
+                  onClick={() => setProductSearch("")}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <XIcon />
+                </Button>
+              )}
             </div>
-            <div className="max-h-64 space-y-2 overflow-y-auto">
+            <p aria-live="polite" className="text-muted-foreground text-xs">
+              {productSearch.trim()
+                ? `${matchingProducts.length} ${matchingProducts.length === 1 ? "coincidencia" : "coincidencias"}${matchingProducts.length > filteredProducts.length ? ` · mostrando ${filteredProducts.length}` : ""}`
+                : `Mostrando ${filteredProducts.length} de ${snapshot.products.length} productos · escribí para buscar en todo el catálogo`}
+            </p>
+            <div className="max-h-80 space-y-2 overflow-y-auto overscroll-contain">
               {filteredProducts.map((product) => (
                 <button
-                  className="flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left hover:bg-muted/50"
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   key={product.id}
                   onClick={() => addProduct(product.id)}
                   type="button"
@@ -629,8 +655,14 @@ export function OfflinePreSaleForm({
                     <span className="block truncate font-medium text-sm">
                       {product.name}
                     </span>
+                    <span className="block truncate text-muted-foreground text-xs">
+                      {[product.sku, product.brand, product.supplierName]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
                     <span className="block text-muted-foreground text-xs">
-                      {product.sku} · Stock {product.totalQuantity ?? 0}
+                      Stock de referencia: {product.totalQuantity ?? 0}{" "}
+                      {product.unitOfMeasure}
                     </span>
                   </span>
                   <span className="shrink-0 font-medium text-sm">
@@ -641,6 +673,12 @@ export function OfflinePreSaleForm({
                   </span>
                 </button>
               ))}
+              {filteredProducts.length === 0 && (
+                <p className="rounded-lg border border-dashed p-6 text-center text-muted-foreground text-sm">
+                  No encontramos productos. Probá con otro nombre, SKU, marca o
+                  proveedor.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>

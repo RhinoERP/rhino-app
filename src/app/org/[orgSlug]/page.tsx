@@ -212,6 +212,10 @@ export default async function OrganizationPage({
   if (isMobileDevice) {
     return (
       <SellerMobileHome
+        canManageSales={
+          permissions.includes("sales.manage") ||
+          permissions.includes("sales.manage.all")
+        }
         orgSlug={orgSlug}
         posEnabled={currentOrganization.pos_enabled ?? true}
         productionEnabled={currentOrganization.production_enabled ?? false}

@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Rhinos",
     short_name: "Rhinos",
     description: "Tu plataforma de gestion de distribucion",
-    start_url: "/",
+    start_url: "/offline.html",
     scope: "/",
     display: "standalone",
     orientation: "any",

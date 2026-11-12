@@ -23,6 +23,11 @@ export const metadata: Metadata = {
 };
 
 function isPwaEnabled() {
+  // Serwist deliberately omits its precache manifest in development. Registering
+  // that worker would replace a working offline installation with an empty one.
+  if (process.env.NODE_ENV !== "production") {
+    return false;
+  }
   const configured = process.env.NEXT_PUBLIC_PWA_ENABLED;
   if (configured) {
     return configured === "true";

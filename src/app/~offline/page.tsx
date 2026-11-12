@@ -20,7 +20,16 @@ export default function OfflinePage() {
     const updateStatus = () => setOnline(navigator.onLine);
     window.addEventListener("online", updateStatus);
     window.addEventListener("offline", updateStatus);
+    const controller = new AbortController();
+    fetch("/", { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (response.ok) {
+          window.location.replace("/");
+        }
+      })
+      .catch(() => setOnline(false));
     return () => {
+      controller.abort();
       window.removeEventListener("online", updateStatus);
       window.removeEventListener("offline", updateStatus);
     };
@@ -40,6 +49,7 @@ export default function OfflinePage() {
           height={88}
           priority
           src="/icons/pwa-192x192.png"
+          unoptimized
           width={88}
         />
         <div className="mx-auto mb-5 flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -58,9 +68,17 @@ export default function OfflinePage() {
           Reintentar
         </Button>
         {hasOfflineData && (
-          <Button asChild className="mt-3 w-full" variant="outline">
-            <a href="/~offline/datos">Consultar datos offline</a>
-          </Button>
+          <>
+            <Button asChild className="mt-3 w-full" variant="outline">
+              <a href="/~offline/cotizaciones">Cotizador competitivo offline</a>
+            </Button>
+            <Button asChild className="mt-3 w-full" variant="outline">
+              <a href="/~offline/preventa">Nueva preventa offline</a>
+            </Button>
+            <Button asChild className="mt-3 w-full" variant="outline">
+              <a href="/~offline/datos">Consultar datos offline</a>
+            </Button>
+          </>
         )}
       </section>
     </main>

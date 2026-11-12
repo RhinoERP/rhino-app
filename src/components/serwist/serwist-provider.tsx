@@ -32,10 +32,25 @@ function UpdateLifecycle() {
         },
       });
     };
-    const reloadWhenControlling = () => {
+    const reloadWhenControlling = (event: { isUpdate?: boolean }) => {
       trackPwaEvent("pwa.service_worker_controlling");
-      window.location.reload();
+      if (event.isUpdate) {
+        window.location.reload();
+      } else {
+        toast.success("Acceso offline preparado", {
+          description:
+            "Las pantallas ya están disponibles sin conexión. Prepará también los datos de tu organización.",
+        });
+      }
     };
+
+    serwist.register().catch((error: unknown) => {
+      captureException(error, { tags: { feature: "pwa-registration" } });
+      trackPwaEvent("pwa.service_worker_register_failed");
+      toast.error("No se pudo preparar el acceso offline", {
+        description: "Mantené la conexión y volvé a abrir Rhinos.",
+      });
+    });
 
     serwist.addEventListener("waiting", showUpdateToast);
     serwist.addEventListener("controlling", reloadWhenControlling);
@@ -73,6 +88,7 @@ export function SerwistProvider({
     <BaseSerwistProvider
       cacheOnNavigation={false}
       disable={!enabled}
+      register={false}
       reloadOnOnline={false}
       swUrl="/serwist/sw.js"
     >
