@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
@@ -63,6 +64,19 @@ export async function dispatchChildOrderAction(
 
     if (fetchError || !childOrder) {
       throw new Error("Pedido no encontrado");
+    }
+
+    const settings = await getOrganizationSettings(orgSlug);
+    if (!settings.success) {
+      throw new Error("No se pudo verificar la configuración de remitos.");
+    }
+    if (
+      childOrder.parent_order_id &&
+      settings.data?.remittance_mask_printing_enabled
+    ) {
+      throw new Error(
+        "Actualizá la página y usá Preparar remitos para confirmar el despacho."
+      );
     }
 
     const parentId = childOrder.parent_order_id ?? childOrderId;

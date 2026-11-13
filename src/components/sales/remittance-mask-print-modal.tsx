@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 type RemittanceMaskPrintModalProps = {
   loadMask: (purchaseOrderNumber: string) => Promise<string | null>;
   title?: string;
+  triggerLabel?: string;
 };
 
 /**
@@ -20,6 +21,7 @@ type RemittanceMaskPrintModalProps = {
 export function RemittanceMaskPrintModal({
   loadMask,
   title = "Imprimir máscara de remito",
+  triggerLabel = "Imprimir máscara",
 }: RemittanceMaskPrintModalProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [open, setOpen] = useState(false);
@@ -78,7 +80,7 @@ export function RemittanceMaskPrintModal({
         variant="outline"
       >
         <PrinterIcon className="mr-2 size-4" weight="bold" />
-        Imprimir máscara
+        {triggerLabel}
       </Button>
     );
   }
@@ -95,7 +97,7 @@ export function RemittanceMaskPrintModal({
         variant="outline"
       >
         <PrinterIcon className="mr-2 size-4" weight="bold" />
-        Imprimir máscara
+        {triggerLabel}
       </Button>
 
       <div className="fixed inset-0 z-50 flex flex-col bg-background">

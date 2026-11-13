@@ -9,6 +9,7 @@ import { guardOrganizationPermissionAccess } from "@/modules/organizations/servi
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
+import { assertNoIssuedOrderRemittances } from "../server/order-remittance-guards.service";
 import {
   recalcParentOrderStatus,
   restoreStockForOrderItems,
@@ -823,6 +824,7 @@ export async function revertOrderStatusAction(
     }
 
     const { supabase, org, user, currentOrder } = validation;
+    await assertNoIssuedOrderRemittances(supabase, org.id, currentOrder.id);
     await checkReentryWarehouse({
       supabase,
       orgId: org.id,

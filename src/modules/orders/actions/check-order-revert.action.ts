@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { documentedOrdersForParents } from "../server/order-remittance-guards.service";
 import { ORDER_STATUS_CONFIG } from "../types";
 
 export type RevertType = "normal" | "undo_creation" | "cascade_revert";
@@ -61,6 +62,19 @@ export async function checkOrderRevertAction(
     }
 
     const isChild = order.parent_order_id !== null;
+    const documented = await documentedOrdersForParents(supabase, org.id, [
+      order.parent_order_id ?? orderId,
+    ]);
+    if (documented.has(orderId)) {
+      return {
+        canRevert: false,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "normal",
+        error:
+          "El pedido tiene remitos activos; primero se debe resolver la documentación del despacho.",
+      };
+    }
 
     // Children always revert via undo_creation (cancel child, restore stock)
     if (isChild) {
