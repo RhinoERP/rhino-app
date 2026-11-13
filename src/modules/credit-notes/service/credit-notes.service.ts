@@ -33,6 +33,7 @@ import type {
   PaginatedResult,
   SortParam,
 } from "../types";
+import { resolveCreditNoteFiscalBreakdown } from "./credit-note-fiscal-breakdown";
 
 type AccessContext = {
   scope: "all" | "own";
@@ -1175,6 +1176,7 @@ export async function getCreditNoteById(
       is_historical,
       created_at,
       arca_status,
+      arca_response_json,
       arca_cae,
       arca_cae_expires_at,
       arca_authorized_at,
@@ -1198,7 +1200,7 @@ export async function getCreditNoteById(
       suppliers(name),
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("id", creditNoteId)
@@ -1209,7 +1211,12 @@ export async function getCreditNoteById(
     return null;
   }
 
-  return mapCreditNoteRow(data);
+  const note = mapCreditNoteRow(data);
+  note.fiscalBreakdown = resolveCreditNoteFiscalBreakdown(
+    data.arca_response_json,
+    note
+  );
+  return note;
 }
 
 export async function getCreditNotesBySaleId(

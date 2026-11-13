@@ -113,6 +113,18 @@ export type CreateCreditNoteSourceDocumentInput = {
 };
 
 export type CreditNote = {
+  fiscalBreakdown?: {
+    netAmount: number;
+    exemptAmount: number;
+    untaxedAmount: number;
+    totalAmount: number;
+    taxes: Array<{
+      name: string;
+      rate: number;
+      baseAmount: number;
+      taxAmount: number;
+    }>;
+  } | null;
   id: string;
   organizationId: string;
   salesOrderId: string | null;

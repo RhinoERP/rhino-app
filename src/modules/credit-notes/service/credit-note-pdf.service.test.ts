@@ -139,6 +139,124 @@ function renderHtml(creditNote: CreditNote): Promise<string> {
 }
 
 describe("credit note PDF HTML", () => {
+  it("does not infer zero VAT from the mere presence of lines", async () => {
+    const base = createCreditNote();
+    const html = await renderHtml(
+      createCreditNote({
+        fiscalBreakdown: null,
+        taxes: [],
+        items: base.items.map((item) => ({ ...item, taxAmount: 0 })),
+      })
+    );
+    expect(html).toContain("Desglose fiscal no disponible");
+    expect(html).not.toContain("<td>IVA</td>");
+  });
+
+  it("preserves known own line taxes when authorized details are unavailable", async () => {
+    const html = await renderHtml(
+      createCreditNote({ fiscalBreakdown: null, taxes: [] })
+    );
+    expect(html).not.toContain("Desglose fiscal no disponible");
+    expect(html).toContain("68.946,12");
+  });
+
+  it("lists fiscal net, exempt and untaxed amounts without inventing a discount bridge", async () => {
+    const html = await renderHtml(
+      createCreditNote({
+        amount: 248.5,
+        items: [],
+        taxes: [],
+        fiscalBreakdown: {
+          netAmount: 200,
+          exemptAmount: 10,
+          untaxedAmount: 5,
+          totalAmount: 248.5,
+          taxes: [
+            { name: "IVA", rate: 21, baseAmount: 100, taxAmount: 21 },
+            { name: "IVA", rate: 10.5, baseAmount: 100, taxAmount: 10.5 },
+            { name: "Percepción", rate: 1, baseAmount: 200, taxAmount: 2 },
+          ],
+        },
+      })
+    );
+    expect(html).toContain("<td>Neto gravado</td>");
+    expect(html).toContain("<td>Exento</td>");
+    expect(html).toContain("<td>No gravado</td>");
+    expect(html).not.toContain("<td>Sub. Total 2</td>");
+    expect(html).not.toContain("<td>Desc.</td>");
+    expect(html).toContain("248,50");
+  });
+
+  it("uses USD in the PDF summary and keeps the fiscal total", async () => {
+    const base = createCreditNote();
+    const html = await renderHtml(
+      createCreditNote({
+        sale: base.sale ? { ...base.sale, currency: "USD" } : null,
+        fiscalBreakdown: {
+          netAmount: 328_314.86,
+          exemptAmount: 0,
+          untaxedAmount: 0,
+          totalAmount: base.amount,
+          taxes: [
+            {
+              name: "IVA",
+              rate: 21,
+              baseAmount: 328_314.86,
+              taxAmount: 68_946.12,
+            },
+          ],
+        },
+      })
+    );
+    expect(html).toContain("Son dólares");
+    expect(html).not.toContain("Son pesos");
+    expect(html).toContain("397.260,98");
+  });
+
+  it("uses the authorized net and VAT for a note with no own lines or taxes", async () => {
+    const note = createCreditNote({
+      items: [],
+      taxes: [],
+      amount: 662_394.22,
+      fiscalBreakdown: {
+        netAmount: 547_433.24,
+        exemptAmount: 0,
+        untaxedAmount: 0,
+        totalAmount: 662_394.22,
+        taxes: [
+          {
+            name: "IVA",
+            rate: 21,
+            baseAmount: 547_433.24,
+            taxAmount: 114_960.98,
+          },
+        ],
+      },
+    });
+    const data = buildCreditNotePDFData({
+      creditNote: note,
+      issuerName: "Empresa",
+    });
+    expect(data.items[0]).toMatchObject({
+      unitPrice: 547_433.24,
+      netAmount: 547_433.24,
+      taxAmount: 114_960.98,
+      totalAmount: 662_394.22,
+    });
+    const html = await generateCreditNoteHTML(data);
+    expect(html).toContain("IVA 21%");
+    expect(html).toContain("114.960,98");
+    expect(html).toContain("547.433,24");
+  });
+
+  it("marks unavailable fiscal data without reporting zero VAT", async () => {
+    const html = await renderHtml(
+      createCreditNote({ items: [], taxes: [], fiscalBreakdown: null })
+    );
+    expect(html).toContain("Desglose fiscal no disponible");
+    expect(html).not.toContain("<td>IVA</td>");
+  });
+
   it("renders return product details, taxes and fiscal QR", async () => {
     const html = await renderHtml(createCreditNote());
 

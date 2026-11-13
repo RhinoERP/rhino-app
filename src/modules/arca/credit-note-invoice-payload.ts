@@ -407,6 +407,31 @@ function buildCreditNoteAmounts(params: {
     );
   }
 
+  // Independently truncated bases can differ from the net obtained by
+  // subtracting taxes from the total. Assign that residual to the largest
+  // base so the declared net and its VAT breakdown remain consistent.
+  if (scaledIvaTaxes.length > 1) {
+    // Inputs are already truncated to cents. Serialize those cents before
+    // subtraction to avoid losing a cent to binary floating-point cancellation.
+    const cents = (amount: number) =>
+      Number(amount.toFixed(2).replace(".", ""));
+    const baseTotalCents = scaledIvaTaxes.reduce(
+      (sum, tax) => sum + cents(tax.baseAmount),
+      0
+    );
+    const residualCents = cents(taxableBase) - baseTotalCents;
+    const largest = scaledIvaTaxes.reduce((selected, tax) =>
+      tax.baseAmount > selected.baseAmount ? tax : selected
+    );
+    const reconciledBase = (cents(largest.baseAmount) + residualCents) / 100;
+    if (reconciledBase < 0) {
+      throw new ArcaValidationError(
+        "No se pudieron conciliar las bases imponibles de la nota de crédito."
+      );
+    }
+    largest.baseAmount = reconciledBase;
+  }
+
   return {
     ImpNeto: taxableBase,
     ImpIVA: ivaAmount,
@@ -415,7 +440,7 @@ function buildCreditNoteAmounts(params: {
       ? {
           Iva: scaledIvaTaxes.map((tax) => ({
             Id: tax.classification.arcaId,
-            BaseImp: taxableBase,
+            BaseImp: scaledIvaTaxes.length === 1 ? taxableBase : tax.baseAmount,
             Importe: truncateMoney(tax.taxAmount),
           })),
         }
