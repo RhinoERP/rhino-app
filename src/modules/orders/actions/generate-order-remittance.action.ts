@@ -5,10 +5,13 @@ import { createClient } from "@/lib/supabase/server";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
+import { findSavedRemittance } from "../server/order-remittance-documents.service";
+import { assertNoIssuedOrderRemittancesBySlug } from "../server/order-remittance-guards.service";
 import {
   generateOrderRemittancePdfDocument,
   resolveRemittanceOrderIds,
 } from "../server/order-remittance-pdf-document.service";
+import { downloadOrderRemittanceAction } from "./download-order-remittance.action";
 
 type GenerateOrderRemittanceResult = {
   success: boolean;
@@ -24,6 +27,19 @@ export async function generateOrderRemittanceAction(
   await ensure("orders.manage", orgSlug);
   try {
     const supabase = await createClient();
+
+    const saved = remitoNumber
+      ? await findSavedRemittance(orgSlug, [orderId], remitoNumber)
+      : null;
+    if (saved) {
+      const result = await downloadOrderRemittanceAction(
+        orgSlug,
+        orderId,
+        remitoNumber ?? saved.document_number
+      );
+      return result.success ? { success: true, pdfUrl: result.pdfUrl } : result;
+    }
+    await assertNoIssuedOrderRemittancesBySlug(supabase, orgSlug, orderId);
 
     const resolvedRemito =
       remitoNumber ??
@@ -60,7 +76,8 @@ export async function generateOrderRemittanceAction(
 
     const childOrderIds = await resolveRemittanceOrderIds(
       orderId,
-      resolvedRemito
+      resolvedRemito,
+      orgSlug
     );
 
     const pdfDoc = await generateOrderRemittancePdfDocument({

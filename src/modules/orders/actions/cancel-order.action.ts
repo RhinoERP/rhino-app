@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isStockReentryFallbackRequired } from "@/modules/inventory/utils/stock-reentry";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { assertNoIssuedOrderRemittances } from "../server/order-remittance-guards.service";
 import { cancelOrder } from "../service/orders.service";
 import type { OrderFlowStatus } from "../types";
 
@@ -54,6 +55,7 @@ export async function cancelOrderAction(
 
   let result: Awaited<ReturnType<typeof cancelOrder>>;
   try {
+    await assertNoIssuedOrderRemittances(supabase, org.id, currentOrder.id);
     result = await cancelOrder(supabase, {
       allowDefaultFallback,
       orgSlug,

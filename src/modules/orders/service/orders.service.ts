@@ -16,6 +16,7 @@ import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import { setPriority } from "../hooks/set-priority";
 import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
+import { documentedOrdersForParents } from "../server/order-remittance-guards.service";
 import {
   type ChildOrderForDispatch,
   type ChildOrderForProduction,
@@ -4074,14 +4075,29 @@ export async function getOrdersRevertInfo(
     .filter((o) => o.parent_order_id === null)
     .map((o) => o.id);
 
-  const [parentsWithChildren, latestPerOrder] = await Promise.all([
-    fetchParentsWithChildren(supabase, parentIds, org.id),
-    fetchLatestHistoryPerOrder(supabase, orderIds),
-  ]);
+  const [parentsWithChildren, latestPerOrder, documentedOrders] =
+    await Promise.all([
+      fetchParentsWithChildren(supabase, parentIds, org.id),
+      fetchLatestHistoryPerOrder(supabase, orderIds),
+      documentedOrdersForParents(
+        supabase,
+        org.id,
+        orders.map((order) => order.parent_order_id ?? order.id)
+      ),
+    ]);
 
   const result: OrdersRevertInfoMap = {};
 
   for (const orderId of orderIds) {
+    if (documentedOrders.has(orderId)) {
+      result[orderId] = {
+        canRevert: false,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "normal",
+      };
+      continue;
+    }
     result[orderId] = buildOrderRevertInfo(
       orderId,
       orderMap,
