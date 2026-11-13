@@ -15,8 +15,12 @@ const mocks = vi.hoisted(() => ({
   refs: vi.fn(),
   prepare: vi.fn(),
   saved: vi.fn(),
+  recalc: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("../service/orders.service", () => ({
+  recalcParentOrderStatus: mocks.recalc,
+}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/modules/organizations/utils/with-permission-guard", () => ({
   ensure: vi.fn(),
@@ -106,6 +110,7 @@ const input: ConfirmOrderRemittancesInput = {
 describe("confirmOrderRemittancesAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.recalc.mockResolvedValue({ salesOrderId: "sale" });
     mocks.existing.mockResolvedValue({ data: null, error: null });
     mocks.prepare.mockResolvedValue({ success: true, data: plan });
     mocks.rpc.mockResolvedValue({
@@ -189,6 +194,27 @@ describe("confirmOrderRemittancesAction", () => {
     expect((await confirmOrderRemittancesAction(input)).success).toBe(true);
     expect(mocks.rpc.mock.calls[1][1]).toEqual(firstArgs);
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    expect(mocks.recalc).toHaveBeenCalledTimes(2);
+    expect(mocks.recalc).toHaveBeenCalledWith("parent", "org");
+  });
+
+  it("retries legacy synchronization after a committed dispatch without issuing again", async () => {
+    mocks.recalc.mockRejectedValueOnce(new Error("No se pudo sincronizar"));
+    const failed = await confirmOrderRemittancesAction(input);
+    expect(failed.success).toBe(false);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect((await confirmOrderRemittancesAction(input)).success).toBe(true);
+    expect(mocks.rpc.mock.calls[1][1]).toEqual(mocks.rpc.mock.calls[0][1]);
+    expect(mocks.recalc).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not synchronize the parent when the dispatch transaction fails", async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      error: { message: "Número de remito ocupado" },
+      data: null,
+    });
+    expect((await confirmOrderRemittancesAction(input)).success).toBe(false);
+    expect(mocks.recalc).not.toHaveBeenCalled();
   });
 
   it("does not commit a stale plan or another user's idempotency key", async () => {

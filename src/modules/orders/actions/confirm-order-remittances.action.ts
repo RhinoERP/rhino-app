@@ -11,6 +11,7 @@ import {
   loadSavedRemittances,
   remittanceHeaderSnapshotSchema,
 } from "../server/order-remittance-documents.service";
+import { recalcParentOrderStatus } from "../service/orders.service";
 import { prepareOrderRemittancesAction } from "./prepare-order-remittances.action";
 
 const documentInputSchema = z.object({
@@ -204,6 +205,7 @@ export async function confirmOrderRemittancesAction(
     if (!result.data.length) {
       throw new Error("No se devolvieron los remitos confirmados.");
     }
+    await recalcParentOrderStatus(payload.parentOrderId, org.id);
     for (const path of [
       "despacho",
       "pedidos",
