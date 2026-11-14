@@ -536,3 +536,33 @@ describe("WhatsApp outbound authorization", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+it("does not dispatch a reserved agent response if the price list changed", async () => {
+  vi.stubEnv("WHATSAPP_META_ACCESS_TOKEN", "test-token");
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const db = database(true);
+  db.rpc.mockImplementation(async (name) => ({
+    data:
+      name === "prepare_whatsapp_priced_outbox"
+        ? { ...reservation, status: "SENDING", text: "Precio anterior" }
+        : null,
+    error: null,
+  }));
+  try {
+    await expect(
+      sendWhatsAppText(db as unknown as SupabaseClient, {
+        ...input,
+        pricingKey: "previous-list",
+      })
+    ).rejects.toMatchObject({ code: "DELIVERY_NOT_AUTHORIZED" });
+    expect(db.rpc).toHaveBeenCalledWith("guard_whatsapp_priced_dispatch", {
+      p_source_message_id: input.sourceMessageId,
+      p_lease_token: input.leaseToken,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  }
+});

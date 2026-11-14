@@ -32,6 +32,7 @@ export type AgentContext = {
   mode?: "LOCAL_SIMULATOR";
   jobId?: string;
   leaseToken?: string;
+  pricingKey?: string | null;
 };
 
 export type ToolCallAudit = { name: string; arguments: unknown };

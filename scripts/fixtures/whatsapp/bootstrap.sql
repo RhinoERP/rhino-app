@@ -18,7 +18,13 @@ CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$ SELECT curren
 CREATE TABLE auth.users (id uuid PRIMARY KEY, email text, raw_user_meta_data jsonb DEFAULT '{}');
 CREATE TABLE organizations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), is_active boolean DEFAULT true, slug text DEFAULT gen_random_uuid()::text);
 CREATE TABLE platform_admins (user_id uuid PRIMARY KEY);
-CREATE TABLE customers (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), fantasy_name text, business_name text);
+CREATE TABLE customers (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid REFERENCES organizations(id), fantasy_name text, business_name text,
+ phone text, cuit text, email text, address text, city text, province text, delivery_address text, delivery_city text,
+ tax_condition text, client_number text, sales_price_list_id uuid, customer_channel text, assigned_seller_id uuid,
+ preferred_carrier_id uuid, due_days integer, is_active boolean NOT NULL DEFAULT true
+);
+CREATE TABLE carriers (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), is_active boolean DEFAULT true);
 CREATE TABLE sales_orders (
  id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), created_at timestamptz DEFAULT now(),
  customer_id uuid, user_id uuid, sale_number integer, sale_date date, credit_days integer, expiration_date date,
@@ -30,7 +36,7 @@ CREATE TABLE sales_order_items (id uuid PRIMARY KEY, organization_id uuid, sales
  product_id uuid, product_variant_id uuid, description text, quantity numeric, unit_quantity numeric, unit_price numeric, base_price numeric,discount_amount numeric,discount_percentage numeric,subtotal numeric);
 CREATE TABLE sales_order_taxes (organization_id uuid,sales_order_id uuid REFERENCES sales_orders(id),tax_id uuid NOT NULL,name text,rate numeric,base_amount numeric,tax_amount numeric,tax_code_snapshot text);
 CREATE TABLE sales_order_item_taxes (organization_id uuid,sales_order_id uuid REFERENCES sales_orders(id),sales_order_item_id uuid REFERENCES sales_order_items(id),product_id uuid,tax_id uuid NOT NULL,name text,rate numeric,base_amount numeric,tax_amount numeric,tax_code_snapshot text,source text);
-CREATE TABLE sales_price_lists (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id));
+CREATE TABLE sales_price_lists (id uuid PRIMARY KEY, organization_id uuid REFERENCES organizations(id), is_active boolean DEFAULT true, valid_from date);
 CREATE TABLE roles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid REFERENCES organizations(id));
 CREATE TABLE organization_members (user_id uuid REFERENCES auth.users(id), organization_id uuid REFERENCES organizations(id), is_active boolean DEFAULT true,
  role_id uuid REFERENCES roles(id), is_owner boolean NOT NULL DEFAULT false);

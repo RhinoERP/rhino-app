@@ -52,6 +52,12 @@ export const DEFAULT_WHATSAPP_RESPONSE_DELAY = {
   maxMinutes: 3,
 } as const;
 
+export const WHATSAPP_PRICING_MODES = [
+  "SINGLE",
+  "CUSTOMER_OR_GENERAL",
+  "REGISTERED_ONLY",
+] as const;
+
 export type WhatsAppIntegration = {
   id: string;
   organizationId: string;
@@ -59,6 +65,8 @@ export type WhatsAppIntegration = {
   displayPhoneNumber: string | null;
   status: WhatsAppIntegrationStatus;
   salesPriceListId: string | null;
+  pricingMode: (typeof WHATSAPP_PRICING_MODES)[number];
+  allowGeneralForCustomers: boolean;
   responsibleUserId: string | null;
   businessHours: WhatsAppBusinessHours;
   responseDelayMinMinutes: number;
@@ -75,6 +83,8 @@ export type WhatsAppIntegrationConfiguration = Pick<
   | "displayPhoneNumber"
   | "status"
   | "salesPriceListId"
+  | "pricingMode"
+  | "allowGeneralForCustomers"
   | "responsibleUserId"
   | "businessHours"
   | "responseDelayMinMinutes"

@@ -1024,3 +1024,66 @@ describe("commercial worker fencing", () => {
     ]);
   });
 });
+
+describe("effective WhatsApp sales lists", () => {
+  it.each([
+    ["list-i", 10, 22],
+    ["list-z", 30, 26],
+    ["price-list", 0, 20],
+  ] as const)("uses %s for the offer and not the integration list", async (listId, value, price) => {
+    testDb.tables.whatsapp_integrations[0].pricing_mode = "CUSTOMER_OR_GENERAL";
+    if (listId !== "price-list") {
+      testDb.tables.sales_price_lists.push({
+        ...testDb.tables.sales_price_lists[0],
+        id: listId,
+        value,
+      });
+    }
+    testDb.rpc.mockResolvedValue({
+      data: {
+        key: "current",
+        listId,
+        customerId: listId === "price-list" ? null : customer,
+      },
+      error: null,
+    });
+    const result = await executeCommercialTool(
+      { ...context, pricingKey: "current" },
+      "get_offer",
+      { product_id: product }
+    );
+    expect(result).toMatchObject({ unitPrice: price });
+  });
+
+  it("reprices the retained items in an open cart after a list change", async () => {
+    pendingCart();
+    testDb.tables.conversation_carts[0].status = "OPEN";
+    testDb.tables.whatsapp_conversations[0].pricing_context_since =
+      "2026-10-26T12:00:00Z";
+    testDb.tables.whatsapp_integrations[0].pricing_mode = "REGISTERED_ONLY";
+    testDb.tables.sales_price_lists[0].value = 30;
+    testDb.rpc.mockResolvedValue({
+      data: { key: "current", listId: "price-list", customerId: customer },
+      error: null,
+    });
+    const result = await executeCommercialTool(
+      { ...context, pricingKey: "current" },
+      "get_cart",
+      {}
+    );
+    expect(result).toMatchObject({ items: [{ id: "item", unitPrice: 26 }] });
+  });
+
+  it("rejects a tool call from an earlier pricing context", async () => {
+    testDb.tables.whatsapp_integrations[0].pricing_mode = "REGISTERED_ONLY";
+    testDb.rpc.mockResolvedValue({
+      data: { key: "new", listId: "price-list" },
+      error: null,
+    });
+    await expect(
+      executeCommercialTool({ ...context, pricingKey: "old" }, "get_offer", {
+        product_id: product,
+      })
+    ).rejects.toThrow("El acceso comercial del contacto cambió");
+  });
+});
