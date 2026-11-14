@@ -4,6 +4,10 @@
     {
       "path": "/api/internal/whatsapp-agent/audio-cleanup",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/ia-comercial-resumen",
+      "schedule": "30 11 * * 1-6"
     }
   ],
   "daemons": {
