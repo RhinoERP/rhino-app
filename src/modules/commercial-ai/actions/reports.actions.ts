@@ -198,7 +198,13 @@ export async function saveReportAction(
     // Se guarda la especificación ya validada contra el catálogo.
     const clean = sanitizeSpec(spec);
     const dataset = clean ? datasetById(clean.dataset) : undefined;
-    if (!(clean && dataset && canUseDataset(dataset, access.permissions))) {
+    if (
+      !(
+        clean &&
+        dataset &&
+        canUseDataset(dataset, access.permissions, access.isManager)
+      )
+    ) {
       throw new ReportError("Ese reporte no se puede guardar.");
     }
     const supabase = await createClient();

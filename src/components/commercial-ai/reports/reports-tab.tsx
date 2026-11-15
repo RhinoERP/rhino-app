@@ -60,10 +60,10 @@ import {
 } from "@/modules/commercial-ai/actions/reports.actions";
 import {
   DATASET_GROUPS,
-  DATASETS,
   type Dataset,
   type DatasetGroup,
   datasetById,
+  datasetsFor,
   defaultSpec,
   type ReportSpec,
   sanitizeSpec,
@@ -283,8 +283,14 @@ function Home({
   onDelete: (saved: SavedReport) => void;
 }) {
   const [group, setGroup] = useState<DatasetGroup | "Todos">("Todos");
-  const allowed = new Set(datasets.map((d) => d.id));
-  const templates = REPORT_TEMPLATES.filter((t) => allowed.has(t.spec.dataset));
+  // Sin reportes armados sobre métricas que no le corresponden (ej. stock valorizado).
+  const templates = REPORT_TEMPLATES.filter((t) => {
+    const source = datasets.find((d) => d.id === t.spec.dataset);
+    const first = t.spec.measures?.[0];
+    return Boolean(
+      source && (!first || source.measures.some((m) => m.key === first))
+    );
+  });
   const groups = DATASET_GROUPS.filter((g) =>
     templates.some((t) => t.group === g)
   );
@@ -555,7 +561,7 @@ function backLabelOf(trail: ReportSpec[]): string | null {
 }
 
 export function ReportsTab() {
-  const { snapshot } = useCommercialAi();
+  const { snapshot, isManager } = useCommercialAi();
   const orgSlug = snapshot.orgSlug;
   const [home, setHome] = useState<ReportsHome | null>(null);
   const [homeError, setHomeError] = useState("");
@@ -583,11 +589,17 @@ export function ReportsTab() {
     });
   }, [orgSlug]);
 
+  // Las mismas fuentes y métricas que el servidor deja ver a este usuario.
   const datasets = useMemo(
-    () => DATASETS.filter((d) => home?.datasets.includes(d.id)),
-    [home]
+    () =>
+      datasetsFor(["organization.admin"], isManager).filter((d) =>
+        home?.datasets.includes(d.id)
+      ),
+    [home, isManager]
   );
-  const dataset = spec ? datasetById(spec.dataset) : undefined;
+  const dataset = spec
+    ? datasets.find((d) => d.id === spec.dataset)
+    : undefined;
 
   const run = useCallback(
     async (next: ReportSpec) => {

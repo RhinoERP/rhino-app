@@ -26,6 +26,8 @@ export type Measure = {
   format: MeasureFormat;
   agg: Aggregation;
   hint?: string;
+  /** Dato general de la empresa: solo para quien gestiona IA Comercial. */
+  managerOnly?: boolean;
 };
 
 export type Dimension = {
@@ -56,6 +58,11 @@ export type Dataset = {
   dateLabel?: string;
   /** Para un vendedor, solo sus clientes. */
   sellerScoped: boolean;
+  /**
+   * Datos generales de la empresa (compras, gastos, proveedores, caja): un
+   * vendedor no los ve aunque tenga el permiso del módulo.
+   */
+  managerOnly?: boolean;
   dimensions: Dimension[];
   measures: Measure[];
   defaultGroupBy: string | null;
@@ -274,6 +281,7 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: "mostrador",
+    managerOnly: true,
     label: "Venta en mostrador (POS)",
     group: "Ventas",
     description: "Tickets de la caja: totales, cantidad y ticket promedio.",
@@ -446,6 +454,7 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: "compras",
+    managerOnly: true,
     label: "Compras",
     group: "Compras",
     description: "Lo que se compró a cada proveedor.",
@@ -497,6 +506,7 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: "compras_productos",
+    managerOnly: true,
     label: "Compras por producto",
     group: "Compras",
     description: "Qué se compró, cuánto y a qué costo.",
@@ -542,6 +552,7 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: "pagos_proveedores",
+    managerOnly: true,
     label: "Pagos a proveedores",
     group: "Finanzas",
     description: "Lo que se le pagó a cada proveedor y con qué medio.",
@@ -574,6 +585,7 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: "deuda_proveedores",
+    managerOnly: true,
     label: "Cuenta corriente con proveedores",
     group: "Finanzas",
     description: "Lo que se les debe hoy a los proveedores.",
@@ -611,6 +623,7 @@ export const DATASETS: Dataset[] = [
   },
   {
     id: "gastos",
+    managerOnly: true,
     label: "Gastos",
     group: "Finanzas",
     description: "Gastos de la empresa por categoría, fijos y variables.",
@@ -660,6 +673,7 @@ export const DATASETS: Dataset[] = [
       {
         key: "valorizado",
         label: "Valorizado a precio de venta",
+        managerOnly: true,
         format: "money",
         agg: sum("valorizado"),
       },
@@ -736,11 +750,40 @@ export function datasetById(id: string): Dataset | undefined {
 
 export function canUseDataset(
   dataset: Dataset,
-  permissions: string[]
+  permissions: string[],
+  isManager: boolean
 ): boolean {
+  if (dataset.managerOnly && !isManager) {
+    return false;
+  }
   return (
     permissions.includes("organization.admin") ||
     dataset.permissions.some((p) => permissions.includes(p))
+  );
+}
+
+/**
+ * Las fuentes que puede usar alguien, sin las métricas que no le
+ * corresponden (por ejemplo, un vendedor no ve el stock valorizado).
+ */
+export function datasetsFor(
+  permissions: string[],
+  isManager: boolean
+): Dataset[] {
+  return DATASETS.filter((d) => canUseDataset(d, permissions, isManager)).map(
+    (d) => {
+      if (isManager) {
+        return d;
+      }
+      const measures = d.measures.filter((m) => !m.managerOnly);
+      const allowed = new Set(measures.map((m) => m.key));
+      const defaults = d.defaultMeasures.filter((m) => allowed.has(m));
+      return {
+        ...d,
+        measures,
+        defaultMeasures: defaults.length ? defaults : [measures[0]?.key ?? ""],
+      };
+    }
   );
 }
 

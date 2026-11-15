@@ -237,3 +237,47 @@ describe("explorar", () => {
     });
   });
 });
+
+describe("qué ve cada rol", () => {
+  it("un vendedor no ve datos generales aunque tenga el permiso del módulo", async () => {
+    const { datasetsFor } = await import("./catalog");
+    const perms = [
+      "commercial_ai.read",
+      "purchases.read",
+      "finances.read",
+      "inventory.read",
+      "pos.read",
+      "sales.read",
+    ];
+    const seller = datasetsFor(perms, false).map((d) => d.id);
+    expect(seller).not.toEqual(expect.arrayContaining(["compras"]));
+    for (const id of [
+      "compras",
+      "compras_productos",
+      "pagos_proveedores",
+      "deuda_proveedores",
+      "gastos",
+      "mostrador",
+    ]) {
+      expect(seller).not.toContain(id);
+    }
+    expect(seller).toEqual(expect.arrayContaining(["ventas", "stock"]));
+    const stock = datasetsFor(perms, false).find((d) => d.id === "stock");
+    expect(stock?.measures.map((m) => m.key)).not.toContain("valorizado");
+    expect(stock?.defaultMeasures).not.toContain("valorizado");
+
+    const manager = datasetsFor([...perms, "commercial_ai.manage"], true).map(
+      (d) => d.id
+    );
+    expect(manager).toEqual(
+      expect.arrayContaining(["compras", "gastos", "mostrador"])
+    );
+  });
+
+  it("solo las fuentes con el permiso del módulo", async () => {
+    const { datasetsFor } = await import("./catalog");
+    expect(
+      datasetsFor(["commercial_ai.manage"], true).map((d) => d.id)
+    ).not.toContain("compras");
+  });
+});

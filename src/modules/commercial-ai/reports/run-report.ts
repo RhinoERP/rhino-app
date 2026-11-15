@@ -15,10 +15,9 @@ import {
   type ReportRow,
 } from "./aggregate";
 import {
-  canUseDataset,
-  DATASETS,
   type Dataset,
   datasetById,
+  datasetsFor,
   type MeasureFormat,
   PERIOD_PRESETS,
   type ReportSpec,
@@ -91,7 +90,7 @@ export async function resolveReportAccess(
 
 /** Fuentes que este usuario puede usar. */
 export function availableDatasets(access: ReportAccess): Dataset[] {
-  return DATASETS.filter((d) => canUseDataset(d, access.permissions));
+  return datasetsFor(access.permissions, access.isManager);
 }
 
 export class ReportError extends Error {}
@@ -167,18 +166,34 @@ function measureColumns(dataset: Dataset, spec: ReportSpec): ReportColumn[] {
     }));
 }
 
-function checkedSpec(access: ReportAccess, input: Partial<ReportSpec>) {
+/**
+ * Valida el pedido contra lo que este usuario puede ver: la fuente y las
+ * métricas (un vendedor no ve datos generales de la empresa).
+ */
+export function checkedSpec(access: ReportAccess, input: Partial<ReportSpec>) {
   const spec = sanitizeSpec(input);
   if (!spec) {
     throw new ReportError("Elegí qué datos querés ver.");
   }
-  const dataset = datasetById(spec.dataset) as Dataset;
-  if (!canUseDataset(dataset, access.permissions)) {
-    throw new ReportError(
-      `No tenés permiso para ver ${dataset.label.toLowerCase()}.`
-    );
+  const dataset = availableDatasets(access).find((d) => d.id === spec.dataset);
+  if (!dataset) {
+    const label =
+      datasetById(spec.dataset)?.label.toLowerCase() ?? "esos datos";
+    throw new ReportError(`No tenés permiso para ver ${label}.`);
   }
-  return { spec, dataset };
+  const allowed = new Set(dataset.measures.map((m) => m.key));
+  const measures = spec.measures.filter((m) => allowed.has(m));
+  return {
+    spec: {
+      ...spec,
+      measures: measures.length ? measures : dataset.defaultMeasures,
+      sort:
+        spec.sort && spec.sort.by !== "label" && !allowed.has(spec.sort.by)
+          ? null
+          : spec.sort,
+    },
+    dataset,
+  };
 }
 
 /** Corre un reporte con los permisos y la cartera del usuario. */
