@@ -86,6 +86,10 @@ Se puede abrir una sección o ficha por URL: `?seccion=reportes|rhino|…`,
     listos; `ai-report.ts` pedido en palabras → spec y "Conclusiones de RHINO".
   - Reportes guardados: tabla `commercial_ai_saved_reports` (propios o
     compartidos). Export Excel/CSV/imprimir.
+  - UI interactiva (`components/commercial-ai/reports/*`): opciones plegadas
+    (`builder-panel`), los números eligen la métrica del gráfico, tocar barra/
+    porción/punto/fila abre la ficha y permite profundizar (`explore.ts`:
+    `drillSpec`, con "Volver"), lo destacado (lidera / más creció / más cayó).
 - **WhatsApp del vendedor** (`modules/commercial-ai/whatsapp/*`): consulta su
   cartera (o toda la empresa si tiene `team_view`), notas de voz, y **carga
   preventas** (`buscar_productos`, `preparar_pedido`, confirmación con "sí").
