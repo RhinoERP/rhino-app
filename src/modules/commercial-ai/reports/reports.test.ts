@@ -219,7 +219,7 @@ describe("explorar", () => {
     );
     expect(byClient).toMatchObject({
       groupBy: "fecha",
-      grain: "mes",
+      grain: "dia",
       filters: [{ dimension: "cliente", values: ["Pendino"] }],
     });
     const byMonth = drillSpec(

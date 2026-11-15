@@ -432,7 +432,7 @@ function pieData(data: ChartDatum[], key: string): ChartDatum[] {
 function renderPie(setup: ChartSetup) {
   const slices = pieData(setup.data, setup.keys[0]);
   return (
-    <PieChart>
+    <PieChart accessibilityLayer={false}>
       <Pie
         data={slices}
         dataKey={setup.keys[0]}
@@ -477,6 +477,7 @@ function renderLine(setup: ChartSetup) {
   );
   return (
     <LineChart
+      accessibilityLayer={false}
       className="cursor-pointer"
       data={setup.data}
       margin={MARGIN}
@@ -517,6 +518,7 @@ function renderLine(setup: ChartSetup) {
 function renderArea(setup: ChartSetup) {
   return (
     <AreaChart
+      accessibilityLayer={false}
       className="cursor-pointer"
       data={setup.data}
       margin={MARGIN}
@@ -585,6 +587,7 @@ function renderBar(setup: ChartSetup) {
   const valueTick = (v: number) => formatShort(v, setup.format);
   return (
     <BarChart
+      accessibilityLayer={false}
       className="cursor-pointer"
       data={setup.data}
       layout={horizontal ? "vertical" : "horizontal"}

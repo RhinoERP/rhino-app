@@ -6,7 +6,7 @@
  */
 import { REST_KEY, type ReportRow } from "./aggregate";
 import type { Dataset, ReportSpec } from "./catalog";
-import { bucketRange, finerGrain } from "./periods";
+import { bucketRange, finerGrain, suggestedGrain } from "./periods";
 
 export type Highlight = {
   key: string;
@@ -87,6 +87,28 @@ export function isDateDimension(dataset: Dataset, key: string | null): boolean {
   return dataset.dimensions.some((d) => d.key === key && d.type === "date");
 }
 
+const DAILY = new Set([
+  "hoy",
+  "ayer",
+  "esta_semana",
+  "semana_pasada",
+  "este_mes",
+  "mes_pasado",
+  "ultimos_30",
+]);
+const WEEKLY = new Set(["ultimos_90", "este_trimestre", "trimestre_pasado"]);
+
+/** Un grano que muestre bien la evolución dentro del período del reporte. */
+export function grainForPeriod(spec: ReportSpec): ReportSpec["grain"] {
+  if (spec.period === "personalizado" && spec.from && spec.to) {
+    return suggestedGrain({ from: spec.from, to: spec.to });
+  }
+  if (DAILY.has(spec.period)) {
+    return "dia";
+  }
+  return WEEKLY.has(spec.period) ? "semana" : "mes";
+}
+
 /**
  * Profundizar en un grupo: si es una fecha, el período pasa a ser ese grupo;
  * si no, se filtra por ese valor. Después se abre por `nextGroupBy`.
@@ -125,7 +147,7 @@ export function drillSpec(
   }
   return {
     ...base,
-    grain: nextIsDate ? "mes" : spec.grain,
+    grain: nextIsDate ? grainForPeriod(spec) : spec.grain,
     filters: [
       ...spec.filters.filter((f) => f.dimension !== spec.groupBy),
       { dimension: spec.groupBy, values: [row.label] },
