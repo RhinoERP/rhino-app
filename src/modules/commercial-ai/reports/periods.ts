@@ -6,6 +6,10 @@ import type { Grain, PeriodPreset, ReportSpec } from "./catalog";
 const DAY_MS = 86_400_000;
 const WEEK_DAYS = 7;
 const MONTHS_IN_QUARTER = 3;
+const QUARTER_KEY = /^(\d{4})-T([1-4])$/;
+const MONTH_KEY = /^\d{4}-\d{2}$/;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const YEAR_KEY = /^\d{4}$/;
 
 export type DateRange = { from: string; to: string };
 
@@ -223,4 +227,36 @@ export function suggestedGrain(range: DateRange): Grain {
     return "mes";
   }
   return "trimestre";
+}
+
+/** Las fechas que abarca un grupo de fecha (para profundizar en él). */
+export function bucketRange(key: string, grain: Grain): DateRange | null {
+  if (grain === "anio" && YEAR_KEY.test(key)) {
+    return { from: `${key}-01-01`, to: `${key}-12-31` };
+  }
+  const quarter = key.match(QUARTER_KEY);
+  if (grain === "trimestre" && quarter) {
+    const start = `${quarter[1]}-${String((Number(quarter[2]) - 1) * MONTHS_IN_QUARTER + 1).padStart(2, "0")}-01`;
+    return {
+      from: start,
+      to: addDays(shiftMonths(start, MONTHS_IN_QUARTER), -1),
+    };
+  }
+  if (grain === "mes" && MONTH_KEY.test(key)) {
+    return { from: `${key}-01`, to: monthEnd(`${key}-01`) };
+  }
+  if (!ISO_DAY.test(key)) {
+    return null;
+  }
+  return grain === "semana"
+    ? { from: key, to: addDays(key, WEEK_DAYS - 1) }
+    : { from: key, to: key };
+}
+
+/** Un grano más fino para ver adentro de un grupo de fecha. */
+export function finerGrain(grain: Grain): Grain {
+  if (grain === "anio" || grain === "trimestre") {
+    return "mes";
+  }
+  return "dia";
 }

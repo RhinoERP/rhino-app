@@ -74,11 +74,11 @@ import {
   type ReportTemplate,
 } from "@/modules/commercial-ai/reports/templates";
 import { RhinoAvatar } from "../rhino/rhino-avatar";
-import { RhinoText } from "../rhino/rhino-text";
 import { useCommercialAi } from "../shared";
+import { ChartGlyph, GROUP_COLORS } from "./chart-glyph";
+import { ReportBody } from "./report-body";
 import { ReportBuilder } from "./report-builder";
 import { downloadCsv, downloadExcel } from "./report-format";
-import { ReportChart, ReportKpis, ReportTable } from "./report-view";
 
 const GROUP_ICONS: Record<DatasetGroup, Icon> = {
   Ventas: StorefrontIcon,
@@ -187,23 +187,36 @@ function TemplateCard({
   template: ReportTemplate;
   onOpen: () => void;
 }) {
-  const GroupIcon = GROUP_ICONS[template.group];
+  const color = GROUP_COLORS[template.group];
+  const ranking =
+    Boolean(template.spec.groupBy) && template.spec.groupBy !== "fecha";
   return (
     <button
-      className="group flex items-start gap-3 rounded-xl border bg-card p-3 text-left transition-all hover:border-primary/40 hover:shadow-sm"
+      className="group flex items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onOpen}
       type="button"
     >
-      <span className="rounded-lg bg-primary/10 p-2 text-primary">
-        <GroupIcon className="size-4" weight="duotone" />
-      </span>
-      <span className="min-w-0">
-        <span className="block font-medium text-sm group-hover:text-primary">
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+          <span
+            className="size-1.5 rounded-full"
+            style={{ background: color }}
+          />
+          {template.group}
+        </span>
+        <span className="mt-0.5 block font-medium text-sm">
           {template.title}
         </span>
         <span className="mt-0.5 block text-muted-foreground text-xs leading-snug">
           {template.description}
         </span>
+      </span>
+      <span className="shrink-0 rounded-lg bg-muted/60 p-1.5 transition-transform group-hover:scale-105">
+        <ChartGlyph
+          color={color}
+          kind={template.spec.chart ?? "bar"}
+          ranking={ranking}
+        />
       </span>
     </button>
   );
@@ -536,58 +549,9 @@ function ReportHeader({
   );
 }
 
-function ReportBody({
-  report,
-  insight,
-  loading,
-}: {
-  report: ReportResult;
-  insight: string | null;
-  loading: boolean;
-}) {
-  return (
-    <div
-      className={cn("space-y-3 transition-opacity", loading && "opacity-50")}
-    >
-      {insight ? (
-        <div className="flex gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm leading-relaxed">
-          <RhinoAvatar size={32} />
-          <div className="min-w-0 flex-1">
-            <p className="mb-1 font-medium">Lo que ve RHINO</p>
-            <RhinoText text={insight} />
-          </div>
-        </div>
-      ) : null}
-      {report.notes.length ? (
-        <ul className="space-y-0.5 text-muted-foreground text-xs">
-          {report.notes.map((note) => (
-            <li key={note}>· {note}</li>
-          ))}
-        </ul>
-      ) : null}
-      {report.factCount ? (
-        <>
-          <ReportKpis report={report} />
-          <ReportChart
-            key={`${report.spec.chart}-${report.measures.map((m) => m.key).join()}`}
-            report={report}
-          />
-          {report.spec.groupBy ? <ReportTable report={report} /> : null}
-          <p className="text-muted-foreground text-xs">
-            {report.factCount.toLocaleString("es-AR")} registros
-            {report.spec.groupBy
-              ? ` · ${report.groupCount.toLocaleString("es-AR")} grupos`
-              : ""}
-          </p>
-        </>
-      ) : (
-        <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground text-sm">
-          No hay datos para este período o estos filtros. Probá con otro período
-          o sacá algún filtro.
-        </div>
-      )}
-    </div>
-  );
+function backLabelOf(trail: ReportSpec[]): string | null {
+  const last = trail.at(-1);
+  return last ? (last.title ?? "el reporte anterior") : null;
 }
 
 export function ReportsTab() {
@@ -604,6 +568,8 @@ export function ReportsTab() {
   const [explaining, setExplaining] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [savedId, setSavedId] = useState<string | undefined>(undefined);
+  /** Reportes anteriores al profundizar, para volver. */
+  const [trail, setTrail] = useState<ReportSpec[]>([]);
   const requestId = useRef(0);
   const skipRun = useRef(false);
 
@@ -665,6 +631,7 @@ export function ReportsTab() {
     if (clean) {
       setReport(null);
       setSavedId(id);
+      setTrail([]);
       setSpec(clean);
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -778,6 +745,7 @@ export function ReportsTab() {
             explaining={explaining}
             onBack={() => {
               setSpec(null);
+              setTrail([]);
               setReport(null);
               setInsight(null);
             }}
@@ -804,7 +772,25 @@ export function ReportsTab() {
           ) : null}
 
           {report ? (
-            <ReportBody insight={insight} loading={loading} report={report} />
+            <ReportBody
+              backLabel={backLabelOf(trail)}
+              dataset={dataset}
+              insight={insight}
+              loading={loading}
+              onBack={() => {
+                const previous = trail.at(-1);
+                if (previous) {
+                  setTrail((prev) => prev.slice(0, -1));
+                  setSpec(previous);
+                }
+              }}
+              onExplore={(next) => {
+                setTrail((prev) => [...prev, { ...spec, title: report.title }]);
+                setSpec(next);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              report={report}
+            />
           ) : (
             <ReportSkeleton />
           )}

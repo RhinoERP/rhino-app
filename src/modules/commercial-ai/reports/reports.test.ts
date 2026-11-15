@@ -189,3 +189,51 @@ describe("catálogo", () => {
     }
   });
 });
+
+describe("explorar", () => {
+  it("destaca al que lidera, al que más creció y al que más cayó", async () => {
+    const { highlights } = await import("./explore");
+    const result = highlights({
+      rows: [
+        { key: "a", label: "A", values: { m: 600 } },
+        { key: "b", label: "B", values: { m: 300 } },
+        { key: "c", label: "C", values: { m: 100 } },
+      ],
+      measureKey: "m",
+      total: 1000,
+      additive: true,
+      previousByKey: { a: { m: 500 }, b: { m: 400 }, c: { m: 50 } },
+    });
+    expect(result.leader).toMatchObject({ label: "A", share: 0.6 });
+    expect(result.riser).toMatchObject({ label: "C", change: 100 });
+    expect(result.faller).toMatchObject({ label: "B", change: -25 });
+  });
+
+  it("profundiza filtrando el valor o acotando la fecha", async () => {
+    const { drillSpec } = await import("./explore");
+    const byClient = drillSpec(
+      ventas,
+      spec({ groupBy: "cliente" }),
+      { key: "Pendino", label: "Pendino" },
+      "fecha"
+    );
+    expect(byClient).toMatchObject({
+      groupBy: "fecha",
+      grain: "mes",
+      filters: [{ dimension: "cliente", values: ["Pendino"] }],
+    });
+    const byMonth = drillSpec(
+      ventas,
+      spec({ groupBy: "fecha", grain: "mes" }),
+      { key: "2026-02", label: "feb 2026" },
+      "vendedor"
+    );
+    expect(byMonth).toMatchObject({
+      groupBy: "vendedor",
+      period: "personalizado",
+      from: "2026-02-01",
+      to: "2026-02-28",
+      grain: "dia",
+    });
+  });
+});
