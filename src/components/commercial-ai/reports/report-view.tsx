@@ -550,17 +550,53 @@ function barRadius(
   return setup.horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0];
 }
 
-const shortLabel = (v: string) => (v.length > 22 ? `${v.slice(0, 21)}…` : v);
+const LABEL_CHARS = 24;
+
+/** Nombre en una sola línea (cortado si es largo) para el eje de las barras acostadas. */
+function CategoryTick({
+  x,
+  y,
+  payload,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value: string };
+}) {
+  const text = String(payload?.value ?? "");
+  const short =
+    text.length > LABEL_CHARS ? `${text.slice(0, LABEL_CHARS - 1)}…` : text;
+  return (
+    <text
+      dominantBaseline="middle"
+      fill="var(--muted-foreground)"
+      fontSize={11}
+      textAnchor="end"
+      x={(x ?? 0) - 6}
+      y={y}
+    >
+      <title>{text}</title>
+      {short}
+    </text>
+  );
+}
 
 function renderBar(setup: ChartSetup) {
   const { horizontal } = setup;
   const valueTick = (v: number) => formatShort(v, setup.format);
   return (
     <BarChart
+      className="cursor-pointer"
       data={setup.data}
       layout={horizontal ? "vertical" : "horizontal"}
       margin={{ ...MARGIN, right: 16 }}
+      onClick={pickFromChart(setup)}
       onMouseLeave={() => setup.onHover(null)}
+      onMouseMove={(state) => {
+        const index = Number(state?.activeTooltipIndex);
+        setup.onHover(
+          Number.isFinite(index) ? (setup.data[index]?.__key ?? null) : null
+        );
+      }}
     >
       {gradients(setup, !horizontal)}
       <CartesianGrid
@@ -578,11 +614,10 @@ function renderBar(setup: ChartSetup) {
         <YAxis
           dataKey="label"
           interval={0}
-          tick={AXIS}
-          tickFormatter={shortLabel}
+          tick={<CategoryTick />}
           tickLine={false}
           type="category"
-          width={150}
+          width={170}
         />
       ) : (
         <YAxis
@@ -601,10 +636,6 @@ function renderBar(setup: ChartSetup) {
           key={k}
           maxBarSize={horizontal ? 22 : 48}
           name={setup.names[k]}
-          onClick={(_, index) => setup.onPick(setup.data[index]?.__key ?? "")}
-          onMouseEnter={(_, index) =>
-            setup.onHover(setup.data[index]?.__key ?? null)
-          }
           radius={barRadius(setup)}
           stackId={setup.stacked ? "s" : undefined}
         >
@@ -677,13 +708,16 @@ export function ReportChart({
 
   const data = useMemo<ChartDatum[]>(
     () =>
-      report.rows.map((row) => ({
-        __key: row.key,
-        label: row.label,
-        ...row.values,
-        ...(row.split ?? {}),
-      })),
-    [report.rows]
+      report.rows
+        // El "Resto" achica todas las barras: se ve en la tabla, no en el gráfico.
+        .filter((row) => row.key !== REST_KEY || report.spec.chart === "pie")
+        .map((row) => ({
+          __key: row.key,
+          label: row.label,
+          ...row.values,
+          ...(row.split ?? {}),
+        })),
+    [report.rows, report.spec.chart]
   );
 
   if (!(measure && report.spec.groupBy) || chart === "table" || !data.length) {
@@ -711,7 +745,10 @@ export function ReportChart({
   });
 
   return (
-    <div style={{ height }}>
+    <div
+      className="[&_*:focus-visible]:outline-none [&_.recharts-surface:focus]:outline-none [&_.recharts-wrapper:focus]:outline-none"
+      style={{ height }}
+    >
       <ResponsiveContainer height="100%" width="100%">
         {body}
       </ResponsiveContainer>

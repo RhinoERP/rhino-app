@@ -82,6 +82,13 @@ function ReportNotes({ notes }: { notes: string[] }) {
   );
 }
 
+const HINTS: Partial<Record<ReportSpec["chart"], string>> = {
+  pie: "una porción",
+  line: "un punto",
+  area: "un punto",
+  bar: "una barra",
+};
+
 /** El escenario del gráfico: lo destacado, el gráfico y la ficha del valor elegido. */
 function ChartStage({
   report,
@@ -98,8 +105,7 @@ function ChartStage({
   byDate: boolean;
   focus: React.ReactNode;
 }) {
-  const hint =
-    report.spec.chart === "pie" ? "una porción" : "una barra o un punto";
+  const hint = HINTS[report.spec.chart] ?? "una barra";
   return (
     <section className="rounded-2xl border bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-card p-3 [background-size:16px_16px] md:p-4">
       <div className="mb-2 flex flex-wrap items-center gap-2">

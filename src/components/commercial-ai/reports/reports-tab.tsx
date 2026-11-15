@@ -75,9 +75,9 @@ import {
 } from "@/modules/commercial-ai/reports/templates";
 import { RhinoAvatar } from "../rhino/rhino-avatar";
 import { useCommercialAi } from "../shared";
+import { BuilderPanel } from "./builder-panel";
 import { ChartGlyph, GROUP_COLORS } from "./chart-glyph";
 import { ReportBody } from "./report-body";
-import { ReportBuilder } from "./report-builder";
 import { downloadCsv, downloadExcel } from "./report-format";
 
 const GROUP_ICONS: Record<DatasetGroup, Icon> = {
@@ -756,7 +756,7 @@ export function ReportsTab() {
           />
 
           <div className="print:hidden">
-            <ReportBuilder
+            <BuilderPanel
               dataset={dataset}
               datasets={datasets}
               filterOptions={report?.filterOptions ?? {}}
