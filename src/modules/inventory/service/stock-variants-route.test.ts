@@ -104,6 +104,50 @@ describe("stock variants endpoint", () => {
     expect(mocks.ilike).not.toHaveBeenCalled();
   });
 
+  it("allows distributor catalog readers to load active product variants only", async () => {
+    mocks.layout.mockResolvedValue({
+      permissions: ["distributor.catalog"],
+      currentOrganization: { id: "org-id" },
+    });
+    mocks.variants.mockResolvedValue([
+      {
+        id: "variant-id",
+        talle: "M",
+        color: "Negro",
+        internal_field: "not exposed",
+        product_lots: { quantity_available: 4 },
+      },
+    ]);
+
+    const response = await request();
+
+    expect(response.status).toBe(200);
+    expect(mocks.eq).toHaveBeenCalledWith("is_active", true);
+    expect(mocks.variants).toHaveBeenCalledWith("org", productId, undefined);
+    expect(mocks.ilike).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual([
+      {
+        id: "variant-id",
+        talle: "M",
+        color: "Negro",
+        product_lots: { quantity_available: 4 },
+      },
+    ]);
+  });
+
+  it("does not allow distributor catalog readers to request stock by warehouse", async () => {
+    mocks.layout.mockResolvedValue({
+      permissions: ["distributor.catalog"],
+      currentOrganization: { id: "org-id" },
+    });
+
+    const response = await request(`?warehouseId=${warehouseId}`);
+
+    expect(response.status).toBe(403);
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.variants).not.toHaveBeenCalled();
+  });
+
   it("restricts MercadoLibre-only readers to MELI products", async () => {
     mocks.layout.mockResolvedValue({
       permissions: ["mercadolibre.access"],
