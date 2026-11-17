@@ -1,6 +1,23 @@
 import { expect, it, vi } from "vitest";
 import type { InboxItem } from "@/modules/whatsapp/inbox-contract";
-import { syncTimeline } from "./whatsapp-inbox-client";
+import { prepareMessageAttempt, syncTimeline } from "./whatsapp-inbox-client";
+
+it("reuses an uncertain attempt for normalized text, even after editing away and back or a control change", () => {
+  const attempt = prepareMessageAttempt({ text: "Hola" }, 1);
+  const edited = { text: "Otro texto", attempt };
+  const restored = { ...edited, text: "  Hola\n" };
+  expect(prepareMessageAttempt(restored, 2)).toBe(attempt);
+  expect(attempt.expectedControlVersion).toBe(1);
+});
+
+it("creates a new identity for a different message or an explicitly resolved attempt", () => {
+  const attempt = prepareMessageAttempt({ text: "Hola" }, 1);
+  const next = prepareMessageAttempt({ text: "Otro texto", attempt }, 2);
+  const resolved = prepareMessageAttempt({ text: "Hola" }, 2);
+  expect(next).toMatchObject({ text: "Otro texto", expectedControlVersion: 2 });
+  expect(next.clientRequestId).not.toBe(attempt.clientRequestId);
+  expect(resolved.clientRequestId).not.toBe(attempt.clientRequestId);
+});
 
 function message(n: number, delivery: "SENT" | "READ" = "SENT"): InboxItem {
   const at = `2026-11-07T13:21:00.${String(n).padStart(6, "0")}+00:00`;

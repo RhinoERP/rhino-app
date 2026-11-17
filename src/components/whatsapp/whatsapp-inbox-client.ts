@@ -7,6 +7,29 @@ import type {
 export const LIST_INTERVAL = 10_000;
 export const CHAT_INTERVAL = 3000;
 
+export type WhatsAppDraft = {
+  text: string;
+  attempt?: {
+    text: string;
+    clientRequestId: string;
+    expectedControlVersion: number;
+  };
+};
+
+export function prepareMessageAttempt(
+  draft: WhatsAppDraft,
+  controlVersion: number
+) {
+  const text = draft.text.trim();
+  return draft.attempt?.text === text
+    ? draft.attempt
+    : {
+        text,
+        clientRequestId: crypto.randomUUID(),
+        expectedControlVersion: controlVersion,
+      };
+}
+
 export class InboxRequestError extends Error {
   readonly status: number;
 

@@ -33,14 +33,12 @@ import {
   inboxFetch,
   type LiveHistory,
   mergeTimeline,
+  prepareMessageAttempt,
   syncTimeline,
+  type WhatsAppDraft,
 } from "./whatsapp-inbox-client";
 import { WhatsAppTimeline } from "./whatsapp-timeline";
 
-export type WhatsAppDraft = {
-  text: string;
-  attempt?: { clientRequestId: string; expectedControlVersion: number };
-};
 const emptyDraft: WhatsAppDraft = { text: "" };
 function subscribeConnection(update: () => void) {
   window.addEventListener("online", update);
@@ -199,7 +197,7 @@ export function WhatsAppChat({
               onSend={actions.send}
               onTextChange={(text) => {
                 actions.setComposerError("");
-                actions.updateDraft({ text });
+                actions.updateDraft({ ...actions.draft, text });
               }}
               withinWindow={actions.withinWindow}
             />
@@ -289,6 +287,13 @@ function useChatActions({
   const [busy, setBusy] = useState(false);
   const [composerError, setComposerError] = useState("");
   const actionInFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const owner =
     chat?.status === "HANDOFF" &&
     chat.humanClaimedAt &&
@@ -312,6 +317,10 @@ function useChatActions({
       !draft.text
   );
   function updateDraft(next: WhatsAppDraft) {
+    // An old chat instance must not replace a draft edited after reopening it.
+    if (!mounted.current) {
+      return;
+    }
     setDraft(next);
     onDraft(next);
   }
@@ -379,10 +388,7 @@ function useChatActions({
     }
     runAction(async () => {
       setComposerError("");
-      const attempt = draft.attempt ?? {
-        clientRequestId: crypto.randomUUID(),
-        expectedControlVersion: chat.controlVersion,
-      };
+      const attempt = prepareMessageAttempt(draft, chat.controlVersion);
       updateDraft({ text: draft.text, attempt });
       try {
         const result = await sendWhatsAppManualMessageAction({
@@ -402,7 +408,7 @@ function useChatActions({
         );
       } catch {
         setComposerError(
-          "No se pudo confirmar el comando. Si reintentás el mismo texto se conserva la clave de envío."
+          "No se pudo confirmar el envío. Reintentá el mismo texto para consultar el resultado sin duplicarlo."
         );
       }
       return false;

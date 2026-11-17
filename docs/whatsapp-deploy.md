@@ -484,4 +484,18 @@ puede haberse entregado aunque haya fallado la respuesta HTTP. Mantener la
 conversación con atención humana durante la revisión. El registro debe conservarse
 para auditoría; si se cancela el envío automático, marcarlo `CANCELLED` únicamente
 tras esa revisión y continuar manualmente. Después se puede reactivar el bot para
-mensajes nuevos. La interfaz específica para resolver estos casos sigue pendiente.
+mensajes nuevos. La bandeja vigente permite registrar esa revisión desde la ficha
+de conversación, con motivo y el ID de Meta cuando se confirma la aceptación.
+
+### Restauración selectiva de RPC — 17 de noviembre de 2026
+
+`20261117133042_restore_whatsapp_missing_rpcs.sql` restaura
+`whatsapp_product_recommendations` y `finish_whatsapp_agent_job` cuando faltan en
+una instalación que ya tiene el inbox humano. Conserva las definiciones de sus
+migraciones originales y restringe ejecución a `service_role`. No modifica datos,
+flags, control humano ni outbox; no requiere detener el consumidor. El bundle
+completo ya incluye ambas definiciones originales.
+
+El runner `scripts/test-whatsapp-human-control.sh` incluye una fixture que reproduce
+su ausencia, aplica la reparación dos veces y comprueba permisos, finalización,
+reintento y rechazo de otro worker. La fixture revierte todos sus cambios.

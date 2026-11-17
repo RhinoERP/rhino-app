@@ -12,7 +12,7 @@ import type {
   InboxFilter,
   InboxList,
 } from "@/modules/whatsapp/inbox-contract";
-import { WhatsAppChat, type WhatsAppDraft } from "./whatsapp-chat";
+import { WhatsAppChat } from "./whatsapp-chat";
 import {
   accessLost,
   clock,
@@ -22,6 +22,7 @@ import {
   LIST_INTERVAL,
   messageTypes,
   stateLabel,
+  type WhatsAppDraft,
 } from "./whatsapp-inbox-client";
 
 const filters = [
@@ -72,15 +73,28 @@ export function WhatsAppInbox({
     if (!(visibleViewport && panel)) {
       return;
     }
-    function update() {
-      panel?.style.setProperty(
+    const update = () => {
+      const height =
+        visibleViewport.height +
+        visibleViewport.offsetTop -
+        panel.getBoundingClientRect().top;
+      panel.style.setProperty(
         "--whatsapp-viewport",
-        `${visibleViewport?.height}px`
+        `${Math.max(0, height)}px`
       );
-    }
+    };
     update();
     visibleViewport.addEventListener("resize", update);
-    return () => visibleViewport.removeEventListener("resize", update);
+    visibleViewport.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    const observer = new ResizeObserver(update);
+    observer.observe(panel.parentElement ?? panel);
+    return () => {
+      visibleViewport.removeEventListener("resize", update);
+      visibleViewport.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      observer.disconnect();
+    };
   }, []);
 
   function selectChat(id: string | null) {
@@ -100,7 +114,7 @@ export function WhatsAppInbox({
   return (
     <section
       aria-label="Bandeja de WhatsApp"
-      className="grid h-[calc(var(--whatsapp-viewport,100dvh)-8rem)] min-w-0 overflow-hidden rounded-xl border bg-background md:h-[calc(100dvh-2rem)] md:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
+      className="grid h-[calc(var(--whatsapp-viewport,100dvh)-5rem)] min-w-0 overflow-hidden rounded-xl border bg-background md:h-[calc(100dvh-2rem)] md:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
       ref={viewport}
     >
       <aside

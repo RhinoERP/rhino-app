@@ -53,7 +53,9 @@ export function WhatsAppChatDetails({
   return (
     <div className="space-y-4 p-4 text-sm">
       <div className="space-y-1">
-        <p className="font-medium">{chat.customerName ?? "Cliente"}</p>
+        <p className="font-medium [overflow-wrap:anywhere]">
+          {chat.customerName ?? "Cliente"}
+        </p>
         <p className="text-muted-foreground">{chat.customerPhone}</p>
         {chat.handoffReason && (
           <p className="whitespace-pre-wrap break-words rounded-md bg-muted p-3">

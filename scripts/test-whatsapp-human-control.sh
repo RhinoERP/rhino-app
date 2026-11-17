@@ -207,6 +207,7 @@ run_sql -c "SELECT CASE WHEN count(*)=1 THEN true ELSE null END FROM whatsapp_me
 rg -qx t "$task_pg_dir/human-upgrade-check.log"
 
 run_sql -f scripts/fixtures/whatsapp/human-inbox.sql > "$task_pg_dir/inbox.log" 2>&1 || { cat "$task_pg_dir/inbox.log"; exit 1; }
+run_sql -f scripts/fixtures/whatsapp/rpc-restoration.sql > "$task_pg_dir/rpc-restoration.log" 2>&1 || { cat "$task_pg_dir/rpc-restoration.log"; exit 1; }
 
 # Regression suites live in separate DBs because their fixtures share fixed IDs.
 for suite in recurring audio; do

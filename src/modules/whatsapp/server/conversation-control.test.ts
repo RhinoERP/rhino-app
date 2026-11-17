@@ -339,6 +339,24 @@ function commandRpc() {
 }
 
 describe("human command boundary", () => {
+  it.each([
+    ["", false],
+    ["   \n ", false],
+    ["x".repeat(4000), true],
+    ["x".repeat(4001), false],
+  ])("validates text boundaries before accepting a command (%#. case)", async (text, valid) => {
+    commandRpc();
+    const result = await sendWhatsAppManualMessageAction({
+      ...messageInput,
+      text,
+    });
+    expect(result.success).toBe(valid);
+    if (!valid) {
+      expect(mocks.user).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    }
+  });
+
   it("persists with authenticated tenant/actor and returns only the public DTO", async () => {
     commandRpc();
     const result = await sendWhatsAppManualMessageAction({
