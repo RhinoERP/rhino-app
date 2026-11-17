@@ -102,6 +102,8 @@ const context = {
   sourceMessageId: source,
 };
 const version = { cart_id: cartId, version: 2 };
+const unsolicitedQuoteDetails = /7\.6|aprox|¿/;
+const unsolicitedRepeatDetails = /disponibles|peso estimado actual|¿/;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -371,6 +373,56 @@ describe("recurring commercial tools", () => {
     expect(testDb.rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "upsert_cart_item",
+    "quote_cart",
+    "create_pre_sale",
+  ] as const)("preserves the pending cart when stock blocks %s and allows human review", async (tool) => {
+    pendingCart();
+    testDb.tables.view_stock_detail[0].total_stock = 0;
+    testDb.tables.whatsapp_messages[0].content = "Sí, confirmo";
+    testDb.tables.whatsapp_conversations[0].pending_order_action = {
+      kind: "CONFIRM_PRE_SALE",
+      cartId,
+      version: 2,
+    };
+    const carts = structuredClone(testDb.tables.conversation_carts);
+    const items = structuredClone(testDb.tables.conversation_cart_items);
+    await expect(
+      executeCommercialTool(
+        context,
+        tool,
+        tool === "upsert_cart_item"
+          ? { ...version, product_id: product, quantity: 1 }
+          : version
+      )
+    ).rejects.toThrow("disponibilidad");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+    expect(testDb.prepare).not.toHaveBeenCalled();
+
+    testDb.rpc.mockImplementation((name) => {
+      if (name === "handoff_whatsapp_conversation") {
+        testDb.tables.whatsapp_conversations[0].status = "HANDOFF";
+      }
+      return { data: {}, error: null };
+    });
+    await executeCommercialTool(context, "handoff_to_human", {
+      reason: "Revisar Queso, cantidad solicitada: 1",
+    });
+    const rendered = await executeCommercialTool(
+      context,
+      "render_order_response",
+      { text: "No hay stock" }
+    );
+    expect(rendered).toMatchObject({
+      text: "Una persona del equipo comercial va a continuar la atención por este chat.",
+      orderPrompt: false,
+    });
+    expect(testDb.tables.conversation_carts).toEqual(carts);
+    expect(testDb.tables.conversation_cart_items).toEqual(items);
+    expect(testDb.tables.sales_orders).toEqual([]);
+  });
+
   it("preserves pieces, estimated kilos and the estimate notice through quoting", async () => {
     pendingCart();
     weightedProduct();
@@ -410,11 +462,14 @@ describe("recurring commercial tools", () => {
     );
     expect(rendered).toMatchObject({
       orderPrompt: true,
-      text: expect.stringContaining("2 piezas (aprox. 7.6 KG)"),
+      text: expect.stringContaining("2 piezas"),
     });
     expect((rendered as { text: string }).text).toContain("total estimado");
     expect((rendered as { text: string }).text).toContain(
-      "El peso y el precio final se ajustan cuando preparemos el pedido."
+      "El total es estimado y se ajusta al pesaje final."
+    );
+    expect((rendered as { text: string }).text).not.toMatch(
+      unsolicitedQuoteDetails
     );
   });
 
@@ -467,6 +522,8 @@ describe("recurring commercial tools", () => {
       phone_number_id: "real-phone",
       commercial_rules: {
         deliveryPolicy: "Reparto los martes.",
+        salesGuidance:
+          "Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
         responseCapitalization: "LOWERCASE",
       },
     };
@@ -485,25 +542,30 @@ describe("recurring commercial tools", () => {
     expect(state).toMatchObject({
       commercialGuidance: expect.objectContaining({
         deliveryPolicy: "Reparto los martes.",
+        salesGuidance:
+          "Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
       }),
     });
     expect(JSON.stringify(state)).not.toContain("private-policy");
 
     const simulatorContext = { ...context, mode: "LOCAL_SIMULATOR" as const };
     const reply = {
-      text: "¡Hola, Manuel! Retirá el pedido PV-123 en Tigre. https://ejemplo.com/Pedido?ref=AB",
+      text: "¡Hola, Manuel! ¿Retirás el pedido PV-123 en Tigre? https://ejemplo.com/Pedido?ref=AB",
     };
     await expect(
       executeCommercialTool(simulatorContext, "render_order_response", reply)
     ).resolves.toEqual({
-      text: "¡hola, manuel! retirá el pedido PV-123 en tigre. https://ejemplo.com/Pedido?ref=AB",
+      text: "¡hola, manuel! retirás el pedido PV-123 en tigre? https://ejemplo.com/Pedido?ref=AB",
       orderPrompt: false,
     });
 
     realIntegration.commercial_rules.responseCapitalization = "STANDARD";
     await expect(
       executeCommercialTool(simulatorContext, "render_order_response", reply)
-    ).resolves.toEqual({ ...reply, orderPrompt: false });
+    ).resolves.toEqual({
+      text: "¡Hola, Manuel! Retirás el pedido PV-123 en Tigre? https://ejemplo.com/Pedido?ref=AB",
+      orderPrompt: false,
+    });
   });
 
   it("confirms commercial follow-up only for a cart converted by this message", async () => {
@@ -729,9 +791,7 @@ describe("recurring commercial tools", () => {
       { text: "Listo" }
     )) as { text: string; orderPrompt: boolean };
     expect(rendered.text).toContain("24.2 ars");
-    expect(rendered.text).toContain(
-      "¿me confirmás que deje el pedido anotado?"
-    );
+    expect(rendered.text).toContain("me confirmás que deje el pedido anotado?");
     expect(rendered.text).toContain(
       "todavía no se cobra ni se reserva mercadería."
     );
@@ -937,7 +997,8 @@ describe("recurring commercial tools", () => {
       { text: "Listo" }
     )) as { text: string; orderPrompt: boolean };
     expect(rendered.text).toContain("20 ARS");
-    expect(rendered.text).toContain("productos disponibles");
+    expect(rendered.text).toContain("estos productos");
+    expect(rendered.text).not.toMatch(unsolicitedRepeatDetails);
     await expect(
       executeCommercialTool(context, "quote_cart", version)
     ).rejects.toThrow("accept_repeat_changes");

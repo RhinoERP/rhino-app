@@ -1367,7 +1367,7 @@ async function inspectRepeatedItems(
       }
       if (quantities.weightChanged) {
         differences.push(
-          `${offer.productName}: el peso estimado actual para ${quantities.quantity} piezas es ${quantities.stockQuantity} ${offer.unitOfMeasure}`
+          `${offer.productName}: cambió la referencia para calcular el importe estimado de ${quantities.quantity} piezas; el total se ajusta al pesaje final`
         );
       }
       if (Number(item.unit_price) !== offer.unitPrice) {
@@ -1489,7 +1489,7 @@ type CartSummary = Awaited<ReturnType<typeof cartSummary>>;
 
 function formatItemQuantity(item: CartSummary["items"][number]) {
   if (item.requestedPieces !== null) {
-    return `${item.requestedPieces} piezas (aprox. ${item.quantity} ${item.unitOfMeasure})`;
+    return `${item.requestedPieces} piezas`;
   }
   return `${item.quantity}${item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}`;
 }
@@ -1505,7 +1505,7 @@ function renderQuoteResponse(state: CartSummary) {
   const estimate = state.items.some((item) => item.quantityEstimated);
   const total = `El total${estimate ? " estimado" : ""} con impuestos queda en ${state.cart.quote_snapshot?.total} ${state.cart.currency}.`;
   const weightNote = estimate
-    ? " El peso y el precio final se ajustan cuando preparemos el pedido."
+    ? " El total es estimado y se ajusta al pesaje final."
     : "";
   return {
     text: `${lines.join("\n")}\n${total}${weightNote}\n¿Me confirmás que deje el pedido anotado? Todavía no se cobra ni se reserva mercadería.`,
@@ -1607,7 +1607,7 @@ async function renderOrderResponse(context: VerifiedContext, text: string) {
   }
   if (action.kind === "REVIEW_REPEAT") {
     return {
-      text: `${(action.differences as string[]).join("\n")}\n¿Confirmás que sigamos con los productos disponibles y sus precios actuales? Después te paso el total para confirmar la preventa.`,
+      text: `${(action.differences as string[]).join("\n")}\n¿Confirmás que sigamos con estos productos y sus precios actuales? Después te paso el total para confirmar la preventa.`,
       orderPrompt: true,
     };
   }
