@@ -59,6 +59,9 @@ El SQL usa una transacción e incluye, en orden:
 8. Audios `20261103000000_whatsapp_audio_pipeline.sql`: almacenamiento privado, transcripción, cuotas, trabajos con lease y registro durable de envíos.
 9. Permisos `20261104000000_whatsapp_rpc_permissions.sql`: revocación explícita de acceso de `anon` y `authenticated` a las RPC de servidor de WhatsApp.
 10. Revisión `20261104010000_whatsapp_audio_review_fixes.sql`: protocolo verificado, exclusión transaccional, cuotas de uploads, recuperación, retención y protección de confirmaciones.
+11. Precios por cliente `20261110130000_whatsapp_customer_pricing.sql` (después de las migraciones de bandeja y envío humano): resolución por teléfono, validación del envío y alta asistida. El paquete instala las dependencias en ese orden.
+
+Aplicá primero la migración y luego desplegá la aplicación y el daemon. El daemon comercial nuevo espera a que exista el protocolo de precios. Las integraciones quedan en **Lista única** hasta cambiar su configuración. Antes de activar un modo por cliente, probá con dos clientes de listas distintas y un número desconocido en una integración de prueba.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones

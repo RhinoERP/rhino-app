@@ -41,6 +41,7 @@ export const inboxListSchema = z.object({
     customer.extend({
       at: date,
       assignedName: z.string().nullable(),
+      pendingCustomer: z.boolean().optional(),
       lastMessageAt: date.nullable(),
       unread: z.number().int().nonnegative(),
       preview: z
@@ -60,6 +61,16 @@ export type InboxList = z.infer<typeof inboxListSchema> & {
 const commandStatus = z.enum(["PENDING", "SENDING", "UNKNOWN", "CANCELLED"]);
 export const inboxDetailSchema = customer.extend({
   handoffReason: z.string().nullable(),
+  customerId: id.nullish(),
+  canLinkCustomer: z.boolean().optional(),
+  pricingReview: z
+    .enum([
+      "AMBIGUOUS_PHONE",
+      "CUSTOMER_WITHOUT_LIST",
+      "UNREGISTERED",
+      "LIST_UNAVAILABLE",
+    ])
+    .nullish(),
   controlVersion: z.number().int().nonnegative(),
   deliveryBlock: z.enum(["SENDING", "UNKNOWN"]).nullable(),
   windowEndsAt: date.nullable(),

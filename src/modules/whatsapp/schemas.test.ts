@@ -67,4 +67,24 @@ describe("whatsappIntegrationConfigurationSchema", () => {
       ]);
     }
   });
+
+  it("allows registered-only pricing without a general list unless fallback is enabled", () => {
+    const input = {
+      ...baseInput,
+      status: "ACTIVE",
+      pricingMode: "REGISTERED_ONLY",
+      salesPriceListId: null,
+      responsibleUserId: "11111111-1111-4111-8111-111111111111",
+    };
+    expect(
+      whatsappIntegrationConfigurationSchema.parse(input)
+        .allowGeneralForCustomers
+    ).toBe(false);
+    expect(
+      whatsappIntegrationConfigurationSchema.safeParse({
+        ...input,
+        allowGeneralForCustomers: true,
+      }).success
+    ).toBe(false);
+  });
 });

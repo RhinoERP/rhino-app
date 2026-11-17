@@ -11,6 +11,7 @@ export type SendWhatsAppTextInput = {
   text: string;
   sourceMessageId?: string;
   orderPrompt?: boolean;
+  pricingKey?: string | null;
   jobId?: string;
   leaseToken?: string;
   deliveryLeaseExpiresAt?: string;
@@ -89,12 +90,20 @@ async function prepareDelivery(
       "El envío requiere un trabajo con lease y outbox persistente."
     );
   }
-  const prepared = await db.rpc("prepare_whatsapp_outbox", {
-    p_job_id: input.jobId,
-    p_lease_token: input.leaseToken,
-    p_text: input.text,
-    p_order_prompt: input.orderPrompt ?? false,
-  });
+  const pricingArgs =
+    input.pricingKey === undefined ? {} : { p_context_key: input.pricingKey };
+  const prepared = await db.rpc(
+    input.pricingKey === undefined
+      ? "prepare_whatsapp_outbox"
+      : "prepare_whatsapp_priced_outbox",
+    {
+      p_job_id: input.jobId,
+      p_lease_token: input.leaseToken,
+      p_text: input.text,
+      p_order_prompt: input.orderPrompt ?? false,
+      ...pricingArgs,
+    }
+  );
   if (prepared.error || !prepared.data) {
     throw new Error("No se pudo preparar el envío persistente.");
   }
@@ -138,7 +147,7 @@ async function dispatchToMeta(
   input: SendWhatsAppTextInput,
   token: string,
   finish: FinishDelivery,
-  guard?: () => Promise<number>
+  guard?: () => Promise<number | undefined>
 ): Promise<string> {
   const customerWindowEndsAt = await guard?.();
   if (
@@ -287,35 +296,41 @@ async function deliverPreparedText(
       "No se pudo registrar el resultado del envío; requiere revisión."
     );
   };
-  const guard = commandId
-    ? async () => {
-        const { data, error } = await supabase.rpc(
-          "guard_whatsapp_human_dispatch",
-          {
-            ...target,
-            p_lease_token: input.leaseToken,
-            p_phone_number_id: input.phoneNumberId,
-            // The provider fallback changes only the HTTP address.
-            p_recipient: input.recipient,
+  const guard =
+    commandId || input.pricingKey !== undefined
+      ? async () => {
+          const { data, error } = await supabase.rpc(
+            commandId
+              ? "guard_whatsapp_human_dispatch"
+              : "guard_whatsapp_priced_dispatch",
+            {
+              ...target,
+              p_lease_token: input.leaseToken,
+              ...(commandId
+                ? {
+                    p_phone_number_id: input.phoneNumberId,
+                    p_recipient: input.recipient,
+                  }
+                : {}),
+            }
+          );
+          if (error) {
+            // This attempt has not contacted Meta. The existing backoff can retry.
+            await finish("PENDING");
+            throw new AudioError(
+              "DELIVERY_PREFLIGHT",
+              "No se pudo autorizar el envío."
+            );
           }
-        );
-        if (error) {
-          // This attempt has not contacted Meta. The existing backoff can retry.
-          await finish("PENDING");
-          throw new AudioError(
-            "DELIVERY_PREFLIGHT",
-            "No se pudo autorizar el envío."
-          );
+          if (data === null) {
+            throw new AudioError(
+              "DELIVERY_NOT_AUTHORIZED",
+              "El envío ya no está autorizado."
+            );
+          }
+          return commandId ? Date.parse(data) : undefined;
         }
-        if (data === null) {
-          throw new AudioError(
-            "DELIVERY_NOT_AUTHORIZED",
-            "El envío ya no está autorizado."
-          );
-        }
-        return Date.parse(data);
-      }
-    : undefined;
+      : undefined;
   const id = await dispatchToMeta(input, token, finish, guard);
   await finish("SENT", id);
   return id;

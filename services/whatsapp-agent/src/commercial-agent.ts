@@ -237,9 +237,34 @@ async function recordAgentRun(
   }
 }
 
-type StoredResponse = { text: string; order_prompt: boolean; status: string };
+type StoredResponse = {
+  text: string;
+  order_prompt: boolean;
+  status: string;
+  pricing_context_key?: string | null;
+};
 
-function commercialContext(job: AgentJob): AgentContext {
+type JobPricing = {
+  key?: string | null;
+  reason?: string | null;
+  historySince?: string | null;
+};
+
+async function readJobPricing(db: SupabaseClient, job: AgentJob) {
+  const { data, error } = await db.rpc("whatsapp_job_pricing", {
+    p_job_id: job.id,
+    p_lease_token: job.lease_token,
+  });
+  if (error || !data) {
+    throw new Error("No se pudo validar el acceso comercial del contacto");
+  }
+  return data as JobPricing;
+}
+
+function commercialContext(
+  job: AgentJob,
+  pricingKey: string | null
+): AgentContext {
   return {
     organizationId: job.organization_id,
     integrationId: job.integration_id,
@@ -247,6 +272,7 @@ function commercialContext(job: AgentJob): AgentContext {
     sourceMessageId: job.source_message_id,
     jobId: job.lease_token ? job.id : undefined,
     leaseToken: job.lease_token,
+    pricingKey,
   };
 }
 
@@ -280,12 +306,16 @@ async function produceCommercialOutput({
   cached,
   audit,
   signal,
+  pricingKey,
+  historySince,
 }: {
   job: AgentJob;
   context: Awaited<ReturnType<typeof loadJobContext>>;
   cached: StoredResponse | null;
   audit: ToolCallAudit[];
   signal: AbortSignal;
+  pricingKey: string | null;
+  historySince?: string | null;
 }) {
   if (cached) {
     return {
@@ -304,15 +334,21 @@ async function produceCommercialOutput({
   const response = await runCommercialModel({
     model: model(),
     businessName: context.businessName,
-    context: commercialContext(job),
-    messages: context.messages,
+    context: commercialContext(job, pricingKey),
+    messages: historySince
+      ? context.messages.filter(
+          (message) =>
+            message.direction === "INBOUND" ||
+            Date.parse(message.created_at) >= Date.parse(historySince)
+        )
+      : context.messages,
     audit,
     requestModel: (body) => requestModel(body, signal),
     callTool: (toolContext, call) =>
       callCommercialTool(toolContext, call, signal),
   });
   const rendered = (await callCommercialTool(
-    commercialContext(job),
+    commercialContext(job, pricingKey),
     {
       type: "function_call",
       call_id: "render-order",
@@ -328,20 +364,37 @@ async function produceCommercialOutput({
   return { text, orderPrompt: rendered.orderPrompt, usage: response.usage };
 }
 
+async function loadAuthorizedTurn(supabase: SupabaseClient, job: AgentJob) {
+  // Reconcile a possibly accepted send even if a newer message supersedes it.
+  const cached = await readStoredResponse(supabase, job);
+  if (cached?.status === "SENT" || cached?.status === "CANCELLED") {
+    return null;
+  }
+  const context = await loadJobContext(supabase, job);
+  if (context.superseded) {
+    return null;
+  }
+  const pricing = await readJobPricing(supabase, job);
+  const pricingKey = pricing.key ?? null;
+  if (
+    pricing.reason ||
+    (cached && (cached.pricing_context_key ?? null) !== pricingKey)
+  ) {
+    return null;
+  }
+  return { cached, context, pricingKey, historySince: pricing.historySince };
+}
+
 async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
   const startedAt = Date.now();
   const toolCalls: ToolCallAudit[] = [];
   let run: AgentRun | null = null;
   try {
-    // Reconcile a possibly accepted send even if a newer message supersedes it.
-    const cached = await readStoredResponse(supabase, job);
-    if (cached?.status === "SENT" || cached?.status === "CANCELLED") {
+    const turn = await loadAuthorizedTurn(supabase, job);
+    if (!turn) {
       return;
     }
-    const context = await loadJobContext(supabase, job);
-    if (context.superseded) {
-      return;
-    }
+    const { cached, context, pricingKey, historySince } = turn;
     const now = new Date();
     const responseAt = job.human_delay_applied
       ? getNextBusinessOpening(now, context.businessHours)
@@ -357,6 +410,8 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
       job,
       context,
       cached,
+      pricingKey,
+      historySince,
       audit: toolCalls,
       signal: AbortSignal.timeout(90_000),
     });
@@ -368,6 +423,7 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
       text: output.text,
       sourceMessageId: job.source_message_id,
       orderPrompt: output.orderPrompt,
+      pricingKey,
       jobId: job.lease_token ? job.id : undefined,
       leaseToken: job.lease_token,
     });

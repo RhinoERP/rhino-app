@@ -135,7 +135,13 @@ const server = createServer((request, response) => {
 async function startWhenDatabaseReady(): Promise<void> {
   let reported = false;
   while (!(stopped || databaseReady)) {
-    databaseReady = await workerDatabaseReady(db);
+    const audioReady = await workerDatabaseReady(db);
+    const pricing =
+      audioReady && role !== "transcription"
+        ? await db.rpc("whatsapp_customer_pricing_ready")
+        : null;
+    databaseReady =
+      audioReady && (role === "transcription" || pricing?.data === true);
     if (databaseReady) {
       break;
     }

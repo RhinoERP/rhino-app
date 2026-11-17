@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { customersQueryKey } from "@/modules/customers/queries/query-keys";
 import { controlWhatsAppConversationAction } from "@/modules/whatsapp/actions/control-whatsapp-conversation.action";
 import { reviewWhatsAppDeliveryAction } from "@/modules/whatsapp/actions/review-whatsapp-delivery.action";
 import { sendWhatsAppManualMessageAction } from "@/modules/whatsapp/actions/send-whatsapp-manual-message.action";
@@ -22,6 +23,7 @@ import {
   type Review,
   WhatsAppChatHeader,
 } from "./whatsapp-chat-controls";
+import { WhatsAppCustomerLink } from "./whatsapp-customer-link";
 import {
   accessLost,
   CHAT_INTERVAL,
@@ -33,7 +35,6 @@ import {
   mergeTimeline,
   syncTimeline,
 } from "./whatsapp-inbox-client";
-
 import { WhatsAppTimeline } from "./whatsapp-timeline";
 
 export type WhatsAppDraft = {
@@ -157,6 +158,19 @@ export function WhatsAppChat({
               onRetry={() => queryClient.invalidateQueries({ queryKey: key })}
             />
           )}
+          <WhatsAppCustomerLink
+            chat={chat}
+            disabled={!interactive}
+            key={chat?.id}
+            onLinked={() => {
+              queryClient.invalidateQueries({ queryKey: key });
+              queryClient.invalidateQueries({ queryKey: listKey });
+              queryClient.invalidateQueries({
+                queryKey: customersQueryKey(orgSlug),
+              });
+            }}
+            orgSlug={orgSlug}
+          />
           {chat?.deliveryBlock && (
             <output className="border-b bg-amber-50 p-2 text-amber-900 text-sm dark:bg-amber-950 dark:text-amber-100">
               {chat.deliveryBlock === "SENDING"

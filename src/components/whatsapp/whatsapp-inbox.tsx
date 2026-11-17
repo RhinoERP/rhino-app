@@ -311,6 +311,7 @@ function ChatListRow({
           </span>
           <span className="mt-1 block text-muted-foreground text-xs">
             {stateLabel(row)}
+            {row.pendingCustomer && " · Pendiente de vincular"}
             {row.assignedUserId === currentUserId && " · Vos"}
             {row.assignedUserId !== currentUserId &&
               row.assignedName &&
