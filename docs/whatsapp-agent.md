@@ -81,6 +81,23 @@ respaldadas por el catálogo y las ofertas actuales. Una lista de marcas no
 reemplaza una recomendación. No afirma equivalencia, rendimiento ni popularidad
 sin datos, ni compara precios de presentaciones o monedas incompatibles.
 
+Las preguntas del bot usan sólo el signo de cierre `?`; el formateador compartido
+quita `¿` tanto en WhatsApp como en el simulador y conserva la configuración de
+mayúsculas. Los mensajes manuales de los vendedores no pasan por ese ajuste.
+
+El stock se consulta y valida internamente, pero las respuestas no anuncian
+existencias, faltantes ni cantidades disponibles. Ante una consulta directa de
+disponibilidad se aclara que requiere confirmación. Si falta disponibilidad para
+un producto solicitado, se conserva el carrito y se deriva a revisión humana;
+siguen vigentes los bloqueos de agregado, cotización y creación de preventa.
+
+El criterio comercial (`salesGuidance`) permite cargar equivalencias propias de
+cada organización, por ejemplo: “Holanda y Pategrás pueden ofrecerse como
+alternativas entre sí”. Con esa validación el bot ofrece la alternativa
+directamente, después de verificar catálogo y oferta, sin frases como “no tengo
+características verificadas”. Sin equivalencia cargada, presenta opciones y datos
+conocidos sin afirmar similitudes. Recomendar nunca autoriza una sustitución.
+
 Ante una marca faltante busca por categoría; ante una objeción de precio busca
 una alternativa comparable más económica. Después del primer rechazo comercial
 puede realizar una única propuesta argumentada. Una enumeración previa no cuenta
@@ -102,6 +119,10 @@ Casos de revisión conversacional al cambiar estas instrucciones:
 - “Es caro”: menor precio comprobado para una presentación comparable.
 - Segundo rechazo, cierre explícito o agradecimiento: ninguna nueva oferta.
 - Alternativas sin stock o disponibilidad desconocida: no prometer disponibilidad.
+- Opciones de queso azul: nombre y precio por kg, sin stock ni peso por pieza.
+- Alternativa al Holanda: usar la equivalencia configurada y esperar la elección.
+- Peso por horma: responder sólo ante una consulta explícita, como aproximado.
+- Faltante al tomar o confirmar el pedido: conservar carrito y derivar a revisión.
 - Rechazo de cotización o descarte: cancelar sólo la acción pendiente.
 - Tema ajeno después de una consulta comercial: conservar el límite de alcance.
 
@@ -120,6 +141,10 @@ conversión se calcula en el servidor y se conserva en el snapshot del carrito.
 La preventa mantiene las piezas y el peso separados cuando el producto controla
 ambos, identifica los valores estimados y conserva la cantidad pedida en su
 descripción. Un cambio de referencia exige actualizar y cotizar nuevamente.
+Los pesos de referencia no se muestran espontáneamente al ofrecer productos ni
+en la cotización. Para pedidos por piezas se muestran las piezas solicitadas y
+el total estimado, con la aclaración “El total es estimado y se ajusta al pesaje
+final”. El peso aproximado por horma se informa sólo cuando el cliente lo pregunta.
 
 `get_recommendations` consulta todos los productos activos que coincidan con la
 búsqueda, ordenados por cantidad de pedidos confirmados distintos en los últimos

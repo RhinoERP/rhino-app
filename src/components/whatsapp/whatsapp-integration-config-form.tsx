@@ -388,7 +388,7 @@ export function WhatsAppIntegrationConfigForm({
                     name: "salesGuidance",
                     label: "Criterio comercial y recomendaciones",
                     placeholder:
-                      "Características verificadas, usos, alternativas y productos complementarios que recomienda el equipo. Indicá el producto o marca al que corresponde cada dato.",
+                      "Características, usos, equivalencias y complementos validados por el equipo. Indicá producto o marca. Ejemplo: Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
                   },
                 ] as const
               ).map((input) => (
