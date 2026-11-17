@@ -412,7 +412,10 @@ describe("recurring commercial tools", () => {
       orderPrompt: true,
       text: expect.stringContaining("2 piezas (aprox. 7.6 KG)"),
     });
-    expect((rendered as { text: string }).text).toContain("Total estimado");
+    expect((rendered as { text: string }).text).toContain("total estimado");
+    expect((rendered as { text: string }).text).toContain(
+      "El peso y el precio final se ajustan cuando preparemos el pedido."
+    );
   });
 
   it("invalidates an estimate when the weight reference changes before quoting", async () => {
@@ -458,12 +461,16 @@ describe("recurring commercial tools", () => {
       "rhinos-local-simulator:test";
     testDb.tables.whatsapp_conversations[0].customer_phone =
       "SIMULACIÓN LOCAL · test";
-    testDb.tables.whatsapp_integrations.push({
+    const realIntegration = {
       id: "real-channel",
       organization_id: org,
       phone_number_id: "real-phone",
-      commercial_rules: { deliveryPolicy: "Reparto los martes." },
-    });
+      commercial_rules: {
+        deliveryPolicy: "Reparto los martes.",
+        responseCapitalization: "LOWERCASE",
+      },
+    };
+    testDb.tables.whatsapp_integrations.push(realIntegration);
     testDb.tables.whatsapp_integrations.push({
       id: "foreign-channel",
       organization_id: "another-org",
@@ -481,6 +488,22 @@ describe("recurring commercial tools", () => {
       }),
     });
     expect(JSON.stringify(state)).not.toContain("private-policy");
+
+    const simulatorContext = { ...context, mode: "LOCAL_SIMULATOR" as const };
+    const reply = {
+      text: "¡Hola, Manuel! Retirá el pedido PV-123 en Tigre. https://ejemplo.com/Pedido?ref=AB",
+    };
+    await expect(
+      executeCommercialTool(simulatorContext, "render_order_response", reply)
+    ).resolves.toEqual({
+      text: "¡hola, manuel! retirá el pedido PV-123 en tigre. https://ejemplo.com/Pedido?ref=AB",
+      orderPrompt: false,
+    });
+
+    realIntegration.commercial_rules.responseCapitalization = "STANDARD";
+    await expect(
+      executeCommercialTool(simulatorContext, "render_order_response", reply)
+    ).resolves.toEqual({ ...reply, orderPrompt: false });
   });
 
   it("confirms commercial follow-up only for a cart converted by this message", async () => {
@@ -498,7 +521,7 @@ describe("recurring commercial tools", () => {
     );
     expect(rendered).toMatchObject({
       text: expect.stringContaining(
-        "reconfirmarlo y coordinar el retiro o envío"
+        "confirmarlo y coordinar el retiro o el envío"
       ),
       orderPrompt: false,
     });
@@ -514,6 +537,9 @@ describe("recurring commercial tools", () => {
 
   it("renders human attention without leaking operator instructions", async () => {
     testDb.tables.whatsapp_conversations[0].status = "HANDOFF";
+    testDb.tables.whatsapp_integrations[0].commercial_rules = {
+      responseCapitalization: "LOWERCASE",
+    };
     const rendered = await executeCommercialTool(
       context,
       "render_order_response",
@@ -678,6 +704,9 @@ describe("recurring commercial tools", () => {
   });
   it("a changed price requotes with taxes and never converts on the old yes", async () => {
     pendingCart();
+    testDb.tables.whatsapp_integrations[0].commercial_rules = {
+      responseCapitalization: "LOWERCASE",
+    };
     testDb.tables.whatsapp_messages[0].content = "Sí";
     testDb.tables.whatsapp_conversations[0].pending_order_action = {
       kind: "CONFIRM_PRE_SALE",
@@ -699,8 +728,13 @@ describe("recurring commercial tools", () => {
       "render_order_response",
       { text: "Listo" }
     )) as { text: string; orderPrompt: boolean };
-    expect(rendered.text).toContain("24.2 ARS");
-    expect(rendered.text).toContain("¿Confirmás");
+    expect(rendered.text).toContain("24.2 ars");
+    expect(rendered.text).toContain(
+      "¿me confirmás que deje el pedido anotado?"
+    );
+    expect(rendered.text).toContain(
+      "todavía no se cobra ni se reserva mercadería."
+    );
     expect(rendered.orderPrompt).toBe(true);
   });
   it("an existing completed sale is returned by cart, not by the whole chat", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prepareWhatsAppPreSaleOrder } from "@/modules/sales/service/sales.service";
 import { computeAverageQuantityPerUnit } from "@/modules/sales/utils/quantity-per-unit";
+import { formatAssistantReply } from "../../../../services/whatsapp-agent/src/response-capitalization";
 import {
   preSaleFollowUpMessage,
   readCommercialGuidance,
@@ -1499,11 +1500,15 @@ function renderQuoteResponse(state: CartSummary) {
   }
   const lines = state.items.map(
     (item) =>
-      `${formatItemQuantity(item)} × ${item.productName}: ${item.subtotal} ${state.cart?.currency}`
+      `${item.productName} · ${formatItemQuantity(item)}: ${item.subtotal} ${state.cart?.currency}`
   );
   const estimate = state.items.some((item) => item.quantityEstimated);
+  const total = `El total${estimate ? " estimado" : ""} con impuestos queda en ${state.cart.quote_snapshot?.total} ${state.cart.currency}.`;
+  const weightNote = estimate
+    ? " El peso y el precio final se ajustan cuando preparemos el pedido."
+    : "";
   return {
-    text: `${lines.join("\n")}\nTotal${estimate ? " estimado" : ""} con impuestos: ${state.cart.quote_snapshot?.total} ${state.cart.currency}. ${estimate ? "El peso y el importe finales se reconfirman al preparar la mercadería. " : ""}¿Confirmás que registre la preventa? Esto no procesa el pago ni reserva stock.`,
+    text: `${lines.join("\n")}\n${total}${weightNote}\n¿Me confirmás que deje el pedido anotado? Todavía no se cobra ni se reserva mercadería.`,
     orderPrompt: true,
   };
 }
@@ -1529,7 +1534,7 @@ async function convertedOrderResponse(context: VerifiedContext) {
       text:
         preSaleFollowUpMessage +
         (converted.quote_snapshot?.quantityEstimated
-          ? " El peso y el importe finales se ajustan al preparar la mercadería."
+          ? " El peso y el precio final se ajustan cuando preparemos el pedido."
           : ""),
       orderPrompt: false,
     };
@@ -1784,11 +1789,23 @@ export async function executeCommercialTool(
         verified,
         toolSchemas.repeat_order.parse(rawArgs).pre_sale_id
       );
-    case "render_order_response":
-      return renderOrderResponse(
+    case "render_order_response": {
+      const rendered = await renderOrderResponse(
         verified,
         toolSchemas.render_order_response.parse(rawArgs).text
       );
+      // The handoff notice is configured separately and enforced by the outbox.
+      if (verified.conversationStatus === "HANDOFF") {
+        return rendered;
+      }
+      return {
+        ...rendered,
+        text: formatAssistantReply(
+          rendered.text,
+          verified.commercialGuidance.responseCapitalization
+        ),
+      };
+    }
     case "find_customer_by_phone":
       toolSchemas.find_customer_by_phone.parse(rawArgs);
       return findCustomer(verified);

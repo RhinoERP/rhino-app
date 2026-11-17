@@ -26,7 +26,19 @@ describe("whatsappIntegrationConfigurationSchema", () => {
       deliveryPolicy: "Reparto los martes.",
       pickupPolicy: "",
       salesGuidance: "",
+      responseCapitalization: "STANDARD",
     });
+  });
+
+  it("permite guardar minúsculas en las respuestas del asistente", () => {
+    const result = whatsappIntegrationConfigurationSchema.parse({
+      ...baseInput,
+      status: "DRAFT",
+      salesPriceListId: null,
+      responsibleUserId: null,
+      commercialRules: { responseCapitalization: "LOWERCASE" },
+    });
+    expect(result.commercialRules.responseCapitalization).toBe("LOWERCASE");
   });
 
   it("rechaza políticas demasiado largas antes de guardar la configuración", () => {

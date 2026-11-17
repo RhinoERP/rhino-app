@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { responseCapitalizations } from "../../../services/whatsapp-agent/src/response-capitalization";
 
 export const commercialGuidanceSchema = z.object({
   deliveryPolicy: z.string().trim().max(4000).default(""),
   pickupPolicy: z.string().trim().max(4000).default(""),
   salesGuidance: z.string().trim().max(8000).default(""),
+  responseCapitalization: z.enum(responseCapitalizations).default("STANDARD"),
 });
 
 export function readCommercialGuidance(value: unknown) {
@@ -12,4 +14,4 @@ export function readCommercialGuidance(value: unknown) {
 }
 
 export const preSaleFollowUpMessage =
-  "Dejé registrado tu pedido como preventa. A la brevedad se va a comunicar alguien del equipo comercial para reconfirmarlo y coordinar el retiro o envío de la mercadería.";
+  "Listo, dejé anotado tu pedido. Te van a escribir para confirmarlo y coordinar el retiro o el envío.";
