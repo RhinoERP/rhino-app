@@ -112,6 +112,7 @@ export const whatsappIntegrationConfigurationSchema = z
       deliveryPolicy: "",
       pickupPolicy: "",
       salesGuidance: "",
+      responseCapitalization: "STANDARD",
     }),
     handoffMessage: z
       .string()

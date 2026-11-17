@@ -415,6 +415,34 @@ export function WhatsAppIntegrationConfigForm({
 
             <FormField
               control={form.control}
+              name="commercialGuidance.responseCapitalization"
+              render={({ field }) => (
+                <FormItem className="max-w-md">
+                  <FormLabel>Estilo de escritura del asistente</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="STANDARD">
+                        Mayúsculas habituales
+                      </SelectItem>
+                      <SelectItem value="LOWERCASE">Minúsculas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Define cómo escribe el asistente en WhatsApp y en el
+                    simulador.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="handoffMessage"
               render={({ field }) => (
                 <FormItem>

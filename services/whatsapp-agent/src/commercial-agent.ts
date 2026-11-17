@@ -9,6 +9,7 @@ import {
 } from "./agent-core.js";
 import { AudioError } from "./audio/config.js";
 import { sendWhatsAppText } from "./meta-cloud.js";
+import { formatAssistantReply } from "./response-capitalization.js";
 import {
   type BusinessHours,
   getNextBusinessOpening,
@@ -135,7 +136,7 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
     supabase
       .from("whatsapp_integrations")
       .select(
-        "phone_number_id, business_hours, response_delay_min_minutes, response_delay_max_minutes"
+        "phone_number_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, commercial_rules"
       )
       .eq("id", job.integration_id)
       .eq("organization_id", job.organization_id)
@@ -182,6 +183,8 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
     audioUnavailable:
       latestInbound?.message_type === "AUDIO" && !latestInbound.content,
     businessName: organization.name as string,
+    responseCapitalization:
+      integration.commercial_rules?.responseCapitalization,
     phoneNumberId: integration.phone_number_id as string,
     recipient: conversation.customer_phone as string,
     messages: ([...(messages ?? [])] as ConversationMessage[]).reverse(),
@@ -326,7 +329,10 @@ async function produceCommercialOutput({
   }
   if (context.audioUnavailable) {
     return {
-      text: "No pude transcribir el audio. ¿Podés reenviarlo más claro o escribir el mensaje?",
+      text: formatAssistantReply(
+        "No pude transcribir el audio. ¿Podés reenviarlo más claro o escribir el mensaje?",
+        context.responseCapitalization
+      ),
       orderPrompt: false,
       usage: undefined as ModelResponse["usage"],
     };
