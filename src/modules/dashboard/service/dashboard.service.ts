@@ -508,7 +508,8 @@ export async function getFinancialBreakdown(
     .gte("sale_date", dateFrom)
     .lte("sale_date", dateTo)
     .neq("is_historical", true)
-    .eq("document_type", "STANDARD");
+    .eq("document_type", "STANDARD")
+    .eq("sales_channel", "WHOLESALE");
 
   if (filters.customerId) {
     normalSalesQuery = normalSalesQuery.eq("customer_id", filters.customerId);
@@ -1168,6 +1169,7 @@ async function fetchCustomerProfitabilitySalesReturns(
       `
     )
     .eq("organization_id", organizationId)
+    .eq("sale.sales_channel", "WHOLESALE")
     .gte("return_date" as never, dateFrom)
     .lte("return_date" as never, dateTo);
 
@@ -1476,7 +1478,8 @@ export async function getCustomerProfitabilityDashboard(
         .lte("sale_date", dateTo)
         .in("status", [...COMPLETED_SALES_ORDER_STATUSES])
         .neq("is_historical", true)
-        .eq("document_type", "STANDARD"),
+        .eq("document_type", "STANDARD")
+        .eq("sales_channel", "WHOLESALE"),
       supabase
         .from("pos_sales")
         .select(

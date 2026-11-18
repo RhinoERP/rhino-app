@@ -5,6 +5,7 @@ import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { getProductVariantsWithStock } from "@/modules/inventory/service/inventory.service";
 import { getStockReadScope } from "@/modules/inventory/utils/stock-read-scope";
 import { WarehouseAccessError } from "@/modules/inventory/utils/warehouse-access-error";
+import { getMeliStockWarehouse } from "@/modules/mercadolibre/service/meli-read.service";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type RouteContext = {
@@ -41,7 +42,7 @@ function resolveVariantAccess(
       error: "No tenés permisos para consultar inventario",
     };
   }
-  if (isDistributorCatalogScope && warehouseId) {
+  if (isDistributorCatalogScope && scope !== "mercadolibre" && warehouseId) {
     return {
       allowed: false,
       error: "El catálogo distribuidor solo muestra stock agregado",
@@ -60,7 +61,6 @@ function findVisibleProduct(params: {
   supabase: SupabaseServerClient;
   organizationId: string;
   productId: string;
-  scope: ReturnType<typeof getStockReadScope>;
   isDistributorCatalogScope: boolean;
 }) {
   let query = params.supabase
@@ -71,8 +71,6 @@ function findVisibleProduct(params: {
 
   if (params.isDistributorCatalogScope) {
     query = query.eq("is_active", true);
-  } else if (params.scope === "mercadolibre") {
-    query = query.ilike("sku", "MELI-%");
   }
 
   return query.maybeSingle();
@@ -111,11 +109,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: access.error }, { status: 403 });
     }
     const supabase = await createClient();
+    const scopedWarehouseId =
+      access.scope === "mercadolibre"
+        ? (await getMeliStockWarehouse(orgSlug, warehouseId)).id
+        : warehouseId;
     const { data: product, error } = await findVisibleProduct({
       supabase,
       organizationId: access.organizationId,
       productId,
-      scope: access.scope,
       isDistributorCatalogScope: access.isDistributorCatalogScope,
     });
     if (error) {
@@ -130,7 +131,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const variants = await getProductVariantsWithStock(
       orgSlug,
       productId,
-      warehouseId
+      scopedWarehouseId
     );
     return NextResponse.json(
       access.isDistributorCatalogScope

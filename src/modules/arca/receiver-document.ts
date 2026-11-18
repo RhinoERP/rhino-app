@@ -18,6 +18,8 @@ const TAXPAYER_CUIT_REGEX = /^\d{11}$/;
 const CONSUMIDOR_FINAL_DOC_TYPE = 99;
 const CONSUMIDOR_FINAL_DOC_NUMBER = 0;
 const CUIT_DOC_TYPE = 80;
+const DNI_DOC_TYPE = 96;
+const DNI_REGEX = /^\d{7,8}$/;
 const CONSUMIDOR_FINAL_IDENTIFICATION_THRESHOLD = 10_000_000;
 
 function buildReceiverDocumentFromCuit(
@@ -62,10 +64,30 @@ export function buildArcaReceiverDocument(params: {
   customerTaxCondition: string | null | undefined;
   invoiceType: InvoiceType;
   totalAmount: number;
+  receiverDocument?: { type: "DNI" | "CUIT"; number: string };
 }): ReceiverDocument {
   const taxCondition = resolveNormalizedTaxCondition(
     params.customerTaxCondition
   );
+  if (params.receiverDocument?.type === "DNI") {
+    if (
+      taxCondition !== "CONSUMIDOR_FINAL" ||
+      isFacturaAInvoiceType(params.invoiceType) ||
+      !DNI_REGEX.test(params.receiverDocument.number) ||
+      Number(params.receiverDocument.number) <= 0
+    ) {
+      throw new ArcaValidationError(
+        "El DNI solo puede identificar un consumidor final con un comprobante compatible."
+      );
+    }
+    return {
+      documentType: DNI_DOC_TYPE,
+      documentNumber: Number(params.receiverDocument.number),
+    };
+  }
+  if (params.receiverDocument?.type === "CUIT") {
+    return buildReceiverDocumentFromCuit(params.receiverDocument.number);
+  }
 
   if (isFacturaAInvoiceType(params.invoiceType)) {
     return buildReceiverDocumentFromCuit(params.customerCuit);

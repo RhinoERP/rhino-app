@@ -825,10 +825,6 @@ export async function getStockPaginated(
     .select(STOCK_CATALOG_COLUMNS, { count: "exact" })
     .eq("organization_id", org.id);
 
-  if (params.skuPrefix) {
-    query = query.ilike("sku", `${params.skuPrefix}%`);
-  }
-
   if (params.search) {
     query = query.or(
       `sku.ilike.%${params.search}%,product_name.ilike.%${params.search}%`
@@ -893,7 +889,6 @@ export async function getAllStockForExport(
     search?: string;
     category?: string;
     status?: string;
-    skuPrefix?: string;
     warehouseId?: string;
   }
 ): Promise<StockItem[]> {
@@ -914,10 +909,6 @@ export async function getAllStockForExport(
     .eq("organization_id", org.id)
     .order("product_name")
     .order("product_id");
-
-  if (filters?.skuPrefix) {
-    query = query.ilike("sku", `${filters.skuPrefix}%`);
-  }
 
   if (filters?.search) {
     query = query.or(

@@ -37,6 +37,44 @@ type OrganizationSummary = {
   cuit: string | null | undefined;
 };
 
+export type FiscalInvoicePrintableSale = Pick<
+  SalesOrderDetail,
+  | "id"
+  | "sale_date"
+  | "credit_days"
+  | "arca_request_json"
+  | "arca_authorized_at"
+  | "arca_point_of_sale"
+  | "arca_voucher_number"
+  | "arca_voucher_type_code"
+  | "arca_cae"
+  | "arca_cae_expires_at"
+  | "arca_status"
+  | "total_amount"
+  | "commercial_exchange_rate"
+  | "invoice_type"
+  | "invoice_number"
+  | "sale_number"
+  | "items"
+  | "taxes"
+  | "seller"
+  | "remittance_number"
+  | "observations"
+  | "sub_total"
+  | "global_discount_amount"
+> & {
+  customer: Pick<
+    SalesOrderDetail["customer"],
+    | "business_name"
+    | "fantasy_name"
+    | "cuit"
+    | "tax_condition"
+    | "address"
+    | "city"
+  >;
+  receiverDocument?: { type: "DNI" | "CUIT"; number: string };
+};
+
 type StoredWsfeRequest = {
   DocTipo?: number;
   DocNro?: number;
@@ -184,7 +222,7 @@ function getVoucherTypeCodeLabel(value: number | null | undefined): string {
 }
 
 function getPaymentConditionLabel(
-  sale: SalesOrderDetail,
+  sale: FiscalInvoicePrintableSale,
   orderQuotePaymentCondition: string | null
 ): string {
   if (orderQuotePaymentCondition) {
@@ -230,7 +268,7 @@ function resolveIssuerBusinessName(params: {
 }
 
 function buildArcaQrPayload(params: {
-  sale: SalesOrderDetail;
+  sale: FiscalInvoicePrintableSale;
   organization: OrganizationSummary;
   request: StoredWsfeRequest | null;
 }): ArcaQrPayload {
@@ -325,7 +363,10 @@ function generateInvoiceItemsRows(
     .join("");
 }
 
-function generateTaxesRows(sale: SalesOrderDetail, currency: string): string {
+function generateTaxesRows(
+  sale: FiscalInvoicePrintableSale,
+  currency: string
+): string {
   if (sale.taxes.length === 0) {
     return `
       <tr>
@@ -389,8 +430,8 @@ function generateInvoiceItemsTable(
   `;
 }
 
-async function generateFiscalInvoiceHtml(params: {
-  sale: SalesOrderDetail;
+export async function generateFiscalInvoiceHtml(params: {
+  sale: FiscalInvoicePrintableSale;
   organization: OrganizationSummary;
   branding: ArcaInvoiceBranding;
   commercialPreventaDetail?: CommercialPreventaDetail | null;
@@ -546,8 +587,8 @@ async function generateFiscalInvoiceHtml(params: {
             <span class="detail-value">${displayValue(customerName)}</span>
           </div>
           <div class="detail-cell">
-            <span class="detail-label">Documento</span>
-            <span class="detail-value">${displayValue(sale.customer.cuit)}</span>
+            <span class="detail-label">${sale.receiverDocument?.type ?? "Documento"}</span>
+            <span class="detail-value">${displayValue(sale.receiverDocument?.number ?? sale.customer.cuit)}</span>
           </div>
           <div class="detail-cell">
             <span class="detail-label">Condición frente al IVA</span>

@@ -20,6 +20,9 @@ vi.mock("@/modules/organizations/service/organizations.service", () => ({
 vi.mock("./warehouse-stock.service", () => ({
   getAvailableWarehouses: mocks.warehouses,
 }));
+vi.mock("@/modules/mercadolibre/service/meli-read.service", () => ({
+  getMeliStockWarehouse: vi.fn(),
+}));
 vi.mock("./inventory.service", () => ({
   getStockPaginated: mocks.stock,
   getStockMetrics: mocks.metrics,

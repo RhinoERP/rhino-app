@@ -1,7 +1,16 @@
 import "server-only";
 
 import { truncateMoney } from "@/lib/decimal";
+import { createTypedAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
+import { getMeliCreditNoteContext } from "@/modules/mercadolibre/service/meli-credit-note-read.service";
+import { resolveMeliFiscalReceiver } from "@/modules/mercadolibre/service/meli-fiscal-receiver";
+import {
+  assertMeliFiscalIdentity,
+  reserveMeliVoucherNumber,
+  verifyMeliReservedVoucher,
+} from "@/modules/mercadolibre/service/meli-voucher-reconciliation";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database, Json } from "@/types/supabase";
 import {
   type ArcaCreditNoteLoadedCreditNote,
@@ -34,6 +43,8 @@ import { toArcaStatus } from "./settings.service";
 type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 
 type LoadedCreditNote = ArcaCreditNoteLoadedCreditNote & {
+  salesChannel?: "MERCADO_LIBRE";
+  issueDate?: string;
   organizationId: string;
   salesOrderId: string | null;
   status: string;
@@ -496,15 +507,80 @@ function normalizeLoadedSale(data: {
   };
 }
 
-async function loadCreditNoteForArca(params: {
-  orgSlug: string;
-  creditNoteId: string;
-}): Promise<{
+type LoadedCreditNoteContext = {
   organizationId: string;
   organizationCuit: string | null;
   creditNote: LoadedCreditNote;
   sale: LoadedSale | null;
-}> {
+};
+
+async function creditNotePersistenceClient(channel?: "MERCADO_LIBRE") {
+  return channel === "MERCADO_LIBRE"
+    ? createTypedAdminClient()
+    : await createClient();
+}
+
+async function loadMeliCreditNoteForArca(params: {
+  orgSlug: string;
+  creditNoteId: string;
+}): Promise<LoadedCreditNoteContext> {
+  const access = await getCurrentUserOrganizationArcaAccess(params.orgSlug);
+  await ensure("mercadolibre.invoice", params.orgSlug);
+  const { note, sale, receiver } = await getMeliCreditNoteContext(
+    params.orgSlug,
+    params.creditNoteId
+  );
+  if (
+    !(
+      sale.arca_point_of_sale &&
+      sale.arca_voucher_number &&
+      sale.arca_voucher_type_code
+    )
+  ) {
+    throw new ArcaValidationError(
+      "La factura Meli no tiene su autorización fiscal completa."
+    );
+  }
+  const fiscalReceiver = resolveMeliFiscalReceiver(receiver, note.customer_id);
+  return {
+    organizationId: access.organization.id,
+    organizationCuit: access.organization.cuit ?? null,
+    creditNote: {
+      ...normalizeLoadedCreditNote(note),
+      salesChannel: "MERCADO_LIBRE",
+      issueDate: note.issue_date,
+    },
+    sale: {
+      id: sale.id,
+      status: sale.status,
+      saleDate: sale.sale_date,
+      invoiceType: sale.invoice_type,
+      totalAmount: sale.total_amount,
+      arcaStatus: sale.arca_status,
+      arcaCae: sale.arca_cae,
+      arcaAuthorizedAt: sale.arca_authorized_at,
+      arcaPointOfSale: sale.arca_point_of_sale,
+      arcaVoucherNumber: sale.arca_voucher_number,
+      arcaVoucherTypeCode: sale.arca_voucher_type_code,
+      arcaRequestJson: sale.arca_request_json,
+      receiverDocument: fiscalReceiver.document,
+      customer: {
+        cuit: fiscalReceiver.cuit,
+        taxCondition: fiscalReceiver.taxCondition,
+      },
+      taxes: sale.taxes.map(normalizeLoadedSaleTax),
+    },
+  };
+}
+
+async function loadCreditNoteForArca(params: {
+  orgSlug: string;
+  creditNoteId: string;
+  salesChannel?: "MERCADO_LIBRE";
+}): Promise<LoadedCreditNoteContext> {
+  if (params.salesChannel === "MERCADO_LIBRE") {
+    return loadMeliCreditNoteForArca(params);
+  }
   const access = await getCurrentUserOrganizationArcaAccess(params.orgSlug);
   const supabase = await createClient();
 
@@ -536,6 +612,7 @@ async function loadCreditNoteForArca(params: {
       `
     )
     .eq("organization_id", access.organization.id)
+    .eq("sales_channel", "WHOLESALE")
     .eq("id", params.creditNoteId)
     .maybeSingle();
 
@@ -670,6 +747,7 @@ async function loadCreditNoteForArca(params: {
 export async function validateCreditNoteForArca(params: {
   orgSlug: string;
   creditNoteId: string;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<CreditNoteValidationResult> {
   const { organizationId, organizationCuit, creditNote, sale } =
     await loadCreditNoteForArca(params);
@@ -783,6 +861,10 @@ export function buildArcaCreditNoteRequest(
     sale: context.sale,
     pointOfSale: context.resolvedCredentials.pointOfSale,
     associatedVoucherDate: context.associatedVoucherDate,
+    ...(context.creditNote.salesChannel === "MERCADO_LIBRE" &&
+    context.creditNote.issueDate
+      ? { cbteFch: Number(context.creditNote.issueDate.replaceAll("-", "")) }
+      : {}),
   });
 }
 
@@ -790,8 +872,9 @@ export async function markCreditNoteArcaPending(params: {
   orgId: string;
   creditNoteId: string;
   requestJson: Json;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<LoadedCreditNote | null> {
-  const supabase = await createClient();
+  const supabase = await creditNotePersistenceClient(params.salesChannel);
   const now = new Date().toISOString();
 
   const { data, error } = await supabase
@@ -804,6 +887,7 @@ export async function markCreditNoteArcaPending(params: {
       updated_at: now,
     })
     .eq("organization_id", params.orgId)
+    .eq("sales_channel", params.salesChannel ?? "WHOLESALE")
     .eq("id", params.creditNoteId)
     .in("arca_status", ["not_requested", "error"])
     .select(
@@ -842,8 +926,9 @@ export async function persistAuthorizedCreditNote(params: {
   };
   requestJson: Json;
   responseJson: Json;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<ArcaCreditNoteInvoiceResult> {
-  const supabase = await createClient();
+  const supabase = await creditNotePersistenceClient(params.salesChannel);
   const now = new Date().toISOString();
 
   const { data, error } = await supabase
@@ -868,7 +953,14 @@ export async function persistAuthorizedCreditNote(params: {
       updated_at: now,
     })
     .eq("organization_id", params.orgId)
+    .eq("sales_channel", params.salesChannel ?? "WHOLESALE")
     .eq("id", params.creditNoteId)
+    .in(
+      "arca_status",
+      params.salesChannel === "MERCADO_LIBRE"
+        ? ["pending"]
+        : ["not_requested", "pending", "error", "authorized"]
+    )
     .select(
       "id, organization_id, sales_order_id, amount, invoice_type, status, is_historical, arca_status, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json, arca_associated_voucher_type_code, arca_associated_point_of_sale, arca_associated_voucher_number, arca_associated_voucher_date"
     )
@@ -898,8 +990,9 @@ export async function persistCreditNoteArcaError(params: {
   requestJson: Json | null;
   responseJson: Json | null;
   errorMessage: string;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<void> {
-  const supabase = await createClient();
+  const supabase = await creditNotePersistenceClient(params.salesChannel);
 
   const { error } = await supabase
     .from("credit_notes")
@@ -911,6 +1004,7 @@ export async function persistCreditNoteArcaError(params: {
       updated_at: new Date().toISOString(),
     })
     .eq("organization_id", params.orgId)
+    .eq("sales_channel", params.salesChannel ?? "WHOLESALE")
     .eq("id", params.creditNoteId);
 
   if (error) {
@@ -920,11 +1014,135 @@ export async function persistCreditNoteArcaError(params: {
   }
 }
 
+async function persistCreditNoteEmissionFailure(params: {
+  error: unknown;
+  orgId: string;
+  creditNoteId: string;
+  salesChannel?: "MERCADO_LIBRE";
+  requestJson: Json | null;
+  responseJson: Json | null;
+}): Promise<never> {
+  const message =
+    sanitizeArcaErrorMessage(params.error) ||
+    "No se pudo completar la emisión fiscal de la nota de crédito en ARCA.";
+  if (params.error instanceof ArcaValidationError) {
+    await persistCreditNoteArcaError({ ...params, errorMessage: message });
+  } else {
+    // A transport error may follow an authorization. Never make it retryable.
+    const supabase = await creditNotePersistenceClient(params.salesChannel);
+    const result = await supabase
+      .from("credit_notes")
+      .update({
+        arca_status: "pending",
+        arca_last_error:
+          "Resultado ARCA indeterminado. Requiere conciliación antes de reintentar para evitar una nota de crédito duplicada.",
+        arca_request_json: params.requestJson,
+        arca_response_json: params.responseJson,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("organization_id", params.orgId)
+      .eq("sales_channel", params.salesChannel ?? "WHOLESALE")
+      .eq("id", params.creditNoteId)
+      .eq("arca_status", "pending");
+    if (result.error) {
+      throw new ArcaConnectionError(
+        "La emisión quedó pendiente y no se pudo guardar su diagnóstico. Actualizá el detalle antes de continuar."
+      );
+    }
+  }
+  throw new ArcaConnectionError(message);
+}
+
+export async function reconcileMeliCreditNote(
+  orgSlug: string,
+  creditNoteId: string
+) {
+  await ensure("mercadolibre.invoice", orgSlug);
+  const { organizationId, organizationCuit, creditNote, sale } =
+    await loadCreditNoteForArca({
+      orgSlug,
+      creditNoteId,
+      salesChannel: "MERCADO_LIBRE",
+    });
+  if (creditNote.arcaStatus === "authorized") {
+    return toArcaCreditNoteInvoiceResult(creditNote, { idempotent: true });
+  }
+  if (creditNote.arcaStatus !== "pending" || !sale) {
+    throw new ArcaValidationError(
+      "La nota de crédito no tiene una emisión pendiente para conciliar."
+    );
+  }
+  const cuit = validateOrganizationCuit(organizationCuit);
+  const credentials = await resolveArcaOrganizationCredentials({
+    organizationId,
+    organizationCuit,
+    actor: "system",
+  });
+  assertMeliFiscalIdentity(creditNote.arcaRequestJson, {
+    environment: credentials.environment,
+    issuerCuit: cuit,
+  });
+  const client = createArcaClientFromCredentials({
+    cuit,
+    cert: credentials.cert,
+    key: credentials.key,
+    environment: credentials.environment,
+  });
+  const verified = await verifyMeliReservedVoucher(
+    client,
+    creditNote.arcaRequestJson
+  );
+  const source = verified.request.CbtesAsoc?.[0];
+  if (
+    !source ||
+    verified.request.CbtesAsoc?.length !== 1 ||
+    source.Tipo !== sale.arcaVoucherTypeCode ||
+    source.PtoVta !== sale.arcaPointOfSale ||
+    source.Nro !== sale.arcaVoucherNumber ||
+    verified.request.CbteTipo !==
+      mapInvoiceTypeToArcaCreditNoteVoucherType(creditNote.invoiceType)
+  ) {
+    throw new ArcaValidationError(
+      "La reserva no corresponde a la nota de crédito y su factura de origen."
+    );
+  }
+  return persistAuthorizedCreditNote({
+    orgId: organizationId,
+    creditNoteId: creditNote.id,
+    salesChannel: "MERCADO_LIBRE",
+    pointOfSale: verified.request.PtoVta,
+    voucherTypeCode: verified.request.CbteTipo,
+    voucherNumber: verified.voucherNumber,
+    associatedVoucherTypeCode: source.Tipo,
+    associatedPointOfSale: source.PtoVta,
+    associatedVoucherNumber: source.Nro,
+    associatedVoucherDate: source.CbteFch,
+    authorization: verified.authorization,
+    requestJson: creditNote.arcaRequestJson ?? {},
+    responseJson: verified.responseJson,
+  });
+}
+
+async function buildCreditNoteEmissionRequest(
+  context: ValidatedCreditNoteContext,
+  client: ArcaClient
+) {
+  const request = buildArcaCreditNoteRequest(context);
+  return context.creditNote.salesChannel === "MERCADO_LIBRE"
+    ? await reserveMeliVoucherNumber(client, request)
+    : request;
+}
+
 export async function emitCreditNote(params: {
   orgSlug: string;
   creditNoteId: string;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<ArcaCreditNoteInvoiceResult> {
-  await assertCanIssueOrganizationArca(params.orgSlug);
+  if (params.salesChannel === "MERCADO_LIBRE") {
+    await ensure("mercadolibre.invoice", params.orgSlug);
+  } else {
+    await assertCanIssueOrganizationArca(params.orgSlug);
+  }
   const validation = await validateCreditNoteForArca(params);
 
   if (validation.kind === "already_authorized") {
@@ -932,9 +1150,21 @@ export async function emitCreditNote(params: {
   }
 
   const context = validation.context;
-  const request = buildArcaCreditNoteRequest(context);
+  const client = createArcaClientFromCredentials({
+    cuit: context.organizationCuit,
+    cert: context.resolvedCredentials.cert,
+    key: context.resolvedCredentials.key,
+    environment: context.resolvedCredentials.environment,
+  });
+  const request = await buildCreditNoteEmissionRequest(context, client);
   const associatedVoucher = request.CbtesAsoc[0];
   const requestJson = toJsonValue({
+    ...(context.creditNote.salesChannel === "MERCADO_LIBRE"
+      ? {
+          arcaEnvironment: context.resolvedCredentials.environment,
+          issuerCuit: context.organizationCuit,
+        }
+      : {}),
     creditNoteId: context.creditNote.id,
     saleId: context.sale.id,
     invoiceType: context.creditNote.invoiceType,
@@ -946,6 +1176,7 @@ export async function emitCreditNote(params: {
   });
 
   const pendingCreditNote = await markCreditNoteArcaPending({
+    salesChannel: context.creditNote.salesChannel,
     orgId: context.organizationId,
     creditNoteId: context.creditNote.id,
     requestJson: requestJson ?? {},
@@ -966,19 +1197,17 @@ export async function emitCreditNote(params: {
   let responseJson: Json | null = null;
 
   try {
-    const client = createArcaClientFromCredentials({
-      cuit: context.organizationCuit,
-      cert: context.resolvedCredentials.cert,
-      key: context.resolvedCredentials.key,
-      environment: context.resolvedCredentials.environment,
-    });
-
     const rawAuthorization =
-      await client.ElectronicBilling.createNextVoucher(request);
+      context.creditNote.salesChannel === "MERCADO_LIBRE"
+        ? await client.ElectronicBilling.createVoucher(request)
+        : await client.ElectronicBilling.createNextVoucher(request);
     authorization = {
       CAE: String(rawAuthorization.CAE),
       CAEFchVto: String(rawAuthorization.CAEFchVto),
-      voucherNumber: Number(rawAuthorization.voucherNumber),
+      voucherNumber:
+        context.creditNote.salesChannel === "MERCADO_LIBRE"
+          ? Number(request.CbteDesde)
+          : Number(rawAuthorization.voucherNumber),
     };
     responseJson =
       (await getVoucherInfoBestEffort({
@@ -989,40 +1218,14 @@ export async function emitCreditNote(params: {
         authorization,
       })) ?? toJsonValue({ authorization });
   } catch (error) {
-    const sanitizedError = sanitizeArcaErrorMessage(error);
-
-    if (error instanceof ArcaValidationError) {
-      await persistCreditNoteArcaError({
-        orgId: context.organizationId,
-        creditNoteId: context.creditNote.id,
-        requestJson,
-        responseJson,
-        errorMessage:
-          sanitizedError ||
-          "No se pudo completar la emisión fiscal de la nota de crédito en ARCA.",
-      });
-    } else {
-      // Do not turn an indeterminate transport outcome into a retryable
-      // request. ARCA could already have assigned a CAE to this exact NC.
-      const supabase = await createClient();
-      await supabase
-        .from("credit_notes")
-        .update({
-          arca_status: "pending",
-          arca_last_error:
-            "Resultado ARCA indeterminado. Requiere conciliación antes de reintentar para evitar una nota de crédito duplicada.",
-          arca_request_json: requestJson,
-          arca_response_json: responseJson,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("organization_id", context.organizationId)
-        .eq("id", context.creditNote.id);
-    }
-
-    throw new ArcaConnectionError(
-      sanitizedError ||
-        "No se pudo completar la emisión fiscal de la nota de crédito en ARCA."
-    );
+    await persistCreditNoteEmissionFailure({
+      error,
+      salesChannel: context.creditNote.salesChannel,
+      orgId: context.organizationId,
+      creditNoteId: context.creditNote.id,
+      requestJson,
+      responseJson,
+    });
   }
 
   if (!authorization) {
@@ -1032,6 +1235,7 @@ export async function emitCreditNote(params: {
   }
 
   return persistAuthorizedCreditNote({
+    salesChannel: context.creditNote.salesChannel,
     orgId: context.organizationId,
     creditNoteId: context.creditNote.id,
     pointOfSale: request.PtoVta,

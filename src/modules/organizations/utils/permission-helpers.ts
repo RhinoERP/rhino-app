@@ -289,6 +289,11 @@ function humanizeAction(
       "pricing.view_margin": "Ver columna Margen (Precios)",
       "distributor.catalog": "Ver catálogo",
       "mercadolibre.access": "Acceso MercadoLibre",
+      "mercadolibre.manage": "Registrar ventas Mercado Libre",
+      "mercadolibre.invoice": "Emitir facturas Mercado Libre",
+      "mercadolibre.payments.read": "Ver cobros Mercado Libre",
+      "mercadolibre.payments.manage":
+        "Registrar y anular cargas de cobros Mercado Libre",
     };
 
     if (specialLabels[key]) {

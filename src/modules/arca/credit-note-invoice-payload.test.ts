@@ -42,6 +42,75 @@ function buildSale(
 
 describe("buildArcaCreditNoteVoucherRequest", () => {
   it.each([
+    { invoiceType: "FACTURA_B", invoiceVoucher: 6, creditVoucher: 8 },
+    { invoiceType: "FACTURA_C", invoiceVoucher: 11, creditVoucher: 13 },
+  ] as const)("conserva el DNI del snapshot Meli para $invoiceType", ({
+    invoiceType,
+    invoiceVoucher,
+    creditVoucher,
+  }) => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: { id: "meli-note", amount: 605, invoiceType },
+      sale: buildSale({
+        invoiceType,
+        arcaVoucherTypeCode: invoiceVoucher,
+        customer: { cuit: null, taxCondition: "CONSUMIDOR_FINAL" },
+        receiverDocument: { type: "DNI", number: "12345678" },
+        ...(invoiceType === "FACTURA_C" ? { taxes: [] } : {}),
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+    expect(request).toMatchObject({
+      DocTipo: 96,
+      DocNro: 12_345_678,
+      CbteTipo: creditVoucher,
+      CbtesAsoc: [
+        {
+          Tipo: invoiceVoucher,
+          PtoVta: 3,
+          Nro: 42,
+          CbteFch: TEST_ASSOCIATED_CBTE_FCH,
+        },
+      ],
+    });
+  });
+
+  it("conserva el tratamiento legacy del consumidor final cuando no hay documento explícito", () => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: { id: "legacy-note", amount: 605, invoiceType: "FACTURA_B" },
+      sale: buildSale({
+        invoiceType: "FACTURA_B",
+        arcaVoucherTypeCode: 6,
+        customer: { cuit: null, taxCondition: "CONSUMIDOR_FINAL" },
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+    expect(request).toMatchObject({ DocTipo: 99, DocNro: 0 });
+  });
+
+  it("rechaza un DNI incompatible con una nota de crédito A", () => {
+    expect(() =>
+      buildArcaCreditNoteVoucherRequest({
+        creditNote: {
+          id: "invalid-note",
+          amount: 605,
+          invoiceType: "FACTURA_A",
+        },
+        sale: buildSale({
+          receiverDocument: { type: "DNI", number: "12345678" },
+        }),
+        pointOfSale: 5,
+        cbteFch: TEST_CBTE_FCH,
+        associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+      })
+    ).toThrow("DNI");
+  });
+
+  it.each([
     10, 17.33, 100.01,
   ])("concilia centavos entre bases desiguales y neto para una NC de %s", (amount) => {
     const request = buildArcaCreditNoteVoucherRequest({

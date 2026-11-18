@@ -1,3 +1,5 @@
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   createPosSale,
   getPosSaleById,
@@ -14,7 +16,7 @@ import type {
   DirectSaleTerminal,
 } from "../types";
 
-export function getDirectSalesByOrgSlug(
+export async function getDirectSalesByOrgSlug(
   orgSlug: string,
   options?: {
     search?: string;
@@ -22,23 +24,26 @@ export function getDirectSalesByOrgSlug(
     pageSize?: number;
   }
 ): Promise<{ data: DirectSale[]; count: number }> {
+  await ensure(READ_PERMISSIONS.pos, orgSlug);
   return getPosSalesByOrgSlug(orgSlug, options);
 }
 
-export function getDirectSaleById(
+export async function getDirectSaleById(
   orgSlug: string,
   saleId: string
 ): Promise<DirectSaleDetail | null> {
+  await ensure(READ_PERMISSIONS.pos, orgSlug);
   return getPosSaleById(orgSlug, saleId);
 }
 
-export function searchDirectSaleProducts(params: {
+export async function searchDirectSaleProducts(params: {
   orgSlug: string;
   terminalId?: string;
   q?: string;
   barcode?: string;
   limit?: number;
 }): Promise<DirectSaleProduct[]> {
+  await ensure(READ_PERMISSIONS.pos, params.orgSlug);
   return searchPosProductsForTerminal(params);
 }
 

@@ -357,11 +357,16 @@ async function ensureReceivable(params: {
   supabase: Supabase;
   orgId: string;
   saleId: string;
-  customerId: string;
+  customerId: string | null;
   amount: number;
   dueDate: string;
   currency?: string;
 }) {
+  if (!params.customerId) {
+    throw new Error(
+      "La cuenta por cobrar de un anticipo requiere un cliente registrado."
+    );
+  }
   const { data: existing, error: existingError } = await params.supabase
     .from("accounts_receivable")
     .select("id")

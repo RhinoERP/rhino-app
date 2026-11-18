@@ -2,10 +2,20 @@ import "server-only";
 
 import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
+import { createTypedAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
+import { resolveMeliFiscalReceiver } from "@/modules/mercadolibre/service/meli-fiscal-receiver";
+import { assertMeliInvoiceChoice } from "@/modules/mercadolibre/service/meli-fiscal-settings.service";
+import { getMeliSale } from "@/modules/mercadolibre/service/meli-read.service";
+import {
+  assertMeliFiscalIdentity,
+  reserveMeliVoucherNumber,
+  verifyMeliReservedVoucher,
+} from "@/modules/mercadolibre/service/meli-voucher-reconciliation";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   isArcaSupportedInvoiceType,
   isFacturaAInvoiceType,
@@ -93,6 +103,8 @@ type LoadedSaleItem = {
 };
 
 type LoadedSale = {
+  salesChannel?: "MERCADO_LIBRE";
+  updatedAt?: string;
   id: string;
   organizationId: string;
   status: OrderStatus;
@@ -118,17 +130,19 @@ type LoadedSale = {
   arcaRequestJson: Json | null;
   arcaResponseJson: Json | null;
   customer: {
-    id: string;
+    id: string | null;
     businessName: string;
     fantasyName: string | null;
     cuit: string | null;
     taxCondition: string | null;
+    document?: { type: "DNI" | "CUIT"; number: string };
   };
   items: LoadedSaleItem[];
   taxes: LoadedSaleTax[];
 };
 
 type LoadedSaleQueryRecord = {
+  updated_at?: string | null;
   id: string;
   organization_id: string;
   status: OrderStatus;
@@ -214,6 +228,21 @@ type ValidatedSaleContext = {
   effectiveInvoiceType: InvoiceType;
 };
 
+function salePersistenceClient(salesChannel?: "MERCADO_LIBRE") {
+  return salesChannel === "MERCADO_LIBRE"
+    ? createTypedAdminClient()
+    : createClient();
+}
+
+function registeredFiscalCustomerId(id: string | null): string {
+  if (!id) {
+    throw new ArcaValidationError(
+      "La facturación mayorista requiere un cliente registrado."
+    );
+  }
+  return id;
+}
+
 type TaxClassification =
   | {
       kind: "iva";
@@ -227,6 +256,8 @@ type TaxClassification =
     };
 
 type ArcaVoucherRequest = {
+  CbteDesde?: number;
+  CbteHasta?: number;
   Concepto: number;
   DocTipo: number;
   DocNro: number;
@@ -684,6 +715,8 @@ function normalizeLoadedSaleArcaState(data: {
 }
 
 function normalizeLoadedSale(data: {
+  updated_at?: string | null;
+  meliReceiver?: ReturnType<typeof resolveMeliFiscalReceiver>;
   id: string;
   organization_id: string;
   status: OrderStatus;
@@ -755,6 +788,8 @@ function normalizeLoadedSale(data: {
   }> | null;
 }): LoadedSale {
   return {
+    salesChannel: data.meliReceiver ? "MERCADO_LIBRE" : undefined,
+    updatedAt: data.updated_at ?? undefined,
     id: data.id,
     organizationId: data.organization_id,
     status: data.status,
@@ -770,7 +805,7 @@ function normalizeLoadedSale(data: {
     totalTaxAmount: toNullableMoney(data.total_tax_amount),
     globalDiscountAmount: toNullableMoney(data.global_discount_amount),
     ...normalizeLoadedSaleArcaState(data),
-    customer: normalizeLoadedSaleCustomer(data.customer),
+    customer: data.meliReceiver ?? normalizeLoadedSaleCustomer(data.customer),
     items: (data.items ?? []).map(normalizeLoadedSaleItem),
     taxes: (data.taxes ?? []).map(normalizeLoadedSaleTax),
   };
@@ -842,13 +877,24 @@ async function loadSaleForArcaInvoicing(params: {
   orgSlug: string;
   saleId: string;
   formalAdvanceDocument?: "ADVANCE" | "BALANCE";
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<{
   organizationId: string;
   organizationCuit: string | null;
   sale: LoadedSale;
 }> {
   const access = await getCurrentUserOrganizationArcaAccess(params.orgSlug);
-  const supabase = await createClient();
+  let meliSale: Awaited<ReturnType<typeof getMeliSale>> = null;
+  if (params.salesChannel === "MERCADO_LIBRE") {
+    await ensure("mercadolibre.invoice", params.orgSlug);
+    meliSale = await getMeliSale(params.orgSlug, params.saleId);
+    if (!meliSale) {
+      throw new ArcaValidationError(
+        "Venta Meli no encontrada o fuera de tus depósitos."
+      );
+    }
+  }
+  const supabase = await salePersistenceClient(params.salesChannel);
 
   const { data, error } = await supabase
     .from("sales_orders")
@@ -857,6 +903,7 @@ async function loadSaleForArcaInvoicing(params: {
         id,
         organization_id,
         status,
+        updated_at,
         document_type,
         parent_sales_order_id,
         sale_date,
@@ -912,6 +959,7 @@ async function loadSaleForArcaInvoicing(params: {
       `
     )
     .eq("organization_id", access.organization.id)
+    .eq("sales_channel", params.salesChannel ?? "WHOLESALE")
     .eq("id", params.saleId)
     .maybeSingle();
 
@@ -926,6 +974,14 @@ async function loadSaleForArcaInvoicing(params: {
   }
 
   const saleData = data as LoadedSaleQueryRecord;
+  if (
+    meliSale &&
+    (!saleData.updated_at || saleData.updated_at !== meliSale.updated_at)
+  ) {
+    throw new ArcaValidationError(
+      "Los datos de la venta Meli cambiaron. Actualizá el detalle antes de emitir."
+    );
+  }
 
   await assertInvoiceDocumentType({
     supabase,
@@ -938,6 +994,10 @@ async function loadSaleForArcaInvoicing(params: {
     organizationId: access.organization.id,
     organizationCuit: access.organization.cuit ?? null,
     sale: normalizeLoadedSale({
+      updated_at: saleData.updated_at,
+      meliReceiver: meliSale
+        ? resolveMeliFiscalReceiver(meliSale.receiver, meliSale.customer_id)
+        : undefined,
       id: saleData.id,
       organization_id: saleData.organization_id,
       status: saleData.status,
@@ -1027,6 +1087,67 @@ export async function getArcaSaleInvoiceReadiness(
   };
 }
 
+export async function reconcileMeliSaleInvoice(
+  orgSlug: string,
+  saleId: string
+) {
+  await ensure("mercadolibre.invoice", orgSlug);
+  const { organizationId, organizationCuit, sale } =
+    await loadSaleForArcaInvoicing({
+      orgSlug,
+      saleId,
+      salesChannel: "MERCADO_LIBRE",
+    });
+  if (sale.arcaStatus === "authorized") {
+    return toArcaSaleInvoiceResult(sale, { idempotent: true });
+  }
+  if (sale.arcaStatus !== "pending") {
+    throw new ArcaValidationError(
+      "La venta no tiene una emisión pendiente para conciliar."
+    );
+  }
+  const cuit = validateOrganizationCuit(organizationCuit);
+  const credentials = await resolveArcaOrganizationCredentials({
+    organizationId,
+    organizationCuit,
+    actor: "system",
+  });
+  assertMeliFiscalIdentity(sale.arcaRequestJson, {
+    environment: credentials.environment,
+    issuerCuit: cuit,
+  });
+  const client = createArcaClientFromCredentials({
+    cuit,
+    cert: credentials.cert,
+    key: credentials.key,
+    environment: credentials.environment,
+  });
+  const verified = await verifyMeliReservedVoucher(
+    client,
+    sale.arcaRequestJson
+  );
+  const invoiceType =
+    verified.request.CbteTipo === 51 ? "FACTURA_A_RETENCION" : sale.invoiceType;
+  if (ARCA_VOUCHER_TYPE_MAP[invoiceType] !== verified.request.CbteTipo) {
+    throw new ArcaValidationError(
+      "La reserva no corresponde al comprobante de esta venta."
+    );
+  }
+  return persistAuthorizedInvoice({
+    orgId: organizationId,
+    saleId: sale.id,
+    salesChannel: "MERCADO_LIBRE",
+    invoiceType,
+    pointOfSale: verified.request.PtoVta,
+    voucherTypeCode: verified.request.CbteTipo,
+    voucherNumber: verified.voucherNumber,
+    exchangeRate: sale.currency === "USD" ? verified.request.MonCotiz : null,
+    authorization: verified.authorization,
+    requestJson: sale.arcaRequestJson ?? {},
+    responseJson: verified.responseJson,
+  });
+}
+
 export function formatArcaInvoiceNumber(
   pointOfSale: number,
   voucherNumber: number
@@ -1044,6 +1165,7 @@ export async function validateSaleForArcaInvoicing(params: {
   orgSlug: string;
   saleId: string;
   formalAdvanceDocument?: "ADVANCE" | "BALANCE";
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<
   ArcaSaleInvoiceValidationResult & { context?: ValidatedSaleContext }
 > {
@@ -1051,12 +1173,15 @@ export async function validateSaleForArcaInvoicing(params: {
     await loadSaleForArcaInvoicing(params);
 
   if (sale.arcaStatus === "authorized") {
-    if (isEarlyBillablePreventaStatus(sale.status)) {
+    if (
+      sale.salesChannel !== "MERCADO_LIBRE" &&
+      isEarlyBillablePreventaStatus(sale.status)
+    ) {
       await ensureReceivableForAuthorizedPreventaInvoice({
         supabase: await createClient(),
         orgId: organizationId,
         saleId: sale.id,
-        customerId: sale.customer.id,
+        customerId: registeredFiscalCustomerId(sale.customer.id),
         totalAmount: sale.totalAmount,
         currency: sale.currency,
         saleDate: sale.saleDate,
@@ -1078,6 +1203,7 @@ export async function validateSaleForArcaInvoicing(params: {
       "Ya hay una emisión fiscal en curso para esta venta. Esperá unos segundos e intentá nuevamente."
     );
   }
+  await assertMeliSaleFiscalRules(sale, organizationId);
 
   requireCommercialExchangeRateForUsdInvoice(
     sale.currency,
@@ -1122,15 +1248,7 @@ export async function validateSaleForArcaInvoicing(params: {
   if (!isArcaSupportedInvoiceType(sale.invoiceType)) {
     assertSupportedInvoiceType(sale.invoiceType);
   }
-  normalizeTaxpayerCuit(sale.customer.cuit, "cliente");
-
-  if (!sale.customer.taxCondition?.trim()) {
-    throw new ArcaValidationError(
-      "El cliente no tiene condición fiscal informada."
-    );
-  }
-
-  validateSaleCustomerVoucherCompatibility(sale);
+  validateFiscalReceiver(sale);
 
   const resolvedCredentials = await resolveArcaOrganizationCredentials({
     organizationId,
@@ -1173,6 +1291,46 @@ export async function validateSaleForArcaInvoicing(params: {
       effectiveInvoiceType,
     },
   };
+}
+
+async function assertMeliSaleFiscalRules(
+  sale: LoadedSale,
+  organizationId: string
+) {
+  if (sale.salesChannel !== "MERCADO_LIBRE") {
+    return;
+  }
+  if (sale.status !== "DELIVERED") {
+    throw new ArcaValidationError(
+      "La venta Meli no está confirmada como operación completa."
+    );
+  }
+  await assertMeliInvoiceChoice(
+    createTypedAdminClient(),
+    organizationId,
+    sale.invoiceType,
+    sale.customer.taxCondition
+  );
+  if (
+    sale.invoiceType === "FACTURA_C" &&
+    (sale.taxes.length > 0 || Number(sale.totalTaxAmount) > 0)
+  ) {
+    throw new ArcaValidationError(
+      "Factura C no debe tener IVA/tributos asociados."
+    );
+  }
+}
+
+function validateFiscalReceiver(sale: LoadedSale) {
+  if (sale.customer.document?.type !== "DNI") {
+    normalizeTaxpayerCuit(sale.customer.cuit, "cliente");
+  }
+  if (!sale.customer.taxCondition?.trim()) {
+    throw new ArcaValidationError(
+      "El cliente no tiene condición fiscal informada."
+    );
+  }
+  validateSaleCustomerVoucherCompatibility(sale);
 }
 
 function sanitizeArcaManualInvoiceNumberConflict(sale: LoadedSale): boolean {
@@ -1255,6 +1413,7 @@ export function buildArcaVoucherRequestFromSale(
   fiscalCurrency: AuthorizedArcaFiscalCurrency
 ): ArcaVoucherRequest {
   const receiverDocument = buildArcaReceiverDocument({
+    receiverDocument: context.sale.customer.document,
     customerCuit: context.sale.customer.cuit,
     customerTaxCondition: context.sale.customer.taxCondition,
     invoiceType: context.effectiveInvoiceType,
@@ -1357,10 +1516,12 @@ async function markSaleInvoicePending(params: {
   orgId: string;
   saleId: string;
   requestJson: Json;
+  salesChannel?: "MERCADO_LIBRE";
+  expectedUpdatedAt?: string;
 }) {
-  const supabase = await createClient();
+  const supabase = await salePersistenceClient(params.salesChannel);
   const now = new Date().toISOString();
-  const { data, error } = await supabase
+  let query = supabase
     .from("sales_orders")
     .update({
       arca_status: "pending",
@@ -1374,8 +1535,11 @@ async function markSaleInvoicePending(params: {
     .in("arca_status", ["not_requested", "error"])
     .select(
       "id, arca_status, invoice_number, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json"
-    )
-    .maybeSingle();
+    );
+  if (params.expectedUpdatedAt) {
+    query = query.eq("updated_at", params.expectedUpdatedAt);
+  }
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     throw new ArcaConnectionError(
@@ -1401,8 +1565,9 @@ async function persistAuthorizedInvoice(params: {
   requestJson: Json;
   responseJson: Json;
   preventaSale?: LoadedSale;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<ArcaSaleInvoiceResult> {
-  const supabase = await createClient();
+  const supabase = await salePersistenceClient(params.salesChannel);
   const now = new Date().toISOString();
   const invoiceNumber = formatArcaInvoiceNumber(
     params.pointOfSale,
@@ -1429,6 +1594,13 @@ async function persistAuthorizedInvoice(params: {
     })
     .eq("organization_id", params.orgId)
     .eq("id", params.saleId)
+    .eq("sales_channel", params.salesChannel ?? "WHOLESALE")
+    .in(
+      "arca_status",
+      params.salesChannel === "MERCADO_LIBRE"
+        ? ["pending"]
+        : ["not_requested", "pending", "error", "authorized"]
+    )
     .select(
       "id, arca_status, invoice_number, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json"
     )
@@ -1442,12 +1614,12 @@ async function persistAuthorizedInvoice(params: {
 
   const persistedSale = data as PersistedAuthorizedSale;
 
-  if (params.preventaSale) {
+  if (params.preventaSale && params.salesChannel !== "MERCADO_LIBRE") {
     await ensureReceivableForAuthorizedPreventaInvoice({
       supabase,
       orgId: params.orgId,
       saleId: params.saleId,
-      customerId: params.preventaSale.customer.id,
+      customerId: registeredFiscalCustomerId(params.preventaSale.customer.id),
       totalAmount: params.preventaSale.totalAmount,
       currency: params.preventaSale.currency,
       saleDate: params.preventaSale.saleDate,
@@ -1456,12 +1628,15 @@ async function persistAuthorizedInvoice(params: {
     });
   }
 
-  const { data: accountingLink } = await supabase
-    .from("sales_orders" as never)
-    .select("accounting_informal_entry_id")
-    .eq("organization_id", params.orgId)
-    .eq("id", params.saleId)
-    .maybeSingle();
+  const { data: accountingLink } =
+    params.salesChannel === "MERCADO_LIBRE"
+      ? { data: null }
+      : await supabase
+          .from("sales_orders" as never)
+          .select("accounting_informal_entry_id")
+          .eq("organization_id", params.orgId)
+          .eq("id", params.saleId)
+          .maybeSingle();
 
   const accountingInformalEntryId = (
     accountingLink as {
@@ -1507,8 +1682,9 @@ async function persistInvoiceError(params: {
   requestJson: Json | null;
   responseJson: Json | null;
   errorMessage: string;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<void> {
-  const supabase = await createClient();
+  const supabase = await salePersistenceClient(params.salesChannel);
 
   const { error } = await supabase
     .from("sales_orders")
@@ -1535,8 +1711,13 @@ export async function emitSaleInvoice(params: {
   saleId: string;
   formalAdvanceDocument?: "ADVANCE" | "BALANCE";
   fiscalExchangeRate?: number;
+  salesChannel?: "MERCADO_LIBRE";
 }): Promise<ArcaSaleInvoiceResult> {
-  await assertCanIssueOrganizationArca(params.orgSlug);
+  if (params.salesChannel === "MERCADO_LIBRE") {
+    await ensure("mercadolibre.invoice", params.orgSlug);
+  } else {
+    await assertCanIssueOrganizationArca(params.orgSlug);
+  }
   const validation = await validateSaleForArcaInvoicing(params);
 
   if (validation.kind === "already_authorized") {
@@ -1558,8 +1739,17 @@ export async function emitSaleInvoice(params: {
     context.sale.currency,
     params.fiscalExchangeRate
   );
-  const request = buildArcaVoucherRequestFromSale(context, fiscalCurrency);
+  let request = buildArcaVoucherRequestFromSale(context, fiscalCurrency);
+  if (context.sale.salesChannel === "MERCADO_LIBRE") {
+    request = await reserveMeliVoucherNumber(client, request);
+  }
   const requestJson = toJsonValue({
+    ...(context.sale.salesChannel === "MERCADO_LIBRE"
+      ? {
+          arcaEnvironment: context.resolvedCredentials.environment,
+          issuerCuit: context.organizationCuit,
+        }
+      : {}),
     saleId: context.sale.id,
     invoiceType: context.effectiveInvoiceType,
     requestedInvoiceType: context.sale.invoiceType,
@@ -1574,6 +1764,11 @@ export async function emitSaleInvoice(params: {
   });
 
   const pendingSale = await markSaleInvoicePending({
+    expectedUpdatedAt:
+      context.sale.salesChannel === "MERCADO_LIBRE"
+        ? context.sale.updatedAt
+        : undefined,
+    salesChannel: context.sale.salesChannel,
     orgId: context.organizationId,
     saleId: context.sale.id,
     requestJson: requestJson ?? {},
@@ -1599,11 +1794,16 @@ export async function emitSaleInvoice(params: {
 
   try {
     const rawAuthorization =
-      await client.ElectronicBilling.createNextVoucher(request);
+      context.sale.salesChannel === "MERCADO_LIBRE"
+        ? await client.ElectronicBilling.createVoucher(request)
+        : await client.ElectronicBilling.createNextVoucher(request);
     authorization = {
       CAE: String(rawAuthorization.CAE),
       CAEFchVto: String(rawAuthorization.CAEFchVto),
-      voucherNumber: Number(rawAuthorization.voucherNumber),
+      voucherNumber:
+        context.sale.salesChannel === "MERCADO_LIBRE"
+          ? Number(request.CbteDesde)
+          : Number(rawAuthorization.voucherNumber),
     };
     responseJson =
       (await getVoucherInfoBestEffort({
@@ -1626,6 +1826,7 @@ export async function emitSaleInvoice(params: {
 
     if (error instanceof ArcaValidationError) {
       await persistInvoiceError({
+        salesChannel: context.sale.salesChannel,
         orgId: context.organizationId,
         saleId: context.sale.id,
         requestJson,
@@ -1638,7 +1839,7 @@ export async function emitSaleInvoice(params: {
       // A transport failure may have happened after ARCA authorized the
       // voucher. Keep the persisted request pending and never submit it a
       // second time automatically; the caller can reconcile the exact record.
-      const supabase = await createClient();
+      const supabase = await salePersistenceClient(context.sale.salesChannel);
       await supabase
         .from("sales_orders")
         .update({
@@ -1670,6 +1871,7 @@ export async function emitSaleInvoice(params: {
   });
 
   const result = await persistAuthorizedInvoice({
+    salesChannel: context.sale.salesChannel,
     orgId: context.organizationId,
     saleId: context.sale.id,
     invoiceType: context.effectiveInvoiceType,
@@ -1685,6 +1887,9 @@ export async function emitSaleInvoice(params: {
       : undefined,
   });
 
+  if (context.sale.salesChannel === "MERCADO_LIBRE") {
+    return result;
+  }
   const supabase = await createClient();
   await regenerateAuthorizedSaleRemittances(
     {

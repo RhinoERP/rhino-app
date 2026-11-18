@@ -181,6 +181,7 @@ export type CreditNotePDFData = {
   };
   customer: {
     businessName: string;
+    document?: { type: "DNI" | "CUIT"; number: string };
     fantasyName?: string | null;
     cuit?: string | null;
     taxCondition?: string | null;
@@ -206,6 +207,8 @@ export type CreditNotePDFData = {
   sourceDocuments: CreditNotePDFSourceDocument[];
   fiscal: {
     isAuthorized: boolean;
+    currency?: string;
+    currencyRate?: number;
     number: string | null;
     cae: string | null;
     caeExpiresAt: string | null;
@@ -546,6 +549,8 @@ async function generateCreditNoteQrDataUrl(
   }
 
   try {
+    const cuitDocumentType =
+      data.customer.cuit || data.customer.document ? 80 : null;
     const verifierUrl = buildArcaQrVerifierUrlFromInput({
       issueDate: data.issueDate,
       issuerCuit: data.issuer.cuit,
@@ -553,10 +558,13 @@ async function generateCreditNoteQrDataUrl(
       voucherTypeCode: data.fiscal.voucherTypeCode,
       voucherNumber: data.fiscal.voucherNumber,
       totalAmount: data.amount,
-      currency: "PES",
-      currencyRate: 1,
-      receiverDocumentNumber: getNumericIdentifier(data.customer.cuit),
-      receiverDocumentType: data.customer.cuit ? 80 : null,
+      currency: data.fiscal.currency ?? "PES",
+      currencyRate: data.fiscal.currencyRate ?? 1,
+      receiverDocumentNumber: getNumericIdentifier(
+        data.customer.document?.number ?? data.customer.cuit
+      ),
+      receiverDocumentType:
+        data.customer.document?.type === "DNI" ? 96 : cuitDocumentType,
       authorizationCode: data.fiscal.cae,
     });
 
@@ -859,7 +867,7 @@ function buildCustomerHtml(
         </div>
         <div class="customer-cell">
           <div><span>Cuenta Nro</span><strong>${displayValue(data.customer.clientNumber)}</strong></div>
-          <div><span>CUIT</span><strong>${displayValue(data.customer.cuit)}</strong></div>
+          <div><span>${data.customer.document?.type === "DNI" ? "DNI" : "CUIT"}</span><strong>${displayValue(data.customer.document?.number ?? data.customer.cuit)}</strong></div>
           <div><span>Comp. asociado</span><strong>${displayValue(getReferenceDocument(data))}</strong></div>
           <div><span>Fecha Vto.</span><strong>${expirationDate}</strong></div>
           ${data.externalReference ? `<div><span>Referencia</span><strong>${escapeHtml(data.externalReference)}</strong></div>` : ""}

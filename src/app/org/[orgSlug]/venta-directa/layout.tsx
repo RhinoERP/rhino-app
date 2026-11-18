@@ -1,5 +1,9 @@
 import { redirect } from "next/navigation";
 import {
+  hasMeliAccess,
+  MELI_READ_PERMISSIONS,
+} from "@/modules/mercadolibre/permissions";
+import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
@@ -30,13 +34,13 @@ export default async function PosModuleLayout({
   if (
     isOrganizationModuleEnabled(organization, "production") &&
     !layoutData?.permissions.includes("organization.admin") &&
-    !layoutData?.permissions.includes("mercadolibre.access")
+    !hasMeliAccess(layoutData?.permissions ?? [])
   ) {
     redirect(`/org/${orgSlug}`);
   }
   await guardOrganizationPermissionAccess(orgSlug, [
     ...READ_PERMISSIONS.pos,
-    ...READ_PERMISSIONS.mercadolibre,
+    ...MELI_READ_PERMISSIONS,
   ]);
 
   return children;

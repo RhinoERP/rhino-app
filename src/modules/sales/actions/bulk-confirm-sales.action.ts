@@ -37,7 +37,7 @@ export type BulkActionResult = {
 type SaleRow = {
   id: string;
   sale_number: number | null;
-  customer_id: string;
+  customer_id: string | null;
   user_id: string | null;
   sale_date: string;
   expiration_date: string | null;
@@ -68,6 +68,11 @@ async function confirmOneSale(
 ): Promise<BulkSaleResult> {
   const saleLabel = sale.sale_number ? `#${sale.sale_number}` : sale.id;
   try {
+    if (!sale.customer_id) {
+      throw new Error(
+        "La confirmación mayorista requiere un cliente registrado."
+      );
+    }
     await confirmSaleOrder({
       orgSlug,
       saleId: sale.id,

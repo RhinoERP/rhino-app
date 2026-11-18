@@ -2120,23 +2120,6 @@ export async function searchPosProductsForTerminal(params: {
   ) {
     throw new Error("No tenés acceso al depósito de la sesión de caja");
   }
-  const { data: userPermissions, error: permissionsError } = await supabase.rpc(
-    "get_user_org_permissions_by_slug",
-    { target_org_slug: params.orgSlug }
-  );
-  if (permissionsError) {
-    throw new Error(
-      `No se pudieron validar permisos POS: ${permissionsError.message}`
-    );
-  }
-  const permissions = (userPermissions ?? []) as string[];
-  const isMercadoLibreOnly =
-    permissions.includes("mercadolibre.access") &&
-    !permissions.includes("organization.admin") &&
-    !permissions.some((permission) =>
-      ["pos.read", "pos.read.all", "pos.manage"].includes(permission)
-    );
-
   const sanitizedBarcode = parsedParams.barcode
     .replaceAll("%", "")
     .replaceAll(",", "")
@@ -2177,10 +2160,6 @@ export async function searchPosProductsForTerminal(params: {
     .eq("is_active", true)
     .order("name")
     .limit(parsedParams.limit);
-
-  if (isMercadoLibreOnly) {
-    productsQuery = productsQuery.ilike("sku", "MELI-%");
-  }
 
   if (barcodeProductIds) {
     productsQuery = productsQuery.in("id", barcodeProductIds);

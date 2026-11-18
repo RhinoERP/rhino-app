@@ -1194,6 +1194,7 @@ export async function createSaleReturn(
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
+    .eq("sales_channel", "WHOLESALE")
     .maybeSingle();
 
   if (saleError || !saleData) {

@@ -1,7 +1,9 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { DirectSalesTabs } from "@/components/pos-sales/direct-sales-tabs";
 import { Button } from "@/components/ui/button";
+import { hasMeliAccess } from "@/modules/mercadolibre/permissions";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 import { getPosCashControlDataByOrgSlug } from "@/modules/pos/service/pos-sessions.service";
 import { getDirectSalesByOrgSlug } from "@/modules/sales/service/direct-sales.service";
@@ -27,24 +29,28 @@ export default async function DirectSalesPage({
   const page = sp.vdPage ? Number(sp.vdPage) : undefined;
   const pageSize = sp.vdPerPage ? Number(sp.vdPerPage) : 20;
 
-  const [result, layoutData] = await Promise.all([
-    getDirectSalesByOrgSlug(orgSlug, { search, page, pageSize }),
-    getOrganizationLayoutData(orgSlug),
-  ]);
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+  const meliAccess = hasMeliAccess(layoutData?.permissions ?? []);
+  if (
+    meliAccess &&
+    !layoutData?.permissions.some((permission) =>
+      ["organization.admin", "pos.read", "pos.read.all", "pos.manage"].includes(
+        permission
+      )
+    )
+  ) {
+    redirect(`/org/${orgSlug}/venta-directa/mercado-libre`);
+  }
+  const result = await getDirectSalesByOrgSlug(orgSlug, {
+    search,
+    page,
+    pageSize,
+  });
   const canManagePos = Boolean(
     layoutData?.permissions.includes("organization.admin") ||
       layoutData?.permissions.includes("pos.manage")
   );
-  const viewOnly = Boolean(
-    layoutData?.permissions.includes("mercadolibre.access") &&
-      !layoutData.permissions.includes("organization.admin") &&
-      !layoutData.permissions.some((permission) =>
-        ["pos.read", "pos.read.all", "pos.manage"].includes(permission)
-      )
-  );
-  const cashControlData = viewOnly
-    ? { sessions: [], terminals: [] }
-    : await getPosCashControlDataByOrgSlug(orgSlug);
+  const cashControlData = await getPosCashControlDataByOrgSlug(orgSlug);
 
   const pageCount =
     result.count > 0 && pageSize > 0 ? Math.ceil(result.count / pageSize) : 1;
@@ -59,14 +65,23 @@ export default async function DirectSalesPage({
             consumidor final.
           </p>
         </div>
-        {canManagePos && (
-          <Button asChild className="w-full md:w-auto">
-            <Link href={`/org/${orgSlug}/venta-directa/nueva`}>
-              <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
-              Nueva venta directa
-            </Link>
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {meliAccess && (
+            <Button asChild variant="outline">
+              <Link href={`/org/${orgSlug}/venta-directa/mercado-libre`}>
+                Mercado Libre
+              </Link>
+            </Button>
+          )}
+          {canManagePos && (
+            <Button asChild className="w-full md:w-auto">
+              <Link href={`/org/${orgSlug}/venta-directa/nueva`}>
+                <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
+                Nueva venta directa
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       <DirectSalesTabs
@@ -75,7 +90,6 @@ export default async function DirectSalesPage({
         sales={result.data}
         sessions={cashControlData.sessions}
         terminals={cashControlData.terminals}
-        viewOnly={viewOnly}
       />
     </div>
   );

@@ -22,6 +22,7 @@ import {
   getStockMovementsForProduct,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { getStockReadScope } from "@/modules/inventory/utils/stock-read-scope";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import {
   getOrganizationBySlug,
@@ -70,13 +71,8 @@ export default async function ProductDetailsPage({
     ...READ_PERMISSIONS.mercadolibre,
   ]);
   const layoutData = await getOrganizationLayoutData(orgSlug);
-  const isMercadoLibreOnly = Boolean(
-    layoutData?.permissions.includes("mercadolibre.access") &&
-      !layoutData.permissions.includes("organization.admin") &&
-      !layoutData.permissions.some((permission) =>
-        READ_PERMISSIONS.inventory.includes(permission)
-      )
-  );
+  const isMercadoLibreOnly =
+    getStockReadScope(layoutData?.permissions ?? []) === "mercadolibre";
   if (isMercadoLibreOnly) {
     notFound();
   }

@@ -145,6 +145,16 @@ export default async function OrganizationPage({
         path: `/org/${orgSlug}/cobranzas`,
         permission: "collections.read",
       },
+      {
+        path: `/org/${orgSlug}/cobranzas/mercado-libre`,
+        permission: "mercadolibre.payments.read",
+        module: "pos",
+      },
+      {
+        path: `/org/${orgSlug}/cobranzas/mercado-libre`,
+        permission: "mercadolibre.payments.manage",
+        module: "pos",
+      },
       { path: `/org/${orgSlug}/finanzas`, permission: "finances.read" },
       { path: `/org/${orgSlug}/clientes`, permission: "customers.read" },
       { path: `/org/${orgSlug}/arca/facturas`, permission: "arca.read" },

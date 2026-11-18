@@ -1,8 +1,4 @@
-import {
-  guardOrganizationModuleAccess,
-  guardOrganizationPermissionAccess,
-} from "@/modules/organizations/service/module-access.service";
-import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
+import { getCollectionsPageAccess } from "@/modules/collections/service/collections-access.service";
 
 type CollectionsModuleLayoutProps = {
   children: React.ReactNode;
@@ -16,11 +12,7 @@ export default async function CollectionsModuleLayout({
   params,
 }: CollectionsModuleLayoutProps) {
   const { orgSlug } = await params;
-  await guardOrganizationModuleAccess(orgSlug, "wholesale");
-  await guardOrganizationPermissionAccess(
-    orgSlug,
-    READ_PERMISSIONS.collections
-  );
+  await getCollectionsPageAccess(orgSlug);
 
   return children;
 }
