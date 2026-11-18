@@ -23,6 +23,7 @@ export async function buildQuoteTotals(params: {
   globalDiscountPercentage?: number | null;
   fallbackTaxes?: ItemTaxInput[];
   lines?: QuoteTaxLine[];
+  isVatExempt?: boolean;
 }): Promise<QuoteTotals> {
   const lines = params.lines ?? buildQuoteTaxLines(params.items);
   const productIds = Array.from(
@@ -54,5 +55,6 @@ export async function buildQuoteTotals(params: {
     globalDiscountPercentage: params.globalDiscountPercentage,
     fallbackTaxes: params.fallbackTaxes,
     lines: linesWithProductTaxes,
+    isVatExempt: params.isVatExempt,
   });
 }

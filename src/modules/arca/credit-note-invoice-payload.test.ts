@@ -449,6 +449,31 @@ describe("buildArcaCreditNoteVoucherRequest", () => {
 
     expect(request.CbtesAsoc[0]?.CbteFch).toBe(TEST_ASSOCIATED_CBTE_FCH);
   });
+
+  it("informa el importe como exento cuando la venta original no tiene IVA", () => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: {
+        id: "credit-note-exempt",
+        amount: 1210,
+        invoiceType: "FACTURA_B",
+      },
+      sale: buildSale({
+        invoiceType: "FACTURA_B",
+        isVatExempt: true,
+        arcaVoucherTypeCode: 6,
+        taxes: [],
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+
+    expect(request.ImpNeto).toBe(0);
+    expect(request.ImpOpEx).toBe(1210);
+    expect(request.ImpIVA).toBe(0);
+    expect(request.ImpTrib).toBe(0);
+    expect(request.Iva).toBeUndefined();
+  });
 });
 
 describe("buildArcaDebitNoteVoucherRequest", () => {

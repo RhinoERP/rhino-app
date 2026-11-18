@@ -4,6 +4,7 @@ import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
   type ItemTaxInput,
+  removeVatTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 
 export type QuoteExtrasInput = LineExtrasInput;
@@ -85,8 +86,19 @@ export function computeQuoteTotals(params: {
   globalDiscountPercentage?: number | null;
   fallbackTaxes?: ItemTaxInput[];
   lines?: QuoteTaxLine[];
+  isVatExempt?: boolean;
 }): QuoteTotals {
-  const lines = params.lines ?? buildQuoteTaxLines(params.items);
+  const sourceLines = params.lines ?? buildQuoteTaxLines(params.items);
+  const lines = params.isVatExempt
+    ? sourceLines.map((line) => ({
+        ...line,
+        taxes: line.taxes ? removeVatTaxes(line.taxes) : undefined,
+      }))
+    : sourceLines;
+  const fallbackTaxes =
+    params.isVatExempt && params.fallbackTaxes
+      ? removeVatTaxes(params.fallbackTaxes)
+      : params.fallbackTaxes;
 
   const grossTotal = truncateToDecimals(
     lines.reduce((sum, line) => sum + line.gross, 0),
@@ -117,7 +129,7 @@ export function computeQuoteTotals(params: {
       taxes: line.taxes,
     })),
     globalDiscountAmount,
-    fallbackTaxes: params.fallbackTaxes,
+    fallbackTaxes,
     precision: CALC_PRECISION,
   });
 

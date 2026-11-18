@@ -286,6 +286,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     items: input.items,
     globalDiscountPercentage: input.globalDiscountPercentage ?? null,
     fallbackTaxes: input.taxes,
+    isVatExempt: input.isVatExempt ?? false,
   });
   const taxesByLine = new Map(
     groupQuoteItemTaxesByLine(totals.taxPlan).map((entry) => [
@@ -303,7 +304,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
         input,
         userId,
         totals,
-      })
+      }) as never
     )
     .select("id")
     .maybeSingle();
@@ -344,7 +345,9 @@ function buildQuoteInsertPayload({
   input: CreateQuoteInput;
   userId: string;
   totals: Awaited<ReturnType<typeof buildQuoteTotals>>;
-}): Database["public"]["Tables"]["quotes"]["Insert"] {
+}): Database["public"]["Tables"]["quotes"]["Insert"] & {
+  is_vat_exempt: boolean;
+} {
   return {
     organization_id: organizationId,
     warehouse_id: warehouseId,
@@ -358,6 +361,7 @@ function buildQuoteInsertPayload({
     currency: input.currency ?? "ARS",
     exchange_rate: input.exchangeRate ?? null,
     invoice_type: input.invoiceType ?? "NOTA_DE_VENTA",
+    is_vat_exempt: input.isVatExempt ?? false,
     payment_condition: input.paymentCondition ?? null,
     observations: input.observations ?? null,
     created_by: userId,
@@ -632,6 +636,9 @@ async function createCancelledVersion(
       advance_payment:
         ((original as Record<string, unknown>).advance_payment as boolean) ??
         false,
+      is_vat_exempt:
+        ((original as Record<string, unknown>).is_vat_exempt as boolean) ??
+        false,
       advance_payment_percentage: (original as Record<string, unknown>)
         .advance_payment_percentage as number | null,
       parent_quote_id: quoteId,
@@ -812,6 +819,8 @@ function buildUpdatePayload(
         : undefined,
     invoice_type:
       input.invoiceType !== undefined ? input.invoiceType : undefined,
+    is_vat_exempt:
+      input.isVatExempt !== undefined ? input.isVatExempt : undefined,
     price_level_id:
       input.priceLevelId !== undefined ? input.priceLevelId : undefined,
     sales_price_list_id:
@@ -836,6 +845,7 @@ function hasMetadataChanged(
     { inputVal: input.designFileUrl, dbVal: existing.design_file_url },
     { inputVal: input.advancePaymentEnabled, dbVal: raw.advance_payment },
     { inputVal: input.invoiceType, dbVal: raw.invoice_type },
+    { inputVal: input.isVatExempt, dbVal: raw.is_vat_exempt },
     {
       inputVal: input.advancePaymentPercentage,
       dbVal: raw.advance_payment_percentage,
@@ -961,7 +971,8 @@ export async function updateQuote(
   const totalsChanged =
     itemsChanged ||
     input.globalDiscountPercentage !== undefined ||
-    input.taxes !== undefined;
+    input.taxes !== undefined ||
+    input.isVatExempt !== undefined;
 
   if (itemsChanged || metadataChanged || taxesChanged) {
     await createCancelledVersion(supabase, quoteId, {
@@ -976,6 +987,9 @@ export async function updateQuote(
     input.globalDiscountPercentage !== undefined
       ? input.globalDiscountPercentage
       : (existing.global_discount_percentage ?? null);
+  const isVatExempt =
+    input.isVatExempt ??
+    Boolean((existing as unknown as Record<string, unknown>).is_vat_exempt);
 
   let totals: Awaited<ReturnType<typeof buildQuoteTotals>> | undefined;
 
@@ -988,6 +1002,7 @@ export async function updateQuote(
         items: newItems,
         globalDiscountPercentage,
         fallbackTaxes: input.taxes,
+        isVatExempt,
       });
     } else {
       const rows = await buildQuoteTaxLinesFromRows(supabase, quoteId);
@@ -998,6 +1013,7 @@ export async function updateQuote(
         globalDiscountPercentage,
         fallbackTaxes: input.taxes ?? existingFallbackTaxes,
         lines: rows,
+        isVatExempt,
       });
     }
 
@@ -1141,6 +1157,9 @@ export async function convertQuoteToSalesOrder(
       sale_date: saleDate,
       invoice_type: (quote.invoice_type ??
         "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
+      is_vat_exempt: Boolean(
+        (quote as unknown as Record<string, unknown>).is_vat_exempt
+      ),
       currency: quote.currency,
       exchange_rate: null,
       commercial_exchange_rate:

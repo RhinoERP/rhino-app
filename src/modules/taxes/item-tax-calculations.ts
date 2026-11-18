@@ -50,6 +50,16 @@ export type ItemizedTaxPlan = {
   totalTaxAmount: number;
 };
 
+export function isVatTaxCode(value: string | null | undefined): boolean {
+  return normalizeArcaTaxCode(value)?.startsWith("IVA_") ?? false;
+}
+
+export function removeVatTaxes<T extends { taxCodeSnapshot?: string | null }>(
+  taxes: T[]
+): T[] {
+  return taxes.filter((tax) => !isVatTaxCode(tax.taxCodeSnapshot));
+}
+
 function taxKey(tax: {
   taxId: string | null;
   name: string;
