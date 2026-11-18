@@ -1,8 +1,10 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { DirectSaleConfigForm } from "@/components/configuration/direct-sale-config-form";
 import { DirectSaleSpecificPricesCard } from "@/components/configuration/direct-sale-specific-prices-card";
+import { MeliWarehouseConfig } from "@/components/mercadolibre/meli-warehouse-config";
 import { getQueryClient } from "@/lib/get-query-client";
 import { getDirectSaleTemplateProductsByOrgSlug } from "@/modules/inventory/service/inventory.service";
+import { getMeliWarehouseConfiguration } from "@/modules/mercadolibre/service/meli-read.service";
 import { getDirectSaleConfigByOrgSlug } from "@/modules/organizations/service/organizations.service";
 import { taxesServerQueryOptions } from "@/modules/taxes/queries/queries.server";
 
@@ -18,9 +20,10 @@ export default async function DirectSaleConfigPage({
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
 
-  const [config, templateProducts] = await Promise.all([
+  const [config, templateProducts, meliConfig] = await Promise.all([
     getDirectSaleConfigByOrgSlug(orgSlug),
     getDirectSaleTemplateProductsByOrgSlug(orgSlug),
+    getMeliWarehouseConfiguration(orgSlug),
     queryClient.prefetchQuery(taxesServerQueryOptions(orgSlug)),
   ]);
 
@@ -37,6 +40,11 @@ export default async function DirectSaleConfigPage({
       <HydrationBoundary state={dehydrate(queryClient)}>
         <div className="space-y-6">
           <DirectSaleConfigForm initialConfig={config} orgSlug={orgSlug} />
+          <MeliWarehouseConfig
+            initial={meliConfig}
+            key={orgSlug}
+            orgSlug={orgSlug}
+          />
           <DirectSaleSpecificPricesCard
             orgSlug={orgSlug}
             products={templateProducts}

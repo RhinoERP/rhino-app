@@ -2,6 +2,8 @@ import { truncateMoney } from "@/lib/decimal";
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
+import { getCollectionsSectionsAccess } from "@/modules/collections/utils/sections-access";
+import { MELI_PAYMENT_READ_PERMISSIONS } from "@/modules/mercadolibre/permissions";
 import type {
   DirectSaleConfig,
   Organization,
@@ -596,12 +598,21 @@ export async function resolveUserRedirect(): Promise<string> {
     {
       path: "/venta-directa",
       permission: "pos.read",
-      alternatePermissions: ["mercadolibre.access"],
+      alternatePermissions: [
+        "mercadolibre.access",
+        "mercadolibre.manage",
+        "mercadolibre.invoice",
+      ],
       module: "pos" as const,
     },
     {
       path: "/cobranzas",
       permission: "collections.read",
+      alternatePermissions: [
+        "collections.read.all",
+        "collections.manage",
+        ...MELI_PAYMENT_READ_PERMISSIONS,
+      ],
     },
     {
       path: "/finanzas",
@@ -621,7 +632,17 @@ export async function resolveUserRedirect(): Promise<string> {
     { path: "/precios/listas-de-precios", permission: "pricelists.read" },
   ];
 
-  for (const route of routes) {
+  const collectionAccess = getCollectionsSectionsAccess(
+    firstOrg,
+    userPermissions
+  );
+  const candidateRoutes = routes.filter(
+    (route) =>
+      route.path !== "/cobranzas" ||
+      collectionAccess.currentAccounts ||
+      collectionAccess.mercadoLibre
+  );
+  for (const route of candidateRoutes) {
     if (
       (userPermissions.includes(route.permission) ||
         route.alternatePermissions?.some((permission) =>

@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
 import { CollectionsMetrics } from "@/components/collections/collections-metrics";
+import { CollectionsSectionNav } from "@/components/collections/collections-section-nav";
 import { CollectionsTabs } from "@/components/collections/collections-tabs";
 import {
   parseDateRangeFilter,
@@ -14,8 +14,8 @@ import {
   getReceivablesMetrics,
   getReceivablesPaginated,
 } from "@/modules/collections/service/collections.service";
+import { getCollectionsPageAccess } from "@/modules/collections/service/collections-access.service";
 import type { CollectionTabValue } from "@/modules/collections/types";
-import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type CollectionsPageProps = {
   params: Promise<{
@@ -57,11 +57,10 @@ export default async function CollectionsPage({
 }: CollectionsPageProps) {
   const { orgSlug } = await params;
   const sp = await searchParams;
-  const [layoutData] = await Promise.all([getOrganizationLayoutData(orgSlug)]);
-
-  if (!layoutData) {
-    redirect("/auth/login");
-  }
+  const { layout: layoutData, sections } = await getCollectionsPageAccess(
+    orgSlug,
+    "currentAccounts"
+  );
 
   const wholesaleEnabled =
     layoutData.currentOrganization.wholesale_enabled ?? true;
@@ -191,6 +190,13 @@ export default async function CollectionsPage({
         </div>
       </div>
 
+      {sections.mercadoLibre && (
+        <CollectionsSectionNav
+          active="currentAccounts"
+          orgSlug={orgSlug}
+          {...sections}
+        />
+      )}
       <CollectionsMetrics
         payablesMetrics={payablesMetrics}
         receivablesMetrics={receivablesMetrics}

@@ -1,3 +1,4 @@
+import { MELI_READ_PERMISSIONS } from "@/modules/mercadolibre/permissions";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 
 export function getStockReadScope(
@@ -11,5 +12,9 @@ export function getStockReadScope(
   ) {
     return "inventory";
   }
-  return permissions.includes("mercadolibre.access") ? "mercadolibre" : null;
+  return MELI_READ_PERMISSIONS.some((permission) =>
+    permissions.includes(permission)
+  )
+    ? "mercadolibre"
+    : null;
 }

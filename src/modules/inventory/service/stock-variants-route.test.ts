@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   layout: vi.fn(),
   variants: vi.fn(),
+  meliWarehouse: vi.fn(),
   from: vi.fn(),
   select: vi.fn(),
   eq: vi.fn(),
@@ -22,6 +23,9 @@ vi.mock("@/modules/organizations/service/organizations.service", () => ({
 }));
 vi.mock("./inventory.service", () => ({
   getProductVariantsWithStock: mocks.variants,
+}));
+vi.mock("@/modules/mercadolibre/service/meli-read.service", () => ({
+  getMeliStockWarehouse: mocks.meliWarehouse,
 }));
 
 const productId = "11111111-1111-4111-8111-111111111111";
@@ -61,6 +65,7 @@ describe("stock variants endpoint", () => {
       error: null,
     });
     mocks.variants.mockResolvedValue([]);
+    mocks.meliWarehouse.mockResolvedValue({ id: warehouseId });
   });
 
   it("returns 401 without a session", async () => {
@@ -124,6 +129,7 @@ describe("stock variants endpoint", () => {
     expect(response.status).toBe(200);
     expect(mocks.eq).toHaveBeenCalledWith("is_active", true);
     expect(mocks.variants).toHaveBeenCalledWith("org", productId, undefined);
+    expect(mocks.meliWarehouse).not.toHaveBeenCalled();
     expect(mocks.ilike).not.toHaveBeenCalled();
     expect(await response.json()).toEqual([
       {
@@ -148,24 +154,112 @@ describe("stock variants endpoint", () => {
     expect(mocks.variants).not.toHaveBeenCalled();
   });
 
-  it("restricts MercadoLibre-only readers to MELI products", async () => {
+  it("does not return variants for a missing Meli product", async () => {
     mocks.layout.mockResolvedValue({
       permissions: ["mercadolibre.access"],
       currentOrganization: { id: "org-id" },
     });
     mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
     expect((await request()).status).toBe(404);
-    expect(mocks.ilike).toHaveBeenCalledWith("sku", "MELI-%");
+    expect(mocks.meliWarehouse).toHaveBeenCalledWith("org", undefined);
     expect(mocks.variants).not.toHaveBeenCalled();
   });
 
-  it("allows a visible MercadoLibre product", async () => {
+  it("scopes Meli variants to its configured warehouse without filtering SKU", async () => {
     mocks.layout.mockResolvedValue({
       permissions: ["mercadolibre.access"],
       currentOrganization: { id: "org-id" },
     });
     expect((await request()).status).toBe(200);
-    expect(mocks.ilike).toHaveBeenCalledWith("sku", "MELI-%");
+    expect(mocks.ilike).not.toHaveBeenCalled();
+    expect(mocks.variants).toHaveBeenCalledWith("org", productId, warehouseId);
+  });
+
+  it("rejects attempts to select another warehouse as a Meli-only reader", async () => {
+    mocks.layout.mockResolvedValue({
+      permissions: ["mercadolibre.manage"],
+      currentOrganization: { id: "org-id" },
+    });
+    mocks.meliWarehouse.mockRejectedValue(
+      new WarehouseAccessError("Depósito fuera de alcance", 403)
+    );
+    expect((await request(`?warehouseId=${warehouseId}`)).status).toBe(403);
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.variants).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "",
+    `?warehouseId=${warehouseId}`,
+  ])("keeps the Meli warehouse and distributor sanitization for mixed permissions %s", async (search) => {
+    mocks.layout.mockResolvedValue({
+      permissions: ["mercadolibre.access", "distributor.catalog"],
+      currentOrganization: { id: "org-id" },
+    });
+    mocks.variants.mockResolvedValue([
+      {
+        id: "variant-id",
+        talle: "M",
+        color: "Negro",
+        internal_field: "not exposed",
+        product_lots: { quantity_available: 0 },
+      },
+    ]);
+    const response = await request(search);
+    expect(response.status).toBe(200);
+    expect(mocks.meliWarehouse).toHaveBeenCalledWith(
+      "org",
+      search ? warehouseId : undefined
+    );
+    expect(mocks.eq).toHaveBeenCalledWith("is_active", true);
+    expect(mocks.ilike).not.toHaveBeenCalled();
+    expect(mocks.variants).toHaveBeenCalledWith("org", productId, warehouseId);
+    expect(await response.json()).toEqual([
+      {
+        id: "variant-id",
+        talle: "M",
+        color: "Negro",
+        product_lots: { quantity_available: 0 },
+      },
+    ]);
+  });
+
+  it("does not let the distributor permission bypass the Meli warehouse check", async () => {
+    mocks.layout.mockResolvedValue({
+      permissions: ["mercadolibre.manage", "distributor.catalog"],
+      currentOrganization: { id: "org-id" },
+    });
+    mocks.meliWarehouse.mockRejectedValue(
+      new WarehouseAccessError("Depósito fuera de alcance", 403)
+    );
+    expect((await request(`?warehouseId=${warehouseId}`)).status).toBe(403);
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.variants).not.toHaveBeenCalled();
+  });
+
+  it("preserves the inventory scope when inventory, Meli and distributor permissions coexist", async () => {
+    mocks.layout.mockResolvedValue({
+      permissions: [
+        "inventory.read",
+        "mercadolibre.access",
+        "distributor.catalog",
+      ],
+      currentOrganization: { id: "org-id" },
+    });
+    const variants = [
+      {
+        id: "variant-id",
+        internal_field: "inventory metadata",
+        product_lots: { quantity_available: 4 },
+      },
+    ];
+    mocks.variants.mockResolvedValue(variants);
+    const response = await request(`?warehouseId=${warehouseId}`);
+    expect(response.status).toBe(200);
+    expect(mocks.meliWarehouse).not.toHaveBeenCalled();
+    expect(mocks.eq).not.toHaveBeenCalledWith("is_active", true);
+    expect(mocks.variants).toHaveBeenCalledWith("org", productId, warehouseId);
+    expect(await response.json()).toEqual(variants);
   });
 
   it("returns 404 for a missing product or a product outside the organization", async () => {

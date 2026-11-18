@@ -52,6 +52,18 @@ describe("direct sales layout access", () => {
     expect(await renderLayout()).toBe("Venta directa");
   });
 
+  it.each([
+    "mercadolibre.manage",
+    "mercadolibre.invoice",
+  ])("allows the dedicated Meli route for %s without POS permissions", async (permission) => {
+    mocks.layoutData.mockResolvedValue({ permissions: [permission] });
+    expect(await renderLayout()).toBe("Venta directa");
+    expect(mocks.permissionGuard).toHaveBeenCalledWith(
+      "desarrollo-dealers",
+      expect.arrayContaining([permission])
+    );
+  });
+
   it("preserves the production restriction for other users", async () => {
     mocks.layoutData.mockResolvedValue({ permissions: ["pos.read"] });
     await expect(renderLayout()).rejects.toThrow("redirect");

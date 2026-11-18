@@ -135,6 +135,7 @@ export async function generateMonthlyReportData(
     .lte("sale_date", endDate.toISOString())
     .neq("is_historical", true)
     .eq("document_type", "STANDARD")
+    .eq("sales_channel", "WHOLESALE")
     .order("total_amount", { ascending: false })
     .limit(100);
 
@@ -193,6 +194,9 @@ export async function generateMonthlyReportData(
     `
     )
     .eq("sales_orders.organization_id", organizationId)
+    .eq("organization_id", organizationId)
+    .eq("sales_orders.sales_channel", "WHOLESALE")
+    .eq("sales_orders.document_type", "STANDARD")
     .gte("sales_orders.sale_date", startDate.toISOString())
     .lte("sales_orders.sale_date", endDate.toISOString())
     .limit(500);
@@ -283,6 +287,7 @@ export async function generateMonthlyReportData(
     .in("status", ["CONFIRMED", "DISPATCH"])
     .neq("is_historical", true)
     .eq("document_type", "STANDARD")
+    .eq("sales_channel", "WHOLESALE")
     .lt(
       "sale_date",
       new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()

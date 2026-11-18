@@ -38,6 +38,9 @@ export type ArcaCreditNoteLoadedSale = {
   arcaVoucherNumber: number;
   arcaVoucherTypeCode: number;
   arcaRequestJson?: unknown;
+  receiverDocument?: Parameters<
+    typeof buildArcaReceiverDocument
+  >[0]["receiverDocument"];
   customer: {
     cuit: string | null;
     taxCondition: string | null;
@@ -466,6 +469,7 @@ export function buildArcaCreditNoteVoucherRequest(
     context.creditNote.invoiceType
   );
   const receiverDocument = buildArcaReceiverDocument({
+    receiverDocument: context.sale.receiverDocument,
     customerCuit: context.sale.customer.cuit,
     customerTaxCondition: context.sale.customer.taxCondition,
     invoiceType: context.creditNote.invoiceType,

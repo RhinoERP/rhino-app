@@ -878,9 +878,19 @@ function resolveSeller(
   return sellersByUserId.get(userId) ?? { id: userId };
 }
 
+function requireRegisteredCustomerId(customerId: string | null): string {
+  if (!customerId) {
+    throw new Error(
+      "Esta operación mayorista requiere un cliente registrado; consultá la venta desde su canal."
+    );
+  }
+  return customerId;
+}
+
 function normalizeCustomerFromSale(
   sale: SalesOrderWithCustomerRaw
 ): SalesOrderWithCustomer["customer"] {
+  const customerId = requireRegisteredCustomerId(sale.customer_id);
   const customer = Array.isArray(sale.customer)
     ? sale.customer[0]
     : sale.customer;
@@ -888,7 +898,7 @@ function normalizeCustomerFromSale(
   const normalizedCustomer =
     customer && typeof customer === "object" && "id" in customer
       ? {
-          id: (customer.id as string) ?? sale.customer_id,
+          id: (customer.id as string) ?? customerId,
           business_name:
             (customer.business_name as string | null) ?? "Cliente desconocido",
           fantasy_name: (customer.fantasy_name as string | null) ?? null,
@@ -905,7 +915,7 @@ function normalizeCustomerFromSale(
             (customer.preferred_carrier_id as string | null) ?? null,
         }
       : {
-          id: sale.customer_id,
+          id: customerId,
           business_name: "Cliente desconocido",
           fantasy_name: null,
           cuit: null,
@@ -1720,7 +1730,8 @@ export async function getSalesOrdersByOrgSlug(
         receivable:accounts_receivable(id, status, pending_balance, total_amount)
       `
     )
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .eq("sales_channel", "WHOLESALE");
 
   if (accessContext.scope === "own") {
     if (!accessContext.userId) {
@@ -1973,6 +1984,7 @@ function buildSalesQuery(
       { count: "exact" }
     )
     .eq("organization_id", orgId)
+    .eq("sales_channel", "WHOLESALE")
     .neq("is_historical", true)
     .in("document_type", ["STANDARD"]);
 
@@ -2284,6 +2296,7 @@ async function fetchSalesMetrics(
     .from("sales_orders")
     .select("*", { count: "exact", head: true })
     .eq("organization_id", orgId)
+    .eq("sales_channel", "WHOLESALE")
     .neq("is_historical", true)
     .in("document_type", ["STANDARD"]);
 
@@ -2295,6 +2308,7 @@ async function fetchSalesMetrics(
     .from("sales_orders")
     .select("*", { count: "exact", head: true })
     .eq("organization_id", orgId)
+    .eq("sales_channel", "WHOLESALE")
     .neq("is_historical", true)
     .in("document_type", ["STANDARD"])
     .gte("sale_date", monthStart)
@@ -2308,6 +2322,7 @@ async function fetchSalesMetrics(
     .from("sales_orders")
     .select("total_amount, status")
     .eq("organization_id", orgId)
+    .eq("sales_channel", "WHOLESALE")
     .neq("is_historical", true)
     .in("document_type", ["STANDARD"])
     .gte("sale_date", monthStart)
@@ -2412,6 +2427,7 @@ export async function getAllSalesForExport(
       `
     )
     .eq("organization_id", org.id)
+    .eq("sales_channel", "WHOLESALE")
     .neq("is_historical", true)
     .in("document_type", ["STANDARD"])
     .limit(10_000);
@@ -2586,6 +2602,7 @@ export async function getSalesOrderById(
         `
       )
       .eq("organization_id", org.id)
+      .eq("sales_channel", "WHOLESALE")
       .eq("id", saleId)
       .maybeSingle(),
     getSellersByUserId(orgSlug, accessContext),
@@ -3643,7 +3660,7 @@ export async function confirmIncompleteSaleWithStockDeduction(
   const { data: saleCustomer } = await supabase
     .from("customers")
     .select("business_name, fantasy_name")
-    .eq("id", sale.customer_id)
+    .eq("id", requireRegisteredCustomerId(sale.customer_id))
     .eq("organization_id", orgId)
     .maybeSingle();
 
@@ -7022,7 +7039,7 @@ export async function updateSaleOrder(
         saleId,
         totalAmount: Number(updatedSale.total_amount ?? 0),
         advancePercentage: input.advancePaymentPercentage,
-        customerId: updatedSale.customer_id,
+        customerId: requireRegisteredCustomerId(updatedSale.customer_id),
         dueDate: computeDueDate(
           updatedSale.sale_date,
           updatedSale.expiration_date,

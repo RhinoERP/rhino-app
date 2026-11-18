@@ -2,6 +2,7 @@
 
 import { getAllStockForExport } from "@/modules/inventory/service/inventory.service";
 import { getStockReadScope } from "@/modules/inventory/utils/stock-read-scope";
+import { getMeliStockWarehouse } from "@/modules/mercadolibre/service/meli-read.service";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
@@ -26,7 +27,9 @@ export async function getStockExportAction(
       getStockReadScope(permissions) === "mercadolibre";
     return await getAllStockForExport(orgSlug, {
       ...filters,
-      skuPrefix: isMercadoLibreOnly ? "MELI-" : undefined,
+      warehouseId: isMercadoLibreOnly
+        ? (await getMeliStockWarehouse(orgSlug, filters?.warehouseId)).id
+        : filters?.warehouseId,
     });
   } catch (error) {
     console.error("Error in getStockExportAction:", error);

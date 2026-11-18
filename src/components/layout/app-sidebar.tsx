@@ -32,11 +32,17 @@ import {
   SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
+import { getCollectionsSectionsAccess } from "@/modules/collections/utils/sections-access";
+import {
+  MELI_PAYMENT_READ_PERMISSIONS,
+  MELI_READ_PERMISSIONS,
+} from "@/modules/mercadolibre/permissions";
 import type { Organization } from "@/modules/organizations/types";
 import {
   isOrganizationModuleEnabled,
   type OrganizationModule,
 } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { AppLogo } from "./app-logo";
 import { NavMain } from "./nav-main";
 import { OrganizationSwitcher } from "./organization-switcher";
@@ -60,6 +66,7 @@ type NavItem = {
   requiredPermission?: string | string[];
   module?: OrganizationModule;
   requiresSalesAdvances?: boolean;
+  requiresCollectionsAccess?: boolean;
   requiresProductionDisabledOrMercadoLibre?: boolean;
   comingSoon?: boolean;
   wrapLabel?: boolean;
@@ -78,6 +85,22 @@ function isNavItemAvailable(
   if (item.module && !isOrganizationModuleEnabled(organization, item.module)) {
     return false;
   }
+  if (item.requiresCollectionsAccess) {
+    if (!organization) {
+      return false;
+    }
+    const sections = getCollectionsSectionsAccess(
+      organization,
+      [
+        "organization.admin",
+        ...READ_PERMISSIONS.collections,
+        ...MELI_PAYMENT_READ_PERMISSIONS,
+      ].filter((permission) => can(permission))
+    );
+    if (!(sections.currentAccounts || sections.mercadoLibre)) {
+      return false;
+    }
+  }
   if (
     item.requiresSalesAdvances &&
     organization?.sales_advances_enabled === false
@@ -87,7 +110,7 @@ function isNavItemAvailable(
   if (
     item.requiresProductionDisabledOrMercadoLibre &&
     isOrganizationModuleEnabled(organization, "production") &&
-    !can("mercadolibre.access")
+    !MELI_READ_PERMISSIONS.some((permission) => can(permission))
   ) {
     return false;
   }
@@ -112,7 +135,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Cobranzas",
           url: `/org/${orgSlug}/cobranzas`,
           icon: <HandCoinsIcon weight="duotone" />,
-          requiredPermission: ["collections.read", "collections.read.all"],
+          requiredPermission: [
+            ...READ_PERMISSIONS.collections,
+            ...MELI_PAYMENT_READ_PERMISSIONS,
+          ],
+          requiresCollectionsAccess: true,
         },
         {
           title: "Finanzas",
@@ -232,6 +259,8 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
             "pos.read",
             "pos.read.all",
             "mercadolibre.access",
+            "mercadolibre.manage",
+            "mercadolibre.invoice",
           ],
           module: "pos",
           requiresProductionDisabledOrMercadoLibre: true,

@@ -139,7 +139,6 @@ export type StockPaginatedParams = {
   search?: string;
   category?: string;
   status?: string;
-  skuPrefix?: string;
 };
 
 export type StockMetrics = {

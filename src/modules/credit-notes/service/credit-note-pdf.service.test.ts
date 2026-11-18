@@ -139,6 +139,16 @@ function renderHtml(creditNote: CreditNote): Promise<string> {
 }
 
 describe("credit note PDF HTML", () => {
+  it("renders an explicit Meli DNI without labeling it as CUIT", async () => {
+    const data = buildCreditNotePDFData({
+      creditNote: createCreditNote({ invoiceType: "FACTURA_B" }),
+      issuerName: "Empresa",
+    });
+    data.customer.document = { type: "DNI", number: "12345678" };
+    data.customer.cuit = null;
+    const html = await generateCreditNoteHTML(data);
+    expect(html).toContain("<span>DNI</span><strong>12345678</strong>");
+  });
   it("does not infer zero VAT from the mere presence of lines", async () => {
     const base = createCreditNote();
     const html = await renderHtml(

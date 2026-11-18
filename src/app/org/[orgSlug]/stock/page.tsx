@@ -13,6 +13,7 @@ import { getSuppliers } from "@/modules/inventory/service/inventory.service";
 import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getStockReadScope } from "@/modules/inventory/utils/stock-read-scope";
 import { WarehouseAccessError } from "@/modules/inventory/utils/warehouse-access-error";
+import { getMeliStockWarehouse } from "@/modules/mercadolibre/service/meli-read.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import {
   getOrganizationBySlug,
@@ -44,7 +45,8 @@ async function getPageWarehouseScope(
   requestedId?: string
 ) {
   if (isMercadoLibreOnly) {
-    return { warehouseId: undefined, warehouses: [] };
+    const warehouse = await getMeliStockWarehouse(orgSlug, requestedId);
+    return { warehouseId: warehouse.id, warehouses: [warehouse] };
   }
   const warehouseId = requestedId || undefined;
   if (warehouseId && !z.uuid().safeParse(warehouseId).success) {
@@ -146,7 +148,6 @@ async function StockPageContent({ params, searchParams }: StockPageProps) {
           category,
           status,
           warehouseId,
-          skuPrefix: isMercadoLibreOnly ? "MELI-" : undefined,
         }}
         searchParams={sp}
         suppliers={suppliers}
@@ -162,7 +163,7 @@ async function StockPageContent({ params, searchParams }: StockPageProps) {
           <h1 className="font-heading text-2xl">Stock</h1>
           <p className="text-muted-foreground text-sm">
             {isMercadoLibreOnly
-              ? "Consulta los productos del catálogo MercadoLibre."
+              ? `Consulta el inventario de Mercado Libre en ${warehouses[0]?.name ?? "su depósito configurado"}.`
               : "Consulta el inventario disponible de todos los productos."}
           </p>
         </div>

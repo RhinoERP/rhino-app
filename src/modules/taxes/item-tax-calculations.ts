@@ -75,8 +75,9 @@ function normalizeTaxInput(tax: ItemTaxInput): ItemTaxInput {
 }
 
 function moneyToCents(value: number, precision = 2): number {
-  const factor = 10 ** precision;
-  return Math.round(truncateToDecimals(value, precision) * factor);
+  return Number(
+    truncateToDecimals(value, precision).toFixed(precision).replace(".", "")
+  );
 }
 
 function centsToMoney(value: number, precision = 2): number {
@@ -168,23 +169,27 @@ export function buildItemizedTaxPlan(params: {
   }
 
   for (const group of itemTaxesByKey.values()) {
-    const expectedTaxAmount = truncateToDecimals(
-      group.reduce((sum, tax) => sum + tax.baseAmount * (tax.rate / 100), 0),
+    const baseCents = group.reduce(
+      (sum, tax) => sum + moneyToCents(tax.baseAmount, precision),
+      0
+    );
+    const expectedTaxCents = moneyToCents(
+      centsToMoney(baseCents, precision) * ((group[0]?.rate ?? 0) / 100),
       precision
     );
-    const currentTaxAmount = truncateToDecimals(
-      group.reduce((sum, tax) => sum + tax.taxAmount, 0),
-      precision
+    const currentTaxCents = group.reduce(
+      (sum, tax) => sum + moneyToCents(tax.taxAmount, precision),
+      0
     );
-    const diff = truncateToDecimals(
-      expectedTaxAmount - currentTaxAmount,
-      precision
-    );
+    const diffCents = expectedTaxCents - currentTaxCents;
 
-    if (Math.abs(diff) >= 10 ** -precision && group.length > 0) {
+    if (diffCents !== 0) {
       const last = group.at(-1);
       if (last) {
-        last.taxAmount = truncateToDecimals(last.taxAmount + diff, precision);
+        last.taxAmount = centsToMoney(
+          moneyToCents(last.taxAmount, precision) + diffCents,
+          precision
+        );
       }
     }
   }
@@ -195,12 +200,14 @@ export function buildItemizedTaxPlan(params: {
     const existing = aggregateByKey.get(key);
 
     if (existing) {
-      existing.baseAmount = truncateToDecimals(
-        existing.baseAmount + itemTax.baseAmount,
+      existing.baseAmount = centsToMoney(
+        moneyToCents(existing.baseAmount, precision) +
+          moneyToCents(itemTax.baseAmount, precision),
         precision
       );
-      existing.taxAmount = truncateToDecimals(
-        existing.taxAmount + itemTax.taxAmount,
+      existing.taxAmount = centsToMoney(
+        moneyToCents(existing.taxAmount, precision) +
+          moneyToCents(itemTax.taxAmount, precision),
         precision
       );
       continue;
@@ -217,8 +224,11 @@ export function buildItemizedTaxPlan(params: {
   }
 
   const aggregateTaxes = Array.from(aggregateByKey.values());
-  const totalTaxAmount = truncateToDecimals(
-    aggregateTaxes.reduce((sum, tax) => sum + tax.taxAmount, 0),
+  const totalTaxAmount = centsToMoney(
+    aggregateTaxes.reduce(
+      (sum, tax) => sum + moneyToCents(tax.taxAmount, precision),
+      0
+    ),
     precision
   );
 
