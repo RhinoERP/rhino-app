@@ -15,6 +15,7 @@ import type { InvoiceType } from "@/modules/sales/types";
 import {
   ArcaConnectionError,
   ArcaValidationError,
+  isDefinitiveArcaRejection,
   sanitizeArcaErrorMessage,
 } from "../errors";
 import { buildArcaCurrencyRequestFields } from "../fiscal-currency";
@@ -520,7 +521,7 @@ export async function emitManualFiscalInvoice(params: {
     authorization = await client.ElectronicBilling.createNextVoucher(request);
   } catch (cause) {
     const message = sanitizeArcaErrorMessage(cause);
-    const wasRejectedByArca = cause instanceof ArcaValidationError;
+    const wasRejectedByArca = isDefinitiveArcaRejection(cause);
     await table(supabase)
       .update({
         status: wasRejectedByArca ? "error" : "pending",

@@ -241,6 +241,9 @@ function buildDefaultValues(
     invoiceType: (quote as Record<string, unknown>).invoice_type as
       | QuoteFormValues["invoiceType"]
       | undefined,
+    isVatExempt: Boolean(
+      (quote as unknown as Record<string, unknown>).is_vat_exempt
+    ),
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",
     purchaseOrderFile: quote.purchase_order_file ?? null,

@@ -141,6 +141,9 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   );
   const total = truncateMoney(data.quote.total_amount ?? 0);
   const currency = data.quote.currency ?? "ARS";
+  const isVatExempt = Boolean(
+    (data.quote as unknown as Record<string, unknown>).is_vat_exempt
+  );
 
   const itemsHTML = itemsWithExtras
     .map(({ item, extrasTotal, net }) => {
@@ -511,6 +514,16 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
           : ""
       }:</span>
       <span class="breakdown-value">-${formatCurrency(globalDiscountAmount, currency)}</span>
+    </div>
+    `
+        : ""
+    }
+    ${
+      isVatExempt
+        ? `
+    <div class="breakdown-item">
+      <span class="breakdown-label">IVA:</span>
+      <span class="breakdown-value">Exento</span>
     </div>
     `
         : ""

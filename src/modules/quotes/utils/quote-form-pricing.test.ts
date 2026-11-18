@@ -202,4 +202,37 @@ describe("precios y extras del presupuesto", () => {
     });
     expect(same).toBe(item);
   });
+
+  it("suspende solo el IVA cuando la operación es exenta", () => {
+    const fallbackTaxes = [
+      {
+        taxId: "iva",
+        name: "IVA 21%",
+        rate: 21,
+        taxCodeSnapshot: "IVA_21",
+      },
+      {
+        taxId: "iibb",
+        name: "IIBB 3%",
+        rate: 3,
+        taxCodeSnapshot: "IIBB",
+      },
+    ];
+
+    const normal = computeQuoteTotals({
+      items: [makeItem("campera", 100)],
+      fallbackTaxes,
+    });
+    const exempt = computeQuoteTotals({
+      items: [makeItem("campera", 100)],
+      fallbackTaxes,
+      isVatExempt: true,
+    });
+
+    expect(normal.totalTaxAmount).toBe(24);
+    expect(normal.totalAmount).toBe(124);
+    expect(exempt.totalTaxAmount).toBe(3);
+    expect(exempt.totalAmount).toBe(103);
+    expect(exempt.taxPlan.aggregateTaxes).toHaveLength(1);
+  });
 });

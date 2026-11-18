@@ -114,6 +114,7 @@ import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
+  removeVatTaxes,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
@@ -282,7 +283,8 @@ const toManualItemTax = (tax: Tax): ItemTaxInput => ({
 
 const getItemTaxIndicator = (
   item: ItemState,
-  fallbackTaxes: Tax[]
+  fallbackTaxes: Tax[],
+  isVatExempt = false
 ): {
   label: string;
   summary: string;
@@ -292,26 +294,33 @@ const getItemTaxIndicator = (
     return null;
   }
 
-  if (item.taxes?.length) {
-    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+  const itemTaxes = isVatExempt
+    ? removeVatTaxes(item.taxes ?? [])
+    : (item.taxes ?? []);
+  const applicableFallbackTaxes = isVatExempt
+    ? fallbackTaxes.filter((tax) => !isIvaTax(tax))
+    : fallbackTaxes;
+
+  if (itemTaxes.length > 0) {
+    const isManualOverride = itemTaxes.some((tax) => tax.source === "manual");
 
     return {
       label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
-      summary: formatTaxSummary(item.taxes),
+      summary: formatTaxSummary(itemTaxes),
       variant: isManualOverride ? "manual" : "product",
     };
   }
 
-  if (fallbackTaxes.length > 0) {
+  if (applicableFallbackTaxes.length > 0) {
     return {
       label: "Impuesto venta",
-      summary: formatTaxSummary(fallbackTaxes),
+      summary: formatTaxSummary(applicableFallbackTaxes),
       variant: "fallback",
     };
   }
 
   return {
-    label: "Sin impuesto",
+    label: isVatExempt ? "Operación exenta de IVA" : "Sin impuesto",
     summary: "",
     variant: "none",
   };
@@ -611,6 +620,7 @@ export function PreSaleForm({
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
+  const [isVatExempt, setIsVatExempt] = useState(false);
   const [hasAdvance, setHasAdvance] = useState(false);
   const [advancePercentage, setAdvancePercentage] = useState<number | null>(
     null
@@ -1019,9 +1029,12 @@ export function PreSaleForm({
   const selectedTaxes = useMemo(
     () =>
       taxes
-        .filter((tax) => selectedTaxIds.includes(tax.id))
+        .filter(
+          (tax) =>
+            selectedTaxIds.includes(tax.id) && !(isVatExempt && isIvaTax(tax))
+        )
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [selectedTaxIds, taxes]
+    [isVatExempt, selectedTaxIds, taxes]
   );
 
   useEffect(() => {
@@ -1134,12 +1147,16 @@ export function PreSaleForm({
     );
 
     const taxPlan = buildItemizedTaxPlan({
-      lines: items.map((item) => ({
-        lineId: item.id,
-        productId: item.type === "product" ? item.productId : null,
-        netAmount: calculateItemTotals(item).subtotal,
-        taxes: item.type === "product" ? item.taxes : undefined,
-      })),
+      lines: items.map((item) => {
+        const itemTaxes = item.type === "product" ? item.taxes : undefined;
+        return {
+          lineId: item.id,
+          productId: item.type === "product" ? item.productId : null,
+          netAmount: calculateItemTotals(item).subtotal,
+          taxes:
+            isVatExempt && itemTaxes ? removeVatTaxes(itemTaxes) : itemTaxes,
+        };
+      }),
       globalDiscountAmount,
       fallbackTaxes: toFallbackItemTaxes(
         selectedTaxes.map((tax) => ({
@@ -1179,7 +1196,13 @@ export function PreSaleForm({
       totalDiscountAmount,
       total,
     };
-  }, [items, selectedTaxes, globalDiscountPercent, calculateItemTotals]);
+  }, [
+    items,
+    selectedTaxes,
+    globalDiscountPercent,
+    calculateItemTotals,
+    isVatExempt,
+  ]);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const normalizedExpirationDays =
@@ -1546,6 +1569,7 @@ export function PreSaleForm({
         expirationDate: expirationDateString || null,
         creditDays: normalizedExpirationDays,
         invoiceType,
+        isVatExempt,
         advancePaymentPercentage: resolvedAdvancePaymentPercentage,
         observations: composePaymentObservations(
           observations,
@@ -1574,6 +1598,7 @@ export function PreSaleForm({
 
       setSuccessMessage("Preventa creada correctamente");
       setItems([]);
+      setIsVatExempt(false);
       setObservations("");
       router.push(`/org/${orgSlug}/ventas`);
     } catch (mutationError) {
@@ -1667,11 +1692,19 @@ export function PreSaleForm({
   };
 
   const handleTaxToggle = (taxId: string) => {
+    const tax = taxes.find((entry) => entry.id === taxId);
+    if (isVatExempt && tax && isIvaTax(tax)) {
+      return;
+    }
     setSelectedTaxIds((prev) =>
       prev.includes(taxId)
         ? prev.filter((id) => id !== taxId)
         : [...prev, taxId]
     );
+  };
+
+  const handleVatExemptChange = (checked: boolean) => {
+    setIsVatExempt(checked);
   };
 
   const handleUseSaleTaxesForItem = (itemId: string) => {
@@ -1688,6 +1721,9 @@ export function PreSaleForm({
   };
 
   const handleItemTaxToggle = (itemId: string, tax: Tax) => {
+    if (isVatExempt && isIvaTax(tax)) {
+      return;
+    }
     setItems((prev) =>
       prev.map((item) => {
         if (item.id !== itemId || item.type === "adjustment") {
@@ -2133,7 +2169,11 @@ export function PreSaleForm({
                     </SelectTrigger>
                     <SelectContent>
                       {invoiceTypeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
+                        <SelectItem
+                          disabled={isVatExempt && option.value === "FACTURA_C"}
+                          key={option.value}
+                          value={option.value}
+                        >
                           {option.label}
                         </SelectItem>
                       ))}
@@ -2218,6 +2258,28 @@ export function PreSaleForm({
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="isVatExempt">
+                    <span className="flex items-center gap-2">
+                      <input
+                        checked={isVatExempt}
+                        className="size-4 accent-primary"
+                        disabled={invoiceType === "FACTURA_C"}
+                        id="isVatExempt"
+                        onChange={(event) =>
+                          handleVatExemptChange(event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      Operación exenta de IVA
+                    </span>
+                  </Label>
+                  <p className="text-muted-foreground text-xs">
+                    ARCA la declarará como importe exento. El IVA no se aplica
+                    mientras la opción esté marcada; otros tributos se
+                    conservan.
+                  </p>
+                </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -2279,6 +2341,7 @@ export function PreSaleForm({
                           <CommandGroup>
                             {taxes.map((tax) => (
                               <CommandItem
+                                disabled={isVatExempt && isIvaTax(tax)}
                                 key={tax.id}
                                 onSelect={() => handleTaxToggle(tax.id)}
                                 value={tax.name}
@@ -2298,6 +2361,9 @@ export function PreSaleForm({
                   </Popover>
                   <p className="text-muted-foreground text-xs">
                     Se aplican a los productos sin impuesto propio.
+                    {isVatExempt
+                      ? " El IVA no se aplica durante esta operación."
+                      : ""}
                   </p>
                 </div>
               </div>
@@ -2789,7 +2855,8 @@ export function PreSaleForm({
                       }
                       const taxIndicator = getItemTaxIndicator(
                         item,
-                        selectedTaxes
+                        selectedTaxes,
+                        isVatExempt
                       );
                       const currentItemTaxIds = new Set(
                         item.taxes?.map((tax) => tax.taxId) ?? []
@@ -3090,6 +3157,9 @@ export function PreSaleForm({
                                         </CommandItem>
                                         {taxes.map((tax) => (
                                           <CommandItem
+                                            disabled={
+                                              isVatExempt && isIvaTax(tax)
+                                            }
                                             key={tax.id}
                                             onSelect={() =>
                                               handleItemTaxToggle(item.id, tax)

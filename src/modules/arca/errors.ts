@@ -64,6 +64,28 @@ export class ArcaValidationError extends ArcaError {
   }
 }
 
+const NUMERIC_ARCA_ERROR_CODE_REGEX = /^\d+$/;
+
+/** ARCA business rejections are definitive; transport failures remain ambiguous. */
+export function isDefinitiveArcaRejection(error: unknown): boolean {
+  if (error instanceof ArcaValidationError) {
+    return true;
+  }
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "number") {
+    return Number.isInteger(code) && code > 0;
+  }
+  return (
+    typeof code === "string" &&
+    NUMERIC_ARCA_ERROR_CODE_REGEX.test(code) &&
+    Number(code) > 0
+  );
+}
+
 const PEM_BLOCK_REGEX = /-----BEGIN [^-]+-----[\s\S]+?-----END [^-]+-----/g;
 const BEARER_TOKEN_REGEX = /Bearer\s+[A-Za-z0-9._-]+/gi;
 const ACCESS_TOKEN_ASSIGNMENT_REGEX =
