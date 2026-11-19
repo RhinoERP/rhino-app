@@ -189,6 +189,10 @@ export type CreditNote = {
     invoiceType: InvoiceType;
     totalAmount: number;
     currency: string;
+    fiscalCurrency?: {
+      code: "PES" | "DOL";
+      rate: number | null;
+    };
     arcaStatus: string | null;
     arcaPointOfSale: number | null;
     arcaVoucherNumber: number | null;
