@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   AUDIO_BUCKET,
   AUDIO_MAX_BYTES,
@@ -16,6 +14,7 @@ import {
   claimJob,
   executeJob,
 } from "../../../../services/whatsapp-agent/src/jobs";
+import { getWhatsAppSandboxAccess } from "./access";
 import {
   createLocalSimulatorSession,
   type SimulationState,
@@ -42,25 +41,19 @@ export const uploadSchema = z
   })
   .strict();
 
-export async function audioContext(orgSlug: string) {
-  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
-  await ensure("whatsapp.manage", orgSlug, "whatsapp_sandbox");
-  const [organization, auth] = await Promise.all([
-    getOrganizationBySlug(orgSlug),
-    (await createClient()).auth.getUser(),
-  ]);
-  if (!(organization && auth.data.user)) {
-    throw new AudioError(
-      "AUDIO_ACCESS",
-      "Iniciá sesión en esta organización.",
-      403
-    );
-  }
-  return {
-    organization,
-    actorId: auth.data.user.id,
-    db: createWhatsAppAdminClient(),
-  };
+export async function audioContext(
+  orgSlug: string,
+  request: NextRequest,
+  configure = false
+) {
+  const { organization, userId } = await getWhatsAppSandboxAccess(
+    orgSlug,
+    request,
+    configure
+      ? ["whatsapp.read", "whatsapp.manage", "whatsapp.configure"]
+      : ["whatsapp.read", "whatsapp.manage"]
+  );
+  return { organization, actorId: userId, db: createWhatsAppAdminClient() };
 }
 
 function audioSetupMessage(
@@ -209,9 +202,13 @@ function throwUploadReservationError(error: { code?: string } | null) {
   throw new Error("No se pudo preparar la carga.");
 }
 
-export async function reserveAudioUpload(orgSlug: string, raw: unknown) {
+export async function reserveAudioUpload(
+  orgSlug: string,
+  raw: unknown,
+  request: NextRequest
+) {
   const input = uploadSchema.parse(raw);
-  const { organization, actorId, db } = await audioContext(orgSlug);
+  const { organization, actorId, db } = await audioContext(orgSlug, request);
   await assertAudioReady(organization.id);
   const existing = await db
     .from("whatsapp_audio_uploads")
@@ -322,9 +319,11 @@ export async function reserveAudioUpload(orgSlug: string, raw: unknown) {
   };
 }
 
-export async function getAudioMessage(orgSlug: string, id: string) {
+async function loadAudioMessage(
+  { organization, actorId, db }: Awaited<ReturnType<typeof audioContext>>,
+  id: string
+) {
   z.uuid().parse(id);
-  const { organization, actorId, db } = await audioContext(orgSlug);
   const result = await db
     .from("whatsapp_audio_assets")
     .select("*")
@@ -368,7 +367,7 @@ export async function getAudioMessage(orgSlug: string, id: string) {
       .single(),
     db
       .from("agent_jobs")
-      .select("id,status,last_error,available_at")
+      .select("id,status,available_at")
       .eq("source_message_id", id)
       .eq("job_type", "TRANSCRIBE_AUDIO")
       .single(),
@@ -381,18 +380,35 @@ export async function getAudioMessage(orgSlug: string, id: string) {
     state,
     status: asset.status,
     transcript: message.data?.content || null,
-    error: asset.error_message || job.data?.last_error || null,
+    error:
+      asset.status === "FAILED" ? "No se pudo transcribir este audio." : null,
     retryable: job.data?.status === "RETRY",
     jobStatus: job.data?.status,
     availableAt: job.data?.available_at,
     jobId: job.data?.id as string,
-    db,
   };
 }
 
-export async function completeAudioUpload(orgSlug: string, uploadId: string) {
+export async function getAudioMessage(
+  orgSlug: string,
+  id: string,
+  request: NextRequest
+) {
+  const { jobId: _jobId, ...result } = await loadAudioMessage(
+    await audioContext(orgSlug, request),
+    id
+  );
+  return result;
+}
+
+export async function completeAudioUpload(
+  orgSlug: string,
+  uploadId: string,
+  request: NextRequest
+) {
   z.uuid().parse(uploadId);
-  const { actorId, organization, db } = await audioContext(orgSlug);
+  const context = await audioContext(orgSlug, request);
+  const { actorId, organization, db } = context;
   await assertAudioReady(organization.id);
   const reservation = await db
     .from("whatsapp_audio_uploads")
@@ -418,7 +434,7 @@ export async function completeAudioUpload(orgSlug: string, uploadId: string) {
       "No se pudo confirmar el archivo. Verificá la carga y la migración de audios."
     );
   }
-  let result = await getAudioMessage(orgSlug, completed.data as string);
+  let result = await loadAudioMessage(context, completed.data as string);
   if (result.status !== "SUCCEEDED" && result.status !== "FAILED") {
     const job = await claimJob(db, "TRANSCRIBE_AUDIO", {
       workerId: `sandbox-${randomUUID()}`,
@@ -438,8 +454,8 @@ export async function completeAudioUpload(orgSlug: string, uploadId: string) {
     } catch {
       // Persisted job state is returned; never expose provider diagnostics.
     }
-    result = await getAudioMessage(orgSlug, completed.data as string);
+    result = await loadAudioMessage(context, completed.data as string);
   }
-  const { db: _db, ...response } = result;
+  const { jobId: _jobId, ...response } = result;
   return response;
 }

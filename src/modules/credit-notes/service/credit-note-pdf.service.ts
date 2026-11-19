@@ -193,6 +193,10 @@ export type CreditNotePDFData = {
     saleNumber?: number | null;
     invoiceNumber?: string | null;
     currency?: string | null;
+    fiscalCurrency?: {
+      code: "PES" | "DOL";
+      rate: number | null;
+    };
   } | null;
   amount: number;
   observations?: string | null;
@@ -201,6 +205,8 @@ export type CreditNotePDFData = {
   externalReference?: string | null;
   items: CreditNotePDFItem[];
   taxes: CreditNotePDFTax[];
+  fiscalBreakdown?: CreditNote["fiscalBreakdown"];
+  fiscalBreakdownUnavailable?: boolean;
   sourceDocuments: CreditNotePDFSourceDocument[];
   fiscal: {
     isAuthorized: boolean;
@@ -295,11 +301,23 @@ function buildCreditNoteItems(
       quantity: 1,
       unitOfMeasure: null,
       weightQuantity: null,
-      unitPrice: creditNote.amount,
+      unitPrice: creditNote.fiscalBreakdown
+        ? creditNote.fiscalBreakdown.netAmount +
+          creditNote.fiscalBreakdown.exemptAmount +
+          creditNote.fiscalBreakdown.untaxedAmount
+        : creditNote.amount,
       discountAmount: 0,
       discountPercent: 0,
-      netAmount: creditNote.amount,
-      taxAmount: 0,
+      netAmount: creditNote.fiscalBreakdown
+        ? creditNote.fiscalBreakdown.netAmount +
+          creditNote.fiscalBreakdown.exemptAmount +
+          creditNote.fiscalBreakdown.untaxedAmount
+        : creditNote.amount,
+      taxAmount:
+        creditNote.fiscalBreakdown?.taxes.reduce(
+          (sum, tax) => sum + tax.taxAmount,
+          0
+        ) ?? 0,
       totalAmount: creditNote.amount,
     },
   ];
@@ -341,6 +359,7 @@ export function buildCreditNotePDFData(
   const { creditNote, issuerName, issuerCuit, returnItems, branding } = input;
   const businessName =
     branding?.issuerBusinessName?.trim() || issuerName || "Empresa";
+  const items = buildCreditNoteItems(creditNote, returnItems);
 
   return {
     creditNoteNumber: creditNote.creditNoteNumber ?? "-",
@@ -374,7 +393,15 @@ export function buildCreditNotePDFData(
     paymentCondition: null,
     dueDate: null,
     externalReference: null,
-    items: buildCreditNoteItems(creditNote, returnItems),
+    items,
+    fiscalBreakdown: creditNote.fiscalBreakdown,
+    fiscalBreakdownUnavailable: Boolean(
+      creditNote.salesOrderId &&
+        creditNote.arcaStatus === "authorized" &&
+        !creditNote.fiscalBreakdown &&
+        !creditNote.taxes.length &&
+        !items.some((item) => item.taxAmount > 0)
+    ),
     taxes: creditNote.taxes.map((tax) => ({
       name: tax.name,
       rate: tax.rate,
@@ -506,9 +533,9 @@ function buildCustomerAddress(data: CreditNotePDFData): string {
     .join(" - ");
 }
 
-async function generateCreditNoteQrDataUrl(
+export function buildCreditNoteQrVerifierUrl(
   data: CreditNotePDFData
-): Promise<string | null> {
+): string | null {
   if (
     !(
       data.fiscal.isAuthorized &&
@@ -522,21 +549,42 @@ async function generateCreditNoteQrDataUrl(
     return null;
   }
 
+  const fallbackCurrencyCode = data.sale?.currency === "USD" ? "DOL" : "PES";
+  const currencyCode = data.sale?.fiscalCurrency?.code ?? fallbackCurrencyCode;
+  const currencyRate =
+    data.sale?.fiscalCurrency?.rate ?? (currencyCode === "PES" ? 1 : null);
+  if (currencyCode === "DOL" && currencyRate === null) {
+    return null;
+  }
+
   try {
-    const verifierUrl = buildArcaQrVerifierUrlFromInput({
+    return buildArcaQrVerifierUrlFromInput({
       issueDate: data.issueDate,
       issuerCuit: data.issuer.cuit,
       pointOfSale: data.fiscal.pointOfSale,
       voucherTypeCode: data.fiscal.voucherTypeCode,
       voucherNumber: data.fiscal.voucherNumber,
       totalAmount: data.amount,
-      currency: "PES",
-      currencyRate: 1,
+      currency: currencyCode,
+      currencyRate: currencyRate ?? 1,
       receiverDocumentNumber: getNumericIdentifier(data.customer.cuit),
       receiverDocumentType: data.customer.cuit ? 80 : null,
       authorizationCode: data.fiscal.cae,
     });
+  } catch {
+    return null;
+  }
+}
 
+async function generateCreditNoteQrDataUrl(
+  data: CreditNotePDFData
+): Promise<string | null> {
+  const verifierUrl = buildCreditNoteQrVerifierUrl(data);
+  if (!verifierUrl) {
+    return null;
+  }
+
+  try {
     return await QRCode.toDataURL(verifierUrl, {
       errorCorrectionLevel: "M",
       margin: 1,
@@ -571,6 +619,9 @@ function buildItemsRows(items: CreditNotePDFItem[], currency?: string): string {
 }
 
 function resolveDisplayTaxes(data: CreditNotePDFData): CreditNotePDFTax[] {
+  if (data.fiscalBreakdown) {
+    return data.fiscalBreakdown.taxes;
+  }
   if (data.taxes.length > 0) {
     return data.taxes;
   }
@@ -595,6 +646,9 @@ function resolveDisplayTaxes(data: CreditNotePDFData): CreditNotePDFTax[] {
 }
 
 function buildTaxesRows(data: CreditNotePDFData): string {
+  if (data.fiscalBreakdownUnavailable) {
+    return '<tr><td colspan="2">Desglose fiscal no disponible</td></tr>';
+  }
   const taxes = resolveDisplayTaxes(data);
   const currency = resolveDisplayCurrency(data);
 
@@ -656,7 +710,29 @@ function buildSourceDocumentsRows(data: CreditNotePDFData): string {
     .join("");
 }
 
-function buildSummaryHtml(data: CreditNotePDFData): string {
+function buildNetSummaryRows(data: CreditNotePDFData): string {
+  if (data.fiscalBreakdownUnavailable) {
+    return "";
+  }
+  const currency = resolveDisplayCurrency(data);
+  const breakdown = data.fiscalBreakdown;
+  if (breakdown) {
+    const rows = [
+      { label: "Neto gravado", amount: breakdown.netAmount },
+      ...(breakdown.exemptAmount > 0
+        ? [{ label: "Exento", amount: breakdown.exemptAmount }]
+        : []),
+      ...(breakdown.untaxedAmount > 0
+        ? [{ label: "No gravado", amount: breakdown.untaxedAmount }]
+        : []),
+    ];
+    return rows
+      .map(
+        (row) =>
+          `<tr><td>${row.label}</td><td class="cell-right">${formatCompactCurrency(row.amount, currency)}</td></tr>`
+      )
+      .join("");
+  }
   const grossSubtotal = data.items.reduce(
     (sum, item) => sum + getItemPricingQuantity(item) * item.unitPrice,
     0
@@ -666,6 +742,12 @@ function buildSummaryHtml(data: CreditNotePDFData): string {
     0
   );
   const netTotal = data.items.reduce((sum, item) => sum + item.netAmount, 0);
+  return `<tr><td>Sub. Total</td><td class="cell-right">${formatCompactCurrency(grossSubtotal, currency)}</td></tr>
+    <tr><td>Desc.</td><td class="cell-right">${formatCompactCurrency(discountTotal, currency)}</td></tr>
+    <tr><td>Sub. Total 2</td><td class="cell-right">${formatCompactCurrency(netTotal, currency)}</td></tr>`;
+}
+
+function buildSummaryHtml(data: CreditNotePDFData): string {
   const currency = resolveDisplayCurrency(data);
   const amountLabel = currency === "USD" ? "Son dólares" : "Son pesos";
 
@@ -680,18 +762,7 @@ function buildSummaryHtml(data: CreditNotePDFData): string {
         <div class="summary-table-wrap">
           <table class="compact-summary">
             <tbody>
-              <tr>
-                <td>Sub. Total</td>
-                <td class="cell-right">${formatCompactCurrency(grossSubtotal, currency)}</td>
-              </tr>
-              <tr>
-                <td>Desc.</td>
-                <td class="cell-right">${formatCompactCurrency(discountTotal, currency)}</td>
-              </tr>
-              <tr>
-                <td>Sub. Total 2</td>
-                <td class="cell-right">${formatCompactCurrency(netTotal, currency)}</td>
-              </tr>
+              ${buildNetSummaryRows(data)}
               ${buildTaxesRows(data)}
             </tbody>
           </table>

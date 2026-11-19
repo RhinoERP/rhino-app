@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { saveWhatsAppIntegrationAction } from "@/modules/whatsapp/actions/save-whatsapp-integration.action";
 import {
@@ -42,6 +43,7 @@ import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
   WHATSAPP_INTEGRATION_STATUSES,
+  WHATSAPP_PRICING_MODES,
   WHATSAPP_WEEKDAYS,
   type WhatsAppIntegration,
   type WhatsAppWeekday,
@@ -58,6 +60,8 @@ const formSchema = z.object({
   displayPhoneNumber: z.string().trim().max(64),
   status: z.enum(WHATSAPP_INTEGRATION_STATUSES),
   salesPriceListId: z.string(),
+  pricingMode: z.enum(WHATSAPP_PRICING_MODES),
+  allowGeneralForCustomers: z.boolean(),
   responsibleUserId: z.string(),
   handoffMessage: z.string().trim().max(1000),
   commercialGuidance: commercialGuidanceSchema.required(),
@@ -103,6 +107,8 @@ function toFormValues(integration: WhatsAppIntegration | null): FormValues {
     displayPhoneNumber: integration?.displayPhoneNumber ?? "",
     status: integration?.status ?? "DRAFT",
     salesPriceListId: integration?.salesPriceListId ?? NONE,
+    pricingMode: integration?.pricingMode ?? "SINGLE",
+    allowGeneralForCustomers: integration?.allowGeneralForCustomers ?? false,
     responsibleUserId: integration?.responsibleUserId ?? NONE,
     handoffMessage: integration?.handoffMessage ?? "",
     commercialGuidance: readCommercialGuidance(integration?.commercialRules),
@@ -125,6 +131,8 @@ function toIntegrationInput(
     phoneNumberId: values.phoneNumberId,
     displayPhoneNumber: values.displayPhoneNumber || null,
     status: values.status,
+    pricingMode: values.pricingMode,
+    allowGeneralForCustomers: values.allowGeneralForCustomers,
     salesPriceListId:
       values.salesPriceListId === NONE ? null : values.salesPriceListId,
     responsibleUserId:
@@ -151,6 +159,7 @@ export function WhatsAppIntegrationConfigForm({
     resolver: zodResolver(formSchema),
     defaultValues: toFormValues(integration),
   });
+  const pricingMode = form.watch("pricingMode");
   const businessHoursEnabled = form.watch("businessHours.enabled");
   const weeklySchedule = form.watch("businessHours.weeklySchedule");
 
@@ -242,10 +251,69 @@ export function WhatsAppIntegrationConfigForm({
               />
               <FormField
                 control={form.control}
+                name="pricingMode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Precios y atención automática</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="SINGLE">Lista única</SelectItem>
+                        <SelectItem value="CUSTOMER_OR_GENERAL">
+                          Listas por cliente con lista general para contactos
+                          nuevos
+                        </SelectItem>
+                        <SelectItem value="REGISTERED_ONLY">
+                          Solo clientes registrados
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {pricingMode === "REGISTERED_ONLY" && (
+                      <FormDescription>
+                        Los números desconocidos quedan en la bandeja sin
+                        respuesta automática.
+                      </FormDescription>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {pricingMode !== "SINGLE" && (
+                <FormField
+                  control={form.control}
+                  name="allowGeneralForCustomers"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex items-center gap-2">
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormLabel>
+                          Usar lista general para clientes sin lista asignada
+                        </FormLabel>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              <FormField
+                control={form.control}
                 name="salesPriceListId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Lista de precios</FormLabel>
+                    <FormLabel>
+                      {pricingMode === "SINGLE"
+                        ? "Lista de precios"
+                        : "Lista general"}
+                    </FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -320,7 +388,7 @@ export function WhatsAppIntegrationConfigForm({
                     name: "salesGuidance",
                     label: "Criterio comercial y recomendaciones",
                     placeholder:
-                      "Características verificadas, usos, alternativas y productos complementarios que recomienda el equipo. Indicá el producto o marca al que corresponde cada dato.",
+                      "Características, usos, equivalencias y complementos validados por el equipo. Indicá producto o marca. Ejemplo: Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
                   },
                 ] as const
               ).map((input) => (
@@ -344,6 +412,34 @@ export function WhatsAppIntegrationConfigForm({
                 />
               ))}
             </section>
+
+            <FormField
+              control={form.control}
+              name="commercialGuidance.responseCapitalization"
+              render={({ field }) => (
+                <FormItem className="max-w-md">
+                  <FormLabel>Estilo de escritura del asistente</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="STANDARD">
+                        Mayúsculas habituales
+                      </SelectItem>
+                      <SelectItem value="LOWERCASE">Minúsculas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Define cómo escribe el asistente en WhatsApp y en el
+                    simulador.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

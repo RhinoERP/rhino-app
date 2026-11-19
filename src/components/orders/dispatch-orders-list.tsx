@@ -50,9 +50,12 @@ import {
   getRemittanceSettings,
   type RemittanceSettings,
 } from "@/modules/organizations/actions/get-remittance-settings.action";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { Textarea } from "../ui/textarea";
+import { DocumentedDispatchDialog } from "./documented-dispatch-dialog";
 import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
+import { SavedRemittanceDocuments } from "./saved-remittance-documents";
 
 function getRemitoPlaceholder(
   isGenerating: boolean,
@@ -493,7 +496,13 @@ function ParentGroup({
         </CardHeader>
 
         {isExpanded && (
-          <CardContent className="space-y-3 pt-4">{children}</CardContent>
+          <CardContent className="space-y-3 pt-4">
+            <SavedRemittanceDocuments
+              orgSlug={orgSlug}
+              parentOrderId={parentId}
+            />
+            {children}
+          </CardContent>
         )}
       </Card>
     </div>
@@ -660,6 +669,8 @@ function PreparingDispatchControls({
   revertType,
 }: PreparingDispatchControlsProps) {
   const router = useRouter();
+  const { data: documentSettings, isLoading: settingsLoading } =
+    useOrgSettings(orgSlug);
   const [isPending, startTransition] = useTransition();
   const [remitoNumber, setRemitoNumber] = useState("");
   const [packageCount, setPackageCount] = useState("");
@@ -729,6 +740,45 @@ function PreparingDispatchControls({
         toast.error(`Error al despachar: ${dispatchResult.error}`);
       }
     });
+  }
+
+  if (settingsLoading) {
+    return <Spinner className="size-4" />;
+  }
+  if (
+    documentSettings?.remittance_mask_printing_enabled &&
+    child.parent_order_id
+  ) {
+    return (
+      <div className="space-y-2">
+        <DocumentedDispatchDialog
+          childOrderIds={[child.id]}
+          orgSlug={orgSlug}
+        />
+        {canRevert && previousStatus && previousStatusLabel && (
+          <>
+            <Button
+              onClick={() => setRevertOpen(true)}
+              size="sm"
+              variant="outline"
+            >
+              Volver atrás
+            </Button>
+            <RevertOrderModal
+              onOpenChange={setRevertOpen}
+              onSuccess={() => router.refresh()}
+              open={revertOpen}
+              orderId={child.id}
+              orderNumber={child.order_number}
+              orgSlug={orgSlug}
+              previousStatus={previousStatus}
+              previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
+            />
+          </>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -852,6 +902,8 @@ function MultiDispatchBar({
   onSuccess,
 }: MultiDispatchBarProps) {
   const router = useRouter();
+  const { data: documentSettings, isLoading: settingsLoading } =
+    useOrgSettings(orgSlug);
   const [isPending, startTransition] = useTransition();
   const [remitoNumber, setRemitoNumber] = useState("");
   const [packageCount, setPackageCount] = useState("");
@@ -941,6 +993,25 @@ function MultiDispatchBar({
         toast.error(`Error al despachar: ${dispatchResult.error}`);
       }
     });
+  }
+
+  if (settingsLoading) {
+    return <Spinner className="size-4" />;
+  }
+  if (documentSettings?.remittance_mask_printing_enabled) {
+    return (
+      <div className="sticky bottom-4 z-10 mx-auto flex max-w-3xl items-center gap-3 rounded-md border bg-background p-4 shadow-lg">
+        <Button onClick={onClear} size="sm" variant="ghost">
+          Limpiar selección
+        </Button>
+        <span className="text-sm">{count} subpedidos</span>
+        <DocumentedDispatchDialog
+          childOrderIds={childOrderIds}
+          onSuccess={onSuccess}
+          orgSlug={orgSlug}
+        />
+      </div>
+    );
   }
 
   return (

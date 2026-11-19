@@ -12,15 +12,24 @@ import {
   generateRemittanceHTML,
   type RemittanceData,
 } from "@/modules/sales/service/remittance-generator.service";
-import { resolveOrderAuthorizedInvoiceNumber } from "./order-remittance-invoice.service";
+import {
+  findSavedRemittance,
+  savedRemittanceData,
+} from "./order-remittance-documents.service";
+import {
+  resolveOrderAuthorizedInvoiceNumber,
+  resolveOrderSaleReference,
+} from "./order-remittance-invoice.service";
 
 type OrderRemittancePdfDocument = {
+  documentId?: string;
   filename: string;
   content: Buffer;
   html: string;
 };
 
 export type OrderRemittanceData = {
+  documentId?: string;
   remittance: RemittanceData;
   orderNumber: string | number;
   carrierName: string | null;
@@ -28,6 +37,7 @@ export type OrderRemittanceData = {
 
 type QuoteItemWithProduct = {
   id: string;
+  assigned_order_id: string | null;
   product_id: string | null;
   description: string | null;
   quantity: number;
@@ -111,16 +121,27 @@ export function groupOrderRemittanceItems(
   return [...grouped.values()];
 }
 
-async function fetchOrderItems(
+function assertRemittanceQuery(error: { message: string } | null) {
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los datos del remito: ${error.message}`
+    );
+  }
+}
+
+export async function fetchOrderRemittanceRows(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
   childOrderIds: string[],
   quoteId?: string
-): Promise<RemittanceData["items"]> {
+) {
   const query = supabase
     .from("quote_items")
     .select(
       `
       id,
+      quote:quotes!inner(organization_id),
+      assigned_order_id,
       description,
       quantity,
       unit_price,
@@ -133,18 +154,23 @@ async function fetchOrderItems(
       quote_item_extras(*)
     `
     )
-    .in("assigned_order_id", childOrderIds);
+    .in("assigned_order_id", childOrderIds)
+    .eq("quote.organization_id", organizationId);
 
-  let { data: quoteItems } = await query;
+  const itemsResult = await query;
+  assertRemittanceQuery(itemsResult.error);
+  let quoteItems = itemsResult.data;
 
   // Pedidos directos (sin hijos) nunca asignan sus items, así que caen a los
   // items sin asignar del presupuesto del pedido.
   if ((quoteItems ?? []).length === 0 && quoteId) {
-    ({ data: quoteItems } = await supabase
+    const fallbackResult = await supabase
       .from("quote_items")
       .select(
         `
         id,
+        quote:quotes!inner(organization_id),
+        assigned_order_id,
         description,
         quantity,
         unit_price,
@@ -158,19 +184,25 @@ async function fetchOrderItems(
       `
       )
       .eq("quote_id", quoteId)
-      .is("assigned_order_id", null));
+      .eq("quote.organization_id", organizationId)
+      .is("assigned_order_id", null);
+    assertRemittanceQuery(fallbackResult.error);
+    quoteItems = fallbackResult.data;
   }
 
   const quoteIds = (quoteItems ?? []).map((item) => item.id);
 
   const saleByQuoteId = new Map<string, SaleItemPrices>();
   if (quoteIds.length > 0) {
-    const { data: saleItems } = await supabase
+    const { data: saleItems, error: saleItemsError } = await supabase
       .from("sales_order_items")
       .select(
         "quote_item_id, description, quantity, unit_quantity, unit_price, discount_percentage"
       )
+      .eq("organization_id", organizationId)
       .in("quote_item_id", quoteIds);
+
+    assertRemittanceQuery(saleItemsError);
 
     for (const saleItem of saleItems ?? []) {
       if (
@@ -196,6 +228,7 @@ async function fetchOrderItems(
 
     return {
       source: item,
+      commercialQuantity: saleItem?.quantity ?? null,
       item: {
         sku: item.products?.sku ?? "",
         name: item.products?.name ?? description ?? "Producto",
@@ -223,7 +256,23 @@ async function fetchOrderItems(
     };
   });
 
-  return groupOrderRemittanceItems(rows);
+  return rows;
+}
+
+async function fetchOrderItems(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  childOrderIds: string[],
+  quoteId?: string
+): Promise<RemittanceData["items"]> {
+  return groupOrderRemittanceItems(
+    await fetchOrderRemittanceRows(
+      supabase,
+      organizationId,
+      childOrderIds,
+      quoteId
+    )
+  );
 }
 
 type CustomerRow = {
@@ -239,6 +288,7 @@ type CustomerRow = {
 
 async function fetchCustomer(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
   customerId: string
 ): Promise<CustomerRow> {
   const { data: customer } = await supabase
@@ -246,6 +296,7 @@ async function fetchCustomer(
     .select(
       "business_name, fantasy_name, cuit, phone, email, address, city, tax_condition"
     )
+    .eq("organization_id", organizationId)
     .eq("id", customerId)
     .single();
 
@@ -283,43 +334,73 @@ export async function getOrderRemittanceData(params: {
   childOrderIds: string[];
   remitoNumber: string;
 }): Promise<OrderRemittanceData> {
+  const saved = await findSavedRemittance(
+    params.orgSlug,
+    params.childOrderIds,
+    params.remitoNumber
+  );
+  if (saved) {
+    return savedRemittanceData(saved);
+  }
   const supabase = await createClient();
+  const organization = await getOrganizationBySlug(params.orgSlug);
+  if (!organization) {
+    throw new Error("Organización no encontrada.");
+  }
+  const ids = [...new Set(params.childOrderIds)];
 
-  const { data: ordersData } = await supabase
+  const { data: ordersData, error: ordersError } = await supabase
     .from("orders")
     .select(
-      "id, order_number, observations, quote_id, sales_order_id, parent_order_id, quotes!inner(customer_id, created_by, currency)"
+      "id, order_number, observations, quote_id, sales_order_id, parent_order_id, quotes!inner(customer_id, created_by, currency, organization_id)"
     )
-    .in("id", params.childOrderIds);
+    .eq("organization_id", organization.id)
+    .eq("quotes.organization_id", organization.id)
+    .in("id", ids);
 
   const orderData = (ordersData ?? [])[0];
-  if (!orderData) {
-    throw new Error("Pedido no encontrado");
+  if (
+    ordersError ||
+    !orderData ||
+    ordersData?.length !== ids.length ||
+    ordersData.some((order) => order.quote_id !== orderData.quote_id)
+  ) {
+    throw new Error(
+      "Los pedidos no pertenecen al mismo presupuesto de esta organización."
+    );
   }
 
-  const [[organization, orgSettingsResult], items] = await Promise.all([
-    Promise.all([
-      getOrganizationBySlug(params.orgSlug),
-      getOrganizationSettings(params.orgSlug),
-    ]),
+  const [orgSettingsResult, items] = await Promise.all([
+    getOrganizationSettings(params.orgSlug),
     fetchOrderItems(
       supabase,
+      organization.id,
       params.childOrderIds,
       params.childOrderIds.length === 1 ? orderData.quote_id : undefined
     ),
   ]);
+  const saleId = await resolveOrderSaleReference(
+    supabase,
+    organization.id,
+    orderData
+  );
 
   const [customer, invoiceNumber, carrierResult] = await Promise.all([
-    fetchCustomer(supabase, orderData.quotes.customer_id),
-    resolveOrderAuthorizedInvoiceNumber(supabase, orderData),
-    orderData.sales_order_id
+    fetchCustomer(supabase, organization.id, orderData.quotes.customer_id),
+    resolveOrderAuthorizedInvoiceNumber(supabase, organization.id, {
+      ...orderData,
+      sales_order_id: saleId,
+    }),
+    saleId
       ? supabase
           .from("sales_orders")
-          .select("carrier:carriers(name)")
-          .eq("id", orderData.sales_order_id)
+          .select("carrier:carriers(name, organization_id)")
+          .eq("organization_id", organization.id)
+          .eq("id", saleId)
           .maybeSingle()
-      : Promise.resolve({ data: null }),
+      : Promise.resolve({ data: null, error: null }),
   ]);
+  assertRemittanceQuery(carrierResult.error);
 
   const singlePageDuplicate =
     orgSettingsResult.success && orgSettingsResult.data
@@ -375,7 +456,8 @@ export async function getOrderRemittanceData(params: {
   return {
     remittance,
     orderNumber: orderData.order_number ?? "sin-numero",
-    carrierName: carrierRow?.name ?? null,
+    carrierName:
+      carrierRow?.organization_id === organization.id ? carrierRow.name : null,
   };
 }
 
@@ -384,38 +466,72 @@ export async function generateOrderRemittancePdfDocument(params: {
   childOrderIds: string[];
   remitoNumber: string;
 }): Promise<OrderRemittancePdfDocument> {
-  const { remittance, orderNumber } = await getOrderRemittanceData(params);
+  const { remittance, orderNumber, documentId } =
+    await getOrderRemittanceData(params);
   const html = generateRemittanceHTML(remittance);
   const content = await renderHtmlToPdfBuffer(html);
-  const filename =
+  const legacyFilename =
     params.childOrderIds.length === 1
       ? `Remito_${orderNumber}.pdf`
       : `Remito_${params.remitoNumber}.pdf`;
+  const filename = documentId ? `Remito_${documentId}.pdf` : legacyFilename;
 
-  return { filename, content, html };
+  return { filename, content, html, documentId };
 }
 
 export async function resolveRemittanceOrderIds(
   childOrderId: string,
-  remitoNumber: string
+  remitoNumber: string,
+  orgSlug: string
 ): Promise<string[]> {
+  const document = await findSavedRemittance(
+    orgSlug,
+    [childOrderId],
+    remitoNumber
+  );
+  if (document) {
+    return [
+      ...new Set(
+        document.lines.flatMap((line) =>
+          line.sources.map((source) => source.order_id)
+        )
+      ),
+    ];
+  }
   const supabase = await createClient();
+  const organization = await getOrganizationBySlug(orgSlug);
+  if (!organization) {
+    throw new Error("Organización no encontrada.");
+  }
+  const order = await supabase
+    .from("orders")
+    .select("id")
+    .eq("organization_id", organization.id)
+    .eq("id", childOrderId)
+    .single();
+  if (order.error || !order.data) {
+    throw new Error("El pedido no pertenece a esta organización.");
+  }
 
-  const { data: event } = await supabase
+  const { data: event, error: eventError } = await supabase
     .from("order_dispatch_events")
-    .select("dispatch_group_id")
+    .select("dispatch_group_id, order:orders!inner(organization_id)")
+    .eq("order.organization_id", organization.id)
     .eq("order_id", childOrderId)
     .eq("remito_number", remitoNumber)
     .maybeSingle();
+  assertRemittanceQuery(eventError);
 
   if (!event?.dispatch_group_id) {
     return [childOrderId];
   }
 
-  const { data: groupEvents } = await supabase
+  const { data: groupEvents, error: groupError } = await supabase
     .from("order_dispatch_events")
-    .select("order_id")
+    .select("order_id, order:orders!inner(organization_id)")
+    .eq("order.organization_id", organization.id)
     .eq("dispatch_group_id", event.dispatch_group_id);
+  assertRemittanceQuery(groupError);
 
   const ids = [...new Set((groupEvents ?? []).map((e) => e.order_id))];
   return ids.length > 0 ? ids : [childOrderId];

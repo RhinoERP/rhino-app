@@ -1,7 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import type {
   DirectSaleConfig,
   Organization,
@@ -267,9 +267,10 @@ export async function getTotalUniqueUsers(): Promise<number> {
  * Gets organization by slug
  */
 export async function getOrganizationBySlug(
-  slug: string
+  slug: string,
+  client?: SupabaseServerClient
 ): Promise<Organization | null> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
 
   const { data, error } = await supabase
     .from("organizations")

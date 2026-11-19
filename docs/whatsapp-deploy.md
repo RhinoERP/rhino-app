@@ -59,6 +59,9 @@ El SQL usa una transacción e incluye, en orden:
 8. Audios `20261103000000_whatsapp_audio_pipeline.sql`: almacenamiento privado, transcripción, cuotas, trabajos con lease y registro durable de envíos.
 9. Permisos `20261104000000_whatsapp_rpc_permissions.sql`: revocación explícita de acceso de `anon` y `authenticated` a las RPC de servidor de WhatsApp.
 10. Revisión `20261104010000_whatsapp_audio_review_fixes.sql`: protocolo verificado, exclusión transaccional, cuotas de uploads, recuperación, retención y protección de confirmaciones.
+11. Precios por cliente `20261110130000_whatsapp_customer_pricing.sql` (después de las migraciones de bandeja y envío humano): resolución por teléfono, validación del envío y alta asistida. El paquete instala las dependencias en ese orden.
+
+Aplicá primero la migración y luego desplegá la aplicación y el daemon. El daemon comercial nuevo espera a que exista el protocolo de precios. Las integraciones quedan en **Lista única** hasta cambiar su configuración. Antes de activar un modo por cliente, probá con dos clientes de listas distintas y un número desconocido en una integración de prueba.
 
 Se puede volver a ejecutar sobre una fundación completa; no borra conversaciones,
 no habilita empresas y no modifica el historial de migraciones. Las migraciones
@@ -481,4 +484,18 @@ puede haberse entregado aunque haya fallado la respuesta HTTP. Mantener la
 conversación con atención humana durante la revisión. El registro debe conservarse
 para auditoría; si se cancela el envío automático, marcarlo `CANCELLED` únicamente
 tras esa revisión y continuar manualmente. Después se puede reactivar el bot para
-mensajes nuevos. La interfaz específica para resolver estos casos sigue pendiente.
+mensajes nuevos. La bandeja vigente permite registrar esa revisión desde la ficha
+de conversación, con motivo y el ID de Meta cuando se confirma la aceptación.
+
+### Restauración selectiva de RPC — 17 de noviembre de 2026
+
+`20261117133042_restore_whatsapp_missing_rpcs.sql` restaura
+`whatsapp_product_recommendations` y `finish_whatsapp_agent_job` cuando faltan en
+una instalación que ya tiene el inbox humano. Conserva las definiciones de sus
+migraciones originales y restringe ejecución a `service_role`. No modifica datos,
+flags, control humano ni outbox; no requiere detener el consumidor. El bundle
+completo ya incluye ambas definiciones originales.
+
+El runner `scripts/test-whatsapp-human-control.sh` incluye una fixture que reproduce
+su ausencia, aplica la reparación dos veces y comprueba permisos, finalización,
+reintento y rechazo de otro worker. La fixture revierte todos sus cambios.

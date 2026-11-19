@@ -12,6 +12,7 @@ import {
   type JobType,
   workerDatabaseReady,
 } from "./jobs.js";
+import { sendNextWhatsAppHumanMessage } from "./meta-cloud.js";
 import { createWorkerSupabaseClient } from "./worker.js";
 
 const port = Number(process.env.PORT || "3002");
@@ -70,6 +71,24 @@ async function consumer(type: JobType, slot: number): Promise<void> {
   }
 }
 
+async function humanConsumer(): Promise<void> {
+  while (!stopped) {
+    let worked = false;
+    try {
+      const protocol = await db.rpc("whatsapp_human_outbox_protocol_version");
+      if (!protocol.error && protocol.data === 1) {
+        worked = await sendNextWhatsAppHumanMessage(db);
+      }
+    } catch {
+      // Do not log provider payloads, message content or transport credentials.
+      console.error("[whatsapp-agent] envío humano pendiente de revisión");
+    }
+    if (!(worked || stopped)) {
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+}
+
 function startConsumers(type: JobType, count: number): void {
   for (let slot = 0; slot < count; slot += 1) {
     const task = consumer(type, slot);
@@ -116,7 +135,13 @@ const server = createServer((request, response) => {
 async function startWhenDatabaseReady(): Promise<void> {
   let reported = false;
   while (!(stopped || databaseReady)) {
-    databaseReady = await workerDatabaseReady(db);
+    const audioReady = await workerDatabaseReady(db);
+    const pricing =
+      audioReady && role !== "transcription"
+        ? await db.rpc("whatsapp_customer_pricing_ready")
+        : null;
+    databaseReady =
+      audioReady && (role === "transcription" || pricing?.data === true);
     if (databaseReady) {
       break;
     }
@@ -132,6 +157,9 @@ async function startWhenDatabaseReady(): Promise<void> {
     return;
   }
   if (role !== "transcription") {
+    const humanTask = humanConsumer();
+    tasks.add(humanTask);
+    humanTask.finally(() => tasks.delete(humanTask));
     startConsumers(
       "PROCESS_CONVERSATION",
       positiveInteger(process.env.WHATSAPP_AGENT_COMMERCIAL_CONCURRENCY, 1, 8)

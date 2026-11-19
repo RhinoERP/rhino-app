@@ -86,7 +86,7 @@ class Query implements PromiseLike<unknown> {
 }
 
 import { executeCommercialTool } from "./commercial-tools";
-import { getSimulationMessages } from "./simulation";
+import { getSimulationMessages, getSimulationSnapshot } from "./simulation";
 
 const org = "11111111-1111-4111-8111-111111111111";
 const integration = "22222222-2222-4222-8222-222222222222";
@@ -102,6 +102,8 @@ const context = {
   sourceMessageId: source,
 };
 const version = { cart_id: cartId, version: 2 };
+const unsolicitedQuoteDetails = /7\.6|aprox|¿/;
+const unsolicitedRepeatDetails = /disponibles|peso estimado actual|¿/;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -135,6 +137,7 @@ beforeEach(() => {
         customer_id: customer,
         current_pre_sale_id: null,
         pending_order_action: null,
+        control_version: 0,
       },
     ],
     whatsapp_messages: [
@@ -370,6 +373,56 @@ describe("recurring commercial tools", () => {
     expect(testDb.rpc).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "upsert_cart_item",
+    "quote_cart",
+    "create_pre_sale",
+  ] as const)("preserves the pending cart when stock blocks %s and allows human review", async (tool) => {
+    pendingCart();
+    testDb.tables.view_stock_detail[0].total_stock = 0;
+    testDb.tables.whatsapp_messages[0].content = "Sí, confirmo";
+    testDb.tables.whatsapp_conversations[0].pending_order_action = {
+      kind: "CONFIRM_PRE_SALE",
+      cartId,
+      version: 2,
+    };
+    const carts = structuredClone(testDb.tables.conversation_carts);
+    const items = structuredClone(testDb.tables.conversation_cart_items);
+    await expect(
+      executeCommercialTool(
+        context,
+        tool,
+        tool === "upsert_cart_item"
+          ? { ...version, product_id: product, quantity: 1 }
+          : version
+      )
+    ).rejects.toThrow("disponibilidad");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+    expect(testDb.prepare).not.toHaveBeenCalled();
+
+    testDb.rpc.mockImplementation((name) => {
+      if (name === "handoff_whatsapp_conversation") {
+        testDb.tables.whatsapp_conversations[0].status = "HANDOFF";
+      }
+      return { data: {}, error: null };
+    });
+    await executeCommercialTool(context, "handoff_to_human", {
+      reason: "Revisar Queso, cantidad solicitada: 1",
+    });
+    const rendered = await executeCommercialTool(
+      context,
+      "render_order_response",
+      { text: "No hay stock" }
+    );
+    expect(rendered).toMatchObject({
+      text: "Una persona del equipo comercial va a continuar la atención por este chat.",
+      orderPrompt: false,
+    });
+    expect(testDb.tables.conversation_carts).toEqual(carts);
+    expect(testDb.tables.conversation_cart_items).toEqual(items);
+    expect(testDb.tables.sales_orders).toEqual([]);
+  });
+
   it("preserves pieces, estimated kilos and the estimate notice through quoting", async () => {
     pendingCart();
     weightedProduct();
@@ -409,9 +462,15 @@ describe("recurring commercial tools", () => {
     );
     expect(rendered).toMatchObject({
       orderPrompt: true,
-      text: expect.stringContaining("2 piezas (aprox. 7.6 KG)"),
+      text: expect.stringContaining("2 piezas"),
     });
-    expect((rendered as { text: string }).text).toContain("Total estimado");
+    expect((rendered as { text: string }).text).toContain("total estimado");
+    expect((rendered as { text: string }).text).toContain(
+      "El total es estimado y se ajusta al pesaje final."
+    );
+    expect((rendered as { text: string }).text).not.toMatch(
+      unsolicitedQuoteDetails
+    );
   });
 
   it("invalidates an estimate when the weight reference changes before quoting", async () => {
@@ -457,12 +516,18 @@ describe("recurring commercial tools", () => {
       "rhinos-local-simulator:test";
     testDb.tables.whatsapp_conversations[0].customer_phone =
       "SIMULACIÓN LOCAL · test";
-    testDb.tables.whatsapp_integrations.push({
+    const realIntegration = {
       id: "real-channel",
       organization_id: org,
       phone_number_id: "real-phone",
-      commercial_rules: { deliveryPolicy: "Reparto los martes." },
-    });
+      commercial_rules: {
+        deliveryPolicy: "Reparto los martes.",
+        salesGuidance:
+          "Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
+        responseCapitalization: "LOWERCASE",
+      },
+    };
+    testDb.tables.whatsapp_integrations.push(realIntegration);
     testDb.tables.whatsapp_integrations.push({
       id: "foreign-channel",
       organization_id: "another-org",
@@ -477,9 +542,30 @@ describe("recurring commercial tools", () => {
     expect(state).toMatchObject({
       commercialGuidance: expect.objectContaining({
         deliveryPolicy: "Reparto los martes.",
+        salesGuidance:
+          "Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
       }),
     });
     expect(JSON.stringify(state)).not.toContain("private-policy");
+
+    const simulatorContext = { ...context, mode: "LOCAL_SIMULATOR" as const };
+    const reply = {
+      text: "¡Hola, Manuel! ¿Retirás el pedido PV-123 en Tigre? https://ejemplo.com/Pedido?ref=AB",
+    };
+    await expect(
+      executeCommercialTool(simulatorContext, "render_order_response", reply)
+    ).resolves.toEqual({
+      text: "¡hola, manuel! retirás el pedido PV-123 en tigre? https://ejemplo.com/Pedido?ref=AB",
+      orderPrompt: false,
+    });
+
+    realIntegration.commercial_rules.responseCapitalization = "STANDARD";
+    await expect(
+      executeCommercialTool(simulatorContext, "render_order_response", reply)
+    ).resolves.toEqual({
+      text: "¡Hola, Manuel! Retirás el pedido PV-123 en Tigre? https://ejemplo.com/Pedido?ref=AB",
+      orderPrompt: false,
+    });
   });
 
   it("confirms commercial follow-up only for a cart converted by this message", async () => {
@@ -497,7 +583,7 @@ describe("recurring commercial tools", () => {
     );
     expect(rendered).toMatchObject({
       text: expect.stringContaining(
-        "reconfirmarlo y coordinar el retiro o envío"
+        "confirmarlo y coordinar el retiro o el envío"
       ),
       orderPrompt: false,
     });
@@ -513,6 +599,9 @@ describe("recurring commercial tools", () => {
 
   it("renders human attention without leaking operator instructions", async () => {
     testDb.tables.whatsapp_conversations[0].status = "HANDOFF";
+    testDb.tables.whatsapp_integrations[0].commercial_rules = {
+      responseCapitalization: "LOWERCASE",
+    };
     const rendered = await executeCommercialTool(
       context,
       "render_order_response",
@@ -677,6 +766,9 @@ describe("recurring commercial tools", () => {
   });
   it("a changed price requotes with taxes and never converts on the old yes", async () => {
     pendingCart();
+    testDb.tables.whatsapp_integrations[0].commercial_rules = {
+      responseCapitalization: "LOWERCASE",
+    };
     testDb.tables.whatsapp_messages[0].content = "Sí";
     testDb.tables.whatsapp_conversations[0].pending_order_action = {
       kind: "CONFIRM_PRE_SALE",
@@ -698,8 +790,11 @@ describe("recurring commercial tools", () => {
       "render_order_response",
       { text: "Listo" }
     )) as { text: string; orderPrompt: boolean };
-    expect(rendered.text).toContain("24.2 ARS");
-    expect(rendered.text).toContain("¿Confirmás");
+    expect(rendered.text).toContain("24.2 ars");
+    expect(rendered.text).toContain("me confirmás que deje el pedido anotado?");
+    expect(rendered.text).toContain(
+      "todavía no se cobra ni se reserva mercadería."
+    );
     expect(rendered.orderPrompt).toBe(true);
   });
   it("an existing completed sale is returned by cart, not by the whole chat", async () => {
@@ -902,7 +997,8 @@ describe("recurring commercial tools", () => {
       { text: "Listo" }
     )) as { text: string; orderPrompt: boolean };
     expect(rendered.text).toContain("20 ARS");
-    expect(rendered.text).toContain("productos disponibles");
+    expect(rendered.text).toContain("estos productos");
+    expect(rendered.text).not.toMatch(unsolicitedRepeatDetails);
     await expect(
       executeCommercialTool(context, "quote_cart", version)
     ).rejects.toThrow("accept_repeat_changes");
@@ -965,6 +1061,29 @@ describe("recurring commercial tools", () => {
 });
 
 describe("commercial worker fencing", () => {
+  it("routes an unleased handoff through the same SQL episode instead of directly writing control", async () => {
+    await executeCommercialTool(context, "handoff_to_human", {
+      reason: "Pidió una persona",
+    });
+    expect(testDb.rpc).toHaveBeenCalledWith("handoff_whatsapp_conversation", {
+      p_organization_id: org,
+      p_integration_id: integration,
+      p_conversation_id: conversation,
+      p_source_message_id: source,
+      p_reason: "Pidió una persona",
+    });
+  });
+  it("includes the observed control version in the simulator snapshot", async () => {
+    testDb.tables.whatsapp_conversations[0].control_version = 4;
+    const snapshot = await getSimulationSnapshot({
+      ...context,
+      customerId: customer,
+    });
+    expect(snapshot).toMatchObject({
+      controlVersion: 4,
+      conversationStatus: "ACTIVE",
+    });
+  });
   const leasedContext = {
     ...context,
     jobId: "88888888-8888-4888-8888-888888888888",
@@ -998,5 +1117,68 @@ describe("commercial worker fencing", () => {
     expect(testDb.rpc.mock.calls.map(([name]) => name)).toEqual([
       "assert_whatsapp_job_lease",
     ]);
+  });
+});
+
+describe("effective WhatsApp sales lists", () => {
+  it.each([
+    ["list-i", 10, 22],
+    ["list-z", 30, 26],
+    ["price-list", 0, 20],
+  ] as const)("uses %s for the offer and not the integration list", async (listId, value, price) => {
+    testDb.tables.whatsapp_integrations[0].pricing_mode = "CUSTOMER_OR_GENERAL";
+    if (listId !== "price-list") {
+      testDb.tables.sales_price_lists.push({
+        ...testDb.tables.sales_price_lists[0],
+        id: listId,
+        value,
+      });
+    }
+    testDb.rpc.mockResolvedValue({
+      data: {
+        key: "current",
+        listId,
+        customerId: listId === "price-list" ? null : customer,
+      },
+      error: null,
+    });
+    const result = await executeCommercialTool(
+      { ...context, pricingKey: "current" },
+      "get_offer",
+      { product_id: product }
+    );
+    expect(result).toMatchObject({ unitPrice: price });
+  });
+
+  it("reprices the retained items in an open cart after a list change", async () => {
+    pendingCart();
+    testDb.tables.conversation_carts[0].status = "OPEN";
+    testDb.tables.whatsapp_conversations[0].pricing_context_since =
+      "2026-10-26T12:00:00Z";
+    testDb.tables.whatsapp_integrations[0].pricing_mode = "REGISTERED_ONLY";
+    testDb.tables.sales_price_lists[0].value = 30;
+    testDb.rpc.mockResolvedValue({
+      data: { key: "current", listId: "price-list", customerId: customer },
+      error: null,
+    });
+    const result = await executeCommercialTool(
+      { ...context, pricingKey: "current" },
+      "get_cart",
+      {}
+    );
+    expect(result).toMatchObject({ items: [{ id: "item", unitPrice: 26 }] });
+  });
+
+  it("rejects a tool call from an earlier pricing context", async () => {
+    testDb.tables.whatsapp_integrations[0].pricing_mode = "REGISTERED_ONLY";
+    testDb.rpc.mockResolvedValue({
+      data: { key: "new", listId: "price-list" },
+      error: null,
+    });
+    await expect(
+      executeCommercialTool({ ...context, pricingKey: "old" }, "get_offer", {
+        product_id: product,
+      })
+    ).rejects.toThrow("El acceso comercial del contacto cambió");
   });
 });

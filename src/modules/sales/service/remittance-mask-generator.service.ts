@@ -18,9 +18,9 @@ export type RemittanceMaskData = {
     description: string;
     variantName?: string | null;
   }>;
-  packageCount: number;
+  packageCount: number | null;
   purchaseOrderNumber?: string | null;
-  declaredValue: number;
+  declaredValue: number | null;
 };
 
 const escapeHtml = (value: string | null | undefined): string =>
@@ -125,14 +125,21 @@ export function buildRemittanceMaskData(
  * Coordinates use the rendered 6089 sample as reference and must be printed
  * at actual size, without browser margins or headers/footers.
  */
-export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
-  const pages = chunkItems(data.items);
-  const date = dateParts(data.date);
+export function generateRemittanceMaskHTML(
+  input: RemittanceMaskData | RemittanceMaskData[]
+): string {
+  const documents = Array.isArray(input) ? input : [input];
+  const pages = documents.flatMap((data) =>
+    chunkItems(data.items).map((items) => ({ data, items }))
+  );
 
   const pageHtml = pages
-    .map((items, pageIndex) => {
+    .map(({ data, items }, pageIndex) => {
+      const date = dateParts(data.date);
       const pageLabel =
-        pages.length > 1 ? `Hoja ${pageIndex + 1} de ${pages.length}` : "";
+        documents.length === 1 && pages.length > 1
+          ? `Hoja ${pageIndex + 1} de ${pages.length}`
+          : "";
       const itemHtml = items
         .map(
           (item, itemIndex) => `
@@ -162,9 +169,9 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
           <div class="field customer-cuit">${escapeHtml(data.customer.cuit)}</div>
           ${itemHtml}
           <div class="field page-label">${escapeHtml(pageLabel)}</div>
-          <div class="field package-count"><strong>BULTOS:</strong> ${escapeHtml(formatQuantity(data.packageCount))}</div>
+          <div class="field package-count"><strong>BULTOS:</strong> ${data.packageCount === null ? "" : escapeHtml(formatQuantity(data.packageCount))}</div>
           <div class="field purchase-order"><strong>O.C.:</strong> ${escapeHtml(data.purchaseOrderNumber)}</div>
-          <div class="field declared-value"><strong>V.D.:</strong> ${escapeHtml(formatDeclaredValue(data.declaredValue))}</div>
+          <div class="field declared-value"><strong>V.D.:</strong> ${data.declaredValue === null ? "" : escapeHtml(formatDeclaredValue(data.declaredValue))}</div>
         </section>`;
     })
     .join("");
@@ -173,7 +180,7 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Máscara de remito ${escapeHtml(data.documentNumber)}</title>
+<title>Máscara de remito ${escapeHtml(documents.map((data) => data.documentNumber).join(", "))}</title>
 <style>
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }

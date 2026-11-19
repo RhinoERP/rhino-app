@@ -41,12 +41,30 @@ SQL
 
 docker exec "$whatsapp_db_container" createdb -U postgres whatsapp_bundle
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/bootstrap.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < supabase/migrations/20260701000000_create_notifications.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < supabase/migrations/20260703000000_add_notification_archiving.sql
 for pass in 1 2; do
   node scripts/build-whatsapp-release-sql.mjs | docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1
 done
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/module-gates.sql
 
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/recurring-orders.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/customer-pricing.sql
+docker exec "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 -c "BEGIN; SELECT run_whatsapp_pricing_concurrent_create(); SELECT pg_sleep(1); COMMIT;" &
+whatsapp_first_pid=$!
+docker exec "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 -c "SELECT run_whatsapp_pricing_concurrent_create();" &
+whatsapp_second_pid=$!
+wait "$whatsapp_first_pid"
+wait "$whatsapp_second_pid"
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 <<'SQL'
+DO $$ BEGIN
+  IF (SELECT count(*) FROM customers c JOIN pricing_fixture f ON c.organization_id=f.org WHERE c.phone='+5491188881111')<>1
+    OR NOT EXISTS (SELECT 1 FROM whatsapp_conversations w JOIN pricing_fixture f ON w.id=f.race_chat
+      JOIN customers c ON c.id=w.customer_id WHERE c.phone='+5491188881111')
+  THEN RAISE EXCEPTION 'Concurrent assisted registration did not produce exactly one linked customer'; END IF;
+END $$;
+SELECT 'WhatsApp concurrent assisted registration checks passed';
+SQL
 # A full rerun must not recreate the old one-sale-per-chat unique index.
 node scripts/build-whatsapp-release-sql.mjs | docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1
 

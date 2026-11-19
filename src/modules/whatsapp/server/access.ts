@@ -1,4 +1,23 @@
+import type { NextRequest } from "next/server";
+import {
+  getWhatsAppUserAccess,
+  WhatsAppControlAccessError,
+} from "./conversation-control";
 import { createWhatsAppAdminClient } from "./supabase-admin";
+
+export async function getWhatsAppSandboxAccess(
+  orgSlug: string,
+  request: NextRequest,
+  required: string | string[]
+) {
+  const access = await getWhatsAppUserAccess(orgSlug, required, request);
+  if (access.organization.whatsapp_sandbox_enabled !== true) {
+    throw new WhatsAppControlAccessError(
+      "El simulador de WhatsApp está deshabilitado"
+    );
+  }
+  return access;
+}
 
 /** Service-role entry points must enforce the tenant flag explicitly. */
 export async function assertWhatsAppEnabled(

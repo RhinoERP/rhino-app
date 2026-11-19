@@ -109,6 +109,7 @@ export type ConfirmSaleOrderInput = {
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  isVatExempt?: boolean;
   invoiceNumber?: string | null;
   commercialExchangeRate?: number | null;
   fiscalExchangeRate?: number | null;
@@ -130,6 +131,7 @@ export type CreatePreSaleOrderInput = {
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  isVatExempt?: boolean;
   invoiceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;

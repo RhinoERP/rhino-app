@@ -31,6 +31,7 @@ import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
   type ItemTaxInput,
+  removeVatTaxes,
   type TaxableItemLine,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
@@ -116,6 +117,7 @@ export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"] & {
   remittance_number?: string | null;
   remittance_pdf_url?: string | null;
   invoice_pdf_url?: string | null;
+  is_vat_exempt?: boolean | null;
 };
 
 export type SalesSeller = {
@@ -1386,6 +1388,7 @@ async function buildSaleItemizedTaxPlan(params: {
   lines: TaxableItemLine[];
   fallbackTaxes: SaleTaxAmountWithSnapshot[];
   globalDiscountAmount: number;
+  isVatExempt?: boolean;
 }) {
   const productIds = params.lines
     .map((line) => line.productId)
@@ -1395,19 +1398,23 @@ async function buildSaleItemizedTaxPlan(params: {
     orgId: params.orgId,
     productIds,
   });
+  const filterVatTaxes = <T extends { taxCodeSnapshot?: string | null }>(
+    taxes: T[]
+  ): T[] => (params.isVatExempt ? removeVatTaxes(taxes) : taxes);
+
   const linesWithProductTaxes = params.lines.map((line) => {
     if (line.taxes?.length) {
-      return line;
+      return { ...line, taxes: filterVatTaxes(line.taxes) };
     }
 
     const taxes = line.productId ? productTaxes.get(line.productId) : undefined;
-    return taxes?.length ? { ...line, taxes } : line;
+    return taxes?.length ? { ...line, taxes: filterVatTaxes(taxes) } : line;
   });
 
   return buildItemizedTaxPlan({
     lines: linesWithProductTaxes,
     globalDiscountAmount: params.globalDiscountAmount,
-    fallbackTaxes: toFallbackItemTaxes(params.fallbackTaxes),
+    fallbackTaxes: toFallbackItemTaxes(filterVatTaxes(params.fallbackTaxes)),
   });
 }
 
@@ -2927,6 +2934,7 @@ export async function createPreSaleOrder(
     lines: buildPreSaleTaxableLines(items),
     fallbackTaxes,
     globalDiscountAmount,
+    isVatExempt: input.isVatExempt ?? false,
   });
   const totalTaxAmount = taxPlan.totalTaxAmount;
 
@@ -2959,7 +2967,9 @@ export async function createPreSaleOrder(
         input.warehouseId ?? undefined
       );
 
-  const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] = {
+  const orderValues: Database["public"]["Tables"]["sales_orders"]["Insert"] & {
+    is_vat_exempt: boolean;
+  } = {
     organization_id: org.id,
     warehouse_id: warehouseId,
     customer_id: customerId,
@@ -2968,6 +2978,7 @@ export async function createPreSaleOrder(
     credit_days: input.creditDays ?? null,
     expiration_date: dueDate,
     invoice_type: invoiceType,
+    is_vat_exempt: input.isVatExempt ?? false,
     invoice_number: sanitizeText(input.invoiceNumber),
     observations: sanitizeText(input.observations),
     sub_total: subTotalAmount,
@@ -3011,7 +3022,7 @@ export async function createPreSaleOrder(
             source: "WHATSAPP",
             conversation_id: trustedExecution.conversationId,
           } as never)
-        : orderValues
+        : (orderValues as never)
     )
     .select("id")
     .maybeSingle();
@@ -4195,10 +4206,10 @@ export async function confirmSaleOrder(
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
-  const { data: existingSale, error: saleError } = await supabase
+  const { data: existingSaleData, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, arca_status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage, warehouse_id, currency, exchange_rate, commercial_exchange_rate"
+      "id, status, arca_status, credit_days, invoice_type, is_vat_exempt, expiration_date, sale_number, invoice_number, user_id, total_amount, accounting_informal_entry_id, advance_payment_percentage, warehouse_id, currency, exchange_rate, commercial_exchange_rate"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -4209,6 +4220,8 @@ export async function confirmSaleOrder(
       `Error obteniendo la venta para confirmar: ${saleError.message}`
     );
   }
+
+  const existingSale = existingSaleData as unknown as SalesOrder | null;
 
   if (!existingSale) {
     throw new Error("Venta no encontrada");
@@ -4243,6 +4256,7 @@ export async function confirmSaleOrder(
   }
 
   const currentStatus = existingSale.status as SalesOrderStatus;
+  const isVatExempt = input.isVatExempt ?? Boolean(existingSale.is_vat_exempt);
 
   if (currentStatus === "CANCELLED") {
     throw new Error("No se puede confirmar una venta cancelada");
@@ -4440,6 +4454,7 @@ export async function confirmSaleOrder(
       lines: buildConfirmSaleTaxableLines(items),
       fallbackTaxes,
       globalDiscountAmount,
+      isVatExempt,
     });
     const totalTaxAmount = taxPlan.totalTaxAmount;
 
@@ -4454,6 +4469,7 @@ export async function confirmSaleOrder(
       credit_days: creditDays,
       expiration_date: dueDate,
       invoice_type: invoiceType,
+      is_vat_exempt: isVatExempt,
       invoice_number: sanitizeText(input.invoiceNumber),
       ...(input.commercialExchangeRate !== undefined
         ? { commercial_exchange_rate: input.commercialExchangeRate }
@@ -5023,14 +5039,15 @@ async function validateSaleForUpdate(
   userId: string | null;
   warehouseId: string | null;
   advancePaymentPercentage: number | null;
+  isVatExempt: boolean;
   currency: string | null;
   exchangeRate: number | null;
   commercialExchangeRate: number | null;
 }> {
-  const { data: existingSale, error: saleError } = await supabase
+  const { data: existingSaleData, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, warehouse_id, arca_status, advance_payment_percentage, document_type, currency, exchange_rate, commercial_exchange_rate"
+      "id, status, sale_number, invoice_number, invoice_type, is_vat_exempt, customer_id, user_id, warehouse_id, arca_status, advance_payment_percentage, document_type, currency, exchange_rate, commercial_exchange_rate"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -5041,6 +5058,8 @@ async function validateSaleForUpdate(
       `Error obteniendo la venta para actualizar: ${saleError.message}`
     );
   }
+
+  const existingSale = existingSaleData as unknown as SalesOrder | null;
 
   if (!existingSale) {
     throw new Error("Venta no encontrada");
@@ -5104,6 +5123,7 @@ async function validateSaleForUpdate(
       typeof existingSale.advance_payment_percentage === "number"
         ? existingSale.advance_payment_percentage
         : null,
+    isVatExempt: Boolean(existingSale.is_vat_exempt),
   };
 }
 
@@ -5815,6 +5835,7 @@ async function persistSaleUpdate(params: {
   items: NonNullable<UpdateSaleOrderInput["items"]>;
   shouldUpdateItems: boolean;
   totals: ReturnType<typeof calculateSaleTotals> | null;
+  isVatExempt: boolean;
 }): Promise<SalesOrder> {
   if (params.shouldUpdateItems) {
     const stableItems = params.items.map((item) => ({
@@ -5852,6 +5873,7 @@ async function persistSaleUpdate(params: {
       ),
       fallbackTaxes,
       globalDiscountAmount,
+      isVatExempt: params.isVatExempt,
     });
     const totalAmount = truncateMoney(
       Math.max(
@@ -7003,6 +7025,7 @@ export async function updateSaleOrder(
       items,
       shouldUpdateItems,
       totals,
+      isVatExempt: existingSale.isVatExempt,
     });
 
     if (isStockedSale) {

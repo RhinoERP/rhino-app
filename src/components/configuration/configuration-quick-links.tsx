@@ -124,7 +124,7 @@ export function ConfigurationQuickLinks({
       description:
         "Configurá el número, lista de precios y responsable del asistente comercial",
       icon: WhatsappLogo,
-      href: `/org/${orgSlug}/whatsapp/configuracion`,
+      href: `/org/${orgSlug}/configuracion/whatsapp`,
       module: "whatsapp",
     },
   ];

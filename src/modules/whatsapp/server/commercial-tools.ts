@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prepareWhatsAppPreSaleOrder } from "@/modules/sales/service/sales.service";
 import { computeAverageQuantityPerUnit } from "@/modules/sales/utils/quantity-per-unit";
+import { formatAssistantReply } from "../../../../services/whatsapp-agent/src/response-capitalization";
 import {
   preSaleFollowUpMessage,
   readCommercialGuidance,
@@ -54,6 +55,7 @@ export type CommercialToolContext = {
   mode?: "LOCAL_SIMULATOR";
   jobId?: string;
   leaseToken?: string;
+  pricingKey?: string | null;
 };
 
 type VerifiedContext = CommercialToolContext & {
@@ -69,6 +71,7 @@ type VerifiedContext = CommercialToolContext & {
   automationResumedAt: string | null;
   commercialGuidance: ReturnType<typeof readCommercialGuidance>;
   conversationStatus: string;
+  pricingHistorySince?: string | null;
 };
 
 type CartItem = {
@@ -257,6 +260,55 @@ async function verifyCommercialLease(
   }
 }
 
+async function resolveToolPricing(
+  supabase: ReturnType<typeof createWhatsAppAdminClient>,
+  context: CommercialToolContext,
+  defaults: { salesPriceListId: string | null; customerId: string | null },
+  pricingMode?: string
+) {
+  if ((!pricingMode || pricingMode === "SINGLE") && !context.pricingKey) {
+    return defaults;
+  }
+  const { data, error } = await supabase.rpc("whatsapp_pricing_context", {
+    p_org: context.organizationId,
+    p_integration: context.integrationId,
+    p_chat: context.conversationId,
+  });
+  if (
+    error ||
+    !data ||
+    data.reason ||
+    (data.key ?? null) !== context.pricingKey
+  ) {
+    throw new Error(
+      "El acceso comercial del contacto cambió o requiere revisión"
+    );
+  }
+  return {
+    salesPriceListId: data.listId as string | null,
+    customerId: data.customerId as string | null,
+  };
+}
+
+async function readCommercialSource(
+  supabase: ReturnType<typeof createWhatsAppAdminClient>,
+  context: CommercialToolContext
+) {
+  const { data: source, error: sourceError } = await supabase
+    .from("whatsapp_messages")
+    .select("id, content, created_at")
+    .eq("id", context.sourceMessageId)
+    .eq("organization_id", context.organizationId)
+    .eq("integration_id", context.integrationId)
+    .eq("conversation_id", context.conversationId)
+    .eq("direction", "INBOUND")
+    .single();
+  if (sourceError || !source) {
+    throw new Error("El mensaje no está disponible para automatización");
+  }
+  return source;
+}
+
 async function verifyContext(
   context: CommercialToolContext,
   allowHandoff = false
@@ -274,7 +326,7 @@ async function verifyContext(
     supabase
       .from("whatsapp_integrations")
       .select(
-        "id, organization_id, phone_number_id, status, sales_price_list_id, responsible_user_id, handoff_message, business_hours, commercial_rules"
+        "id, organization_id, phone_number_id, status, sales_price_list_id, pricing_mode, responsible_user_id, handoff_message, business_hours, commercial_rules"
       )
       .eq("id", context.integrationId)
       .eq("organization_id", context.organizationId)
@@ -282,7 +334,7 @@ async function verifyContext(
     supabase
       .from("whatsapp_conversations")
       .select(
-        "id, organization_id, integration_id, status, customer_phone, customer_id, current_pre_sale_id, pending_order_action, automation_resumed_at"
+        "id, organization_id, integration_id, status, customer_phone, customer_id, current_pre_sale_id, pending_order_action, automation_resumed_at, pricing_context_since"
       )
       .eq("id", context.conversationId)
       .eq("organization_id", context.organizationId)
@@ -310,22 +362,20 @@ async function verifyContext(
   ) {
     throw new Error("La conversación no está disponible para automatización");
   }
-  if (!(integration.sales_price_list_id && integration.responsible_user_id)) {
+  const { salesPriceListId, customerId } = await resolveToolPricing(
+    supabase,
+    context,
+    {
+      salesPriceListId: integration.sales_price_list_id,
+      customerId: conversation.customer_id,
+    },
+    isSimulator ? "SINGLE" : integration.pricing_mode
+  );
+  if (!(salesPriceListId && integration.responsible_user_id)) {
     throw new Error("La integración comercial está incompleta");
   }
 
-  const { data: source, error: sourceError } = await supabase
-    .from("whatsapp_messages")
-    .select("id, content, created_at")
-    .eq("id", context.sourceMessageId)
-    .eq("organization_id", context.organizationId)
-    .eq("integration_id", context.integrationId)
-    .eq("conversation_id", context.conversationId)
-    .eq("direction", "INBOUND")
-    .single();
-  if (sourceError || !source) {
-    throw new Error("El mensaje no está disponible para automatización");
-  }
+  const source = await readCommercialSource(supabase, context);
   const configuration = await getEffectiveCommercialConfiguration(
     context.organizationId,
     integration,
@@ -340,13 +390,16 @@ async function verifyContext(
       configuration.business_hours?.timezone ||
       "America/Argentina/Buenos_Aires",
     customerPhone: conversation.customer_phone,
-    customerId: conversation.customer_id,
+    customerId,
     currentPreSaleId: conversation.current_pre_sale_id,
-    salesPriceListId: integration.sales_price_list_id,
+    salesPriceListId,
     responsibleUserId: integration.responsible_user_id,
     handoffMessage: configuration.handoff_message ?? null,
     commercialGuidance: readCommercialGuidance(configuration.commercial_rules),
     conversationStatus: conversation.status,
+    pricingHistorySince: isSimulator
+      ? null
+      : conversation.pricing_context_since,
   };
 }
 
@@ -415,6 +468,15 @@ type Cart = {
   updated_at: string;
 };
 
+function orderMutationRpc(context: VerifiedContext) {
+  if (!context.jobId) {
+    return "mutate_whatsapp_order";
+  }
+  return context.pricingKey === undefined
+    ? "mutate_whatsapp_order_leased"
+    : "mutate_whatsapp_priced_order";
+}
+
 async function mutate(
   context: VerifiedContext,
   operation: string,
@@ -422,10 +484,13 @@ async function mutate(
   payload: unknown = {}
 ) {
   const { data, error } = await createWhatsAppAdminClient().rpc(
-    context.jobId ? "mutate_whatsapp_order_leased" : "mutate_whatsapp_order",
+    orderMutationRpc(context),
     {
       ...(context.jobId
         ? { p_job_id: context.jobId, p_lease_token: context.leaseToken }
+        : {}),
+      ...(context.jobId && context.pricingKey !== undefined
+        ? { p_context_key: context.pricingKey }
         : {}),
       p_organization_id: context.organizationId,
       p_integration_id: context.integrationId,
@@ -470,25 +535,37 @@ async function cartSummary(context: VerifiedContext) {
   if (error) {
     throw new Error(error.message);
   }
-  return {
-    cart: cart as Cart,
-    items: ((items ?? []) as CartItem[]).map((item) => ({
-      id: item.id,
-      productId: item.product_id,
-      productVariantId: item.product_variant_id,
-      quantity: Number(item.quantity),
-      unitPrice: Number(item.unit_price),
-      subtotal: roundMoney(Number(item.quantity) * Number(item.unit_price)),
-      productName: String(item.price_snapshot?.productName ?? "Producto"),
-      sku: item.price_snapshot?.sku ?? null,
-      unitOfMeasure: item.price_snapshot?.unitOfMeasure ?? null,
-      requestedPieces:
-        typeof item.price_snapshot?.requestedPieces === "number"
-          ? item.price_snapshot.requestedPieces
-          : null,
-      quantityEstimated: item.price_snapshot?.quantityEstimated === true,
-    })),
-  };
+  const reprice =
+    Boolean(context.pricingHistorySince) && cart.status === "OPEN";
+  const summaryItems = await Promise.all(
+    ((items ?? []) as CartItem[]).map(async (item) => {
+      const price = reprice
+        ? await resolvePrice({
+            organizationId: context.organizationId,
+            priceListId: context.salesPriceListId,
+            productId: item.product_id,
+          }).catch(() => null)
+        : { unitPrice: Number(item.unit_price) };
+      const quantity = Number(item.quantity);
+      return {
+        id: item.id,
+        productId: item.product_id,
+        productVariantId: item.product_variant_id,
+        quantity,
+        unitPrice: price?.unitPrice ?? null,
+        subtotal: price ? roundMoney(quantity * price.unitPrice) : null,
+        productName: String(item.price_snapshot?.productName ?? "Producto"),
+        sku: item.price_snapshot?.sku ?? null,
+        unitOfMeasure: item.price_snapshot?.unitOfMeasure ?? null,
+        requestedPieces:
+          typeof item.price_snapshot?.requestedPieces === "number"
+            ? item.price_snapshot.requestedPieces
+            : null,
+        quantityEstimated: item.price_snapshot?.quantityEstimated === true,
+      };
+    })
+  );
+  return { cart: cart as Cart, items: summaryItems };
 }
 
 async function expectedCart(context: VerifiedContext, expected: CartVersion) {
@@ -518,6 +595,10 @@ async function findCustomer(context: VerifiedContext) {
     if (linkedCustomer) {
       return { found: true, customer: linkedCustomer };
     }
+  }
+
+  if (context.pricingKey) {
+    return { found: false, customer: null };
   }
 
   const phone = normalizedPhone(context.customerPhone);
@@ -1019,6 +1100,7 @@ async function prepareQuote(context: VerifiedContext, expected: CartVersion) {
   });
   // Exclude generated IDs/timestamps; compare all commercial amounts and taxes.
   const fingerprint = JSON.stringify({
+    ...(context.pricingKey ? { pricingKey: context.pricingKey } : {}),
     items: state.items.map((item, index) => [
       item.productId,
       item.productVariantId,
@@ -1112,14 +1194,21 @@ async function createPreSale(context: VerifiedContext, expected: CartVersion) {
 }
 
 async function listPreSales(context: VerifiedContext, offset: number) {
-  const { data, error } = await createWhatsAppAdminClient()
+  if (context.pricingHistorySince && !context.customerId) {
+    return { preSales: [], nextOffset: null };
+  }
+  const query = createWhatsAppAdminClient()
     .from("sales_orders")
     .select(
       "id, sale_number, sale_date, created_at, status, preventa_status, total_amount, currency"
     )
     .eq("organization_id", context.organizationId)
     .eq("conversation_id", context.conversationId)
-    .eq("source", "WHATSAPP")
+    .eq("source", "WHATSAPP");
+  if (context.pricingHistorySince && context.customerId) {
+    query.eq("customer_id", context.customerId);
+  }
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .range(offset, offset + 19);
@@ -1137,10 +1226,13 @@ async function getPreSaleStatus(
   preSaleId?: string | null
 ) {
   const id = preSaleId || context.currentPreSaleId;
-  if (!id) {
+  if (preSaleId && context.pricingHistorySince && !context.customerId) {
+    throw new Error("No se encontró ese pedido en esta conversación");
+  }
+  if (!id || (context.pricingHistorySince && !context.customerId)) {
     return { preSale: null };
   }
-  const { data, error } = await createWhatsAppAdminClient()
+  const query = createWhatsAppAdminClient()
     .from("sales_orders")
     .select(
       "id, sale_number, sale_date, status, preventa_status, total_amount, currency"
@@ -1148,9 +1240,12 @@ async function getPreSaleStatus(
     .eq("id", id)
     .eq("organization_id", context.organizationId)
     .eq("conversation_id", context.conversationId)
-    .eq("source", "WHATSAPP")
-    .maybeSingle();
-  if (error || !data) {
+    .eq("source", "WHATSAPP");
+  if (context.pricingHistorySince && context.customerId) {
+    query.eq("customer_id", context.customerId);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error || (!data && preSaleId)) {
     throw new Error("No se encontró ese pedido en esta conversación");
   }
   return { preSale: data };
@@ -1272,7 +1367,7 @@ async function inspectRepeatedItems(
       }
       if (quantities.weightChanged) {
         differences.push(
-          `${offer.productName}: el peso estimado actual para ${quantities.quantity} piezas es ${quantities.stockQuantity} ${offer.unitOfMeasure}`
+          `${offer.productName}: cambió la referencia para calcular el importe estimado de ${quantities.quantity} piezas; el total se ajusta al pesaje final`
         );
       }
       if (Number(item.unit_price) !== offer.unitPrice) {
@@ -1365,13 +1460,19 @@ async function repeatOrder(context: VerifiedContext, preSaleId: string) {
 }
 
 async function conversationHistory(context: VerifiedContext, offset: number) {
-  const { data, error } = await createWhatsAppAdminClient()
+  const query = createWhatsAppAdminClient()
     .from("whatsapp_messages")
     .select("id, direction, content, created_at")
     .eq("organization_id", context.organizationId)
     .eq("integration_id", context.integrationId)
     .eq("conversation_id", context.conversationId)
-    .lte("created_at", context.source.created_at)
+    .lte("created_at", context.source.created_at);
+  if (context.pricingHistorySince) {
+    query.or(
+      `direction.eq.INBOUND,created_at.gte.${context.pricingHistorySince}`
+    );
+  }
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .range(offset, offset + 19);
@@ -1388,7 +1489,7 @@ type CartSummary = Awaited<ReturnType<typeof cartSummary>>;
 
 function formatItemQuantity(item: CartSummary["items"][number]) {
   if (item.requestedPieces !== null) {
-    return `${item.requestedPieces} piezas (aprox. ${item.quantity} ${item.unitOfMeasure})`;
+    return `${item.requestedPieces} piezas`;
   }
   return `${item.quantity}${item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""}`;
 }
@@ -1399,11 +1500,15 @@ function renderQuoteResponse(state: CartSummary) {
   }
   const lines = state.items.map(
     (item) =>
-      `${formatItemQuantity(item)} × ${item.productName}: ${roundMoney(item.quantity * item.unitPrice)} ${state.cart?.currency}`
+      `${item.productName} · ${formatItemQuantity(item)}: ${item.subtotal} ${state.cart?.currency}`
   );
   const estimate = state.items.some((item) => item.quantityEstimated);
+  const total = `El total${estimate ? " estimado" : ""} con impuestos queda en ${state.cart.quote_snapshot?.total} ${state.cart.currency}.`;
+  const weightNote = estimate
+    ? " El total es estimado y se ajusta al pesaje final."
+    : "";
   return {
-    text: `${lines.join("\n")}\nTotal${estimate ? " estimado" : ""} con impuestos: ${state.cart.quote_snapshot?.total} ${state.cart.currency}. ${estimate ? "El peso y el importe finales se reconfirman al preparar la mercadería. " : ""}¿Confirmás que registre la preventa? Esto no procesa el pago ni reserva stock.`,
+    text: `${lines.join("\n")}\n${total}${weightNote}\n¿Me confirmás que deje el pedido anotado? Todavía no se cobra ni se reserva mercadería.`,
     orderPrompt: true,
   };
 }
@@ -1429,7 +1534,7 @@ async function convertedOrderResponse(context: VerifiedContext) {
       text:
         preSaleFollowUpMessage +
         (converted.quote_snapshot?.quantityEstimated
-          ? " El peso y el importe finales se ajustan al preparar la mercadería."
+          ? " El peso y el precio final se ajustan cuando preparemos el pedido."
           : ""),
       orderPrompt: false,
     };
@@ -1502,7 +1607,7 @@ async function renderOrderResponse(context: VerifiedContext, text: string) {
   }
   if (action.kind === "REVIEW_REPEAT") {
     return {
-      text: `${(action.differences as string[]).join("\n")}\n¿Confirmás que sigamos con los productos disponibles y sus precios actuales? Después te paso el total para confirmar la preventa.`,
+      text: `${(action.differences as string[]).join("\n")}\n¿Confirmás que sigamos con estos productos y sus precios actuales? Después te paso el total para confirmar la preventa.`,
       orderPrompt: true,
     };
   }
@@ -1528,21 +1633,18 @@ async function handoffToHuman(context: VerifiedContext, reason: string) {
         "Te conectamos con una persona del equipo comercial para continuar.",
     };
   }
-  const { error } = await createWhatsAppAdminClient()
-    .from("whatsapp_conversations")
-    .update({
-      status: "HANDOFF",
-      handoff_reason: reason,
-      pending_order_action: null,
-      bot_paused_at: new Date().toISOString(),
-      assigned_user_id: context.responsibleUserId,
-    })
-    .eq("id", context.conversationId)
-    .eq("organization_id", context.organizationId)
-    .eq("integration_id", context.integrationId)
-    .eq("status", "ACTIVE");
+  const { error } = await createWhatsAppAdminClient().rpc(
+    "handoff_whatsapp_conversation",
+    {
+      p_organization_id: context.organizationId,
+      p_integration_id: context.integrationId,
+      p_conversation_id: context.conversationId,
+      p_source_message_id: context.sourceMessageId,
+      p_reason: reason,
+    }
+  );
   if (error) {
-    throw new Error(`No se pudo derivar la conversación: ${error.message}`);
+    throw new Error("No se pudo derivar la conversación");
   }
   return {
     handedOff: true,
@@ -1687,11 +1789,23 @@ export async function executeCommercialTool(
         verified,
         toolSchemas.repeat_order.parse(rawArgs).pre_sale_id
       );
-    case "render_order_response":
-      return renderOrderResponse(
+    case "render_order_response": {
+      const rendered = await renderOrderResponse(
         verified,
         toolSchemas.render_order_response.parse(rawArgs).text
       );
+      // The handoff notice is configured separately and enforced by the outbox.
+      if (verified.conversationStatus === "HANDOFF") {
+        return rendered;
+      }
+      return {
+        ...rendered,
+        text: formatAssistantReply(
+          rendered.text,
+          verified.commercialGuidance.responseCapitalization
+        ),
+      };
+    }
     case "find_customer_by_phone":
       toolSchemas.find_customer_by_phone.parse(rawArgs);
       return findCustomer(verified);

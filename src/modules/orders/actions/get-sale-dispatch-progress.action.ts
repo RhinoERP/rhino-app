@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import {
+  listSavedOrderRemittances,
+  type SavedOrderRemittance,
+} from "../server/order-remittance-documents.service";
 import type { SaleDispatchEvent, SaleDispatchProgress } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -13,6 +17,49 @@ type DispatchItemRow = {
   description: string;
   quantity: number;
 };
+
+function savedDispatchEvents(
+  documents: SavedOrderRemittance[],
+  children: { id: string; order_number: string }[]
+): SaleDispatchEvent[] {
+  const byId = new Map(children.map((child) => [child.id, child]));
+  return documents
+    .filter((document) => document.status === "ISSUED")
+    .map((document) => {
+      const ids = [
+        ...new Set(
+          document.lines.flatMap((line) =>
+            line.sources.map((source) => source.order_id)
+          )
+        ),
+      ];
+      const first = byId.get(ids[0]);
+      if (!first) {
+        throw new Error("El remito no tiene un subpedido de origen válido.");
+      }
+      return {
+        remito_number: document.document_number,
+        dispatched_at: document.created_at,
+        child_order_id: first.id,
+        child_order_number: first.order_number,
+        child_orders: ids.map((id) => ({
+          id,
+          order_number: byId.get(id)?.order_number ?? id,
+        })),
+        notes: null,
+        remittance_pdf_url: document.pdf_url,
+        items: [...document.lines]
+          .sort((a, b) => a.line_position - b.line_position)
+          .map((line) => ({
+            id: line.id,
+            description: [line.product_name, line.variant_name]
+              .filter(Boolean)
+              .join(" — "),
+            quantity: line.quantity,
+          })),
+      };
+    });
+}
 
 async function buildItemsByChild(
   supabase: SupabaseServerClient,
@@ -136,7 +183,17 @@ export async function getSaleDispatchProgressAction(
     }),
   ]);
 
-  const dispatchEvents = eventsData ?? [];
+  const documents = await listSavedOrderRemittances(orgSlug, parentOrder.id);
+  const documentedOrderIds = new Set(
+    documents.flatMap((document) =>
+      document.lines.flatMap((line) =>
+        line.sources.map((source) => source.order_id)
+      )
+    )
+  );
+  const dispatchEvents = (eventsData ?? []).filter(
+    (event) => !documentedOrderIds.has(event.order_id)
+  );
 
   const activeChildren = children.filter((c) => c.status !== "CANCELLED");
 
@@ -207,6 +264,6 @@ export async function getSaleDispatchProgressAction(
     delivered_children: deliveredChildren,
     completed,
     standalone,
-    events,
+    events: [...events, ...savedDispatchEvents(documents, children)],
   };
 }

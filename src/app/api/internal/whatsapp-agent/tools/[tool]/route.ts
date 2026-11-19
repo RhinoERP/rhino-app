@@ -17,6 +17,7 @@ const requestSchema = z.object({
     sourceMessageId: z.string().uuid(),
     jobId: z.string().uuid(),
     leaseToken: z.string().uuid(),
+    pricingKey: z.string().length(32).nullable().optional(),
   }),
   arguments: z.unknown(),
 });

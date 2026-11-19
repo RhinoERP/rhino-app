@@ -276,6 +276,37 @@ export async function filterCustomersBySalesScope(
   );
 }
 
+export function buildCustomerInsert(
+  input: Omit<CreateCustomerInput, "orgSlug">
+) {
+  const sanitize = (value?: string | null) => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+  };
+  const taxCondition = normalizeTaxConditionInput(input.tax_condition) ?? null;
+  return {
+    business_name: input.business_name.trim(),
+    fantasy_name: sanitize(input.fantasy_name),
+    cuit: sanitize(input.cuit),
+    phone: sanitize(input.phone),
+    email: sanitize(input.email),
+    address: sanitize(input.address),
+    city: sanitize(input.city),
+    province: sanitize(input.province),
+    delivery_address: sanitize(input.delivery_address),
+    delivery_city: sanitize(input.delivery_city),
+    credit_limit: input.credit_limit,
+    tax_condition: taxCondition,
+    client_number: sanitize(input.client_number),
+    sales_price_list_id: input.sales_price_list_id || null,
+    customer_channel: normalizeCustomerChannel(input.customer_channel),
+    assigned_seller_id: input.assigned_seller_id || null,
+    preferred_carrier_id: input.preferred_carrier_id || null,
+    due_days: input.due_days ?? null,
+    is_active: true,
+  };
+}
+
 export async function createCustomerForOrg(
   input: CreateCustomerInput
 ): Promise<Customer> {
@@ -305,36 +336,9 @@ export async function createCustomerForOrg(
     }
   }
 
-  const sanitize = (value?: string | null) => {
-    const trimmed = value?.trim();
-    return trimmed ? trimmed : null;
-  };
-  const taxCondition = normalizeTaxConditionInput(input.tax_condition) ?? null;
-
   const { data, error } = await supabase
     .from("customers")
-    .insert({
-      organization_id: org.id,
-      business_name: input.business_name.trim(),
-      fantasy_name: sanitize(input.fantasy_name),
-      cuit: sanitize(input.cuit),
-      phone: sanitize(input.phone),
-      email: sanitize(input.email),
-      address: sanitize(input.address),
-      city: sanitize(input.city),
-      province: sanitize(input.province),
-      delivery_address: sanitize(input.delivery_address),
-      delivery_city: sanitize(input.delivery_city),
-      credit_limit: input.credit_limit,
-      tax_condition: taxCondition,
-      client_number: sanitize(input.client_number),
-      sales_price_list_id: input.sales_price_list_id || null,
-      customer_channel: normalizeCustomerChannel(input.customer_channel),
-      assigned_seller_id: input.assigned_seller_id || null,
-      preferred_carrier_id: input.preferred_carrier_id || null,
-      due_days: input.due_days ?? null,
-      is_active: true,
-    })
+    .insert({ ...buildCustomerInsert(input), organization_id: org.id })
     .select("*")
     .maybeSingle();
 

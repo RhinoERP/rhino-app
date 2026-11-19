@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { AudioError } from "../../../../services/whatsapp-agent/src/audio/config";
 
+import { WhatsAppControlAccessError } from "./conversation-control";
+
 export async function audioResponse(
   work: () => Promise<unknown>
 ): Promise<Response> {
@@ -10,14 +12,11 @@ export async function audioResponse(
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
-    if (
-      error &&
-      typeof error === "object" &&
-      "digest" in error &&
-      typeof error.digest === "string" &&
-      error.digest.startsWith("NEXT_")
-    ) {
-      throw error;
+    if (error instanceof WhatsAppControlAccessError) {
+      return NextResponse.json(
+        { error: "No tenés acceso al audio de este simulador." },
+        { status: 403, headers: { "Cache-Control": "no-store" } }
+      );
     }
     if (error instanceof z.ZodError) {
       return NextResponse.json(

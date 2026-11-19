@@ -190,6 +190,10 @@ type AddCustomerDialogProps = {
   onUpdated?: () => void;
   customer?: Customer | null;
   trigger?: ReactNode;
+  fromWhatsApp?: {
+    phone: string;
+    save: (values: CustomerFormValues) => Promise<void>;
+  };
 };
 
 const EMPTY_CUSTOMER_FORM_VALUES = {
@@ -275,6 +279,7 @@ export function AddCustomerDialog({
   onUpdated,
   customer,
   trigger,
+  fromWhatsApp,
 }: AddCustomerDialogProps) {
   const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
   const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
@@ -301,10 +306,16 @@ export function AddCustomerDialog({
 
   const isEditing = Boolean(customer);
 
-  const defaultValues = useMemo(
-    () => getDefaultCustomerValues(customer),
-    [customer]
-  );
+  const initialPhone = fromWhatsApp?.phone;
+  const emptyPriceList = fromWhatsApp
+    ? "Seleccioná una lista"
+    : "Ninguna (precio base)";
+  const defaultValues = useMemo(() => {
+    const defaults = getDefaultCustomerValues(customer);
+    return initialPhone && !customer
+      ? { ...defaults, phone: initialPhone }
+      : defaults;
+  }, [customer, initialPhone]);
 
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
@@ -548,7 +559,17 @@ export function AddCustomerDialog({
       return false;
     }
 
-    await createCustomer.mutateAsync(values);
+    if (fromWhatsApp) {
+      if (!values.sales_price_list_id) {
+        form.setError("sales_price_list_id", {
+          message: "Seleccioná una lista de venta",
+        });
+        return false;
+      }
+      await fromWhatsApp.save(values);
+    } else {
+      await createCustomer.mutateAsync(values);
+    }
     return true;
   };
 
@@ -790,6 +811,7 @@ export function AddCustomerDialog({
                         <Input
                           disabled={isSubmitting}
                           placeholder="+54 11 4567-8901"
+                          readOnly={Boolean(fromWhatsApp)}
                           {...field}
                         />
                       </FormControl>
@@ -957,7 +979,9 @@ export function AddCustomerDialog({
                 name="sales_price_list_id"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Lista de Precios de Venta (Opcional)</FormLabel>
+                    <FormLabel>
+                      Lista de precios de venta{!fromWhatsApp && " (Opcional)"}
+                    </FormLabel>
                     <Popover
                       onOpenChange={setIsPriceListPickerOpen}
                       open={isPriceListPickerOpen}
@@ -977,7 +1001,7 @@ export function AddCustomerDialog({
                                 ? salesPriceLists.find(
                                     (list) => list.id === field.value
                                   )?.name || "Selecciona una lista"
-                                : "Ninguna (precio base)"}
+                                : emptyPriceList}
                             </span>
                             <CaretDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                           </Button>

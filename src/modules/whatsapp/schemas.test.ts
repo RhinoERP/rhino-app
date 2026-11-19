@@ -26,7 +26,19 @@ describe("whatsappIntegrationConfigurationSchema", () => {
       deliveryPolicy: "Reparto los martes.",
       pickupPolicy: "",
       salesGuidance: "",
+      responseCapitalization: "STANDARD",
     });
+  });
+
+  it("permite guardar minúsculas en las respuestas del asistente", () => {
+    const result = whatsappIntegrationConfigurationSchema.parse({
+      ...baseInput,
+      status: "DRAFT",
+      salesPriceListId: null,
+      responsibleUserId: null,
+      commercialRules: { responseCapitalization: "LOWERCASE" },
+    });
+    expect(result.commercialRules.responseCapitalization).toBe("LOWERCASE");
   });
 
   it("rechaza políticas demasiado largas antes de guardar la configuración", () => {
@@ -66,5 +78,25 @@ describe("whatsappIntegrationConfigurationSchema", () => {
         "responsibleUserId",
       ]);
     }
+  });
+
+  it("allows registered-only pricing without a general list unless fallback is enabled", () => {
+    const input = {
+      ...baseInput,
+      status: "ACTIVE",
+      pricingMode: "REGISTERED_ONLY",
+      salesPriceListId: null,
+      responsibleUserId: "11111111-1111-4111-8111-111111111111",
+    };
+    expect(
+      whatsappIntegrationConfigurationSchema.parse(input)
+        .allowGeneralForCustomers
+    ).toBe(false);
+    expect(
+      whatsappIntegrationConfigurationSchema.safeParse({
+        ...input,
+        allowGeneralForCustomers: true,
+      }).success
+    ).toBe(false);
   });
 });

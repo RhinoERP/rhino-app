@@ -38,6 +38,7 @@ export async function createQuoteAction(
       priceLevelId: toNullablePricingId(values.priceLevelId),
       salesPriceListId: toNullablePricingId(values.salesPriceListId),
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      isVatExempt: values.isVatExempt ?? false,
       invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",
       taxes: values.taxes,
       items: mapQuoteFormItems(values.items, values.currency),

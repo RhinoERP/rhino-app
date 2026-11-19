@@ -32,6 +32,7 @@ export default async function ConfiguracionLayout({
           accountingEnabled={accountingEnabled}
           orgSlug={orgSlug}
           posEnabled={organization.pos_enabled ?? true}
+          whatsappEnabled={organization.whatsapp_enabled === true}
         />
       </aside>
       <main className="flex-1">{children}</main>

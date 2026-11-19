@@ -43,6 +43,7 @@ import { stripRouteFromObservations } from "@/modules/orders/types";
 import { CancelOrderModal } from "./cancel-order-modal";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
+import { SavedRemittanceDocuments } from "./saved-remittance-documents";
 
 type OrderDetailClientProps = {
   orgSlug: string;
@@ -698,6 +699,16 @@ function getCancelCheck(
   return { type: "single" };
 }
 
+function OrderSavedRemittances({ orgSlug, order }: OrderDetailClientProps) {
+  return (
+    <SavedRemittanceDocuments
+      childOrderId={order.parent_order_id ? order.id : undefined}
+      orgSlug={orgSlug}
+      parentOrderId={order.parent_order_id ?? order.id}
+    />
+  );
+}
+
 export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const [childrenExpanded, setChildrenExpanded] = useState(true);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
@@ -744,6 +755,7 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
       />
 
       <OrderFlowTimeline currentStatus={order.status} history={history} />
+      <OrderSavedRemittances order={order} orgSlug={orgSlug} />
 
       {currentOrderEvent && (
         <DispatchRemittanceCard

@@ -20,6 +20,7 @@ export type WhatsAppInboundMessage = {
 };
 
 export type WhatsAppDeliveryStatus = {
+  phoneNumberId: string;
   externalMessageId: string;
   status: "SENT" | "DELIVERED" | "READ" | "FAILED";
   occurredAt: string;
@@ -39,7 +40,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function metaTimestampToIso(timestamp: unknown): string {
   const seconds =
     typeof timestamp === "string" ? Number(timestamp) : Number.NaN;
-  return Number.isFinite(seconds)
+  return Number.isFinite(seconds) && seconds > 0 && seconds <= Date.now() / 1000
     ? new Date(seconds * 1000).toISOString()
     : new Date().toISOString();
 }
@@ -122,7 +123,10 @@ function parseInboundMessages(
   });
 }
 
-function parseDeliveryStatuses(candidates: unknown): WhatsAppDeliveryStatus[] {
+function parseDeliveryStatuses(
+  candidates: unknown,
+  phoneNumberId: string
+): WhatsAppDeliveryStatus[] {
   if (!Array.isArray(candidates)) {
     return [];
   }
@@ -145,6 +149,7 @@ function parseDeliveryStatuses(candidates: unknown): WhatsAppDeliveryStatus[] {
     }
     return [
       {
+        phoneNumberId,
         externalMessageId: candidate.id,
         status,
         occurredAt: metaTimestampToIso(candidate.timestamp),
@@ -174,7 +179,7 @@ function parseChange(change: unknown): {
 
   return {
     messages: parseInboundMessages(value.messages, phoneNumberId),
-    deliveryStatuses: parseDeliveryStatuses(value.statuses),
+    deliveryStatuses: parseDeliveryStatuses(value.statuses, phoneNumberId),
   };
 }
 

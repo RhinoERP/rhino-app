@@ -7,21 +7,25 @@ function createSupabaseStub(params: {
   invoiceNumber?: string | null;
 }) {
   return {
-    from: vi.fn((table: string) => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          maybeSingle: vi.fn().mockResolvedValue({
-            data:
-              table === "orders"
-                ? { sales_order_id: params.parentSaleId ?? null }
-                : {
-                    arca_status: params.arcaStatus ?? null,
-                    invoice_number: params.invoiceNumber ?? null,
-                  },
-          }),
-        })),
-      })),
-    })),
+    from: vi.fn((table: string) => {
+      const result = {
+        data:
+          table === "orders"
+            ? { sales_order_id: params.parentSaleId ?? null }
+            : {
+                arca_status: params.arcaStatus ?? null,
+                invoice_number: params.invoiceNumber ?? null,
+              },
+        error: null,
+      };
+      const query = {
+        select: vi.fn(() => query),
+        eq: vi.fn(() => query),
+        single: vi.fn().mockResolvedValue(result),
+        maybeSingle: vi.fn().mockResolvedValue(result),
+      };
+      return query;
+    }),
   } as unknown as Parameters<typeof resolveOrderAuthorizedInvoiceNumber>[0];
 }
 
@@ -34,7 +38,7 @@ describe("resolveOrderAuthorizedInvoiceNumber", () => {
     });
 
     await expect(
-      resolveOrderAuthorizedInvoiceNumber(supabase, {
+      resolveOrderAuthorizedInvoiceNumber(supabase, "org", {
         sales_order_id: null,
         parent_order_id: "order-parent",
       })
@@ -51,7 +55,7 @@ describe("resolveOrderAuthorizedInvoiceNumber", () => {
     });
 
     await expect(
-      resolveOrderAuthorizedInvoiceNumber(supabase, {
+      resolveOrderAuthorizedInvoiceNumber(supabase, "org", {
         sales_order_id: "sale-direct",
         parent_order_id: null,
       })

@@ -79,3 +79,79 @@ it.each([
     p_lease_token: "lease",
   });
 });
+
+describe("commercial pricing gate", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    { reason: "UNREGISTERED", key: "current" },
+    { reason: "AMBIGUOUS_PHONE", key: "current" },
+    { reason: "CUSTOMER_WITHOUT_LIST", key: "current" },
+    { reason: null, key: "current" },
+  ])("does not generate or dispatch when denied or a cached response is stale ($reason)", async (pricing) => {
+    const source = "source";
+    const cached = pricing.reason
+      ? null
+      : {
+          status: "PENDING",
+          text: "Precio anterior",
+          pricing_context_key: "old",
+        };
+    const records: Record<string, unknown> = {
+      organizations: { name: "Rhinos" },
+      whatsapp_integrations: { phone_number_id: "phone" },
+      whatsapp_conversations: { customer_phone: "5491112345678" },
+      whatsapp_messages: [
+        {
+          id: source,
+          direction: "INBOUND",
+          message_type: "AUDIO",
+          content: null,
+        },
+      ],
+    };
+    const db = {
+      rpc: vi.fn((name: string) =>
+        Promise.resolve({
+          data: name === "whatsapp_job_pricing" ? pricing : cached,
+          error: null,
+        })
+      ),
+      from: vi.fn((name: string) => {
+        const result = { data: records[name], error: null };
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          not: () => builder,
+          order: () => builder,
+          limit: () => Promise.resolve(result),
+          single: () => Promise.resolve(result),
+        };
+        return builder;
+      }),
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createCommercialJobProcessor(db as unknown as SupabaseClient)({
+        id: "job",
+        source_message_id: source,
+        organization_id: "org",
+        integration_id: "integration",
+        conversation_id: "conversation",
+        lease_token: "lease",
+        attempts: 1,
+        max_attempts: 5,
+        human_delay_applied: true,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(db.rpc).toHaveBeenCalledWith("whatsapp_job_pricing", {
+      p_job_id: "job",
+      p_lease_token: "lease",
+    });
+    expect(db.from).not.toHaveBeenCalledWith("agent_runs");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

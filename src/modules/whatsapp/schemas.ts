@@ -4,6 +4,7 @@ import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
   WHATSAPP_INTEGRATION_STATUSES,
+  WHATSAPP_PRICING_MODES,
   WHATSAPP_WEEKDAYS,
 } from "./types";
 
@@ -84,6 +85,8 @@ export const whatsappIntegrationConfigurationSchema = z
       .max(64, "El número visible es demasiado largo")
       .nullable(),
     status: z.enum(WHATSAPP_INTEGRATION_STATUSES),
+    pricingMode: z.enum(WHATSAPP_PRICING_MODES).default("SINGLE"),
+    allowGeneralForCustomers: z.boolean().default(false),
     salesPriceListId: z
       .string()
       .uuid("La lista de precios es inválida")
@@ -109,6 +112,7 @@ export const whatsappIntegrationConfigurationSchema = z
       deliveryPolicy: "",
       pickupPolicy: "",
       salesGuidance: "",
+      responseCapitalization: "STANDARD",
     }),
     handoffMessage: z
       .string()
@@ -129,7 +133,11 @@ export const whatsappIntegrationConfigurationSchema = z
       return;
     }
 
-    if (!value.salesPriceListId) {
+    if (
+      !value.salesPriceListId &&
+      (value.pricingMode !== "REGISTERED_ONLY" ||
+        value.allowGeneralForCustomers)
+    ) {
       ctx.addIssue({
         code: "custom",
         message: "Una integración activa requiere una lista de precios",
