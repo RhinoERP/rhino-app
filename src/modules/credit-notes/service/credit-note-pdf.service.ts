@@ -193,6 +193,10 @@ export type CreditNotePDFData = {
     saleNumber?: number | null;
     invoiceNumber?: string | null;
     currency?: string | null;
+    fiscalCurrency?: {
+      code: "PES" | "DOL";
+      rate: number | null;
+    };
   } | null;
   amount: number;
   observations?: string | null;
@@ -529,9 +533,9 @@ function buildCustomerAddress(data: CreditNotePDFData): string {
     .join(" - ");
 }
 
-async function generateCreditNoteQrDataUrl(
+export function buildCreditNoteQrVerifierUrl(
   data: CreditNotePDFData
-): Promise<string | null> {
+): string | null {
   if (
     !(
       data.fiscal.isAuthorized &&
@@ -545,21 +549,42 @@ async function generateCreditNoteQrDataUrl(
     return null;
   }
 
+  const fallbackCurrencyCode = data.sale?.currency === "USD" ? "DOL" : "PES";
+  const currencyCode = data.sale?.fiscalCurrency?.code ?? fallbackCurrencyCode;
+  const currencyRate =
+    data.sale?.fiscalCurrency?.rate ?? (currencyCode === "PES" ? 1 : null);
+  if (currencyCode === "DOL" && currencyRate === null) {
+    return null;
+  }
+
   try {
-    const verifierUrl = buildArcaQrVerifierUrlFromInput({
+    return buildArcaQrVerifierUrlFromInput({
       issueDate: data.issueDate,
       issuerCuit: data.issuer.cuit,
       pointOfSale: data.fiscal.pointOfSale,
       voucherTypeCode: data.fiscal.voucherTypeCode,
       voucherNumber: data.fiscal.voucherNumber,
       totalAmount: data.amount,
-      currency: "PES",
-      currencyRate: 1,
+      currency: currencyCode,
+      currencyRate: currencyRate ?? 1,
       receiverDocumentNumber: getNumericIdentifier(data.customer.cuit),
       receiverDocumentType: data.customer.cuit ? 80 : null,
       authorizationCode: data.fiscal.cae,
     });
+  } catch {
+    return null;
+  }
+}
 
+async function generateCreditNoteQrDataUrl(
+  data: CreditNotePDFData
+): Promise<string | null> {
+  const verifierUrl = buildCreditNoteQrVerifierUrl(data);
+  if (!verifierUrl) {
+    return null;
+  }
+
+  try {
     return await QRCode.toDataURL(verifierUrl, {
       errorCorrectionLevel: "M",
       margin: 1,

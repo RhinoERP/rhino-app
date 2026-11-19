@@ -1,7 +1,9 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import type { CreditNote } from "../types";
 import {
   buildCreditNotePDFData,
+  buildCreditNoteQrVerifierUrl,
   generateCreditNoteHTML,
 } from "./credit-note-pdf.service";
 
@@ -211,6 +213,56 @@ describe("credit note PDF HTML", () => {
     expect(html).toContain("Son dólares");
     expect(html).not.toContain("Son pesos");
     expect(html).toContain("397.260,98");
+  });
+
+  it("uses the associated invoice currency and fiscal rate in the ARCA QR", () => {
+    const base = createCreditNote();
+    const data = buildCreditNotePDFData({
+      creditNote: createCreditNote({
+        amount: 11_761.85,
+        sale: base.sale
+          ? {
+              ...base.sale,
+              currency: "USD",
+              fiscalCurrency: { code: "DOL", rate: 1559.5 },
+            }
+          : null,
+      }),
+      issuerName: "CONECTANDO PUNTOS SRL",
+      issuerCuit: "30717167984",
+    });
+
+    const url = buildCreditNoteQrVerifierUrl(data);
+    expect(url).not.toBeNull();
+    const encodedPayload = new URL(url ?? "").searchParams.get("p");
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload ?? "", "base64").toString("utf-8")
+    ) as { importe: number; moneda: string; ctz: number };
+
+    expect(payload).toMatchObject({
+      importe: 11_761.85,
+      moneda: "DOL",
+      ctz: 1559.5,
+    });
+  });
+
+  it("does not generate a USD QR without the original fiscal rate", () => {
+    const base = createCreditNote();
+    const data = buildCreditNotePDFData({
+      creditNote: createCreditNote({
+        sale: base.sale
+          ? {
+              ...base.sale,
+              currency: "USD",
+              fiscalCurrency: { code: "DOL", rate: null },
+            }
+          : null,
+      }),
+      issuerName: "CONECTANDO PUNTOS SRL",
+      issuerCuit: "30717167984",
+    });
+
+    expect(buildCreditNoteQrVerifierUrl(data)).toBeNull();
   });
 
   it("uses the authorized net and VAT for a note with no own lines or taxes", async () => {

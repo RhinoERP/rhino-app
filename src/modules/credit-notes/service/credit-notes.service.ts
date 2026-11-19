@@ -11,6 +11,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
+import { readAuthorizedFiscalCurrency } from "@/modules/arca/fiscal-currency";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isAuthorizedPreventaInvoice } from "@/modules/sales/preventa-invoicing";
 import {
@@ -837,21 +838,39 @@ function mapCreditNoteCustomer(row: any): CreditNote["customer"] {
 
 // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
 function mapCreditNoteSale(row: any): CreditNote["sale"] {
-  return row.sales_orders
-    ? {
-        saleNumber: row.sales_orders.sale_number,
-        invoiceNumber: row.sales_orders.invoice_number,
-        remittanceNumber: row.sales_orders.remittance_number ?? null,
-        invoiceType: row.sales_orders.invoice_type,
-        totalAmount: Number(row.sales_orders.total_amount),
-        currency: row.sales_orders.currency ?? "ARS",
-        arcaStatus: row.sales_orders.arca_status ?? null,
-        arcaPointOfSale: row.sales_orders.arca_point_of_sale ?? null,
-        arcaVoucherNumber: row.sales_orders.arca_voucher_number ?? null,
-        arcaVoucherTypeCode: row.sales_orders.arca_voucher_type_code ?? null,
-        arcaAuthorizedAt: row.sales_orders.arca_authorized_at ?? null,
-      }
-    : null;
+  if (!row.sales_orders) {
+    return null;
+  }
+
+  const sale = row.sales_orders;
+  const currency = sale.currency ?? "ARS";
+  const fallbackFiscalCurrency = {
+    code: currency === "USD" ? ("DOL" as const) : ("PES" as const),
+    rate: currency === "USD" ? toNullableNumber(sale.exchange_rate) : 1,
+  };
+  let fiscalCurrency = fallbackFiscalCurrency;
+  if (sale.arca_request_json) {
+    try {
+      fiscalCurrency = readAuthorizedFiscalCurrency(sale.arca_request_json);
+    } catch {
+      fiscalCurrency = fallbackFiscalCurrency;
+    }
+  }
+
+  return {
+    saleNumber: sale.sale_number,
+    invoiceNumber: sale.invoice_number,
+    remittanceNumber: sale.remittance_number ?? null,
+    invoiceType: sale.invoice_type,
+    totalAmount: Number(sale.total_amount),
+    currency,
+    fiscalCurrency,
+    arcaStatus: sale.arca_status ?? null,
+    arcaPointOfSale: sale.arca_point_of_sale ?? null,
+    arcaVoucherNumber: sale.arca_voucher_number ?? null,
+    arcaVoucherTypeCode: sale.arca_voucher_type_code ?? null,
+    arcaAuthorizedAt: sale.arca_authorized_at ?? null,
+  };
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -1027,7 +1046,7 @@ export async function getCreditNotesByOrgSlug(
       suppliers(name),
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, exchange_rate, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("organization_id", org.id);
@@ -1108,7 +1127,7 @@ export async function getCreditNotesByCustomerId(
       supplier_id,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, exchange_rate, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
       suppliers(name),
       customer_credits(remaining_amount)
     `
@@ -1200,7 +1219,7 @@ export async function getCreditNoteById(
       suppliers(name),
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, exchange_rate, arca_request_json, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("id", creditNoteId)
@@ -1276,7 +1295,7 @@ export async function getCreditNotesBySaleId(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, exchange_rate, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("organization_id", org.id)
@@ -1338,7 +1357,7 @@ const CREDIT_NOTE_LIST_SELECT = `
   supplier_id,
   suppliers(name),
   customers(id, business_name, fantasy_name),
-  sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+  sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, currency, exchange_rate, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
 `;
 
 export type CreditNotesPaginatedParams = {

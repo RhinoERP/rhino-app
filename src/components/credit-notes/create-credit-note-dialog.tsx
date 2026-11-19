@@ -276,7 +276,10 @@ function SalePicker({
         >
           <span className="truncate">
             {selected
-              ? `${saleLabel(selected)} · ${formatCurrency(Number(selected.total_amount ?? 0))}`
+              ? `${saleLabel(selected)} · ${formatCurrency(
+                  Number(selected.total_amount ?? 0),
+                  selected.currency ?? "ARS"
+                )}`
               : "Seleccioná una venta..."}
           </span>
           <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
@@ -321,7 +324,10 @@ function SalePicker({
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{label}</p>
                       <p className="truncate text-muted-foreground text-xs">
-                        {formatCurrency(Number(s.total_amount ?? 0))}
+                        {formatCurrency(
+                          Number(s.total_amount ?? 0),
+                          s.currency ?? "ARS"
+                        )}
                       </p>
                     </div>
                     <Check
@@ -543,6 +549,7 @@ function SupplierPicker({
 
 function ReturnItemRow({
   item,
+  currency,
   state,
   remainingQty,
   remainingUnits,
@@ -553,6 +560,7 @@ function ReturnItemRow({
   lineTotal,
 }: {
   item: SalesOrderItemDetail;
+  currency: string;
   state: ReturnItemState;
   remainingQty: number;
   remainingUnits: number;
@@ -583,13 +591,13 @@ function ReturnItemRow({
           )}
           <p className="text-muted-foreground text-xs">
             {item.tracksStockUnits
-              ? `${formattedRemainingQty} ${weightLabel} disponibles de ${formattedPurchasedWeight} ${weightLabel} · ${formatCurrency(price)}/${weightLabel}`
-              : `${formattedRemainingQty} disponibles de ${formattedPurchasedQty} · ${formatCurrency(price)} c/u`}
+              ? `${formattedRemainingQty} ${weightLabel} disponibles de ${formattedPurchasedWeight} ${weightLabel} · ${formatCurrency(price, currency)}/${weightLabel}`
+              : `${formattedRemainingQty} disponibles de ${formattedPurchasedQty} · ${formatCurrency(price, currency)} c/u`}
           </p>
           <p className="text-muted-foreground text-xs">
             {item.tracksStockUnits
-              ? `Comprado: ${formattedPurchasedQty} uds · ${formattedPurchasedWeight} ${weightLabel} · ${formatCurrency(item.subtotal)} subtotal`
-              : `Comprado: ${formattedPurchasedQty} unidades · ${formatCurrency(item.subtotal)} subtotal`}
+              ? `Comprado: ${formattedPurchasedQty} uds · ${formattedPurchasedWeight} ${weightLabel} · ${formatCurrency(item.subtotal, currency)} subtotal`
+              : `Comprado: ${formattedPurchasedQty} unidades · ${formatCurrency(item.subtotal, currency)} subtotal`}
           </p>
         </div>
 
@@ -664,7 +672,7 @@ function ReturnItemRow({
             </span>
           </div>
           <span className="font-medium text-sm">
-            {formatCurrency(lineTotal)}
+            {formatCurrency(lineTotal, currency)}
           </span>
         </div>
       )}
@@ -734,6 +742,16 @@ export function CreateCreditNoteDialog({
   const maxAmount = selectedSale
     ? Number(selectedSale.total_amount ?? 0)
     : undefined;
+  const amountCurrency =
+    mode === "sale" ? (selectedSale?.currency ?? null) : "ARS";
+  const returnCurrency = returnSale?.currency ?? "ARS";
+  const originalFiscalExchangeRate = Number(selectedSale?.exchange_rate);
+  const originalFiscalExchangeRateLabel =
+    selectedSale?.currency === "USD" &&
+    Number.isFinite(originalFiscalExchangeRate) &&
+    originalFiscalExchangeRate > 0
+      ? `Cotización fiscal de la factura original: ${formatCurrency(originalFiscalExchangeRate, "ARS")} por USD.`
+      : null;
   const selectedSalePendingBalance = Number(
     selectedSale?.receivable?.pending_balance ?? 0
   );
@@ -862,7 +880,7 @@ export function CreateCreditNoteDialog({
       return "Completá todos los campos requeridos";
     }
     if (maxAmount != null && parsedAmount > maxAmount) {
-      return `El monto no puede superar el total de la venta (${formatCurrency(maxAmount)})`;
+      return `El monto no puede superar el total de la venta (${formatCurrency(maxAmount, amountCurrency ?? "ARS")})`;
     }
     return null;
   }
@@ -1326,6 +1344,7 @@ export function CreateCreditNoteDialog({
 
                         return (
                           <ReturnItemRow
+                            currency={returnCurrency}
                             item={item}
                             key={item.id}
                             lineTotal={calculateReturnLineTotal({
@@ -1352,7 +1371,7 @@ export function CreateCreditNoteDialog({
                     ) : (
                       <p className="py-4 text-muted-foreground text-sm">
                         {existingReturnCreditNoteTotal > 0
-                          ? `La venta seleccionada no tiene productos disponibles para devolver. Ya existe una nota de crédito por ${formatCurrency(existingReturnCreditNoteTotal)}.`
+                          ? `La venta seleccionada no tiene productos disponibles para devolver. Ya existe una nota de crédito por ${formatCurrency(existingReturnCreditNoteTotal, returnCurrency)}.`
                           : "La venta seleccionada no tiene productos disponibles para devolver."}
                       </p>
                     )}
@@ -1374,7 +1393,7 @@ export function CreateCreditNoteDialog({
                       Total NC c/imp.
                     </p>
                     <p className="font-semibold text-lg">
-                      {formatCurrency(returnTotal)}
+                      {formatCurrency(returnTotal, returnCurrency)}
                     </p>
                   </div>
                 </div>
@@ -1401,10 +1420,11 @@ export function CreateCreditNoteDialog({
             {mode !== "return" && (
               <div className="space-y-1.5">
                 <Label htmlFor="nc-amount">
-                  Monto *
+                  Monto *{amountCurrency ? ` (${amountCurrency})` : ""}
                   {maxAmount != null && (
                     <span className="ml-1 font-normal text-muted-foreground text-xs">
-                      (máx. {formatCurrency(maxAmount)})
+                      (máx. {formatCurrency(maxAmount, amountCurrency ?? "ARS")}
+                      )
                     </span>
                   )}
                 </Label>
@@ -1418,6 +1438,11 @@ export function CreateCreditNoteDialog({
                   type="number"
                   value={amount}
                 />
+                {originalFiscalExchangeRateLabel ? (
+                  <p className="text-muted-foreground text-xs">
+                    {originalFiscalExchangeRateLabel}
+                  </p>
+                ) : null}
               </div>
             )}
 
@@ -1450,7 +1475,10 @@ export function CreateCreditNoteDialog({
                     </div>
                     <p className="text-muted-foreground text-xs">
                       {canApplyToReceivable
-                        ? `Saldo pendiente: ${formatCurrency(selectedSalePendingBalance)}`
+                        ? `Saldo pendiente: ${formatCurrency(
+                            selectedSalePendingBalance,
+                            selectedSale.currency ?? "ARS"
+                          )}`
                         : "La factura no tiene saldo pendiente; la NC quedará como saldo a favor."}
                     </p>
                   </div>
