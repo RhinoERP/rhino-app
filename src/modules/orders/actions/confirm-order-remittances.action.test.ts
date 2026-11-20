@@ -236,4 +236,31 @@ describe("confirmOrderRemittancesAction", () => {
     expect(forbidden.success).toBe(false);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+
+  it("confirms a standalone root using itself as parent and documentary source", async () => {
+    mocks.prepare.mockResolvedValue({
+      success: true,
+      data: { ...plan, parentOrderId: child },
+    });
+    expect((await confirmOrderRemittancesAction(input)).success).toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "commit_order_remittance_documents",
+      expect.objectContaining({
+        p_parent_order_id: child,
+        p_order_ids: [child],
+        p_documents: expect.arrayContaining([
+          expect.objectContaining({
+            lines: expect.arrayContaining([
+              expect.objectContaining({
+                sources: [
+                  { order_id: child, quote_item_id: item, quantity: 20 },
+                ],
+              }),
+            ]),
+          }),
+        ]),
+      })
+    );
+    expect(mocks.recalc).toHaveBeenCalledWith(child, "org");
+  });
 });
