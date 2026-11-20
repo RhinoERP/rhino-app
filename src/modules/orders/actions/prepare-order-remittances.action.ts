@@ -9,6 +9,7 @@ import { getRemittanceSettings } from "@/modules/organizations/actions/get-remit
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { RemittanceData } from "@/modules/sales/service/remittance-generator.service";
+import type { Database } from "@/types/supabase";
 import {
   fetchOrderRemittanceRows,
   getOrderRemittanceData,
@@ -23,7 +24,6 @@ const prepareSchema = z.object({
   orgSlug: z.string().trim().min(1),
   childOrderIds: z.array(z.uuid()).min(1),
 });
-const unitSchema = z.enum(["UN", "KG", "LT", "MT"]);
 
 export type PreparedOrderRemittances = {
   automaticNumbering: boolean;
@@ -41,6 +41,42 @@ export type PreparedOrderRemittances = {
 type PrepareResult =
   | { success: true; data: PreparedOrderRemittances }
   | { success: false; error: string };
+
+type DispatchOrder = Pick<
+  Database["public"]["Tables"]["orders"]["Row"],
+  "id" | "parent_order_id" | "status" | "created_by" | "quote_id"
+>;
+
+function resolveDispatchSelection(
+  orders: DispatchOrder[],
+  access: Awaited<ReturnType<typeof resolveOrdersAccessContext>>
+) {
+  const standaloneOrderId =
+    orders.length === 1 && orders[0].parent_order_id === null
+      ? orders[0].id
+      : null;
+  const parentOrderId = orders[0].parent_order_id ?? standaloneOrderId;
+  if (
+    !parentOrderId ||
+    orders.some(
+      (order) =>
+        (order.parent_order_id ?? standaloneOrderId) !== parentOrderId ||
+        order.quote_id !== orders[0].quote_id ||
+        order.status !== "PREPARING"
+    )
+  ) {
+    throw new Error(
+      "Seleccioná un pedido sin subpedidos o subpedidos en preparación del mismo pedido."
+    );
+  }
+  if (
+    access.scope !== "all" &&
+    orders.some((order) => order.created_by !== access.userId)
+  ) {
+    throw new Error("La selección incluye pedidos fuera de tu alcance.");
+  }
+  return { standaloneOrderId, parentOrderId, quoteId: orders[0].quote_id };
+}
 
 function preparationConfiguration(
   settings: Awaited<ReturnType<typeof getOrganizationSettings>>,
@@ -66,15 +102,14 @@ function preparationConfiguration(
 
 function assertEveryOrderHasItems(
   ids: string[],
-  rows: Awaited<ReturnType<typeof fetchOrderRemittanceRows>>
+  rows: Awaited<ReturnType<typeof fetchOrderRemittanceRows>>,
+  standaloneOrderId: string | null
 ) {
   const populatedOrders = new Set(
-    rows.map((row) => row.source.assigned_order_id)
+    rows.map((row) => row.source.assigned_order_id ?? standaloneOrderId)
   );
   if (ids.some((id) => !populatedOrders.has(id))) {
-    throw new Error(
-      "Uno de los subpedidos no tiene productos para documentar."
-    );
+    throw new Error("Uno de los pedidos no tiene productos para documentar.");
   }
 }
 
@@ -105,6 +140,73 @@ async function validateParentForPreparation(params: {
   }
 }
 
+async function validateStandaloneForPreparation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  orderId: string
+) {
+  const children = await supabase
+    .from("orders")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("parent_order_id", orderId)
+    .limit(1);
+  if (children.error) {
+    throw new Error(children.error.message);
+  }
+  if (children.data?.length) {
+    throw new Error("Este pedido tiene subpedidos. Seleccioná sus envíos.");
+  }
+}
+
+function buildDocumentPlan(params: {
+  rows: Awaited<ReturnType<typeof fetchOrderRemittanceRows>>;
+  orderIds: string[];
+  quoteId: string;
+  standaloneOrderId: string | null;
+}) {
+  return planRemittanceDocuments(
+    params.rows.map(({ source, item, commercialQuantity }) => {
+      const sourceOrderId =
+        source.assigned_order_id ?? params.standaloneOrderId;
+      if (
+        !(sourceOrderId && params.orderIds.includes(sourceOrderId)) ||
+        source.quote_id !== params.quoteId
+      ) {
+        throw new Error("Un ítem dejó de pertenecer al despacho.");
+      }
+      // Never copy the weight of an entire commercial line onto a split child.
+      const weightQuantity = item.weightQuantity;
+      if (
+        weightQuantity != null &&
+        (!commercialQuantity || commercialQuantity <= 0)
+      ) {
+        throw new Error(
+          "No se pudo distribuir el peso comercial de un producto."
+        );
+      }
+      return {
+        source: {
+          id: source.id,
+          orderId: sourceOrderId,
+          product_id: source.product_id,
+          product_variant_id: source.product_variant_id,
+        },
+        item: {
+          ...item,
+          weightQuantity:
+            weightQuantity == null
+              ? null
+              : truncateToDecimals(
+                  (weightQuantity * item.quantity) / (commercialQuantity ?? 1),
+                  6
+                ),
+        },
+      };
+    })
+  );
+}
+
 /** Read-only: prepares a plan; no counter, event, state or document is mutated. */
 export async function prepareOrderRemittancesAction(
   input: z.input<typeof prepareSchema>
@@ -128,34 +230,26 @@ export async function prepareOrderRemittancesAction(
       throw new Error(error.message);
     }
     if (!orders || orders.length !== ids.length) {
-      throw new Error("Uno o más subpedidos no fueron encontrados.");
+      throw new Error("Uno o más pedidos no fueron encontrados.");
     }
-    const parentOrderId = orders[0].parent_order_id;
-    if (
-      !parentOrderId ||
-      orders.some(
-        (order) =>
-          order.parent_order_id !== parentOrderId ||
-          order.quote_id !== orders[0].quote_id ||
-          order.status !== "PREPARING"
-      )
-    ) {
-      throw new Error("Seleccioná subpedidos en preparación del mismo pedido.");
+    const { standaloneOrderId, parentOrderId, quoteId } =
+      resolveDispatchSelection(orders, access);
+    if (standaloneOrderId) {
+      await validateStandaloneForPreparation(
+        supabase,
+        org.id,
+        standaloneOrderId
+      );
+    } else {
+      await validateParentForPreparation({
+        supabase,
+        orgId: org.id,
+        parentOrderId,
+        quoteId,
+        userId: access.userId,
+        scope: access.scope,
+      });
     }
-    if (
-      access.scope !== "all" &&
-      orders.some((order) => order.created_by !== access.userId)
-    ) {
-      throw new Error("La selección incluye pedidos fuera de tu alcance.");
-    }
-    await validateParentForPreparation({
-      supabase,
-      orgId: org.id,
-      parentOrderId,
-      quoteId: orders[0].quote_id,
-      userId: access.userId,
-      scope: access.scope,
-    });
     const admin = createAdminClient();
     const fingerprintArgs = { p_org_id: org.id, p_order_ids: ids };
     const before = await admin.rpc(
@@ -166,7 +260,12 @@ export async function prepareOrderRemittancesAction(
       throw new Error("No se pudo verificar el contenido del despacho.");
     }
     const [rows, documentData, settings, numbering] = await Promise.all([
-      fetchOrderRemittanceRows(supabase, org.id, ids),
+      fetchOrderRemittanceRows(
+        supabase,
+        org.id,
+        ids,
+        standaloneOrderId ? quoteId : undefined
+      ),
       getOrderRemittanceData({
         orgSlug: parsed.orgSlug,
         childOrderIds: ids,
@@ -176,47 +275,14 @@ export async function prepareOrderRemittancesAction(
       getRemittanceSettings(parsed.orgSlug),
     ]);
     const configuration = preparationConfiguration(settings, numbering);
-    assertEveryOrderHasItems(ids, rows);
+    assertEveryOrderHasItems(ids, rows, standaloneOrderId);
     const declaredValuePercentage = configuration.percentage;
-    const documents = planRemittanceDocuments(
-      rows.map(({ source, item, commercialQuantity }) => {
-        if (
-          !(source.assigned_order_id && ids.includes(source.assigned_order_id))
-        ) {
-          throw new Error("Un ítem dejó de pertenecer al despacho.");
-        }
-        // Never copy the weight of an entire commercial line onto a split child.
-        const weightQuantity = item.weightQuantity;
-        if (
-          weightQuantity != null &&
-          (!commercialQuantity || commercialQuantity <= 0)
-        ) {
-          throw new Error(
-            "No se pudo distribuir el peso comercial de un producto."
-          );
-        }
-        return {
-          source: {
-            id: source.id,
-            orderId: source.assigned_order_id,
-            product_id: source.product_id,
-            product_variant_id: source.product_variant_id,
-          },
-          item: {
-            ...item,
-            unitOfMeasure: unitSchema.parse(item.unitOfMeasure),
-            weightQuantity:
-              weightQuantity == null
-                ? null
-                : truncateToDecimals(
-                    (weightQuantity * item.quantity) /
-                      (commercialQuantity ?? 1),
-                    6
-                  ),
-          },
-        };
-      })
-    );
+    const documents = buildDocumentPlan({
+      rows,
+      orderIds: ids,
+      quoteId,
+      standaloneOrderId,
+    });
     const after = await admin.rpc(
       "order_remittance_source_fingerprint",
       fingerprintArgs

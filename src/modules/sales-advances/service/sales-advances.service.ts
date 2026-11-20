@@ -357,7 +357,7 @@ async function ensureReceivable(params: {
   supabase: Supabase;
   orgId: string;
   saleId: string;
-  customerId: string;
+  customerId: string | null;
   amount: number;
   dueDate: string;
   currency?: string;
@@ -373,6 +373,12 @@ async function ensureReceivable(params: {
   }
   if (existing?.id) {
     return existing.id;
+  }
+
+  if (!params.customerId) {
+    throw new Error(
+      "No se puede crear una cuenta por cobrar sin un cliente asociado."
+    );
   }
 
   const { data, error } = await params.supabase

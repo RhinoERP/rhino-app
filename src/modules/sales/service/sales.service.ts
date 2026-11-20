@@ -151,7 +151,7 @@ export type SalesAccessContext = {
 
 export type SalesOrderWithCustomer = SalesOrder & {
   customer: {
-    id: string;
+    id: SalesOrder["customer_id"];
     business_name: string;
     fantasy_name: string | null;
     cuit: string | null;
@@ -887,41 +887,20 @@ function normalizeCustomerFromSale(
     ? sale.customer[0]
     : sale.customer;
 
-  const normalizedCustomer =
-    customer && typeof customer === "object" && "id" in customer
-      ? {
-          id: (customer.id as string) ?? sale.customer_id,
-          business_name:
-            (customer.business_name as string | null) ?? "Cliente desconocido",
-          fantasy_name: (customer.fantasy_name as string | null) ?? null,
-          cuit: (customer.cuit as string | null) ?? null,
-          phone: (customer.phone as string | null) ?? null,
-          email: (customer.email as string | null) ?? null,
-          address: (customer.address as string | null) ?? null,
-          city: (customer.city as string | null) ?? null,
-          delivery_address:
-            (customer.delivery_address as string | null) ?? null,
-          delivery_city: (customer.delivery_city as string | null) ?? null,
-          tax_condition: (customer.tax_condition as string | null) ?? null,
-          preferred_carrier_id:
-            (customer.preferred_carrier_id as string | null) ?? null,
-        }
-      : {
-          id: sale.customer_id,
-          business_name: "Cliente desconocido",
-          fantasy_name: null,
-          cuit: null,
-          phone: null,
-          email: null,
-          address: null,
-          city: null,
-          delivery_address: null,
-          delivery_city: null,
-          tax_condition: null,
-          preferred_carrier_id: null,
-        };
-
-  return normalizedCustomer;
+  return {
+    id: customer?.id ?? sale.customer_id,
+    business_name: customer?.business_name ?? "Cliente desconocido",
+    fantasy_name: customer?.fantasy_name ?? null,
+    cuit: customer?.cuit ?? null,
+    phone: customer?.phone ?? null,
+    email: customer?.email ?? null,
+    address: customer?.address ?? null,
+    city: customer?.city ?? null,
+    delivery_address: customer?.delivery_address ?? null,
+    delivery_city: customer?.delivery_city ?? null,
+    tax_condition: customer?.tax_condition ?? null,
+    preferred_carrier_id: customer?.preferred_carrier_id ?? null,
+  };
 }
 
 function normalizeCarrierFromSale(
@@ -3651,6 +3630,10 @@ export async function confirmIncompleteSaleWithStockDeduction(
     throw new Error("La preventa no está disponible para confirmación");
   }
 
+  if (!sale.customer_id) {
+    throw new Error("La venta no tiene un cliente asociado.");
+  }
+
   const { data: saleCustomer } = await supabase
     .from("customers")
     .select("business_name, fantasy_name")
@@ -6375,7 +6358,7 @@ async function syncInformalAdvanceReceivable(params: {
   saleId: string;
   totalAmount: number;
   advancePercentage: number | null;
-  customerId: string;
+  customerId: SalesOrder["customer_id"];
   dueDate: string;
   currency: string;
   createdBy: string | null;
@@ -6423,6 +6406,10 @@ async function syncInformalAdvanceReceivable(params: {
       currency: params.currency,
     });
     return;
+  }
+
+  if (!params.customerId) {
+    throw new Error("No se puede crear un anticipo sin un cliente asociado.");
   }
 
   const { data: parentSale } = await params.supabase

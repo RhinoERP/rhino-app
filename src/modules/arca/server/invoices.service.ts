@@ -17,7 +17,7 @@ export type AuthorizedArcaInvoiceListItem = {
   sale_number: number | string | null;
   invoice_number: string | null;
   customer: {
-    id: string;
+    id: Database["public"]["Tables"]["sales_orders"]["Row"]["customer_id"];
     business_name: string;
     fantasy_name: string | null;
     email: string | null;

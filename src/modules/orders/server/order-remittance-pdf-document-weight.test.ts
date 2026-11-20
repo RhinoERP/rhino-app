@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createClient } from "@/lib/supabase/server";
 import { generateRemittanceHTML } from "@/modules/sales/service/remittance-generator.service";
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +32,7 @@ vi.mock("@/modules/organizations/service/organizations.service", () => ({
 }));
 
 import {
+  fetchOrderRemittanceRows,
   getOrderRemittanceData,
   groupOrderRemittanceItems,
 } from "./order-remittance-pdf-document.service";
@@ -41,6 +43,7 @@ function queryResult(data: unknown) {
     select: vi.fn(),
     eq: vi.fn(),
     in: vi.fn(),
+    is: vi.fn().mockResolvedValue({ data: [], error: null }),
     single: vi.fn().mockResolvedValue(result),
   });
   query.select.mockReturnValue(query);
@@ -230,5 +233,48 @@ describe("getOrderRemittanceData", () => {
     expect(remittance.total).toBe(400);
     expect(remittance.finalRemittanceVisibility?.showWeight).toBe(true);
     expect(generateRemittanceHTML(remittance)).toContain("Peso</th>");
+  });
+});
+
+describe("fetchOrderRemittanceRows", () => {
+  it("loads assigned and loose items together only for the standalone quote", async () => {
+    const assignedItem = {
+      id: "assigned",
+      quote_id: "quote",
+      assigned_order_id: "root",
+      quantity: 1,
+      unit_price: 10,
+      quote_item_extras: [],
+    };
+    const looseItem = { ...assignedItem, id: "loose", assigned_order_id: null };
+    const assigned = queryResult([assignedItem]);
+    const loose = queryResult([]);
+    loose.is.mockResolvedValue({ data: [looseItem], error: null });
+    const quoteItems = vi
+      .fn()
+      .mockReturnValueOnce(assigned)
+      .mockReturnValueOnce(loose);
+    const from = vi.fn((table: string) =>
+      table === "quote_items" ? quoteItems() : queryResult([])
+    );
+    mocks.createClient.mockResolvedValue({ from });
+    const rows = await fetchOrderRemittanceRows(
+      await createClient(),
+      "org",
+      ["root"],
+      "quote"
+    );
+    expect(rows.map(({ source }) => source.id)).toEqual(["assigned", "loose"]);
+    expect(loose.eq).toHaveBeenCalledWith("quote_id", "quote");
+    expect(loose.eq).toHaveBeenCalledWith("quote.organization_id", "org");
+    expect(loose.is).toHaveBeenCalledWith("assigned_order_id", null);
+    expect(looseItem.assigned_order_id).toBeNull();
+  });
+
+  it("never loads loose quote items for a child selection", async () => {
+    const from = vi.fn(() => queryResult([]));
+    mocks.createClient.mockResolvedValue({ from });
+    await fetchOrderRemittanceRows(await createClient(), "org", ["child"]);
+    expect(from).toHaveBeenCalledTimes(1);
   });
 });
