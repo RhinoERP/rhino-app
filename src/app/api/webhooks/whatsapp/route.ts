@@ -1,4 +1,8 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import {
+  findSellerForInbound,
+  processSellerMessage,
+} from "@/modules/commercial-ai/whatsapp/seller-assistant.service";
 import {
   parseMetaWebhook,
   verifyMetaSignature,
@@ -64,6 +68,13 @@ export async function POST(request: Request) {
     const supabase = createWhatsAppAdminClient();
 
     for (const message of messages) {
+      // Si escribe un vendedor, lo atiende el asistente de IA Comercial y no
+      // entra a la bandeja de pedidos de clientes. Se responde después del 200.
+      const seller = await findSellerForInbound(supabase, message);
+      if (seller) {
+        after(() => processSellerMessage(seller, message));
+        continue;
+      }
       const { error } = await supabase.rpc("ingest_whatsapp_inbound_message", {
         p_phone_number_id: message.phoneNumberId,
         p_customer_phone: message.customerPhone,

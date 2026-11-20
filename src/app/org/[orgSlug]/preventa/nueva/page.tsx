@@ -16,10 +16,16 @@ type PreSalePageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams?: Promise<{ customerId?: string }>;
 };
 
-export default async function PreSalePage({ params }: PreSalePageProps) {
+export default async function PreSalePage({
+  params,
+  searchParams,
+}: PreSalePageProps) {
   const { orgSlug } = await params;
+  // Opcional: IA Comercial abre la preventa con ?customerId= para precargar el cliente.
+  const { customerId: initialCustomerId } = (await searchParams) ?? {};
   const accessContext = await getSalesAccessContext(orgSlug);
 
   if (!accessContext.canManage) {
@@ -60,6 +66,7 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
   return (
     <PreSaleForm
       customers={visibleCustomers}
+      initialCustomerId={initialCustomerId}
       initialSellerId={accessContext.userId ?? undefined}
       initialWarehouseId={initialWarehouseId}
       organization={{ name: organization.name, cuit: organization.cuit }}

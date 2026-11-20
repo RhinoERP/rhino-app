@@ -126,6 +126,8 @@ type PreSaleFormProps = {
     cuit: string | null;
   };
   initialSellerId?: string;
+  /** Cliente preseleccionado (por ejemplo, al venir desde IA Comercial). */
+  initialCustomerId?: string;
   initialWarehouseId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
@@ -588,6 +590,7 @@ export function PreSaleForm({
   orgSlug,
   organization,
   initialSellerId,
+  initialCustomerId,
   initialWarehouseId,
   customers,
   sellers,
@@ -597,7 +600,11 @@ export function PreSaleForm({
   warehouses,
 }: PreSaleFormProps) {
   const router = useRouter();
-  const [customerId, setCustomerId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>(() =>
+    initialCustomerId && customers.some((c) => c.id === initialCustomerId)
+      ? initialCustomerId
+      : ""
+  );
   const [warehouseId, setWarehouseId] = useState<string>(
     initialWarehouseId ?? warehouses[0]?.id ?? ""
   );
