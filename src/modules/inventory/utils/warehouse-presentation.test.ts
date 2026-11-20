@@ -68,6 +68,9 @@ describe("stock warehouse filter visibility", () => {
         { is_active: false },
       ])
     ).toBe(true);
+    expect(
+      shouldShowStockWarehouseFilter([{ is_active: true }, { is_active: true }])
+    ).toBe(true);
     expect(shouldShowStockWarehouseFilter([{ is_active: false }])).toBe(true);
   });
 });

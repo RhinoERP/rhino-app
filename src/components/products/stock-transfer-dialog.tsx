@@ -172,7 +172,13 @@ export function StockTransferDialog({
   const isWeightBased =
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
-  const { data: warehouses = [], isPending: warehousesLoading } = useQuery({
+  const {
+    data: warehouses = [],
+    isError: warehousesError,
+    isFetching: warehousesFetching,
+    isPending: warehousesLoading,
+    refetch: refetchWarehouses,
+  } = useQuery({
     queryKey: ["inventory-warehouses", orgSlug, "transfer"],
     queryFn: () => getTransferWarehousesAction(orgSlug),
     enabled: open,
@@ -206,10 +212,12 @@ export function StockTransferDialog({
   const sourceWarehouseName = sourceLot
     ? warehousesById.get(sourceLot.warehouse_id)?.name
     : undefined;
-  const destinationOptions = warehouses.filter(
-    (warehouse) =>
-      warehouse.isActive && warehouse.id !== sourceLot?.warehouse_id
-  );
+  const destinationOptions = warehousesError
+    ? []
+    : warehouses.filter(
+        (warehouse) =>
+          warehouse.isActive && warehouse.id !== sourceLot?.warehouse_id
+      );
   const pending = form.formState.isSubmitting;
   const stockUnitSuffix = getStockUnitSuffix(product.unit_of_measure);
   const quantityLabel = getQuantityLabel(product.unit_of_measure);
@@ -371,7 +379,12 @@ export function StockTransferDialog({
                 <FormItem>
                   <FormLabel>Depósito destino</FormLabel>
                   <Select
-                    disabled={pending || destinationOptions.length === 0}
+                    disabled={
+                      pending ||
+                      warehousesLoading ||
+                      warehousesError ||
+                      destinationOptions.length === 0
+                    }
                     onValueChange={field.onChange}
                     value={field.value}
                   >
@@ -392,6 +405,34 @@ export function StockTransferDialog({
                   <FormDescription>
                     Origen: {sourceWarehouseName ?? "sin depósito"}
                   </FormDescription>
+                  {warehousesError && (
+                    <div className="space-y-2" role="alert">
+                      <p className="text-destructive text-sm">
+                        No se pudieron cargar los depósitos disponibles. No se
+                        puede confirmar la transferencia hasta volver a
+                        cargarlos.
+                      </p>
+                      <Button
+                        disabled={warehousesFetching}
+                        onClick={() => {
+                          refetchWarehouses();
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        {warehousesFetching ? "Reintentando..." : "Reintentar"}
+                      </Button>
+                    </div>
+                  )}
+                  {!(warehousesLoading || warehousesError) &&
+                    sourceLot &&
+                    destinationOptions.length === 0 && (
+                      <output className="text-muted-foreground text-sm">
+                        No hay otro depósito activo disponible para usar como
+                        destino.
+                      </output>
+                    )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -484,7 +525,14 @@ export function StockTransferDialog({
                 Cancelar
               </Button>
               <Button
-                disabled={pending || availableLots.length === 0 || !sourceLot}
+                disabled={
+                  pending ||
+                  warehousesLoading ||
+                  warehousesError ||
+                  destinationOptions.length === 0 ||
+                  availableLots.length === 0 ||
+                  !sourceLot
+                }
                 type="submit"
               >
                 <ArrowsLeftRightIcon className="size-4" />
