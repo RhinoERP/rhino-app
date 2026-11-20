@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableCatalogPicker } from "@/components/ui/searchable-catalog-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { truncateMoney } from "@/lib/decimal";
 import { createOfflinePreSaleCommand } from "@/modules/offline/contracts/offline-command";
@@ -522,26 +523,25 @@ export function OfflinePreSaleForm({
             <CardTitle className="text-base">Cliente</CardTitle>
           </CardHeader>
           <CardContent>
-            <select
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              onChange={(event) =>
-                updateItemsForCustomer(event.target.value || null)
+            <SearchableCatalogPicker
+              label="Cliente"
+              onChange={(value) => updateItemsForCustomer(value)}
+              options={snapshot.customers.map((customer) => ({
+                value: customer.id,
+                label: customer.fantasyName || customer.businessName,
+                description: [customer.clientNumber, customer.city]
+                  .filter(Boolean)
+                  .join(" · "),
+                searchText: `${customer.businessName} ${customer.cuit ?? ""}`,
+              }))}
+              placeholder={
+                migration.issues.some((issue) => issue.kind === "customer")
+                  ? "Cliente no disponible: elegí otro"
+                  : "Buscar cliente"
               }
+              searchPlaceholder="Buscar por nombre, número o CUIT"
               value={draft.payload.customerId ?? ""}
-            >
-              <option value="">Seleccionar cliente</option>
-              {migration.issues.some((issue) => issue.kind === "customer") &&
-                draft.payload.customerId && (
-                  <option disabled value={draft.payload.customerId}>
-                    Cliente no disponible
-                  </option>
-                )}
-              {snapshot.customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.fantasyName || customer.businessName}
-                </option>
-              ))}
-            </select>
+            />
           </CardContent>
         </Card>
 
@@ -550,27 +550,26 @@ export function OfflinePreSaleForm({
             <CardTitle className="text-base">Condiciones</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              onChange={(event) =>
+            <SearchableCatalogPicker
+              label="Vendedor"
+              onChange={(value) =>
                 setDraft((current) => ({
                   ...current,
-                  payload: { ...current.payload, sellerId: event.target.value },
+                  payload: { ...current.payload, sellerId: value },
                 }))
               }
+              options={snapshot.sellers.map((seller) => ({
+                value: seller.id,
+                label: seller.name,
+              }))}
+              placeholder={
+                migration.issues.some((issue) => issue.kind === "seller")
+                  ? "Vendedor no disponible: elegí otro"
+                  : "Buscar vendedor"
+              }
+              searchPlaceholder="Buscar vendedor por nombre"
               value={draft.payload.sellerId}
-            >
-              {migration.issues.some((issue) => issue.kind === "seller") && (
-                <option disabled value={draft.payload.sellerId}>
-                  Vendedor no disponible
-                </option>
-              )}
-              {snapshot.sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.name}
-                </option>
-              ))}
-            </select>
+            />
             {/* Only expose this editor if an older draft must fix a disabled method to migrate. */}
             <select
               aria-label="Elegir método de pago válido"
@@ -578,7 +577,7 @@ export function OfflinePreSaleForm({
                 migration.issues.some(
                   (issue) => issue.kind === "payment-method"
                 )
-                  ? "h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  ? "h-11 rounded-md border border-input bg-background px-3 text-base md:h-10 md:text-sm"
                   : "hidden"
               }
               onChange={(event) =>

@@ -21,19 +21,25 @@ import type { RouteSheetSale } from "@/modules/route-sheets/types";
 type RouteSheetSaleRowProps = {
   canManage: boolean;
   isPending: boolean;
+  canRetryDispatch: boolean;
   orgSlug: string;
   sale: RouteSheetSale;
   isRemoving: boolean;
+  isRetryingDispatch: boolean;
   onRemove: () => void;
+  onRetryDispatch: () => void;
 };
 
 export function RouteSheetSaleRow({
   canManage,
   isPending,
+  canRetryDispatch,
   orgSlug,
   sale,
   isRemoving,
+  isRetryingDispatch,
   onRemove,
+  onRetryDispatch,
 }: RouteSheetSaleRowProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -48,8 +54,14 @@ export function RouteSheetSaleRow({
         >
           #{sale.sale_number ?? "—"}
         </Link>
-        <span className="min-w-0 flex-1 truncate text-sm">
+        <span className="min-w-0 flex-1 text-sm">
           {sale.customer_name}
+          {sale.delivery_site_name && (
+            <span className="block text-muted-foreground text-xs">
+              {sale.delivery_site_name} · {sale.delivery_site_address},{" "}
+              {sale.delivery_site_city}
+            </span>
+          )}
         </span>
         <Badge className="shrink-0" variant="outline">
           {sale.remittance_number ?? "Sin remito"}
@@ -60,6 +72,16 @@ export function RouteSheetSaleRow({
         <span className="font-medium text-sm tabular-nums">
           {formatCurrency(sale.total_amount)}
         </span>
+        {canManage && canRetryDispatch && (
+          <Button
+            disabled={isRetryingDispatch}
+            onClick={onRetryDispatch}
+            size="sm"
+            variant="outline"
+          >
+            {isRetryingDispatch ? "Despachando..." : "Reintentar despacho"}
+          </Button>
+        )}
         {canRemove && (
           <Button
             aria-label="Quitar venta de la hoja de ruta"

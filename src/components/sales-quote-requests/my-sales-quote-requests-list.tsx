@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { WhatsAppApprovalShare } from "@/components/sales-quote-requests/whatsapp-approval-share";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { cancelSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/cancel-sales-quote-request.action";
 import type { MySalesQuoteRequest } from "@/modules/sales-quote-requests/service/my-sales-quote-requests.service";
+import { canShareApprovalRequest } from "@/modules/sales-quote-requests/whatsapp-approval-share";
 
 export function MySalesQuoteRequestsList({
   orgSlug,
@@ -225,6 +227,13 @@ function RequestRow({
           Acciones
         </span>
         <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap xl:whitespace-nowrap">
+          {canShareApprovalRequest(request.status) && (
+            <WhatsAppApprovalShare
+              customerName={request.customer_name}
+              orgSlug={orgSlug}
+              requestId={request.id}
+            />
+          )}
           {canCancel && (
             <Button
               aria-label="Editar cotización"

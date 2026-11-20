@@ -29,6 +29,7 @@ const itemInputSchema = z.object({
 
 export const createSalesQuoteRequestSchema = z.object({
   orgSlug: z.string().min(1),
+  preparedOn: z.iso.date().optional(),
   customerId: z.string().uuid(),
   customerSegment: z.enum(["ACTIVE", "NEW", "REACTIVATED"]),
   sellerZone: z.string().trim().min(1).max(120),
@@ -343,7 +344,7 @@ export async function createSalesQuoteRequest(
       args: Record<string, unknown>
     ) => Promise<{
       data: string | null;
-      error: { message: string } | null;
+      error: { message: string; code?: string } | null;
     }>;
   };
   const userName =
@@ -370,6 +371,7 @@ export async function createSalesQuoteRequest(
     tax_amount: taxAmount,
     total_amount: totalAmount,
     seller_observations: input.observations,
+    ...(requestId ? {} : { prepared_on: input.preparedOn ?? null }),
   };
   let createdRequestId: string | null = null;
   let error: { message: string } | null = null;
@@ -406,10 +408,22 @@ export async function createSalesQuoteRequest(
     createdRequestId = result.data?.[0]?.request_id ?? null;
     error = result.error;
   } else {
-    const result = await adminClient.rpc("create_sales_quote_request", {
+    let result = await adminClient.rpc("create_sales_quote_request_with_day", {
       p_request: requestSnapshot,
       p_items: lineSnapshots,
     });
+    // Keep independent quote creation working while the new visit migration
+    // has not yet been applied to an environment.
+    if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+      result = await adminClient.rpc("create_sales_quote_request", {
+        p_request: Object.fromEntries(
+          Object.entries(requestSnapshot).filter(
+            ([key]) => key !== "prepared_on"
+          )
+        ),
+        p_items: lineSnapshots,
+      });
+    }
     createdRequestId = result.data;
     error = result.error;
   }

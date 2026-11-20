@@ -181,6 +181,16 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           module: "route_sheets",
         },
         {
+          title: "Visitas",
+          url: `/org/${orgSlug}/visitas`,
+          icon: <MapPinIcon weight="duotone" />,
+          requiredPermission: [
+            "sales.manage",
+            "sales.manage.all",
+            "organization.admin",
+          ],
+        },
+        {
           title: "Clientes",
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,

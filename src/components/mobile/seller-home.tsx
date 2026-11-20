@@ -3,12 +3,12 @@
 import {
   ChartLine,
   ClipboardText,
+  MapPin,
   Package,
   Receipt,
 } from "@phosphor-icons/react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { PendingLink } from "@/components/layout/pending-link";
 import { Card, CardContent } from "@/components/ui/card";
 
 type SellerMobileHomeProps = {
@@ -60,7 +60,6 @@ export function SellerMobileHome({
       label: "Nueva preventa",
       href: `/org/${orgSlug}/preventa/nueva`,
       offlineHref: "/~offline/preventa",
-      variant: "secondary" as const,
       description: "Registrar una nueva venta",
       requiresWholesale: true,
       requiresPos: false,
@@ -71,7 +70,6 @@ export function SellerMobileHome({
       label: "Mis ventas",
       href: `/org/${orgSlug}/ventas`,
       offlineHref: "/~offline",
-      variant: "secondary" as const,
       description: "Ver historial de ventas",
       requiresWholesale: true,
       requiresPos: false,
@@ -80,11 +78,19 @@ export function SellerMobileHome({
     ...(canManageSales
       ? [
           {
+            icon: MapPin,
+            label: "Mis visitas",
+            href: `/org/${orgSlug}/visitas`,
+            description: "Lista diaria y llegada al cliente",
+            requiresWholesale: false,
+            requiresPos: false,
+            requiresNoProduction: false,
+          },
+          {
             icon: ClipboardText,
             label: "Cotizaciones",
             href: `/org/${orgSlug}/solicitudes-venta`,
             offlineHref: "/~offline/cotizaciones",
-            variant: "secondary" as const,
             description: "Mis cotizaciones y cotizador competitivo",
             requiresWholesale: false,
             requiresPos: false,
@@ -97,7 +103,6 @@ export function SellerMobileHome({
       label: "Venta directa",
       href: `/org/${orgSlug}/venta-directa/nueva`,
       offlineHref: "/~offline",
-      variant: "secondary" as const,
       description: "Registrar una venta de mostrador",
       requiresWholesale: false,
       requiresPos: true,
@@ -108,7 +113,6 @@ export function SellerMobileHome({
       label: "Consultar Stock",
       href: `/org/${orgSlug}/stock`,
       offlineHref: "/~offline/datos",
-      variant: "secondary" as const,
       description: "Ver productos disponibles",
       requiresWholesale: false,
       requiresPos: false,
@@ -140,29 +144,29 @@ export function SellerMobileHome({
         <div className="flex flex-col gap-4">
           {actionButtons.map((button) => {
             const Icon = button.icon;
+            const unavailableOffline = !(online || button.offlineHref);
             const card = (
-              <Card className="overflow-hidden transition-all hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]">
-                <CardContent className="p-0">
-                  <Button
-                    className="h-auto w-full flex-col gap-3 rounded-none py-8"
-                    size="lg"
-                    variant={button.variant}
-                  >
-                    <Icon className="size-10" weight="duotone" />
-                    <div className="flex flex-col gap-1">
-                      <span className="font-semibold text-lg">
-                        {button.label}
-                      </span>
-                      <span className="font-normal text-muted-foreground text-xs">
-                        {button.description}
-                      </span>
-                    </div>
-                  </Button>
+              <Card
+                className={`overflow-hidden transition-all ${unavailableOffline ? "opacity-50" : "hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]"}`}
+              >
+                <CardContent className="flex min-h-28 flex-col items-center justify-center gap-2 bg-secondary p-4 text-center text-secondary-foreground">
+                  <Icon className="size-8" weight="duotone" />
+                  <span className="font-semibold text-base">
+                    {button.label}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    {unavailableOffline
+                      ? "Disponible con conexión"
+                      : button.description}
+                  </span>
                 </CardContent>
               </Card>
             );
 
             if (!online) {
+              if (!button.offlineHref) {
+                return <div key={button.href}>{card}</div>;
+              }
               return (
                 <a href={button.offlineHref} key={button.href}>
                   {card}
@@ -171,9 +175,13 @@ export function SellerMobileHome({
             }
 
             return (
-              <Link href={button.href} key={button.href}>
+              <PendingLink
+                href={button.href}
+                key={button.href}
+                pendingLabel="Abriendo…"
+              >
                 {card}
-              </Link>
+              </PendingLink>
             );
           })}
         </div>

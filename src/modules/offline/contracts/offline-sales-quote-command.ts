@@ -11,6 +11,7 @@ export const offlineSalesQuoteCommandSchema = z
     snapshot: sellerOfflineSnapshotV1Schema,
     quote: z.record(z.string(), z.unknown()),
     createdAt: z.string().datetime(),
+    preparedOn: z.iso.date().optional(),
   })
   .strict();
 

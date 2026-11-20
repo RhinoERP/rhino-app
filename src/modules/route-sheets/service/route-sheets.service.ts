@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { customerSitesSchema } from "@/modules/commercial-visits/contracts";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   dispatchSaleOrder,
@@ -35,6 +36,7 @@ export type RouteSheet = Database["public"]["Tables"]["route_sheets"]["Row"];
 type SalesOrderSale = Pick<
   Database["public"]["Tables"]["sales_orders"]["Row"],
   | "id"
+  | "customer_id"
   | "sale_number"
   | "total_amount"
   | "remittance_number"
@@ -44,6 +46,9 @@ type SalesOrderSale = Pick<
   | "sale_date"
   | "carrier_id"
 > & {
+  delivery_site_name?: string | null;
+  delivery_site_address?: string | null;
+  delivery_site_city?: string | null;
   customer:
     | {
         business_name?: string | null;
@@ -66,6 +71,10 @@ type SalesOrderSale = Pick<
 
 const SALES_SELECT = `
   id,
+  customer_id,
+  delivery_site_name,
+  delivery_site_address,
+  delivery_site_city,
   sale_number,
   total_amount,
   remittance_number,
@@ -94,6 +103,7 @@ function normalizeCustomerField(
 function toRouteSheetSale(sale: SalesOrderSale): RouteSheetSale {
   return {
     id: sale.id,
+    customer_id: sale.customer_id,
     sale_number: sale.sale_number,
     customer_name: normalizeCustomerName(sale.customer),
     total_amount: Number(sale.total_amount ?? 0),
@@ -108,11 +118,13 @@ function toRouteSheetSale(sale: SalesOrderSale): RouteSheetSale {
       "preferred_carrier_id"
     ),
     customer_city: normalizeCustomerField(sale.customer, "city"),
-    customer_delivery_city: normalizeCustomerField(
-      sale.customer,
-      "delivery_city"
-    ),
+    customer_delivery_city:
+      sale.delivery_site_city ??
+      normalizeCustomerField(sale.customer, "delivery_city"),
     customer_province: normalizeCustomerField(sale.customer, "province"),
+    delivery_site_name: sale.delivery_site_name ?? null,
+    delivery_site_address: sale.delivery_site_address ?? null,
+    delivery_site_city: sale.delivery_site_city ?? null,
   };
 }
 
@@ -174,13 +186,14 @@ function buildRouteSheetsWithSales(params: {
     }));
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: loads scoped sheets, sales and customer sites
 export async function getRouteSheetPageData(
   orgSlug: string
 ): Promise<RouteSheetPageData> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return { routeSheets: [], availableSales: [] };
+    return { routeSheets: [], availableSales: [], sites: [] };
   }
 
   const supabase = await createClient();
@@ -228,7 +241,8 @@ export async function getRouteSheetPageData(
     .select(SALES_SELECT)
     .eq("organization_id", org.id)
     .is("route_sheet_id", null)
-    .eq("status", "CONFIRMED");
+    .eq("status", "CONFIRMED")
+    .eq("document_type", "STANDARD");
 
   if (accessContext.scope === "own" && accessContext.userId) {
     availableQuery = availableQuery.eq("user_id", accessContext.userId);
@@ -265,7 +279,25 @@ export async function getRouteSheetPageData(
       )
     );
 
-  return { routeSheets, availableSales };
+  let sites: ReturnType<typeof customerSitesSchema.parse> = [];
+  if (accessContext.canManage || accessContext.isOrganizationAdmin) {
+    const rpc = supabase.rpc.bind(supabase) as unknown as (
+      name: string,
+      args: Record<string, unknown>
+    ) => Promise<{
+      data: unknown;
+      error: { message: string } | null;
+    }>;
+    const { data: siteData, error: siteError } = await rpc(
+      "commercial_site_catalog",
+      { p_org: org.id }
+    );
+    if (siteError) {
+      throw new Error(`Error al obtener sucursales: ${siteError.message}`);
+    }
+    sites = customerSitesSchema.parse(siteData).filter((site) => site.active);
+  }
+  return { routeSheets, availableSales, sites };
 }
 
 export type SearchCompletedRouteSheetsInput = {
@@ -419,7 +451,7 @@ export async function searchCompletedRouteSheets(
 
   return buildRouteSheetsWithSales({
     sheets: completedSheets,
-    sales: (sales ?? ([] as unknown)) as SalesOrderSale[],
+    sales: (sales ?? []) as unknown as SalesOrderSale[],
     scope: accessContext.scope,
   });
 }
@@ -711,7 +743,7 @@ async function getRouteSheetForOrg(orgId: string, routeSheetId: string) {
 export async function addSalesToRouteSheet(
   input: AddSalesToRouteSheetInput
 ): Promise<void> {
-  const { orgSlug, routeSheetId, saleIds, remittances } = input;
+  const { orgSlug, routeSheetId, saleIds, remittances, siteIds } = input;
 
   if (!saleIds?.length) {
     throw new Error("Seleccioná al menos una venta");
@@ -740,7 +772,9 @@ export async function addSalesToRouteSheet(
 
   const { data: sales, error: salesError } = await supabase
     .from("sales_orders")
-    .select("id, status, user_id, remittance_number, route_sheet_id")
+    .select(
+      "id, customer_id, sale_number, status, user_id, remittance_number, route_sheet_id, document_type"
+    )
     .eq("organization_id", org.id)
     .in("id", saleIds);
 
@@ -759,49 +793,134 @@ export async function addSalesToRouteSheet(
     salesById,
     routeSheetId,
     remittances,
+    siteIds,
     accessContext,
   });
 
+  await validateDeliverySitesForSales({
+    orgId: org.id,
+    saleIds: uniqueSaleIds,
+    salesById,
+    siteIds,
+    supabase,
+  });
+
+  let assignedCount = 0;
   for (const saleId of uniqueSaleIds) {
     const sale = salesById.get(saleId);
-
     if (!sale) {
-      continue;
+      throw new Error("Una de las ventas seleccionadas no existe");
     }
-
-    await assignSaleToRoute({
+    await assignAndDispatchRouteSale({
       orgId: org.id,
+      orgSlug,
       routeSheetId,
+      saleId,
+      saleNumber: sale.sale_number,
       sale,
       remittance: remittances[saleId],
+      siteId: siteIds[saleId],
       supabase,
+      sheet,
+      assignedCount,
+      totalCount: uniqueSaleIds.length,
     });
+    assignedCount += 1;
+  }
+}
 
-    if (sheet.status === "IN_PROGRESS") {
+async function assignAndDispatchRouteSale(
+  params: AssignSaleToRouteParams & {
+    orgSlug: string;
+    saleId: string;
+    saleNumber: number | null;
+    sheet: { status: string; carrier_id: string | null };
+    assignedCount: number;
+    totalCount: number;
+  }
+): Promise<void> {
+  let assigned = false;
+  try {
+    await assignSaleToRoute(params);
+    assigned = true;
+    if (params.sheet.status === "IN_PROGRESS") {
       await dispatchSaleOrder({
-        orgSlug,
-        saleId,
-        remittanceNumber: remittances[saleId]?.trim(),
-        carrierId: sheet.carrier_id,
-        routeSheetId,
+        orgSlug: params.orgSlug,
+        saleId: params.saleId,
+        remittanceNumber: params.remittance?.trim() ?? "",
+        carrierId: params.sheet.carrier_id,
+        routeSheetId: params.routeSheetId,
       });
     }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Error desconocido";
+    if (assigned) {
+      throw new Error(
+        `La venta #${params.saleNumber ?? params.saleId} quedó asignada, pero no se pudo completar el despacho: ${detail}. Refrescá la hoja y usá «Reintentar despacho» en esa venta; no vuelvas a agregarla.`
+      );
+    }
+    if (params.assignedCount > 0) {
+      throw new Error(
+        `Se asignaron ${params.assignedCount} de ${params.totalCount} ventas. La venta #${params.saleNumber ?? params.saleId} falló: ${detail}. Refrescá la hoja y seleccioná solo las ventas que sigan disponibles.`
+      );
+    }
+    throw error;
   }
 }
 
 type RouteSheetSaleRow = {
   id: string;
+  customer_id: string | null;
+  sale_number: number | null;
   status: string;
   user_id: string | null;
   remittance_number: string | null;
   route_sheet_id: string | null;
+  document_type: string;
 };
+
+async function validateDeliverySitesForSales(params: {
+  orgId: string;
+  saleIds: string[];
+  salesById: Map<string, RouteSheetSaleRow>;
+  siteIds: Record<string, string>;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+}): Promise<void> {
+  const rpc = params.supabase.rpc.bind(params.supabase) as unknown as (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  const { data, error } = await rpc("commercial_site_catalog", {
+    p_org: params.orgId,
+    p_customer: null,
+  });
+  if (error) {
+    throw new Error(`No se pudieron validar las sucursales: ${error.message}`);
+  }
+  const sites = new Map(
+    customerSitesSchema.parse(data).map((site) => [site.id, site])
+  );
+  for (const saleId of params.saleIds) {
+    const site = sites.get(params.siteIds[saleId]);
+    if (
+      !site?.active ||
+      site.customerId !== params.salesById.get(saleId)?.customer_id ||
+      !site.address.trim() ||
+      !site.city.trim()
+    ) {
+      throw new Error(
+        "Seleccioná para cada venta una sucursal activa del cliente con dirección y ciudad completas"
+      );
+    }
+  }
+}
 
 function validateSalesForRouteSheet(params: {
   saleIds: string[];
   salesById: Map<string, RouteSheetSaleRow>;
   routeSheetId: string;
   remittances: Record<string, string>;
+  siteIds: Record<string, string>;
   accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
 }): void {
   for (const saleId of params.saleIds) {
@@ -815,6 +934,7 @@ function validateSalesForRouteSheet(params: {
       sale,
       routeSheetId: params.routeSheetId,
       remittance: params.remittances[saleId],
+      siteId: params.siteIds[saleId],
       accessContext: params.accessContext,
     });
   }
@@ -824,12 +944,17 @@ function assertSaleEligibleForRouteSheet(params: {
   sale: RouteSheetSaleRow;
   routeSheetId: string;
   remittance: string | undefined;
+  siteId: string | undefined;
   accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
 }): void {
-  const { sale, routeSheetId, remittance, accessContext } = params;
+  const { sale, routeSheetId, remittance, siteId, accessContext } = params;
 
-  if (sale.route_sheet_id && sale.route_sheet_id !== routeSheetId) {
-    throw new Error("Una de las ventas ya pertenece a otra hoja de ruta");
+  if (sale.route_sheet_id) {
+    throw new Error(
+      sale.route_sheet_id === routeSheetId
+        ? "Una venta ya está asignada a esta hoja de ruta; refrescá y seleccioná solo las disponibles"
+        : "Una de las ventas ya pertenece a otra hoja de ruta"
+    );
   }
 
   if (
@@ -851,8 +976,17 @@ function assertSaleEligibleForRouteSheet(params: {
     );
   }
 
+  if (sale.document_type !== "STANDARD") {
+    throw new Error(
+      "Los documentos de anticipo o saldo no pueden agregarse a una hoja de ruta"
+    );
+  }
+
   if (!remittance?.trim()) {
     throw new Error("Falta el número de remito para la venta seleccionada");
+  }
+  if (!siteId) {
+    throw new Error("Elegí una sucursal para cada entrega");
   }
 }
 
@@ -861,6 +995,7 @@ type AssignSaleToRouteParams = {
   routeSheetId: string;
   sale: RouteSheetSaleRow;
   remittance: string | undefined;
+  siteId: string | undefined;
   supabase: Awaited<ReturnType<typeof createClient>>;
 };
 
@@ -869,21 +1004,29 @@ async function assignSaleToRoute({
   routeSheetId,
   sale,
   remittance,
+  siteId,
   supabase,
 }: AssignSaleToRouteParams): Promise<void> {
   if (!remittance?.trim()) {
     throw new Error("Falta el número de remito para la venta seleccionada");
   }
+  if (!siteId) {
+    throw new Error("Elegí una sucursal para cada entrega");
+  }
 
-  const { error: updateError } = await supabase
-    .from("sales_orders")
-    .update({
-      route_sheet_id: routeSheetId,
-      remittance_number: remittance.trim(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", sale.id)
-    .eq("organization_id", orgId);
+  const rpc = supabase.rpc.bind(supabase) as unknown as (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<{
+    error: { message: string } | null;
+  }>;
+  const { error: updateError } = await rpc("commercial_site_assign_delivery", {
+    p_org: orgId,
+    p_sheet: routeSheetId,
+    p_sale: sale.id,
+    p_site: siteId,
+    p_remittance: remittance.trim(),
+  });
 
   if (updateError) {
     throw new Error(

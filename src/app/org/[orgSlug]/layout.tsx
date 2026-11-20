@@ -75,13 +75,14 @@ async function OrganizationLayoutContent({
             ownerUserId={ownerUserId}
             wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
           />
-          <div className="flex flex-1 flex-col gap-4 p-2 pb-20 md:pb-4">
+          <div className="flex flex-1 flex-col gap-4 p-2 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-4">
             {children}
           </div>
           <BottomNav
             canManageSales={
               permissions.includes("sales.manage") ||
-              permissions.includes("sales.manage.all")
+              permissions.includes("sales.manage.all") ||
+              permissions.includes("organization.admin")
             }
             orgSlug={orgSlug}
             wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}

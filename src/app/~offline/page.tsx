@@ -10,30 +10,41 @@ import { getActiveSellerSnapshot } from "@/modules/offline/storage/offline-db";
 export default function OfflinePage() {
   const [online, setOnline] = useState(false);
   const [hasOfflineData, setHasOfflineData] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(true);
 
   useEffect(() => {
     setOnline(navigator.onLine);
     getActiveSellerSnapshot()
       .then((snapshot) => setHasOfflineData(Boolean(snapshot)))
       .catch(() => setHasOfflineData(false));
-    trackPwaEvent("pwa.offline_fallback_shown");
     const updateStatus = () => setOnline(navigator.onLine);
     window.addEventListener("online", updateStatus);
     window.addEventListener("offline", updateStatus);
     const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
     fetch("/", { cache: "no-store", signal: controller.signal })
       .then((response) => {
         if (response.ok) {
           window.location.replace("/");
+        } else {
+          setCheckingConnection(false);
         }
       })
-      .catch(() => setOnline(false));
+      .catch(() => setCheckingConnection(false))
+      .finally(() => window.clearTimeout(timeout));
     return () => {
       controller.abort();
+      window.clearTimeout(timeout);
       window.removeEventListener("online", updateStatus);
       window.removeEventListener("offline", updateStatus);
     };
   }, []);
+
+  useEffect(() => {
+    if (!checkingConnection) {
+      trackPwaEvent("pwa.offline_fallback_shown");
+    }
+  }, [checkingConnection]);
 
   const retry = () => {
     trackPwaEvent("pwa.offline_fallback_retry");
@@ -52,32 +63,47 @@ export default function OfflinePage() {
           unoptimized
           width={88}
         />
-        <div className="mx-auto mb-5 flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <WifiSlashIcon className="size-7" />
-        </div>
-        <h1 className="font-semibold text-2xl">Sin conexion</h1>
-        <p className="mt-3 text-muted-foreground text-sm leading-6">
-          No pudimos conectar con Rhinos. Si preparaste tus datos previamente,
-          podés consultar clientes y productos guardados en este dispositivo.
-        </p>
-        <p className="mt-3 text-sm">
-          Estado: {online ? "conexion detectada" : "sin red"}
-        </p>
-        <Button className="mt-6 w-full" onClick={retry}>
-          <ArrowClockwiseIcon />
-          Reintentar
-        </Button>
-        {hasOfflineData && (
+        {checkingConnection ? (
+          <output className="block">
+            <div className="mx-auto mb-5 size-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <h1 className="font-semibold text-2xl">Abriendo Rhinos…</h1>
+            <p className="mt-3 text-muted-foreground text-sm">
+              Comprobando conexión
+            </p>
+          </output>
+        ) : (
           <>
-            <Button asChild className="mt-3 w-full" variant="outline">
-              <a href="/~offline/cotizaciones">Cotizador competitivo offline</a>
+            <div className="mx-auto mb-5 flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <WifiSlashIcon className="size-7" />
+            </div>
+            <h1 className="font-semibold text-2xl">Sin conexion</h1>
+            <p className="mt-3 text-muted-foreground text-sm leading-6">
+              No pudimos conectar con Rhinos. Si preparaste tus datos
+              previamente, podés consultar clientes y productos guardados en
+              este dispositivo.
+            </p>
+            <p className="mt-3 text-sm">
+              Estado: {online ? "conexion detectada" : "sin red"}
+            </p>
+            <Button className="mt-6 w-full" onClick={retry}>
+              <ArrowClockwiseIcon />
+              Reintentar
             </Button>
-            <Button asChild className="mt-3 w-full" variant="outline">
-              <a href="/~offline/preventa">Nueva preventa offline</a>
-            </Button>
-            <Button asChild className="mt-3 w-full" variant="outline">
-              <a href="/~offline/datos">Consultar datos offline</a>
-            </Button>
+            {hasOfflineData && (
+              <>
+                <Button asChild className="mt-3 w-full" variant="outline">
+                  <a href="/~offline/cotizaciones">
+                    Cotizador competitivo offline
+                  </a>
+                </Button>
+                <Button asChild className="mt-3 w-full" variant="outline">
+                  <a href="/~offline/preventa">Nueva preventa offline</a>
+                </Button>
+                <Button asChild className="mt-3 w-full" variant="outline">
+                  <a href="/~offline/datos">Consultar datos offline</a>
+                </Button>
+              </>
+            )}
           </>
         )}
       </section>

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { WhatsAppApprovalShare } from "@/components/sales-quote-requests/whatsapp-approval-share";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SearchableCatalogPicker } from "@/components/ui/searchable-catalog-picker";
 import { Spinner } from "@/components/ui/spinner";
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
@@ -41,8 +43,10 @@ import {
   calculateCompetitivePriceSuggestion,
   type SalesQuotePricingMethod,
 } from "@/modules/sales-quote-requests/competitive-pricing";
+import { quoteProductStockLabel } from "@/modules/sales-quote-requests/product-stock";
 import type { SalesQuoteRequestEditValues } from "@/modules/sales-quote-requests/service/my-sales-quote-requests.service";
 import type { CreateSalesQuoteRequestInput } from "@/modules/sales-quote-requests/service/sales-quote-requests.service";
+import { canShareSyncedOfflineQuote } from "@/modules/sales-quote-requests/whatsapp-approval-share";
 
 type ProductVariantOption = {
   id: string;
@@ -107,7 +111,7 @@ type SalesQuoteRequestFormProps = {
 };
 
 const selectClassName =
-  "h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
+  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base md:h-9 md:text-sm";
 
 function customerName(customer: Customer): string {
   return customer.fantasy_name || customer.business_name || "Cliente";
@@ -328,6 +332,7 @@ async function queueOfflineQuote(params: {
     return "missing-snapshot";
   }
   try {
+    const preparedAt = new Date();
     await enqueueOfflineSalesQuoteCommand({
       commandId: crypto.randomUUID(),
       ownerUserId: params.ownerUserId,
@@ -336,7 +341,8 @@ async function queueOfflineQuote(params: {
       signature: stored.signature,
       snapshot,
       quote: params.values,
-      createdAt: new Date().toISOString(),
+      createdAt: preparedAt.toISOString(),
+      preparedOn: `${preparedAt.getFullYear()}-${String(preparedAt.getMonth() + 1).padStart(2, "0")}-${String(preparedAt.getDate()).padStart(2, "0")}`,
     });
     return "queued";
   } catch {
@@ -367,7 +373,12 @@ async function submitOrQueueQuote(params: {
     }
     return { type: "queued" };
   }
-  return submitRequest(params.requestId, params.values);
+  const now = new Date();
+  const preparedOn = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return submitRequest(
+    params.requestId,
+    params.requestId ? params.values : { ...params.values, preparedOn }
+  );
 }
 
 function offlineQuoteStatusLabel(record: StoredOfflineSalesQuoteCommand) {
@@ -378,6 +389,17 @@ function offlineQuoteStatusLabel(record: StoredOfflineSalesQuoteCommand) {
     return `Enviada a aprobación${record.requestId ? ` · ${record.requestId}` : ""}`;
   }
   return "Requiere revisión";
+}
+
+function offlineQuoteCustomerName(record: StoredOfflineSalesQuoteCommand) {
+  const customerId = record.command.quote.customerId;
+  const customer =
+    typeof customerId === "string"
+      ? record.command.snapshot.customers.find(
+          (entry) => entry.id === customerId
+        )
+      : null;
+  return customer?.fantasyName || customer?.businessName || "Cliente";
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates seller form state and pricing preview.
@@ -441,7 +463,10 @@ export function SalesQuoteRequestForm({
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [isPending, startTransition] = useTransition();
   const [isAddingItem, startAddingItem] = useTransition();
-  const [createdRequestId, setCreatedRequestId] = useState<string | null>(null);
+  const [createdQuote, setCreatedQuote] = useState<{
+    requestId: string;
+    customerName: string;
+  } | null>(null);
   const [offlineQuoteCommands, setOfflineQuoteCommands] = useState<
     StoredOfflineSalesQuoteCommand[]
   >([]);
@@ -495,6 +520,34 @@ export function SalesQuoteRequestForm({
   const selectedProduct = products.find(
     (product) => product.id === selectedProductId
   );
+  const customerOptions = useMemo(
+    () =>
+      customers.map((customer) => ({
+        value: customer.id,
+        label: customerName(customer),
+        description: [customer.client_number, customer.city]
+          .filter(Boolean)
+          .join(" · "),
+        searchText: `${customer.business_name ?? ""} ${customer.fantasy_name ?? ""} ${customer.cuit ?? ""}`,
+      })),
+    [customers]
+  );
+  const productOptions = useMemo(
+    () =>
+      products.map((product) => ({
+        value: product.id,
+        label: product.name,
+        description: [
+          quoteProductStockLabel(product, snapshotPriceByLevel !== undefined),
+          product.sku && `SKU ${product.sku}`,
+          formatCurrency(product.price, product.currency),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        searchText: `${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""}`,
+      })),
+    [products, snapshotPriceByLevel]
+  );
 
   const handleCustomerChange = (nextCustomerId: string) => {
     setCustomerId(nextCustomerId);
@@ -514,7 +567,7 @@ export function SalesQuoteRequestForm({
         ? customer.sales_price_list_id
         : ""
     );
-    setCreatedRequestId(null);
+    setCreatedQuote(null);
   };
 
   const priceLevel = priceLevels.find((level) => level.id === priceLevelId);
@@ -595,7 +648,7 @@ export function SalesQuoteRequestForm({
       ]);
       setSelectedProductId("");
       setSelectedVariantId("");
-      setCreatedRequestId(null);
+      setCreatedQuote(null);
     });
   };
 
@@ -606,7 +659,7 @@ export function SalesQuoteRequestForm({
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...values } : item))
     );
-    setCreatedRequestId(null);
+    setCreatedQuote(null);
   };
 
   const updatePricingMethod = (
@@ -675,6 +728,52 @@ export function SalesQuoteRequestForm({
     });
   };
 
+  async function handleQuoteSubmissionResult(
+    result: Awaited<ReturnType<typeof submitOrQueueQuote>>,
+    quoteCustomerName: string
+  ) {
+    if (result.type === "missing-snapshot") {
+      toast.error(
+        "Necesitás actualizar los datos offline antes de guardar la cotización"
+      );
+      return;
+    }
+    if (result.type === "queue-error") {
+      toast.error("No se pudo guardar la cotización offline");
+      return;
+    }
+    if (result.type === "queued") {
+      setItems([]);
+      setObservations("");
+      setOfflineQuoteCommands(await listOfflineSalesQuoteCommands(ownerUserId));
+      toast.success(
+        "Cotización guardada en la cola offline; se enviará al recuperar conexión"
+      );
+      syncOfflineSalesQuotes(ownerUserId).catch((error: unknown) => {
+        console.error("No se pudieron sincronizar cotizaciones offline", error);
+      });
+      return;
+    }
+    if (result.type === "error") {
+      toast.error(result.message);
+      return;
+    }
+    if (result.type === "updated") {
+      toast.success("Cotización actualizada y enviada a aprobación");
+      router.push(`/org/${orgSlug}/solicitudes-venta`);
+      router.refresh();
+      return;
+    }
+
+    setCreatedQuote({
+      requestId: result.requestId,
+      customerName: quoteCustomerName,
+    });
+    setItems([]);
+    setObservations("");
+    toast.success("Solicitud enviada a aprobación");
+  }
+
   const handleSubmit = () => {
     if (!selectedCustomer) {
       toast.error("Seleccioná un cliente");
@@ -711,6 +810,7 @@ export function SalesQuoteRequestForm({
       return;
     }
 
+    const quoteCustomerName = customerName(selectedCustomer);
     startTransition(async () => {
       const values = buildRequestValues({
         orgSlug,
@@ -736,48 +836,7 @@ export function SalesQuoteRequestForm({
         orgSlug,
         values,
       });
-      if (result.type === "missing-snapshot") {
-        toast.error(
-          "Necesitás actualizar los datos offline antes de guardar la cotización"
-        );
-        return;
-      }
-      if (result.type === "queue-error") {
-        toast.error("No se pudo guardar la cotización offline");
-        return;
-      }
-      if (result.type === "queued") {
-        setItems([]);
-        setObservations("");
-        setOfflineQuoteCommands(
-          await listOfflineSalesQuoteCommands(ownerUserId)
-        );
-        toast.success(
-          "Cotización guardada en la cola offline; se enviará al recuperar conexión"
-        );
-        syncOfflineSalesQuotes(ownerUserId).catch((error: unknown) => {
-          console.error(
-            "No se pudieron sincronizar cotizaciones offline",
-            error
-          );
-        });
-        return;
-      }
-      if (result.type === "error") {
-        toast.error(result.message);
-        return;
-      }
-      if (result.type === "updated") {
-        toast.success("Cotización actualizada y enviada a aprobación");
-        router.push(`/org/${orgSlug}/solicitudes-venta`);
-        router.refresh();
-        return;
-      }
-
-      setCreatedRequestId(result.requestId);
-      setItems([]);
-      setObservations("");
-      toast.success("Solicitud enviada a aprobación");
+      await handleQuoteSubmissionResult(result, quoteCustomerName);
     });
   };
 
@@ -811,6 +870,13 @@ export function SalesQuoteRequestForm({
                   <p className="font-medium">
                     {offlineQuoteStatusLabel(record)}
                   </p>
+                  {canShareSyncedOfflineQuote(record) && record.requestId && (
+                    <WhatsAppApprovalShare
+                      customerName={offlineQuoteCustomerName(record)}
+                      orgSlug={orgSlug}
+                      requestId={record.requestId}
+                    />
+                  )}
                   {record.status === "synced" && record.snapshotExpired && (
                     <p className="text-amber-700">
                       Se preparó con snapshot vencido.
@@ -863,18 +929,14 @@ export function SalesQuoteRequestForm({
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <Field label="Cliente">
-              <select
-                className={selectClassName}
-                onChange={(event) => handleCustomerChange(event.target.value)}
+              <SearchableCatalogPicker
+                label="Cliente"
+                onChange={handleCustomerChange}
+                options={customerOptions}
+                placeholder="Buscar cliente"
+                searchPlaceholder="Buscar por nombre, número o CUIT"
                 value={customerId}
-              >
-                <option value="">Seleccionar cliente</option>
-                {customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customerName(customer)}
-                  </option>
-                ))}
-              </select>
+              />
             </Field>
             <Field label="Segmento del cliente">
               <select
@@ -1011,23 +1073,26 @@ export function SalesQuoteRequestForm({
             <div className="sales-quote-product-picker">
               <div className="min-w-0">
                 <Field label="Producto">
-                  <select
-                    className={`${selectClassName} min-w-0 text-ellipsis`}
-                    onChange={(event) => {
-                      setSelectedProductId(event.target.value);
+                  <SearchableCatalogPicker
+                    label="Producto"
+                    onChange={(value) => {
+                      setSelectedProductId(value);
                       setSelectedVariantId("");
                     }}
+                    options={productOptions}
+                    placeholder="Buscar producto"
+                    searchPlaceholder="Buscar por nombre, SKU, marca o proveedor"
                     value={selectedProductId}
-                  >
-                    <option value="">Seleccionar producto</option>
-                    {products.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name} · {product.sku} ·{" "}
-                        {formatCurrency(product.price, product.currency)}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </Field>
+                {selectedProduct && (
+                  <p className="text-muted-foreground text-sm">
+                    {quoteProductStockLabel(
+                      selectedProduct,
+                      snapshotPriceByLevel !== undefined
+                    )}
+                  </p>
+                )}
               </div>
               <Field
                 label={
@@ -1035,24 +1100,21 @@ export function SalesQuoteRequestForm({
                 }
               >
                 {selectedProduct?.hasVariants ? (
-                  <select
-                    className={selectClassName}
-                    onChange={(event) =>
-                      setSelectedVariantId(event.target.value)
-                    }
-                    value={selectedVariantId}
-                  >
-                    <option value="">Seleccionar variante</option>
-                    {variants
+                  <SearchableCatalogPicker
+                    label="Variante"
+                    onChange={setSelectedVariantId}
+                    options={variants
                       .filter(
                         (variant) => variant.productId === selectedProduct.id
                       )
-                      .map((variant) => (
-                        <option key={variant.id} value={variant.id}>
-                          {variant.color} / {variant.talle}
-                        </option>
-                      ))}
-                  </select>
+                      .map((variant) => ({
+                        value: variant.id,
+                        label: `${variant.color} / ${variant.talle}`,
+                      }))}
+                    placeholder="Buscar variante"
+                    searchPlaceholder="Buscar color o talle"
+                    value={selectedVariantId}
+                  />
                 ) : (
                   <div className="flex h-9 min-w-0 items-center rounded-md border bg-muted/30 px-3 text-muted-foreground text-sm">
                     {selectedProduct?.unitOfMeasure ?? "Seleccioná un producto"}
@@ -1159,9 +1221,17 @@ export function SalesQuoteRequestForm({
                 Los impuestos se estiman usando los impuestos asignados a cada
                 producto.
               </p>
-              {createdRequestId && (
-                <div className="rounded-md border border-emerald-600/30 bg-emerald-600/5 p-3 text-sm">
-                  Solicitud enviada. Referencia: {createdRequestId.slice(0, 8)}
+              {createdQuote && (
+                <div className="space-y-2 rounded-md border border-emerald-600/30 bg-emerald-600/5 p-3 text-sm">
+                  <p>
+                    Solicitud enviada. Referencia:{" "}
+                    {createdQuote.requestId.slice(0, 8)}
+                  </p>
+                  <WhatsAppApprovalShare
+                    customerName={createdQuote.customerName}
+                    orgSlug={orgSlug}
+                    requestId={createdQuote.requestId}
+                  />
                 </div>
               )}
               <Button

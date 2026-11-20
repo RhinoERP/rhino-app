@@ -5,12 +5,20 @@ import { createClient } from "@/lib/supabase/client";
 import { purgeAllOfflineData } from "@/modules/offline/storage/offline-db";
 
 export async function secureLogout() {
-  await Promise.allSettled([
-    purgeAllOfflineData(),
-    Promise.resolve().then(() => getQueryClient().clear()),
-  ]);
+  try {
+    await purgeAllOfflineData();
+  } catch {
+    throw new Error(
+      "No se pudieron borrar los datos offline. La sesión sigue abierta; revisá el almacenamiento del dispositivo y volvé a intentar."
+    );
+  }
+
+  getQueryClient().clear();
 
   const supabase = createClient();
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    throw new Error("No se pudo cerrar la sesión. Intentá de nuevo.");
+  }
   window.location.replace("/auth/login");
 }

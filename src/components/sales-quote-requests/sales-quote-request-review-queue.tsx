@@ -153,13 +153,17 @@ function RequestReviewCard({
       : ((request.subtotal_amount - totalCost) / totalCost) * 100;
 
   return (
-    <details className="group w-full min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
+    <details
+      className="group w-full min-w-0 scroll-mt-20 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm"
+      id={`cotizacion-${request.id}`}
+    >
       <summary className="cursor-pointer list-none space-y-4 p-3 marker:hidden sm:p-5 [&::-webkit-details-marker]:hidden">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="break-words font-semibold">{request.customer_name}</p>
             <p className="break-words text-muted-foreground text-xs">
-              {request.seller_name_snapshot || "—"} · {createdAt}
+              {request.seller_name_snapshot || "—"} · {createdAt} · Ref.{" "}
+              {request.id.slice(0, 8)}
             </p>
           </div>
           <div className="flex max-w-full items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-amber-700 text-xs dark:text-amber-300">

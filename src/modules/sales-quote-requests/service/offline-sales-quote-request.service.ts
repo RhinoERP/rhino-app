@@ -24,6 +24,8 @@ export const offlineSalesQuoteRequestCommandSchema = z.object({
   signature: z.string().min(1).max(4096),
   snapshot: sellerOfflineSnapshotV1Schema,
   quote: createSalesQuoteRequestSchema,
+  createdAt: z.string().datetime(),
+  preparedOn: z.iso.date().optional(),
 });
 
 export class OfflineQuoteRequestError extends Error {
@@ -53,6 +55,17 @@ function adjustedPrice(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates signed snapshot, current authorization, historical pricing and atomic persistence.
 export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
   const command = offlineSalesQuoteRequestCommandSchema.parse(rawCommand);
+  const preparedTimestamp = Date.parse(command.createdAt);
+  const preparedOn = command.preparedOn ?? command.createdAt.slice(0, 10);
+  const utcDay = command.createdAt.slice(0, 10);
+  if (
+    preparedTimestamp > Date.now() + 5 * 60_000 ||
+    Math.abs(
+      Date.parse(`${preparedOn}T00:00:00Z`) - Date.parse(`${utcDay}T00:00:00Z`)
+    ) > 86_400_000
+  ) {
+    throw new OfflineQuoteRequestError("Fecha de preparación inválida", 400);
+  }
   const snapshot = command.snapshot;
   const supabase = await createClient();
   const { data: authData, error: authError } = await supabase.auth.getUser();
@@ -309,6 +322,7 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
     snapshot.sellers.find((seller) => seller.id === command.ownerUserId)
       ?.name ?? "Vendedor";
   const requestSnapshot = {
+    prepared_on: preparedOn,
     organization_id: organization.id,
     customer_id: customer.id,
     created_by: command.ownerUserId,
@@ -363,7 +377,7 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
       };
     };
   };
-  const { data, error } = await admin.rpc(
+  let { data, error } = await admin.rpc(
     "create_sales_quote_request_idempotent",
     {
       p_idempotency_key: command.commandId,
@@ -371,6 +385,25 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
       p_items: lineSnapshots,
     }
   );
+  // A previously queued command may have been accepted by the old RPC before
+  // preparation dates existed. Retry its original payload for idempotent replay.
+  if (
+    error?.message.includes("OFFLINE_IDEMPOTENCY_CONFLICT") &&
+    !command.preparedOn
+  ) {
+    ({ data, error } = await admin.rpc(
+      "create_sales_quote_request_idempotent",
+      {
+        p_idempotency_key: command.commandId,
+        p_request: Object.fromEntries(
+          Object.entries(requestSnapshot).filter(
+            ([key]) => key !== "prepared_on"
+          )
+        ),
+        p_items: lineSnapshots,
+      }
+    ));
+  }
   if (error) {
     if (error.message.includes("OFFLINE_IDEMPOTENCY_CONFLICT")) {
       throw new OfflineQuoteRequestError(

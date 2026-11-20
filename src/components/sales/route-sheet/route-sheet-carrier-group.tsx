@@ -1,6 +1,7 @@
 "use client";
 
 import { MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -40,10 +41,12 @@ import { getRemittanceSettings } from "@/modules/organizations/actions/get-remit
 import { useRouteSheetPdf } from "@/modules/route-sheets/hooks/use-route-sheet-pdf";
 import { useRouteSheets } from "@/modules/route-sheets/hooks/use-route-sheets";
 import { useRouteSheetMutations } from "@/modules/route-sheets/hooks/use-route-sheets-mutations";
+import { routeSheetsQueryKey } from "@/modules/route-sheets/queries/query-keys";
 import type {
   RouteSheetSale,
   RouteSheetWithSales,
 } from "@/modules/route-sheets/types";
+import { dispatchSaleAction } from "@/modules/sales/actions/dispatch-sale.action";
 import { RouteSheetHeader } from "./route-sheet-header";
 import { RouteSheetSaleRow } from "./route-sheet-sale-row";
 
@@ -62,6 +65,7 @@ type AddSalesDialogProps = {
   onRequestDispatchConfirm: (payload: {
     saleIds: string[];
     remittances: Record<string, string>;
+    siteIds: Record<string, string>;
   }) => void;
 };
 
@@ -132,7 +136,8 @@ function makeRemittanceMap(
 
 function validateSelection(
   selected: RouteSheetSale[],
-  remittances: Record<string, string>
+  remittances: Record<string, string>,
+  siteIds: Record<string, string>
 ): string | null {
   if (selected.length === 0) {
     return "Seleccioná al menos una venta";
@@ -142,6 +147,9 @@ function validateSelection(
   );
   if (missing) {
     return "Completá el número de remito de las ventas seleccionadas";
+  }
+  if (selected.some((sale) => !siteIds[sale.id])) {
+    return "Elegí una sucursal para cada entrega";
   }
   return null;
 }
@@ -160,6 +168,7 @@ function AddSalesDialog({
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [remittances, setRemittances] = useState<Record<string, string>>({});
+  const [siteIds, setSiteIds] = useState<Record<string, string>>({});
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -197,6 +206,7 @@ function AddSalesDialog({
     }
     setSelectedIds(new Set());
     setRemittances({});
+    setSiteIds({});
     setErrorMessage(null);
     clearFilters();
     getRemittanceSettings(orgSlug).then((settings) => {
@@ -279,8 +289,8 @@ function AddSalesDialog({
 
   const handleSubmit = async () => {
     setErrorMessage(null);
-    const selected = filteredSales.filter((sale) => selectedIds.has(sale.id));
-    const selectionError = validateSelection(selected, remittances);
+    const selected = availableSales.filter((sale) => selectedIds.has(sale.id));
+    const selectionError = validateSelection(selected, remittances, siteIds);
     if (selectionError) {
       setErrorMessage(selectionError);
       return;
@@ -292,6 +302,9 @@ function AddSalesDialog({
       onRequestDispatchConfirm({
         saleIds: selected.map((sale) => sale.id),
         remittances: remitMap,
+        siteIds: Object.fromEntries(
+          selected.map((sale) => [sale.id, siteIds[sale.id]])
+        ),
       });
       return;
     }
@@ -302,13 +315,20 @@ function AddSalesDialog({
         routeSheetId: routeSheet.id,
         saleIds: selected.map((sale) => sale.id),
         remittances: remitMap,
+        siteIds: Object.fromEntries(
+          selected.map((sale) => [sale.id, siteIds[sale.id]])
+        ),
       });
       onOpenChange(false);
     } catch (error) {
-      setErrorMessage(
+      // Some sales may have been assigned; clear the stale selection after the
+      // mutation refetches the sheet instead of submitting the same batch again.
+      onOpenChange(false);
+      toast.error(
         error instanceof Error
           ? error.message
-          : "Error al agregar las ventas a la hoja de ruta"
+          : "Error al agregar las ventas a la hoja de ruta",
+        { duration: 10_000 }
       );
     } finally {
       setIsPending(false);
@@ -545,6 +565,32 @@ function AddSalesDialog({
                     <p className="truncate text-muted-foreground text-sm">
                       {sale.customer_name}
                     </p>
+                    {selectedIds.has(sale.id) && (
+                      <select
+                        aria-label={`Sucursal de entrega para venta ${sale.sale_number ?? sale.id}`}
+                        className="mt-2 w-full rounded-md border bg-background p-2 text-sm"
+                        onChange={(event) =>
+                          setSiteIds((current) => ({
+                            ...current,
+                            [sale.id]: event.target.value,
+                          }))
+                        }
+                        value={siteIds[sale.id] ?? ""}
+                      >
+                        <option value="">Elegí dónde entregar</option>
+                        {(data?.sites ?? [])
+                          .filter(
+                            (site) =>
+                              site.customerId === sale.customer_id &&
+                              Boolean(site.address.trim() && site.city.trim())
+                          )
+                          .map((site) => (
+                            <option key={site.id} value={site.id}>
+                              {site.name} · {site.address}, {site.city}
+                            </option>
+                          ))}
+                      </select>
+                    )}
                   </div>
 
                   <span className="shrink-0 font-medium text-sm tabular-nums">
@@ -602,6 +648,7 @@ export function RouteSheetCarrierGroup({
 }: RouteSheetCarrierGroupProps) {
   const { updateStatus, addSales, removeSale, deleteRouteSheet } =
     useRouteSheetMutations(orgSlug);
+  const queryClient = useQueryClient();
   const { downloadRouteSheet, isDownloading } = useRouteSheetPdf({ orgSlug });
   const [expanded, setExpanded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -609,9 +656,11 @@ export function RouteSheetCarrierGroup({
   const [dispatchPayload, setDispatchPayload] = useState<{
     saleIds: string[];
     remittances: Record<string, string>;
+    siteIds: Record<string, string>;
   } | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [includeAmounts, setIncludeAmounts] = useState(true);
+  const [retryingSaleId, setRetryingSaleId] = useState<string | null>(null);
 
   const handleDownload = () => {
     setDownloadOpen(true);
@@ -625,6 +674,7 @@ export function RouteSheetCarrierGroup({
   const handleRequestDispatchConfirm = (payload: {
     saleIds: string[];
     remittances: Record<string, string>;
+    siteIds: Record<string, string>;
   }) => {
     setDispatchPayload(payload);
     setDispatchConfirmOpen(true);
@@ -643,11 +693,43 @@ export function RouteSheetCarrierGroup({
       setDispatchConfirmOpen(false);
       setDispatchPayload(null);
     } catch (error) {
+      setAddOpen(false);
+      setDispatchConfirmOpen(false);
+      setDispatchPayload(null);
       toast.error(
         error instanceof Error
           ? error.message
           : "No se pudieron agregar las ventas a la hoja de ruta"
       );
+    }
+  };
+
+  const handleRetryDispatch = async (sale: RouteSheetSale) => {
+    if (!(sale.remittance_number && sale.delivery_site_name)) {
+      return;
+    }
+    setRetryingSaleId(sale.id);
+    try {
+      const result = await dispatchSaleAction({
+        orgSlug,
+        saleId: sale.id,
+        remittanceNumber: sale.remittance_number,
+        carrierId: routeSheet.carrier_id,
+        routeSheetId: routeSheet.id,
+      });
+      if (!result.success) {
+        throw new Error(result.error ?? "No se pudo despachar la venta");
+      }
+      toast.success("Venta despachada");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "No se pudo despachar la venta"
+      );
+    } finally {
+      await queryClient.invalidateQueries({
+        queryKey: routeSheetsQueryKey(orgSlug),
+      });
+      setRetryingSaleId(null);
     }
   };
 
@@ -720,10 +802,17 @@ export function RouteSheetCarrierGroup({
               routeSheet.sales.map((sale) => (
                 <RouteSheetSaleRow
                   canManage={canManage}
+                  canRetryDispatch={
+                    routeSheet.status === "IN_PROGRESS" &&
+                    sale.status === "CONFIRMED" &&
+                    Boolean(sale.delivery_site_name)
+                  }
                   isPending={routeSheet.status === "PENDING"}
                   isRemoving={removeSale.isPending}
+                  isRetryingDispatch={retryingSaleId === sale.id}
                   key={sale.id}
                   onRemove={() => handleRemoveSale(sale.id)}
+                  onRetryDispatch={() => handleRetryDispatch(sale)}
                   orgSlug={orgSlug}
                   sale={sale}
                 />

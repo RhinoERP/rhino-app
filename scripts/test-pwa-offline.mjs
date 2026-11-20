@@ -123,6 +123,29 @@ test("installed PWA survives a cold start without a server", async () => {
       shell.includes("<title>Rhinos · Acceso offline</title>"),
       "Precache must contain the offline shell, never an authentication redirect"
     );
+    assert(
+      shell.includes("Abriendo Rhinos…"),
+      "The installed start URL must show a loading indicator while redirecting"
+    );
+
+    const onlineLaunch = await browser.newPage();
+    await onlineLaunch.goto(`${origin}/offline.html`, {
+      waitUntil: "domcontentloaded",
+    });
+    await onlineLaunch.waitForFunction(
+      () => !["/offline.html", "/~offline"].includes(location.pathname),
+      { timeout: 20_000 }
+    );
+    assert(
+      !(await onlineLaunch.evaluate(() =>
+        document.body.innerText.includes("Sin conexion")
+      )),
+      "Online launch must reach the app instead of showing the offline warning"
+    );
+    console.log(
+      "PASS online launch reaches the app without the offline warning"
+    );
+    await onlineLaunch.close();
 
     await browser.close();
     connected = false;

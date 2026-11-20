@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
+import { ScrollToTopOnNavigation } from "@/components/layout/scroll-to-top-on-navigation";
 import { PwaProvider } from "@/components/pwa/pwa-provider";
 import { SerwistProvider } from "@/components/serwist/serwist-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
@@ -67,7 +68,10 @@ export default function RootLayout({
           >
             <SerwistProvider enabled={isPwaEnabled()}>
               <PwaProvider>
-                <Providers>{children}</Providers>
+                <Providers>
+                  <ScrollToTopOnNavigation />
+                  {children}
+                </Providers>
                 <Toaster />
               </PwaProvider>
             </SerwistProvider>

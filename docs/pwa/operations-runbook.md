@@ -87,6 +87,7 @@ directamente, sin depender del optimizador de imagenes de Next para cargar offli
 | Fecha aparece como el dia anterior en iOS | Confirmar que la lista movil usa `formatDateOnly`; desplegar un build nuevo y actualizar el Service Worker |
 | Duplicado sospechado | Buscar por organizacion y `command_id`; no reenviar con un payload distinto |
 | Datos offline no se actualizan | Confirmar modo standalone, app visible, conectividad, feature flag, permisos y headers `ETag`/`If-None-Match` |
+| No se puede cerrar sesion por falla al borrar datos offline | El cierre voluntario se bloquea para no dejar datos de la cuenta anterior. Revisar almacenamiento del dispositivo y reintentar; antes de compartirlo, borrar los datos del sitio/PWA desde el navegador (esto elimina borradores y comandos pendientes). Un cierre remoto muestra una advertencia persistente si falla la purga |
 | La organizacion no puede preparar snapshot | Confirmar modulo `wholesale`, produccion deshabilitada, usuario miembro activo con permiso de ventas y flag de offline habilitado en ajustes de preventa |
 | No aparece tutorial de instalacion | Verificar navegador soportado (Safari iOS o Chrome Android/iOS), viewport mobile, permiso de ventas, modulo wholesale y que no esté instalada/descartada por siete días |
 

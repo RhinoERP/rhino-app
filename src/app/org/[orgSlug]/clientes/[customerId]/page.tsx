@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
 import { CustomerMetricsCards } from "@/components/customers/customer-metrics-cards";
+import { CustomerSitesCard } from "@/components/customers/customer-sites-card";
 import { RecentQuotesCard } from "@/components/customers/recent-quotes-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
 import { SupplierAssignmentsCard } from "@/components/customers/supplier-assignments-card";
@@ -31,6 +32,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
+import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
 import {
   getSalesPriceListById,
   getSalesPriceListsByOrgSlug,
@@ -52,6 +54,7 @@ const dateFormatter = new Intl.DateTimeFormat("es-AR", {
   minute: "2-digit",
 });
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes independent customer detail cards
 export default async function CustomerDetailsPage({
   params,
 }: CustomerDetailsPageProps) {
@@ -104,6 +107,7 @@ export default async function CustomerDetailsPage({
     : null;
 
   const displayName = customer.fantasy_name || customer.business_name;
+  const siteAccess = await getSalesAccessContext(orgSlug);
   const createdAt = customer.created_at
     ? dateFormatter.format(new Date(customer.created_at))
     : "-";
@@ -174,6 +178,13 @@ export default async function CustomerDetailsPage({
           )}
 
           {/* Recent Sales */}
+          {(siteAccess.canManage || siteAccess.isOrganizationAdmin) && (
+            <CustomerSitesCard
+              canManage={siteAccess.isOrganizationAdmin}
+              customerId={customerId}
+              orgSlug={orgSlug}
+            />
+          )}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
 
           <DebitNotesCard debitNotes={debitNotes} orgSlug={orgSlug} />

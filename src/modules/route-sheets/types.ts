@@ -1,3 +1,4 @@
+import type { CustomerSite } from "@/modules/commercial-visits/contracts";
 import type { Database } from "@/types/supabase";
 
 export type RouteSheetStatus =
@@ -7,6 +8,7 @@ export type RouteSheet = Database["public"]["Tables"]["route_sheets"]["Row"];
 
 export type RouteSheetSale = {
   id: string;
+  customer_id: string;
   sale_number: number | null;
   customer_name: string;
   total_amount: number;
@@ -20,6 +22,9 @@ export type RouteSheetSale = {
   customer_city: string | null;
   customer_delivery_city: string | null;
   customer_province: string | null;
+  delivery_site_name: string | null;
+  delivery_site_address: string | null;
+  delivery_site_city: string | null;
 };
 
 export type RouteSheetWithSales = RouteSheet & {
@@ -30,6 +35,7 @@ export type RouteSheetWithSales = RouteSheet & {
 export type RouteSheetPageData = {
   routeSheets: RouteSheetWithSales[];
   availableSales: RouteSheetSale[];
+  sites: CustomerSite[];
 };
 
 export type CreateRouteSheetInput = {
@@ -50,6 +56,7 @@ export type AddSalesToRouteSheetInput = {
   routeSheetId: string;
   saleIds: string[];
   remittances: Record<string, string>;
+  siteIds: Record<string, string>;
 };
 
 export type RemoveSaleFromRouteSheetInput = {
