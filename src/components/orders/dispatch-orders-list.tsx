@@ -745,10 +745,7 @@ function PreparingDispatchControls({
   if (settingsLoading) {
     return <Spinner className="size-4" />;
   }
-  if (
-    documentSettings?.remittance_mask_printing_enabled &&
-    child.parent_order_id
-  ) {
+  if (documentSettings?.remittance_mask_printing_enabled) {
     return (
       <div className="space-y-2">
         <DocumentedDispatchDialog

@@ -952,7 +952,7 @@ export function SaleDetail({
     null
   );
   const [customerId, setCustomerId] = useState<string>(
-    sale.customer?.id ?? sale.customer_id
+    sale.customer?.id ?? sale.customer_id ?? ""
   );
   const [warehouseId, setWarehouseId] = useState<string>(
     sale.warehouse_id ?? ""
@@ -1236,7 +1236,7 @@ export function SaleDetail({
 
     return (
       invoiceType !== sale.invoice_type ||
-      customerId !== (sale.customer?.id ?? sale.customer_id) ||
+      customerId !== (sale.customer?.id ?? sale.customer_id ?? "") ||
       selectedTaxFingerprint !== persistedTaxFingerprint ||
       selectedItemTaxFingerprint !== persistedItemTaxFingerprint
     );

@@ -12,6 +12,7 @@ import {
   generateRemittanceHTML,
   type RemittanceData,
 } from "@/modules/sales/service/remittance-generator.service";
+import type { Database } from "@/types/supabase";
 import {
   findSavedRemittance,
   savedRemittanceData,
@@ -35,40 +36,32 @@ export type OrderRemittanceData = {
   carrierName: string | null;
 };
 
-type QuoteItemWithProduct = {
-  id: string;
-  assigned_order_id: string | null;
-  product_id: string | null;
-  description: string | null;
-  quantity: number;
-  unit_price: number;
-  subtotal: number;
-  discount_percentage: number | null;
-  product_variant_id: string | null;
-  product_variants: {
-    talle: string | null;
-    color: string | null;
-  } | null;
-  quote_item_extras: Array<{
-    description: string;
-    price: number;
-  }> | null;
-  products: {
-    name: string | null;
-    sku: string | null;
-    brand: string | null;
-    unit_of_measure: string | null;
-  } | null;
-};
+type SaleItemPrices = Pick<
+  Database["public"]["Tables"]["sales_order_items"]["Row"],
+  | "quote_item_id"
+  | "description"
+  | "quantity"
+  | "unit_quantity"
+  | "unit_price"
+  | "discount_percentage"
+>;
 
-type SaleItemPrices = {
-  quote_item_id: string | null;
-  description: string | null;
-  quantity: number;
-  unit_quantity: number | null;
-  unit_price: number;
-  discount_percentage: number | null;
-};
+const remittanceItemsSelect = `
+  id,
+  quote_id,
+  quote:quotes!inner(organization_id),
+  assigned_order_id,
+  description,
+  quantity,
+  unit_price,
+  subtotal,
+  discount_percentage,
+  product_id,
+  product_variant_id,
+  product_variants!left(talle, color),
+  products!left(name, sku, brand, unit_of_measure),
+  quote_item_extras(description, price)
+`;
 
 export function groupOrderRemittanceItems(
   rows: Array<{
@@ -137,23 +130,7 @@ export async function fetchOrderRemittanceRows(
 ) {
   const query = supabase
     .from("quote_items")
-    .select(
-      `
-      id,
-      quote:quotes!inner(organization_id),
-      assigned_order_id,
-      description,
-      quantity,
-      unit_price,
-      subtotal,
-      discount_percentage,
-      product_id,
-      product_variant_id,
-      product_variants!left(talle, color),
-      products!left(name, sku, brand, unit_of_measure),
-      quote_item_extras(*)
-    `
-    )
+    .select(remittanceItemsSelect)
     .in("assigned_order_id", childOrderIds)
     .eq("quote.organization_id", organizationId);
 
@@ -161,33 +138,17 @@ export async function fetchOrderRemittanceRows(
   assertRemittanceQuery(itemsResult.error);
   let quoteItems = itemsResult.data;
 
-  // Pedidos directos (sin hijos) nunca asignan sus items, así que caen a los
-  // items sin asignar del presupuesto del pedido.
-  if ((quoteItems ?? []).length === 0 && quoteId) {
+  // A standalone order owns both explicitly assigned and unassigned quote
+  // items. Preparation validates that the order has no children before using it.
+  if (quoteId) {
     const fallbackResult = await supabase
       .from("quote_items")
-      .select(
-        `
-        id,
-        quote:quotes!inner(organization_id),
-        assigned_order_id,
-        description,
-        quantity,
-        unit_price,
-        subtotal,
-        discount_percentage,
-        product_id,
-        product_variant_id,
-        product_variants!left(talle, color),
-        products!left(name, sku, brand, unit_of_measure),
-        quote_item_extras(*)
-      `
-      )
+      .select(remittanceItemsSelect)
       .eq("quote_id", quoteId)
       .eq("quote.organization_id", organizationId)
       .is("assigned_order_id", null);
     assertRemittanceQuery(fallbackResult.error);
-    quoteItems = fallbackResult.data;
+    quoteItems = [...(quoteItems ?? []), ...(fallbackResult.data ?? [])];
   }
 
   const quoteIds = (quoteItems ?? []).map((item) => item.id);
@@ -214,7 +175,7 @@ export async function fetchOrderRemittanceRows(
     }
   }
 
-  const rows = (quoteItems ?? []).map((item: QuoteItemWithProduct) => {
+  const rows = (quoteItems ?? []).map((item) => {
     const saleItem = saleByQuoteId.get(item.id);
     const unitPrice = saleItem?.unit_price ?? item.unit_price;
     // The sale keeps the original commercial quantity; a quote item may have
@@ -275,16 +236,17 @@ async function fetchOrderItems(
   );
 }
 
-type CustomerRow = {
-  business_name: string;
-  fantasy_name: string | null;
-  cuit: string | null;
-  phone: string | null;
-  email: string | null;
-  address: string | null;
-  city: string | null;
-  tax_condition: string | null;
-};
+type CustomerRow = Pick<
+  Database["public"]["Tables"]["customers"]["Row"],
+  | "business_name"
+  | "fantasy_name"
+  | "cuit"
+  | "phone"
+  | "email"
+  | "address"
+  | "city"
+  | "tax_condition"
+>;
 
 async function fetchCustomer(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -376,7 +338,9 @@ export async function getOrderRemittanceData(params: {
       supabase,
       organization.id,
       params.childOrderIds,
-      params.childOrderIds.length === 1 ? orderData.quote_id : undefined
+      ids.length === 1 && !orderData.parent_order_id
+        ? orderData.quote_id
+        : undefined
     ),
   ]);
   const saleId = await resolveOrderSaleReference(
