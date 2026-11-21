@@ -60,6 +60,7 @@ El SQL usa una transacción e incluye, en orden:
 9. Permisos `20261104000000_whatsapp_rpc_permissions.sql`: revocación explícita de acceso de `anon` y `authenticated` a las RPC de servidor de WhatsApp.
 10. Revisión `20261104010000_whatsapp_audio_review_fixes.sql`: protocolo verificado, exclusión transaccional, cuotas de uploads, recuperación, retención y protección de confirmaciones.
 11. Precios por cliente `20261110130000_whatsapp_customer_pricing.sql` (después de las migraciones de bandeja y envío humano): resolución por teléfono, validación del envío y alta asistida. El paquete instala las dependencias en ese orden.
+12. Seguimiento por silencio `20261117150000_whatsapp_follow_ups.sql`: configuración opt-in, cola durable y comandos independientes para un único seguimiento. Incluido en el generador de release; no habilita empresas ni programa mensajes históricos.
 
 Aplicá primero la migración y luego desplegá la aplicación y el daemon. El daemon comercial nuevo espera a que exista el protocolo de precios. Las integraciones quedan en **Lista única** hasta cambiar su configuración. Antes de activar un modo por cliente, probá con dos clientes de listas distintas y un número desconocido en una integración de prueba.
 
@@ -499,3 +500,31 @@ completo ya incluye ambas definiciones originales.
 El runner `scripts/test-whatsapp-human-control.sh` incluye una fixture que reproduce
 su ausencia, aplica la reparación dos veces y comprueba permisos, finalización,
 reintento y rechazo de otro worker. La fixture revierte todos sus cambios.
+
+## Activación del seguimiento automático
+
+1. Aplicar `20261117150000_whatsapp_follow_ups.sql` en una instalación con bandeja,
+   envío humano y precios por cliente ya migrados, o usar el bundle del generador
+   para instalar sus dependencias. Desplegar después aplicación y daemon.
+2. Confirmar `select public.whatsapp_follow_up_protocol_version();` devuelve `1`.
+   El nuevo consumidor permanece inactivo si no está disponible ese protocolo;
+   los consumidores ordinarios conservan sus comprobaciones actuales.
+3. La opción queda desactivada por defecto. En una integración piloto, habilitar
+   “Seguimiento automático”, revisar espera e instrucciones y probar una consulta
+   comercial sin responder, otra con respuesta antes del vencimiento y una toma
+   humana. Confirmar que el seguimiento aparece una sola vez en el historial.
+4. Para detener futuros seguimientos, desactivar la opción de la integración.
+   Cancela los pendientes sin revivirlos al reactivar. Un envío ya aceptado por
+   Meta no puede retirarse; una entrega incierta se resuelve desde el inbox.
+
+Pruebas locales, sin conectar a una base desplegada:
+
+```sh
+pnpm exec vitest run services/whatsapp-agent/src/follow-ups.test.ts services/whatsapp-agent/src/meta-cloud.test.ts src/modules/whatsapp/schemas.test.ts
+bash scripts/test-whatsapp-follow-ups.sh
+```
+
+El script SQL usa un PostgreSQL 16 descartable en Docker, aplica el bundle dos
+veces y verifica cancelaciones, leases, outbox, aislamiento entre empresas,
+ventana vencida, recuperación y reclamación con sesiones concurrentes. No envía
+mensajes reales ni invoca al proveedor del modelo.

@@ -2,11 +2,18 @@ import { z } from "zod";
 import { commercialGuidanceSchema } from "./commercial-guidance";
 import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
+  DEFAULT_WHATSAPP_FOLLOW_UP,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
   WHATSAPP_INTEGRATION_STATUSES,
   WHATSAPP_PRICING_MODES,
   WHATSAPP_WEEKDAYS,
 } from "./types";
+
+export const whatsappFollowUpSchema = z.object({
+  enabled: z.boolean(),
+  delayMinutes: z.number().int().min(1).max(1380),
+  instructions: z.string().trim().max(2000),
+});
 
 const businessHoursDaySchema = z.object({
   enabled: z.boolean(),
@@ -96,6 +103,7 @@ export const whatsappIntegrationConfigurationSchema = z
       .uuid("El vendedor responsable es inválido")
       .nullable(),
     businessHours: businessHoursSchema,
+    followUp: whatsappFollowUpSchema.default(DEFAULT_WHATSAPP_FOLLOW_UP),
     responseDelayMinMinutes: z
       .number()
       .int()
