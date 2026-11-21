@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { whatsappIntegrationConfigurationSchema } from "./schemas";
+import {
+  whatsappFollowUpSchema,
+  whatsappIntegrationConfigurationSchema,
+} from "./schemas";
+import { DEFAULT_WHATSAPP_FOLLOW_UP } from "./types";
 
 const baseInput = {
   phoneNumberId: "123456789012345",
@@ -10,6 +14,59 @@ const baseInput = {
 };
 
 describe("whatsappIntegrationConfigurationSchema", () => {
+  it("mantiene el seguimiento desactivado a 30 minutos para configuraciones existentes", () => {
+    const result = whatsappIntegrationConfigurationSchema.parse({
+      ...baseInput,
+      status: "DRAFT",
+      salesPriceListId: null,
+      responsibleUserId: null,
+    });
+    expect(result.followUp).toEqual(DEFAULT_WHATSAPP_FOLLOW_UP);
+  });
+
+  it("guarda la activación, la espera y las instrucciones del seguimiento", () => {
+    const result = whatsappIntegrationConfigurationSchema.parse({
+      ...baseInput,
+      status: "DRAFT",
+      salesPriceListId: null,
+      responsibleUserId: null,
+      followUp: {
+        enabled: true,
+        delayMinutes: 45,
+        instructions: "  Ofrecé ayuda.  ",
+      },
+    });
+    expect(result.followUp).toEqual({
+      enabled: true,
+      delayMinutes: 45,
+      instructions: "Ofrecé ayuda.",
+    });
+  });
+
+  it.each([
+    0,
+    -1,
+    1381,
+    1.5,
+    Number.NaN,
+  ])("rechaza una espera inválida: %s", (delayMinutes) => {
+    expect(
+      whatsappFollowUpSchema.safeParse({
+        ...DEFAULT_WHATSAPP_FOLLOW_UP,
+        delayMinutes,
+      }).success
+    ).toBe(false);
+  });
+
+  it("rechaza instrucciones de seguimiento demasiado largas", () => {
+    expect(
+      whatsappFollowUpSchema.safeParse({
+        ...DEFAULT_WHATSAPP_FOLLOW_UP,
+        instructions: "x".repeat(2001),
+      }).success
+    ).toBe(false);
+  });
+
   it("preserva reglas existentes y valida las nuevas políticas comerciales", () => {
     const result = whatsappIntegrationConfigurationSchema.parse({
       ...baseInput,

@@ -266,8 +266,14 @@ async function deliverPreparedText(
   supabase: SupabaseClient,
   input: SendWhatsAppTextInput,
   token: string,
-  commandId?: string
+  command?: {
+    id: string;
+    guard:
+      | "guard_whatsapp_human_dispatch"
+      | "guard_whatsapp_follow_up_dispatch";
+  }
 ): Promise<string> {
+  const commandId = command?.id;
   const target = commandId
     ? { p_command_id: commandId }
     : { p_source_message_id: input.sourceMessageId };
@@ -300,9 +306,7 @@ async function deliverPreparedText(
     commandId || input.pricingKey !== undefined
       ? async () => {
           const { data, error } = await supabase.rpc(
-            commandId
-              ? "guard_whatsapp_human_dispatch"
-              : "guard_whatsapp_priced_dispatch",
+            command?.guard ?? "guard_whatsapp_priced_dispatch",
             {
               ...target,
               p_lease_token: input.leaseToken,
@@ -336,6 +340,42 @@ async function deliverPreparedText(
   return id;
 }
 
+export type PreparedFollowUp = {
+  id: string;
+  integration_id: string;
+  conversation_id: string;
+  phone_number_id: string;
+  recipient: string;
+  text: string;
+  lease_token: string;
+  lease_expires_at: string;
+};
+
+/** The follow-up RPC has already persisted the text and reserved this command. */
+export async function sendPreparedWhatsAppFollowUp(
+  db: SupabaseClient,
+  command: PreparedFollowUp
+): Promise<string> {
+  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
+  }
+  return await deliverPreparedText(
+    db,
+    {
+      integrationId: command.integration_id,
+      conversationId: command.conversation_id,
+      phoneNumberId: command.phone_number_id,
+      recipient: command.recipient,
+      text: command.text,
+      leaseToken: command.lease_token,
+      deliveryLeaseExpiresAt: command.lease_expires_at,
+    },
+    token,
+    { id: command.id, guard: "guard_whatsapp_follow_up_dispatch" }
+  );
+}
+
 export async function sendNextWhatsAppHumanMessage(
   db: SupabaseClient
 ): Promise<boolean> {
@@ -362,7 +402,10 @@ export async function sendNextWhatsAppHumanMessage(
     deliveryLeaseExpiresAt: command.lease_expires_at,
   };
   try {
-    await deliverPreparedText(db, input, token, command.id);
+    await deliverPreparedText(db, input, token, {
+      id: command.id,
+      guard: "guard_whatsapp_human_dispatch",
+    });
   } catch (error) {
     if (
       !(
