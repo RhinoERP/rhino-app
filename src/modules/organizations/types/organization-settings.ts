@@ -8,6 +8,7 @@ import { z } from "zod";
 export const organizationSettingsSchema = z.object({
   invoice_backed_debt_enabled: z.boolean().default(false),
   accounting_integration_enabled: z.boolean().default(false),
+  mercadolibre_accounting_enabled: z.boolean().default(false),
   automatic_accounting_enabled: z.boolean().default(false),
   credit_note_accounting_modal_enabled: z.boolean().default(false),
   remittance_single_page_duplicate: z.boolean().default(false),
@@ -99,6 +100,7 @@ export type OrganizationSettingsData = z.infer<
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   invoice_backed_debt_enabled: false,
   accounting_integration_enabled: false,
+  mercadolibre_accounting_enabled: false,
   automatic_accounting_enabled: false,
   credit_note_accounting_modal_enabled: false,
   remittance_single_page_duplicate: false,

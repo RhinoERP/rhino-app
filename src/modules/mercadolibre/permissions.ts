@@ -25,6 +25,16 @@ export function canManageMeliPayments(permissions: readonly string[]): boolean {
   );
 }
 
+export function canManageMeliAccounting(
+  permissions: readonly string[]
+): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    (permissions.includes("mercadolibre.accounting.manage") &&
+      hasMeliPaymentsAccess(permissions))
+  );
+}
+
 export function hasMeliAccess(permissions: readonly string[]): boolean {
   return (
     permissions.includes("organization.admin") ||

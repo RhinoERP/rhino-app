@@ -6,6 +6,7 @@ import { useRef, useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import type { z } from "zod";
+import { MeliFiscalAccountingHistory } from "@/components/mercadolibre/meli-fiscal-accounting-history";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,6 +37,7 @@ export function MeliCreditNotes({
   remaining,
   canCreate,
   canIssue,
+  canReviewAccounting,
 }: {
   orgSlug: string;
   saleId: string;
@@ -44,6 +46,7 @@ export function MeliCreditNotes({
   remaining: number;
   canCreate: boolean;
   canIssue: boolean;
+  canReviewAccounting: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -101,6 +104,12 @@ export function MeliCreditNotes({
           </p>
           {note.arca_last_error && (
             <p className="text-destructive text-sm">{note.arca_last_error}</p>
+          )}
+          {canReviewAccounting && (
+            <MeliFiscalAccountingHistory
+              orgSlug={orgSlug}
+              origin={{ type: "creditNote", saleId, creditNoteId: note.id }}
+            />
           )}
           <div className="flex flex-wrap gap-2">
             {canIssue && note.arca_status === "pending" && (

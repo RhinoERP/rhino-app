@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { CollectionsSectionNav } from "@/components/collections/collections-section-nav";
+import { MeliAccountingAccessError } from "@/components/mercadolibre/meli-accounting-access-error";
+import { MeliAccountingDraft } from "@/components/mercadolibre/meli-accounting-draft";
+import { MeliPaymentAccountingHistory } from "@/components/mercadolibre/meli-payment-accounting-history";
 import {
   MeliPaymentForm,
   VoidMeliPaymentForm,
@@ -12,6 +15,8 @@ import {
   canManageMeliPayments,
   hasMeliAccess,
 } from "@/modules/mercadolibre/permissions";
+import { listMeliAccountingDrafts } from "@/modules/mercadolibre/service/meli-accounting-drafts.service";
+import { getMeliAccountingPageAccess } from "@/modules/mercadolibre/service/meli-accounting-page-access";
 import { getMeliPaymentHistory } from "@/modules/mercadolibre/service/meli-payments.service";
 import { getMeliFiscalStatusLabel } from "@/modules/mercadolibre/utils/fiscal-status";
 
@@ -47,6 +52,18 @@ export default async function MeliCollectionSalePage({
   }
   const { sale } = history;
   const canManage = canManageMeliPayments(layout.permissions);
+  const accountingAccess = await getMeliAccountingPageAccess(
+    orgSlug,
+    layout.permissions
+  );
+  const canReviewAccounting = accountingAccess === "enabled";
+  const drafts = canReviewAccounting
+    ? await Promise.all(
+        history.data.map((payment) =>
+          listMeliAccountingDrafts(orgSlug, payment.id)
+        )
+      )
+    : [];
   const buyer = sale.receiver;
   return (
     <div className="space-y-5">
@@ -64,6 +81,7 @@ export default async function MeliCollectionSalePage({
       <h1 className="font-heading text-2xl">
         Cobros de venta Meli #{sale.saleNumber}
       </h1>
+      <MeliAccountingAccessError visible={accountingAccess === "error"} />
       <div className="grid gap-4 rounded-md border p-4 text-sm sm:grid-cols-2">
         <div className="space-y-2">
           <p>Orden Meli: {sale.marketplaceOrderNumber}</p>
@@ -111,7 +129,7 @@ export default async function MeliCollectionSalePage({
       )}
       <section className="space-y-3">
         <h2 className="font-semibold text-lg">Historial de cobros brutos</h2>
-        {history.data.map((payment) => (
+        {history.data.map((payment, index) => (
           <article
             className="space-y-3 rounded-md border p-4 text-sm"
             id={`payment-${payment.id}`}
@@ -136,6 +154,23 @@ export default async function MeliCollectionSalePage({
                 Motivo de anulación: {payment.void_reason}
                 {payment.voided_at ? ` · ${formatDate(payment.voided_at)}` : ""}
               </p>
+            )}
+            {canReviewAccounting && (
+              <>
+                <MeliAccountingDraft
+                  currency={payment.currency}
+                  editable={payment.status === "RECORDED"}
+                  history={drafts[index]}
+                  key={`${payment.id}-${drafts[index][0]?.version ?? 0}`}
+                  orgId={layout.currentOrganization.id}
+                  orgSlug={orgSlug}
+                  paymentId={payment.id}
+                />
+                <MeliPaymentAccountingHistory
+                  orgSlug={orgSlug}
+                  paymentId={payment.id}
+                />
+              </>
             )}
             {canManage && payment.status === "RECORDED" && (
               <VoidMeliPaymentForm orgSlug={orgSlug} paymentId={payment.id} />

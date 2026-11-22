@@ -12,6 +12,10 @@ import type {
   InformalEntrySourceType,
   PreviewResponse,
 } from "@/modules/accounting/types";
+import {
+  type MeliJournalOrigin,
+  parseMeliJournalEntriesByOrigin,
+} from "@/modules/mercadolibre/utils/accounting-origin";
 
 const TIMEOUT_MS = 10_000;
 const HTTP_NOT_FOUND = 404;
@@ -199,6 +203,20 @@ export async function findJournalEntryIdByReferenceServer(params: {
     }
     throw error;
   }
+}
+
+export async function listMeliJournalEntriesByOriginServer(
+  origin: MeliJournalOrigin
+) {
+  const query = new URLSearchParams({
+    org_id: origin.orgId,
+    referencia_id: origin.referenciaId,
+    referencia_tabla: origin.referenciaTabla,
+  });
+  const result = await serviceGet<unknown>(
+    `asientos/by-origin?${query.toString()}`
+  );
+  return parseMeliJournalEntriesByOrigin(origin, result);
 }
 
 // ============================================================

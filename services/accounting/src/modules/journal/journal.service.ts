@@ -93,3 +93,55 @@ export async function findActiveJournalEntryIdByReference(params: {
 
   return entry?.id;
 }
+
+type JournalOrigin = {
+  orgId: string;
+  referenciaId: string;
+  referenciaTabla: "sales_orders" | "credit_notes" | "mercadolibre_payments";
+};
+
+export function buildJournalEntriesByOriginQuery(
+  params: JournalOrigin,
+  executor: Kysely<Database> = db
+) {
+  const originals = executor
+    .selectFrom("accounting.journal_entries")
+    .select("id")
+    .where("org_id", "=", params.orgId)
+    .where("referencia_id", "=", params.referenciaId)
+    .where("referencia_tabla", "=", params.referenciaTabla);
+
+  return executor
+    .selectFrom("accounting.journal_entries")
+    .select([
+      "id",
+      "org_id",
+      "tipo_evento",
+      "referencia_id",
+      "referencia_tabla",
+      "estado",
+      "idempotency_key",
+      "anulado_por_id",
+      "fecha",
+    ])
+    .where("org_id", "=", params.orgId)
+    .where((expression) =>
+      expression.or([
+        expression.and([
+          expression("referencia_id", "=", params.referenciaId),
+          expression("referencia_tabla", "=", params.referenciaTabla),
+        ]),
+        expression.and([
+          expression("tipo_evento", "=", "CONTRA_ASIENTO"),
+          expression("referencia_tabla", "=", "accounting.journal_entries"),
+          expression("referencia_id", "in", originals),
+        ]),
+      ])
+    )
+    .orderBy("creado_at", "asc")
+    .orderBy("id", "asc");
+}
+
+export function listJournalEntriesByOrigin(params: JournalOrigin) {
+  return buildJournalEntriesByOriginQuery(params).execute();
+}

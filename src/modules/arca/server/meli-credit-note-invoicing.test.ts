@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readMeliAccountingFiscalSnapshot } from "@/modules/mercadolibre/utils/accounting-fiscal-snapshot";
 import {
   emitCreditNote,
   reconcileMeliCreditNote,
@@ -140,6 +141,18 @@ describe("Meli through the shared NC fiscal engine", () => {
   it("emits a proportional B credit to the original DNI without wholesale or accounting access", async () => {
     const result = await emitCreditNote(params);
     expect(result.status).toBe("authorized");
+    expect(
+      readMeliAccountingFiscalSnapshot({
+        status: "authorized",
+        cae: "86462382117559",
+        currency: "ARS",
+        amount: 60.5,
+        pointOfSale: 2,
+        voucherType: 8,
+        voucherNumber: 8,
+        request: note.arca_request_json,
+      })
+    ).toMatchObject({ net: "50.00", vat: "10.50", total: "60.50" });
     expect(mocks.authorize).toHaveBeenCalledWith(
       expect.objectContaining({
         CbteTipo: 8,

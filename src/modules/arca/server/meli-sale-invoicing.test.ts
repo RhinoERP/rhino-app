@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readMeliAccountingFiscalSnapshot } from "@/modules/mercadolibre/utils/accounting-fiscal-snapshot";
 import {
   buildArcaVoucherRequestFromSale,
   emitSaleInvoice,
@@ -240,6 +241,18 @@ describe("Meli through the shared A/B/C fiscal engine", () => {
   it("authorizes once, without receivables or legacy remittance regeneration", async () => {
     const first = await emitSaleInvoice(params);
     expect(first.status).toBe("authorized");
+    expect(
+      readMeliAccountingFiscalSnapshot({
+        status: "authorized",
+        cae: "86462382117559",
+        currency: "ARS",
+        amount: 121,
+        pointOfSale: 2,
+        voucherType: 6,
+        voucherNumber: 7,
+        request: row.arca_request_json,
+      })
+    ).toMatchObject({ net: "100.00", vat: "21.00", total: "121.00" });
     expect(mocks.authorize).toHaveBeenCalledTimes(1);
     expect(mocks.eq).toHaveBeenCalledWith("updated_at", updatedAt);
     expect(mocks.receivable).not.toHaveBeenCalled();

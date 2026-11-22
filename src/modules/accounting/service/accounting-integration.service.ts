@@ -6,3 +6,13 @@ export async function isAccountingIntegrationEnabled(
   const settings = await getOrgSettings(orgSlug);
   return settings.accounting_integration_enabled;
 }
+
+export async function isMeliAccountingIntegrationEnabled(
+  orgSlug: string
+): Promise<boolean> {
+  const settings = await getOrgSettings(orgSlug);
+  return (
+    settings.accounting_integration_enabled &&
+    settings.mercadolibre_accounting_enabled
+  );
+}

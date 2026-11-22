@@ -1,6 +1,7 @@
 "use client";
 
 import { DollarSign } from "lucide-react";
+import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +48,7 @@ export function AccountingCurrencySelector({
   onMonedaChange,
   onTipoCambioChange,
 }: AccountingCurrencySelectorProps) {
+  const exchangeRateId = useId();
   return (
     <div className="rounded-xl border bg-linear-to-r from-muted/60 to-background px-4 py-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -86,9 +88,15 @@ export function AccountingCurrencySelector({
 
           {moneda === "USD" ? (
             <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 shadow-xs">
-              <Label className="text-muted-foreground text-xs">1 USD =</Label>
+              <Label
+                className="text-muted-foreground text-xs"
+                htmlFor={exchangeRateId}
+              >
+                1 USD =
+              </Label>
               <Input
                 className="h-8 w-28 border-0 bg-transparent px-0 text-right font-mono shadow-none focus-visible:ring-0"
+                id={exchangeRateId}
                 inputMode="decimal"
                 min={1}
                 onChange={(event) =>

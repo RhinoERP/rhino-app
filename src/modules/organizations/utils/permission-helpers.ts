@@ -294,6 +294,8 @@ function humanizeAction(
       "mercadolibre.payments.read": "Ver cobros Mercado Libre",
       "mercadolibre.payments.manage":
         "Registrar y anular cargas de cobros Mercado Libre",
+      "mercadolibre.accounting.manage":
+        "Gestionar contabilización Mercado Libre",
     };
 
     if (specialLabels[key]) {

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MeliAccountingAccessError } from "@/components/mercadolibre/meli-accounting-access-error";
 import { MeliCreditNotes } from "@/components/mercadolibre/meli-credit-notes";
+import { MeliFiscalAccountingHistory } from "@/components/mercadolibre/meli-fiscal-accounting-history";
 import { MeliInvoiceActions } from "@/components/mercadolibre/meli-invoice-actions";
 import { MeliPhysicalReturns } from "@/components/mercadolibre/meli-physical-returns";
 import { MeliReceiverCorrection } from "@/components/mercadolibre/meli-receiver-correction";
@@ -8,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { hasMeliPaymentsAccess } from "@/modules/mercadolibre/permissions";
+import { getMeliAccountingPageAccess } from "@/modules/mercadolibre/service/meli-accounting-page-access";
 import { listMeliCreditNotes } from "@/modules/mercadolibre/service/meli-credit-note-read.service";
 import { getMeliPaymentSale } from "@/modules/mercadolibre/service/meli-payments.service";
 import { listMeliPhysicalReturns } from "@/modules/mercadolibre/service/meli-physical-return.service";
@@ -15,6 +18,32 @@ import { getMeliSale } from "@/modules/mercadolibre/service/meli-read.service";
 import { getMeliFiscalStatusLabel } from "@/modules/mercadolibre/utils/fiscal-status";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 import { getInvoiceTypeLabel } from "@/modules/sales/invoice-type-utils";
+
+function canIssueMeliInvoice(permissions: readonly string[]) {
+  return permissions.some(
+    (permission) =>
+      permission === "organization.admin" ||
+      permission === "mercadolibre.invoice"
+  );
+}
+
+function canManageMeliSales(permissions: readonly string[]) {
+  return permissions.some(
+    (permission) =>
+      permission === "organization.admin" ||
+      permission === "mercadolibre.manage"
+  );
+}
+
+function getSalePermissions(permissions: readonly string[] = []) {
+  const canIssue = canIssueMeliInvoice(permissions);
+  const canManageReturns = canManageMeliSales(permissions);
+  return {
+    canIssue,
+    canManageReturns,
+    canCreateCreditNote: canIssue && canManageReturns,
+  };
+}
 
 export default async function MeliSalePage({
   params,
@@ -27,12 +56,13 @@ export default async function MeliSalePage({
     notFound();
   }
   const layout = await getOrganizationLayoutData(orgSlug);
-  const canIssue =
-    layout?.permissions.some(
-      (permission) =>
-        permission === "organization.admin" ||
-        permission === "mercadolibre.invoice"
-    ) === true;
+  const accountingAccess = await getMeliAccountingPageAccess(
+    orgSlug,
+    layout?.permissions ?? []
+  );
+  const canReviewAccounting = accountingAccess === "enabled";
+  const { canIssue, canManageReturns, canCreateCreditNote } =
+    getSalePermissions(layout?.permissions);
   const receiver = sale.receiver;
   const [creditNotes, physicalReturns, paymentSale] = await Promise.all([
     listMeliCreditNotes(orgSlug, sale.id),
@@ -41,19 +71,6 @@ export default async function MeliSalePage({
       ? getMeliPaymentSale(orgSlug, sale.id)
       : Promise.resolve(null),
   ]);
-  const canManageReturns =
-    layout?.permissions.some(
-      (permission) =>
-        permission === "organization.admin" ||
-        permission === "mercadolibre.manage"
-    ) === true;
-  const canCreateCreditNote =
-    canIssue &&
-    layout?.permissions.some(
-      (permission) =>
-        permission === "organization.admin" ||
-        permission === "mercadolibre.manage"
-    ) === true;
   const buyerName =
     receiver.tax_condition === "RESPONSABLE_INSCRIPTO"
       ? receiver.business_name
@@ -67,6 +84,7 @@ export default async function MeliSalePage({
         ← Ventas Mercado Libre
       </Link>
       <h1 className="font-heading text-2xl">Venta Meli #{sale.sale_number}</h1>
+      <MeliAccountingAccessError visible={accountingAccess === "error"} />
       {sale.status === "CANCELLED" && (
         <p className="text-destructive text-sm">Esta venta está cancelada.</p>
       )}
@@ -90,6 +108,12 @@ export default async function MeliSalePage({
               status={sale.arca_status}
             />
             <p>Factura: {sale.invoice_number ?? "Sin emitir"}</p>
+            {canReviewAccounting && (
+              <MeliFiscalAccountingHistory
+                orgSlug={orgSlug}
+                origin={{ type: "invoice", saleId: sale.id }}
+              />
+            )}
             {sale.arca_last_error && (
               <p className="text-destructive">{sale.arca_last_error}</p>
             )}
@@ -167,6 +191,7 @@ export default async function MeliSalePage({
       <MeliCreditNotes
         canCreate={canCreateCreditNote && sale.arca_status === "authorized"}
         canIssue={canIssue}
+        canReviewAccounting={canReviewAccounting}
         currency={sale.currency}
         notes={creditNotes.notes}
         orgSlug={orgSlug}

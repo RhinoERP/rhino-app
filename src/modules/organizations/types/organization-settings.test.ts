@@ -5,6 +5,35 @@ import {
   organizationSettingsSchema,
 } from "./organization-settings";
 
+describe("Mercado Libre accounting setting", () => {
+  it("defaults to disabled in both readers for existing organizations", () => {
+    expect(
+      organizationSettingsSchema.parse({}).mercadolibre_accounting_enabled
+    ).toBe(false);
+    expect(OrgSettingsSchema.parse({}).mercadolibre_accounting_enabled).toBe(
+      false
+    );
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.mercadolibre_accounting_enabled).toBe(
+      false
+    );
+  });
+
+  it("preserves the flag through both settings schemas", () => {
+    const current = organizationSettingsSchema.parse({
+      mercadolibre_accounting_enabled: true,
+    });
+    const viaService = OrgSettingsSchema.parse({
+      ...current,
+      due_days_enabled: true,
+    });
+    const viaAction = organizationSettingsSchema.parse({
+      ...viaService,
+      invoice_print_duplicate: true,
+    });
+    expect(viaAction.mercadolibre_accounting_enabled).toBe(true);
+  });
+});
+
 describe("invoice-backed debt setting", () => {
   it("keeps both settings readers disabled for existing organizations", () => {
     expect(

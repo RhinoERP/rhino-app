@@ -3,6 +3,7 @@ import { Router } from "express";
 import {
   findActiveJournalEntryIdByReference,
   getJournalEntryById,
+  listJournalEntriesByOrigin,
 } from "../modules/journal/journal.service";
 import { AppError } from "../utils/errors";
 
@@ -10,6 +11,36 @@ const router: ReturnType<typeof Router> = Router();
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+router.get(
+  "/by-origin",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { org_id, referencia_id, referencia_tabla } = req.query;
+      if (
+        typeof org_id !== "string" ||
+        typeof referencia_id !== "string" ||
+        !UUID_RE.test(org_id) ||
+        !UUID_RE.test(referencia_id) ||
+        (referencia_tabla !== "sales_orders" &&
+          referencia_tabla !== "credit_notes" &&
+          referencia_tabla !== "mercadolibre_payments")
+      ) {
+        next(AppError.badRequest("Origen o organización inválidos"));
+        return;
+      }
+
+      const entries = await listJournalEntriesByOrigin({
+        orgId: org_id,
+        referenciaId: referencia_id,
+        referenciaTabla: referencia_tabla,
+      });
+      res.json({ ok: true, data: entries });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // ------------------------------------------------------------
 // GET /asientos/by-reference
