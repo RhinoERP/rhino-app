@@ -34,6 +34,23 @@ function request(body: unknown, token?: string) {
   );
 }
 describe("worker tool authentication and fencing", () => {
+  it.each([
+    "incorrect",
+    "private-service-tokex",
+    "private-service-token-extra",
+  ])("rejects an invalid service credential without executing tools: %s", async (token) => {
+    expect((await POST(request({ context }, token), params)).status).toBe(401);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown tool even with a valid service credential", async () => {
+    const result = await POST(request({ context }, "private-service-token"), {
+      params: Promise.resolve({ tool: "execute_sql" }),
+    });
+    expect(result.status).toBe(404);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("rejects a request without the service credential", async () => {
     expect((await POST(request({ context }), params)).status).toBe(401);
     expect(execute).not.toHaveBeenCalled();

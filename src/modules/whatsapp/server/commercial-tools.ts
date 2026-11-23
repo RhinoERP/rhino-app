@@ -403,10 +403,29 @@ async function verifyContext(
   };
 }
 
+function priceNumber(value: unknown): number {
+  if (
+    (typeof value !== "number" && typeof value !== "string") ||
+    (typeof value === "string" && !value.trim())
+  ) {
+    throw new Error(
+      "El producto o la lista no tienen un precio válido; requiere revisión comercial"
+    );
+  }
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    throw new Error(
+      "El producto o la lista no tienen un precio válido; requiere revisión comercial"
+    );
+  }
+  return amount;
+}
+
 async function resolvePrice(params: {
   organizationId: string;
   priceListId: string;
   productId: string;
+  timezone: string;
 }) {
   const supabase = createWhatsAppAdminClient();
   const [
@@ -434,19 +453,28 @@ async function resolvePrice(params: {
   if (priceListError || !priceList?.is_active) {
     throw new Error("La lista de precios de WhatsApp no está disponible");
   }
-  if (priceList.valid_from > new Date().toISOString().slice(0, 10)) {
+  const localDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: params.timezone,
+  }).format(new Date());
+  if (priceList.valid_from > localDate) {
     throw new Error("La lista de precios de WhatsApp aún no está vigente");
   }
 
-  const basePrice = Number(product.calculated_sale_price ?? 0);
+  const basePrice = priceNumber(product.calculated_sale_price);
+  if (basePrice < 0) {
+    throw new Error(
+      "El producto no tiene un precio válido; requiere revisión comercial"
+    );
+  }
   const type = priceList.type ?? "PERCENTAGE";
-  const value = Number(
+  const value = priceNumber(
     priceList.value ?? (type === "PERCENTAGE" ? priceList.percentage : 0) ?? 0
   );
-  const unitPrice =
+  const unitPrice = priceNumber(
     type === "PRICE"
       ? roundMoney(Math.max(0, basePrice + value))
-      : roundMoney(Math.max(0, basePrice * (1 + value / 100)));
+      : roundMoney(Math.max(0, basePrice * (1 + value / 100)))
+  );
 
   return {
     productId: product.id,
@@ -544,6 +572,7 @@ async function cartSummary(context: VerifiedContext) {
             organizationId: context.organizationId,
             priceListId: context.salesPriceListId,
             productId: item.product_id,
+            timezone: context.timezone,
           }).catch(() => null)
         : { unitPrice: Number(item.unit_price) };
       const quantity = Number(item.quantity);
@@ -838,6 +867,7 @@ async function getOffer(context: VerifiedContext, productId: string) {
       organizationId: context.organizationId,
       priceListId: context.salesPriceListId,
       productId,
+      timezone: context.timezone,
     }),
     createWhatsAppAdminClient()
       .from("view_stock_detail")
@@ -919,6 +949,7 @@ async function getRecommendations(
       organizationId: context.organizationId,
       priceListId: context.salesPriceListId,
       productId: args.related_product_id,
+      timezone: context.timezone,
     });
   }
   const supabase = createWhatsAppAdminClient();
