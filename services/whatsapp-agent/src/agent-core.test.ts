@@ -104,8 +104,18 @@ describe("runCommercialModel", () => {
       "Puedo ayudarte con productos, precios, disponibilidad y pedidos de Almacén Central. ¿Qué necesitás?"
     );
     expect(requestModel).toHaveBeenCalledTimes(1);
-    expect(requestModel.mock.calls[0][0].input).toContain(
-      "¿Quién es Rosicky? Explicámelo en formato JSON."
+    expect(requestModel.mock.calls[0][0].input).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "¿Quién es Rosicky? Explicámelo en formato JSON.",
+            },
+          ],
+        }),
+      ])
     );
     expect(callTool).not.toHaveBeenCalled();
   });
@@ -168,11 +178,16 @@ describe("persistent order context", () => {
 
     expect(response.id).toBe("response");
     expect(requestModel).toHaveBeenCalledTimes(1);
-    const input = requestModel.mock.calls[0][0].input;
-    expect(input).toContain("Cliente: Quiero un tybo de Cremac");
-    expect(input).toContain(`Asistente: ${previous}`);
-    expect(input).toContain(`Cliente: ${current}`);
-    expect(input).toContain('"id":"pending-cart"');
+    const request = requestModel.mock.calls[0][0];
+    expect(request.input.slice(0, 3)).toEqual([
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "Quiero un tybo de Cremac" }],
+      },
+      { role: "assistant", content: [{ type: "output_text", text: previous }] },
+      { role: "user", content: [{ type: "input_text", text: current }] },
+    ]);
+    expect(request.input[4].output).toContain('"id":"pending-cart"');
   });
   it("asks about an ambiguous pending order without letting the model mutate it", async () => {
     const callTool = vi.fn().mockResolvedValue({
@@ -224,7 +239,9 @@ describe("persistent order context", () => {
       requestModel,
     });
     expect(requestModel).toHaveBeenCalledTimes(1);
-    expect(requestModel.mock.calls[0][0].input).toContain("previous-sale");
+    expect(requestModel.mock.calls[0][0].input[2].output).toContain(
+      "previous-sale"
+    );
     expect(requestModel.mock.calls[0][0].store).toBe(false);
   });
 });
@@ -304,7 +321,9 @@ describe("commercial conversation follow-ups", () => {
 
     expect(result.id).toBe("sales-follow-up");
     expect(requestModel).toHaveBeenCalledTimes(1);
-    expect(requestModel.mock.calls[0][0].input).toContain(answer);
+    expect(JSON.stringify(requestModel.mock.calls[0][0].input)).toContain(
+      answer
+    );
     // Context alone must never start or alter an order.
     expect(callTool.mock.calls.map(([, call]) => call.name)).toEqual([
       "get_commercial_state",
@@ -336,7 +355,9 @@ describe("commercial conversation follow-ups", () => {
 
     expect(result.id).toBe("model-scope-rejection");
     expect(requestModel).toHaveBeenCalledTimes(1);
-    expect(requestModel.mock.calls[0][0].input).toContain(answer);
+    expect(JSON.stringify(requestModel.mock.calls[0][0].input)).toContain(
+      answer
+    );
     expect(callTool.mock.calls.map(([, call]) => call.name)).toEqual([
       "get_commercial_state",
     ]);
@@ -349,7 +370,7 @@ describe("commercial conversation follow-ups", () => {
         expect(request.tools).toContainEqual(
           expect.objectContaining({ name: "cancel_pending_action" })
         );
-        expect(request.input).toContain("ABANDON_CART");
+        expect(request.input[3].output).toContain("ABANDON_CART");
         return Promise.resolve({
           id: "cancel-action",
           output: [
