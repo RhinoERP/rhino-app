@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { HistoricalSalesExportButton } from "@/components/sales/historical-sales-export-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,12 +20,16 @@ import {
 } from "@/components/ui/select";
 import { useDataTable } from "@/hooks/use-data-table";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
-import type { ChessHistoricalSalesDocument } from "@/modules/sales/historical/service/chess-historical-sales.service";
+import type {
+  ChessHistoricalSalesDocument,
+  ChessHistoricalSalesExportFilters,
+} from "@/modules/sales/historical/service/chess-historical-sales.service";
 
 type HistoricalSalesDataTableProps = {
   orgSlug: string;
   data: ChessHistoricalSalesDocument[];
   pageCount: number;
+  sort?: ChessHistoricalSalesExportFilters["sort"];
 };
 
 const DOCUMENT_TYPES = [
@@ -89,6 +94,7 @@ export function HistoricalSalesDataTable({
   orgSlug,
   data,
   pageCount,
+  sort,
 }: HistoricalSalesDataTableProps) {
   const columns = useMemo<ColumnDef<ChessHistoricalSalesDocument>[]>(
     () => [
@@ -225,6 +231,17 @@ export function HistoricalSalesDataTable({
                 value={inputValue}
               />
             </div>
+            <HistoricalSalesExportButton
+              filters={{
+                search: search || undefined,
+                documentCode: documentCode ?? undefined,
+                dateFrom: dateFrom ?? undefined,
+                dateTo: dateTo ?? undefined,
+                sort,
+              }}
+              orgSlug={orgSlug}
+              table={table}
+            />
             {hasFilters ? (
               <Button
                 className="border-dashed"

@@ -130,16 +130,14 @@ async function getReadableOrganization(orgSlug: string) {
   return organization;
 }
 
-async function applyHistoricalSearch(
-  // biome-ignore lint/suspicious/noExplicitAny: historical table types are not generated yet
-  query: any,
+async function buildHistoricalSearchFilter(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string,
   rawSearch: string
-) {
+): Promise<string | null> {
   const search = normalizeHistoricalSearch(rawSearch);
   if (!search) {
-    return query;
+    return null;
   }
 
   const conditions = buildHistoricalTextSearchConditions(search);
@@ -165,7 +163,7 @@ async function applyHistoricalSearch(
       `customer_id.in.(${customers.map((row) => row.id).join(",")})`
     );
   }
-  return query.or(conditions.join(","));
+  return conditions.join(",");
 }
 
 function applyHistoricalFilters(
@@ -197,12 +195,37 @@ function applyHistoricalSort(query: any, sorts: SortParam[] | undefined) {
   if (!selected) {
     return query
       .order("document_date", { ascending: false })
-      .order("document_number", { ascending: false });
+      .order("document_number", { ascending: false })
+      .order("id", { ascending: true });
   }
   const sortedQuery = query.order(selected.id, { ascending: !selected.desc });
-  return selected.id === "document_date"
-    ? sortedQuery
-    : sortedQuery.order("document_date", { ascending: false });
+  const dateSortedQuery =
+    selected.id === "document_date"
+      ? sortedQuery
+      : sortedQuery.order("document_date", { ascending: false });
+  return dateSortedQuery.order("id", { ascending: true });
+}
+
+function createHistoricalDocumentsQuery(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  filters: ChessHistoricalSalesFilters;
+  searchFilter: string | null;
+  includeCount: boolean;
+}) {
+  const { supabase, orgId, filters, searchFilter, includeCount } = options;
+  // biome-ignore lint/suspicious/noExplicitAny: pending regenerated Supabase table types
+  let query: any = supabase
+    .from("historical_sales_documents" as never)
+    .select(DOCUMENT_SELECT, includeCount ? { count: "exact" } : undefined)
+    .eq("organization_id", orgId)
+    .eq("is_reference_only", false);
+
+  if (searchFilter) {
+    query = query.or(searchFilter);
+  }
+  query = applyHistoricalFilters(query, filters);
+  return applyHistoricalSort(query, filters.sort);
 }
 
 export async function getChessHistoricalSalesPage(
@@ -219,27 +242,20 @@ export async function getChessHistoricalSalesPage(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   const supabase = await createClient();
-  // The historical tables are introduced by a migration and are not yet in the
-  // generated Supabase schema types for every deployed environment.
-  // biome-ignore lint/suspicious/noExplicitAny: pending regenerated Supabase table types
-  let query: any = supabase
-    .from("historical_sales_documents" as never)
-    .select(DOCUMENT_SELECT, { count: "exact" })
-    .eq("organization_id", organization.id)
-    .eq("is_reference_only", false)
-    .order("document_date", { ascending: false })
-    .order("document_number", { ascending: false });
-
-  if (filters.search) {
-    query = await applyHistoricalSearch(
-      query,
-      supabase,
-      organization.id,
-      filters.search
-    );
-  }
-  query = applyHistoricalFilters(query, filters);
-  query = applyHistoricalSort(query, filters.sort);
+  const searchFilter = filters.search
+    ? await buildHistoricalSearchFilter(
+        supabase,
+        organization.id,
+        filters.search
+      )
+    : null;
+  const query = createHistoricalDocumentsQuery({
+    supabase,
+    orgId: organization.id,
+    filters,
+    searchFilter,
+    includeCount: true,
+  });
 
   const { data, count, error } = await query.range(from, to);
   if (error) {
@@ -254,6 +270,65 @@ export async function getChessHistoricalSalesPage(
     page,
     pageSize,
   };
+}
+
+export type ChessHistoricalSalesExportFilters = Omit<
+  ChessHistoricalSalesFilters,
+  "page" | "pageSize"
+>;
+
+const HISTORICAL_EXPORT_BATCH_SIZE = 500;
+
+export async function getChessHistoricalSalesExport(
+  orgSlug: string,
+  filters: ChessHistoricalSalesExportFilters = {}
+): Promise<ChessHistoricalSalesDocument[] | null> {
+  const organization = await getReadableOrganization(orgSlug);
+  if (!organization) {
+    return null;
+  }
+
+  const supabase = await createClient();
+  const searchFilter = filters.search
+    ? await buildHistoricalSearchFilter(
+        supabase,
+        organization.id,
+        filters.search
+      )
+    : null;
+  const queryFilters: ChessHistoricalSalesFilters = {
+    ...filters,
+    page: 1,
+    pageSize: HISTORICAL_EXPORT_BATCH_SIZE,
+  };
+  const documents: ChessHistoricalSalesDocument[] = [];
+
+  for (let from = 0; ; from += HISTORICAL_EXPORT_BATCH_SIZE) {
+    const query = createHistoricalDocumentsQuery({
+      supabase,
+      orgId: organization.id,
+      filters: queryFilters,
+      searchFilter,
+      includeCount: false,
+    });
+    const { data, error } = await query.range(
+      from,
+      from + HISTORICAL_EXPORT_BATCH_SIZE - 1
+    );
+    if (error) {
+      throw new Error(
+        `No se pudieron exportar las ventas históricas CHESS: ${error.message}`
+      );
+    }
+
+    const batch = (data ?? []) as ChessHistoricalSalesDocument[];
+    documents.push(...batch);
+    if (batch.length < HISTORICAL_EXPORT_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return documents;
 }
 
 export async function getChessHistoricalSalesProductMetrics(

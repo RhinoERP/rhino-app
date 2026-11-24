@@ -187,6 +187,7 @@ export default async function HistoricalSalesPage({
                 1,
                 Math.ceil(pageData.totalCount / pageData.pageSize)
               )}
+              sort={pagination.sort}
             />
           </>
         )}
