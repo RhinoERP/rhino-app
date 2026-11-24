@@ -38,9 +38,13 @@ import {
   commercialGuidanceSchema,
   readCommercialGuidance,
 } from "@/modules/whatsapp/commercial-guidance";
-import type { WhatsAppIntegrationConfigurationInput } from "@/modules/whatsapp/schemas";
+import {
+  type WhatsAppIntegrationConfigurationInput,
+  whatsappFollowUpSchema,
+} from "@/modules/whatsapp/schemas";
 import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
+  DEFAULT_WHATSAPP_FOLLOW_UP,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
   WHATSAPP_INTEGRATION_STATUSES,
   WHATSAPP_PRICING_MODES,
@@ -90,6 +94,7 @@ const formSchema = z.object({
   }),
   responseDelayMinMinutes: z.number().int().min(0).max(120),
   responseDelayMaxMinutes: z.number().int().min(0).max(120),
+  followUp: whatsappFollowUpSchema,
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -111,6 +116,7 @@ function toFormValues(integration: WhatsAppIntegration | null): FormValues {
     allowGeneralForCustomers: integration?.allowGeneralForCustomers ?? false,
     responsibleUserId: integration?.responsibleUserId ?? NONE,
     handoffMessage: integration?.handoffMessage ?? "",
+    followUp: integration?.followUp ?? DEFAULT_WHATSAPP_FOLLOW_UP,
     commercialGuidance: readCommercialGuidance(integration?.commercialRules),
     businessHours:
       integration?.businessHours ?? DEFAULT_WHATSAPP_BUSINESS_HOURS,
@@ -138,6 +144,7 @@ function toIntegrationInput(
     responsibleUserId:
       values.responsibleUserId === NONE ? null : values.responsibleUserId,
     businessHours: values.businessHours,
+    followUp: values.followUp,
     responseDelayMinMinutes: values.responseDelayMinMinutes,
     responseDelayMaxMinutes: values.responseDelayMaxMinutes,
     commercialRules: {
@@ -161,6 +168,7 @@ export function WhatsAppIntegrationConfigForm({
   });
   const pricingMode = form.watch("pricingMode");
   const businessHoursEnabled = form.watch("businessHours.enabled");
+  const followUpEnabled = form.watch("followUp.enabled");
   const weeklySchedule = form.watch("businessHours.weeklySchedule");
 
   function onSubmit(values: FormValues) {
@@ -574,6 +582,82 @@ export function WhatsAppIntegrationConfigForm({
                   )}
                 />
               </div>
+            </section>
+
+            <section className="space-y-4 rounded-lg border p-4">
+              <div>
+                <h2 className="font-medium">Seguimiento automático</h2>
+                <p className="text-muted-foreground text-sm">
+                  Si el cliente deja de responder, el asistente puede escribirle
+                  una sola vez para retomar la consulta. Respeta el horario de
+                  atención y la ventana de 24 horas desde el último mensaje del
+                  cliente.
+                </p>
+              </div>
+              <FormField
+                control={form.control}
+                name="followUp.enabled"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between gap-3">
+                    <FormLabel>
+                      Activar seguimiento por falta de respuesta
+                    </FormLabel>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="followUp.delayMinutes"
+                render={({ field }) => (
+                  <FormItem className="max-w-xs">
+                    <FormLabel>Tiempo de espera (minutos)</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        disabled={!followUpEnabled}
+                        max={1380}
+                        min={1}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                        type="number"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Desde la última respuesta del bot. Los cambios se aplican
+                      a nuevos seguimientos.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="followUp.instructions"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Instrucciones para el seguimiento</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        {...field}
+                        disabled={!followUpEnabled}
+                        maxLength={2000}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      La IA adapta el mensaje al contexto. No insiste después de
+                      un rechazo o despedida ni durante la atención humana.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </section>
 
             <div className="flex justify-end">

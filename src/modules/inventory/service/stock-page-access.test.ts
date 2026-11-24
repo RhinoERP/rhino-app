@@ -9,12 +9,13 @@ const mocks = vi.hoisted(() => ({
   warehouses: vi.fn(),
   stock: vi.fn(),
   metrics: vi.fn(),
+  organizationLayout: vi.fn(),
 }));
 vi.mock("@/modules/organizations/service/module-access.service", () => ({
   guardOrganizationPermissionAccess: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
-  getOrganizationLayoutData: async () => ({ permissions: ["inventory.read"] }),
+  getOrganizationLayoutData: mocks.organizationLayout,
   getOrganizationBySlug: async () => ({ id: "org" }),
 }));
 vi.mock("./warehouse-stock.service", () => ({
@@ -68,6 +69,9 @@ describe("expected warehouse errors in the stock page", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.warehouses.mockResolvedValue([]);
+    mocks.organizationLayout.mockResolvedValue({
+      permissions: ["inventory.read"],
+    });
     mocks.stock.mockResolvedValue({ data: [], totalCount: 0 });
     mocks.metrics.mockResolvedValue(null);
   });
@@ -78,6 +82,46 @@ describe("expected warehouse errors in the stock page", () => {
     expect(page.props.message).toContain("inválido");
     expect(mocks.stock).not.toHaveBeenCalled();
     expect(mocks.metrics).not.toHaveBeenCalled();
+  });
+
+  it("keeps the deposit filter for a user with inventory and Mercado Libre access", async () => {
+    const marketWarehouseId = "33333333-3333-4333-8333-333333333333";
+    mocks.organizationLayout.mockResolvedValue({
+      permissions: ["inventory.read.all", "mercadolibre.access"],
+    });
+    mocks.warehouses.mockResolvedValue([
+      {
+        id: warehouseId,
+        name: "Depósito principal",
+        is_active: true,
+        is_default: true,
+      },
+      {
+        id: marketWarehouseId,
+        name: "MERCADO LIBRE",
+        is_active: true,
+        is_default: false,
+      },
+    ]);
+
+    const page = await renderPage("");
+    const warehouseScope = page.props.children[1];
+
+    expect(warehouseScope.type.name).toBe("StockWarehouseScope");
+    expect(warehouseScope.props.warehouses).toEqual([
+      {
+        id: warehouseId,
+        name: "Depósito principal",
+        is_active: true,
+        is_default: true,
+      },
+      {
+        id: marketWarehouseId,
+        name: "MERCADO LIBRE",
+        is_active: true,
+        is_default: false,
+      },
+    ]);
   });
 
   it("renders a recovery notice for removed or inaccessible warehouses", async () => {

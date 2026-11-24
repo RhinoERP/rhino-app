@@ -15,6 +15,17 @@ describe("commercial order intent guards", () => {
     "¿Cuánto sale?",
     "Quiero saber el precio",
     "Quisiera consultar el stock",
+    "No quiero comprar nada",
+    "No voy a comprar",
+    "No puedo comprar ahora",
+    "No queremos comprar",
+    "Quiero comprar, pero no ahora",
+    "No, no quiero comprar",
+    "Todavía no necesito comprar",
+    "No me armes un pedido",
+    "Nunca quiero comprar esto",
+    "No me mandes queso",
+    "Quiero comprar, pero no quiero nada por ahora",
   ])("does not open another order for %s", (text) => {
     expect(isPurchaseRequest(text)).toBe(false);
   });
@@ -23,6 +34,9 @@ describe("commercial order intent guards", () => {
     "Necesito comprar 2 quesos",
     "Dame un termo",
     "Armá un nuevo pedido",
+    "No tengo queso, quiero comprar dos",
+    "No quiero jamón, quiero queso",
+    "Quiero comprar, pero no puedo retirarlo",
   ])("recognizes a new purchase: %s", (text) => {
     expect(isPurchaseRequest(text)).toBe(true);
   });

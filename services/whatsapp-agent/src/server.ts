@@ -6,6 +6,7 @@ import {
   createCommercialJobProcessor,
   getMissingCommercialEnvironment,
 } from "./commercial-agent.js";
+import { consumeNextFollowUp } from "./follow-ups.js";
 import {
   claimJob,
   executeJob,
@@ -89,6 +90,20 @@ async function humanConsumer(): Promise<void> {
   }
 }
 
+async function followUpConsumer(): Promise<void> {
+  while (!stopped) {
+    let worked = false;
+    try {
+      worked = await consumeNextFollowUp(db);
+    } catch {
+      console.error("[whatsapp-agent] no se pudo completar un seguimiento");
+    }
+    if (!(worked || stopped)) {
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+}
+
 function startConsumers(type: JobType, count: number): void {
   for (let slot = 0; slot < count; slot += 1) {
     const task = consumer(type, slot);
@@ -157,6 +172,9 @@ async function startWhenDatabaseReady(): Promise<void> {
     return;
   }
   if (role !== "transcription") {
+    const followUpTask = followUpConsumer();
+    tasks.add(followUpTask);
+    followUpTask.finally(() => tasks.delete(followUpTask));
     const humanTask = humanConsumer();
     tasks.add(humanTask);
     humanTask.finally(() => tasks.delete(humanTask));

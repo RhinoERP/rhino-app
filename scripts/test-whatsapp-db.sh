@@ -20,7 +20,8 @@ for sql_file in \
   supabase/migrations/20261027000000_whatsapp_recurring_orders.sql \
   supabase/migrations/20261104000000_whatsapp_rpc_permissions.sql \
   scripts/fixtures/whatsapp/module-gates.sql \
-  scripts/fixtures/whatsapp/recurring-orders.sql; do
+  scripts/fixtures/whatsapp/recurring-orders.sql \
+  scripts/fixtures/whatsapp/agent-safety.sql; do
   docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -v ON_ERROR_STOP=1 < "$sql_file"
 done
 

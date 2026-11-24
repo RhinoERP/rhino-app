@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendNextWhatsAppHumanMessage, sendWhatsAppText } from "./meta-cloud";
+import {
+  sendNextWhatsAppHumanMessage,
+  sendPreparedWhatsAppFollowUp,
+  sendWhatsAppText,
+} from "./meta-cloud";
 
 const input = {
   integrationId: "integration",
@@ -565,4 +569,112 @@ it("does not dispatch a reserved agent response if the price list changed", asyn
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   }
+});
+
+describe("follow-up delivery preflight", () => {
+  const command = {
+    id: "follow-up-command",
+    integration_id: input.integrationId,
+    conversation_id: input.conversationId,
+    phone_number_id: input.phoneNumberId,
+    recipient: input.recipient,
+    text: "Texto persistido del seguimiento",
+    lease_token: "follow-up-lease",
+    lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+  beforeEach(() => {
+    vi.stubEnv("WHATSAPP_META_ACCESS_TOKEN", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ messages: [{ id: "wamid.follow-up" }] }),
+            { status: 200 }
+          )
+      )
+    );
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  function followUpDb(deadline: string | null, guardError: unknown = null) {
+    const rpc = vi.fn(async (name: string, _args: Record<string, unknown>) => ({
+      data: name === "guard_whatsapp_follow_up_dispatch" ? deadline : true,
+      error: name === "guard_whatsapp_follow_up_dispatch" ? guardError : null,
+    }));
+    return { db: { rpc } as unknown as SupabaseClient, rpc };
+  }
+
+  it("checks the follow-up identity and persists the known Meta ID", async () => {
+    const { db, rpc } = followUpDb(new Date(Date.now() + 60_000).toISOString());
+    await expect(sendPreparedWhatsAppFollowUp(db, command)).resolves.toBe(
+      "wamid.follow-up"
+    );
+    expect(rpc).toHaveBeenCalledWith("guard_whatsapp_follow_up_dispatch", {
+      p_command_id: command.id,
+      p_lease_token: command.lease_token,
+      p_phone_number_id: command.phone_number_id,
+      p_recipient: command.recipient,
+    });
+    expect(
+      JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).text.body
+    ).toBe(command.text);
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_command",
+      expect.objectContaining({
+        p_command_id: command.id,
+        p_status: "SENT",
+        p_external_message_id: "wamid.follow-up",
+      })
+    );
+  });
+
+  it("never contacts Meta when a reply or human intervention revoked authorization", async () => {
+    const { db } = followUpDb(null);
+    await expect(
+      sendPreparedWhatsAppFollowUp(db, command)
+    ).rejects.toMatchObject({ code: "DELIVERY_NOT_AUTHORIZED" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("checks the 24-hour deadline again immediately before HTTP", async () => {
+    const { db, rpc } = followUpDb(new Date(Date.now() - 1).toISOString());
+    await expect(
+      sendPreparedWhatsAppFollowUp(db, command)
+    ).rejects.toMatchObject({ code: "WINDOW_EXPIRED" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_command",
+      expect.objectContaining({ p_status: "WINDOW_EXPIRED" })
+    );
+  });
+
+  it("can retry an authorization database failure before HTTP", async () => {
+    const { db, rpc } = followUpDb(null, { message: "db unavailable" });
+    await expect(
+      sendPreparedWhatsAppFollowUp(db, command)
+    ).rejects.toMatchObject({ code: "DELIVERY_PREFLIGHT" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_command",
+      expect.objectContaining({ p_status: "PENDING" })
+    );
+  });
+
+  it("records a network timeout as uncertain and does not repeat the provider POST", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("timeout"));
+    const { db, rpc } = followUpDb(new Date(Date.now() + 60_000).toISOString());
+    await expect(
+      sendPreparedWhatsAppFollowUp(db, command)
+    ).rejects.toMatchObject({ code: "DELIVERY_UNKNOWN" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_whatsapp_command",
+      expect.objectContaining({ p_status: "UNKNOWN" })
+    );
+  });
 });

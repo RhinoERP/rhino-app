@@ -310,7 +310,7 @@ credenciales de producción y se complete una prueba real de punta a punta.
 
 - Confirmación autónoma de ventas.
 - Pagos, anticipos y medios de pago.
-- Seguimiento proactivo, campañas y plantillas de WhatsApp.
+- Campañas y plantillas de WhatsApp para contactar fuera de la ventana de atención.
 - Más canales y uso del agente por otros sistemas.
 
 ## Seguridad y operación
@@ -390,3 +390,33 @@ y se vinculan al mensaje saliente realmente registrado. Un sí para descartar no
 puede confirmar una compra. Una modificación condicionada nunca cuenta como sí.
 La bandeja muestra el carrito pendiente y las preventas vinculadas; el sandbox
 permite varias compras sin Reiniciar y ofrece reactivación manual del bot.
+
+## Seguimiento automático por falta de respuesta
+
+Configuración de WhatsApp permite habilitar por empresa un único seguimiento,
+con espera inicial de 30 minutos e instrucciones editables para la IA. También
+aplica a consultas sobre productos sin carrito ni cotización: no requiere detectar
+una duda explícita. La espera se cuenta desde una respuesta ordinaria del bot
+aceptada por Meta, y respeta el horario y la zona horaria configurados.
+
+Al vencer, la IA evalúa el intercambio y devuelve SEND o SKIP sin herramientas ni
+mutaciones comerciales. Omite cierres, rechazos, solicitudes de no contacto,
+compras finalizadas y contexto insuficiente. La base excluye atención humana,
+cambios de control o estado comercial y ventanas vencidas. El límite de 24 horas
+se calcula desde la evidencia del último mensaje real del cliente, no desde la
+respuesta del bot. Esta versión no envía plantillas fuera de esa ventana.
+
+`whatsapp_follow_ups` guarda la programación, lease, intentos, decisión, motivo y
+uso del modelo. Su comando en `whatsapp_outbox` tiene `follow_up_id` propio y no
+ocupa la respuesta ordinaria por mensaje entrante. El texto se persiste antes del
+HTTP y se conserva ante reintentos confirmadamente seguros. Una entrega incierta
+queda UNKNOWN y se revisa desde los controles existentes del inbox.
+
+Una respuesta del cliente, toma humana, pausa, cierre o desactivación cancela los
+pendientes; reactivar no los recupera. Una nueva respuesta del cliente puede
+iniciar otro ciclo. El propio seguimiento no programa otro. Cambiar la espera
+sólo afecta nuevas programaciones; las instrucciones se leen al ejecutar.
+
+El consumidor corre dentro del daemon comercial, comprueba su protocolo de base
+y vuelve a validar autorización, ventana y horario justo antes del envío. La
+migración no recupera mensajes históricos. El simulador no programa seguimientos.
