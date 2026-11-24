@@ -199,7 +199,8 @@ export function checkedSpec(access: ReportAccess, input: Partial<ReportSpec>) {
 /** Corre un reporte con los permisos y la cartera del usuario. */
 export async function runReport(
   access: ReportAccess,
-  input: Partial<ReportSpec>
+  input: Partial<ReportSpec>,
+  options: { withoutSession?: boolean } = {}
 ): Promise<ReportResult> {
   const { spec, dataset } = checkedSpec(access, input);
   const today = todayInArgentina();
@@ -208,7 +209,9 @@ export async function runReport(
     // Lectura con la clave de servicio: el permiso a la fuente ya se chequeó
     // arriba y cada consulta filtra por organización (y cartera si es vendedor).
     db: createAdminClient() as unknown as SupabaseClient,
-    userDb: (await createClient()) as unknown as SupabaseClient,
+    userDb: (options.withoutSession
+      ? createAdminClient()
+      : await createClient()) as unknown as SupabaseClient,
     organizationId: access.organizationId,
     orgSlug: access.orgSlug,
     today,

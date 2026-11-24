@@ -86,6 +86,14 @@ Se puede abrir una sección o ficha por URL: `?seccion=reportes|rhino|…`,
     listos; `ai-report.ts` pedido en palabras → spec y "Conclusiones de RHINO".
   - Reportes guardados: tabla `commercial_ai_saved_reports` (propios o
     compartidos). Export Excel/CSV/imprimir.
+  - **Reportes por WhatsApp** (`whatsapp-report.ts`, `report-delivery.service.ts`):
+    cada reporte guardado propio se programa (diario / semanal / mensual, hora
+    argentina) con el botón de WhatsApp de su tarjeta. Cron cada hora
+    `/api/cron/ia-comercial-reportes`. Se arma con los permisos del dueño (sin
+    sesión). Dentro de 24 h va el texto; fuera, la plantilla
+    `WHATSAPP_REPORT_TEMPLATE` ({{1}} nombre, {{2}} reporte, botón "Ver
+    reporte") y el texto queda en `whatsapp_pending_text` hasta que toca el
+    botón. El gerente también puede cargar su propio celular en Configuración.
   - UI interactiva (`components/commercial-ai/reports/*`): opciones plegadas
     (`builder-panel`), los números eligen la métrica del gráfico, tocar barra/
     porción/punto/fila abre la ficha y permite profundizar (`explore.ts`:
@@ -124,4 +132,5 @@ Ver `docs/compras-factura-pdf.md`.
 - Incluir en créditos al agente de WhatsApp de clientes.
 - Facturas PDF: faltan facturas B/C (IVA incluido), notas de crédito, fotos
   JPG/PNG, dólares e IVA mezclado por línea.
-- Producción: CRON_SECRET y plantilla de Meta.
+- Producción: CRON_SECRET y plantillas de Meta (resumen diario y
+  `WHATSAPP_REPORT_TEMPLATE` para reportes).

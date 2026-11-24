@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import {
   explainReport,
@@ -14,12 +15,20 @@ import {
   sanitizeSpec,
 } from "../reports/catalog";
 import {
+  type DeliveryOutcome,
+  deliverSavedReportNow,
+} from "../reports/report-delivery.service";
+import {
   availableDatasets,
   ReportError,
   type ReportResult,
   resolveReportAccess,
   runReport,
 } from "../reports/run-report";
+import {
+  type ReportSchedule,
+  sanitizeSchedule,
+} from "../reports/whatsapp-report";
 import { isAiEnabled } from "../service/ai-client";
 import { AiBudgetExceededError } from "../service/usage.service";
 
@@ -31,12 +40,16 @@ export type SavedReport = {
   mine: boolean;
   userName: string | null;
   updatedAt: string;
+  /** Solo en los propios: cuándo llega por WhatsApp. */
+  whatsapp: ReportSchedule | null;
 };
 
 export type ReportsHome = {
   datasets: string[];
   saved: SavedReport[];
   aiEnabled: boolean;
+  /** Tiene su WhatsApp cargado en IA Comercial (para recibir reportes). */
+  whatsappLinked: boolean;
 };
 
 type Fail = { success: false; error: string };
@@ -63,7 +76,9 @@ async function loadSaved(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("commercial_ai_saved_reports" as never)
-    .select("id, name, spec, shared, user_id, user_name, updated_at")
+    .select(
+      "id, name, spec, shared, user_id, user_name, updated_at, whatsapp_schedule"
+    )
     .eq("organization_id", orgId)
     .order("updated_at", { ascending: false })
     .limit(100);
@@ -80,6 +95,7 @@ async function loadSaved(
       user_id: string;
       user_name: string | null;
       updated_at: string;
+      whatsapp_schedule: unknown;
     }[]
   ).map((r) => ({
     id: r.id,
@@ -89,7 +105,20 @@ async function loadSaved(
     mine: r.user_id === userId,
     userName: r.user_name,
     updatedAt: r.updated_at,
+    whatsapp:
+      r.user_id === userId ? sanitizeSchedule(r.whatsapp_schedule) : null,
   }));
+}
+
+async function hasWhatsapp(orgId: string, userId: string): Promise<boolean> {
+  // Clave de servicio: org y usuario ya vienen validados por la sesión.
+  const { data } = await createAdminClient()
+    .from("commercial_ai_seller_phones" as never)
+    .select("user_id")
+    .eq("organization_id", orgId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return Boolean(data);
 }
 
 /** Lo que el usuario puede ver y sus reportes guardados. */
@@ -104,6 +133,7 @@ export async function getReportsHomeAction(
         datasets: availableDatasets(access).map((d) => d.id),
         saved: await loadSaved(access.organizationId, access.userId),
         aiEnabled: isAiEnabled(),
+        whatsappLinked: await hasWhatsapp(access.organizationId, access.userId),
       },
     };
   } catch (error) {
@@ -260,5 +290,77 @@ export async function deleteReportAction(
     };
   } catch (error) {
     return fail(error, "No pude borrar el reporte.");
+  }
+}
+
+/* ============ Por WhatsApp ============ */
+
+/** Programa (o quita, con `null`) el envío por WhatsApp de un reporte propio. */
+export async function scheduleReportAction(
+  orgSlug: string,
+  id: string,
+  schedule: ReportSchedule | null
+): Promise<{ success: true; saved: SavedReport[] } | Fail> {
+  if (!z.uuid().safeParse(id).success) {
+    return { success: false, error: "Reporte inválido" };
+  }
+  const clean = schedule ? sanitizeSchedule(schedule) : null;
+  if (schedule && !clean) {
+    return { success: false, error: "Elegí cada cuánto mandarlo." };
+  }
+  try {
+    const access = await resolveReportAccess(orgSlug);
+    if (clean && !(await hasWhatsapp(access.organizationId, access.userId))) {
+      throw new ReportError(
+        "Falta cargar tu celular en IA Comercial → Configuración → Celulares."
+      );
+    }
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("commercial_ai_saved_reports" as never)
+      .update({ whatsapp_schedule: clean } as never)
+      .eq("id", id)
+      .eq("user_id", access.userId);
+    if (error) {
+      throw new ReportError(`No se pudo guardar: ${error.message}`);
+    }
+    return {
+      success: true,
+      saved: await loadSaved(access.organizationId, access.userId),
+    };
+  } catch (error) {
+    return fail(error, "No pude programar el reporte.");
+  }
+}
+
+const NOW_MESSAGES: Record<DeliveryOutcome, string> = {
+  texto: "Listo, te llegó por WhatsApp.",
+  plantilla:
+    "Te mandamos un aviso por WhatsApp: tocá “Ver reporte” y te llega completo.",
+  sin_whatsapp:
+    "Falta cargar tu celular en IA Comercial → Configuración → Celulares.",
+  sin_creditos: "No quedan créditos de IA Comercial para mandar mensajes.",
+  sin_plantilla:
+    "Hace más de 24 h que no le escribís a RHINO por WhatsApp: mandale un “hola” y probá de nuevo.",
+};
+
+/** "Mandámelo ahora". */
+export async function sendReportNowAction(
+  orgSlug: string,
+  id: string
+): Promise<{ success: true; message: string; sent: boolean } | Fail> {
+  if (!z.uuid().safeParse(id).success) {
+    return { success: false, error: "Reporte inválido" };
+  }
+  try {
+    const access = await resolveReportAccess(orgSlug);
+    const outcome = await deliverSavedReportNow(id, access.userId);
+    return {
+      success: true,
+      message: NOW_MESSAGES[outcome],
+      sent: outcome === "texto" || outcome === "plantilla",
+    };
+  } catch (error) {
+    return fail(error, "No pude mandar el reporte.");
   }
 }

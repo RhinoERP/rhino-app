@@ -78,7 +78,7 @@ export function toWhatsAppText(markdown: string): string {
     .trim();
 }
 
-export type QuickCommand = "dia" | "ruta" | "pendientes" | "ayuda";
+export type QuickCommand = "dia" | "ruta" | "pendientes" | "ayuda" | "reporte";
 
 const COMMANDS: Record<string, QuickCommand> = {
   hoy: "dia",
@@ -94,6 +94,9 @@ const COMMANDS: Record<string, QuickCommand> = {
   tareas: "pendientes",
   recordatorios: "pendientes",
   ayuda: "ayuda",
+  "ver reporte": "reporte",
+  "ver reportes": "reporte",
+  "ver el reporte": "reporte",
   menu: "ayuda",
   hola: "ayuda",
 };

@@ -16,6 +16,7 @@ import {
   UsersIcon,
   UsersThreeIcon,
   WalletIcon,
+  WhatsappLogoIcon,
 } from "@phosphor-icons/react";
 import {
   useCallback,
@@ -73,12 +74,14 @@ import {
   REPORT_TEMPLATES,
   type ReportTemplate,
 } from "@/modules/commercial-ai/reports/templates";
+import { describeSchedule } from "@/modules/commercial-ai/reports/whatsapp-report";
 import { RhinoAvatar } from "../rhino/rhino-avatar";
 import { useCommercialAi } from "../shared";
 import { BuilderPanel } from "./builder-panel";
 import { ChartGlyph, GROUP_COLORS } from "./chart-glyph";
 import { ReportBody } from "./report-body";
 import { downloadCsv, downloadExcel } from "./report-format";
+import { WhatsappScheduleDialog } from "./whatsapp-schedule-dialog";
 
 const GROUP_ICONS: Record<DatasetGroup, Icon> = {
   Ventas: StorefrontIcon,
@@ -226,10 +229,12 @@ function SavedCard({
   saved,
   onOpen,
   onDelete,
+  onSchedule,
 }: {
   saved: SavedReport;
   onOpen: () => void;
   onDelete: () => void;
+  onSchedule: () => void;
 }) {
   const dataset = datasetById(saved.spec.dataset);
   return (
@@ -250,9 +255,31 @@ function SavedCard({
             {dataset?.label}
             {saved.mine ? "" : ` · de ${saved.userName ?? "otro usuario"}`}
           </span>
+          {saved.whatsapp ? (
+            <span className="block truncate text-emerald-700 text-xs dark:text-emerald-400">
+              WhatsApp · {describeSchedule(saved.whatsapp).toLowerCase()}
+            </span>
+          ) : null}
         </span>
       </button>
       {saved.shared ? <Badge variant="secondary">Compartido</Badge> : null}
+      {saved.mine ? (
+        <Button
+          aria-label={`Recibir ${saved.name} por WhatsApp`}
+          className={cn(
+            "size-8",
+            saved.whatsapp
+              ? "text-emerald-600"
+              : "opacity-60 hover:text-emerald-600 hover:opacity-100"
+          )}
+          onClick={onSchedule}
+          size="icon"
+          title="Recibir por WhatsApp"
+          variant="ghost"
+        >
+          <WhatsappLogoIcon weight={saved.whatsapp ? "fill" : "regular"} />
+        </Button>
+      ) : null}
       {saved.mine ? (
         <Button
           aria-label={`Borrar ${saved.name}`}
@@ -273,6 +300,7 @@ function Home({
   datasets,
   onOpen,
   onDelete,
+  onSchedule,
 }: {
   home: ReportsHome;
   datasets: Dataset[];
@@ -281,6 +309,7 @@ function Home({
     savedId?: string
   ) => void;
   onDelete: (saved: SavedReport) => void;
+  onSchedule: (saved: SavedReport) => void;
 }) {
   const [group, setGroup] = useState<DatasetGroup | "Todos">("Todos");
   // Sin reportes armados sobre métricas que no le corresponden (ej. stock valorizado).
@@ -312,6 +341,7 @@ function Home({
                     saved.mine ? saved.id : undefined
                   )
                 }
+                onSchedule={() => onSchedule(saved)}
                 saved={saved}
               />
             ))}
@@ -574,6 +604,7 @@ export function ReportsTab() {
   const [explaining, setExplaining] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [savedId, setSavedId] = useState<string | undefined>(undefined);
+  const [scheduling, setScheduling] = useState<SavedReport | null>(null);
   /** Reportes anteriores al profundizar, para volver. */
   const [trail, setTrail] = useState<ReportSpec[]>([]);
   const requestId = useRef(0);
@@ -648,6 +679,23 @@ export function ReportsTab() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
+
+  // Link del WhatsApp: ?seccion=reportes&reporte=ID abre ese reporte guardado.
+  const linkedOpened = useRef(false);
+  useEffect(() => {
+    if (!home || linkedOpened.current) {
+      return;
+    }
+    linkedOpened.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const target = home.saved.find((r) => r.id === params.get("reporte"));
+    if (target) {
+      open(
+        { ...target.spec, title: target.name },
+        target.mine ? target.id : undefined
+      );
+    }
+  });
 
   const ask = (question: string) => {
     startAsking(async () => {
@@ -808,8 +856,28 @@ export function ReportsTab() {
           )}
         </div>
       ) : (
-        <Home datasets={datasets} home={home} onDelete={remove} onOpen={open} />
+        <Home
+          datasets={datasets}
+          home={home}
+          onDelete={remove}
+          onOpen={open}
+          onSchedule={setScheduling}
+        />
       )}
+
+      <WhatsappScheduleDialog
+        linked={home.whatsappLinked}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            setScheduling(null);
+          }
+        }}
+        onSaved={(list) =>
+          setHome((prev) => (prev ? { ...prev, saved: list } : prev))
+        }
+        orgSlug={orgSlug}
+        saved={scheduling}
+      />
 
       <SaveDialog
         initialName={report?.title ?? ""}

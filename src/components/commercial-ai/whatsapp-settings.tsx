@@ -11,6 +11,25 @@ import { saveSellerPhoneAction } from "@/modules/commercial-ai/actions/whatsapp.
 import type { CommercialAiSeller } from "@/modules/commercial-ai/types";
 import { useCommercialAi } from "./shared";
 
+/**
+ * Vendedores y también el propio gerente: con su celular cargado le llegan
+ * los reportes programados y puede consultar a RHINO por WhatsApp.
+ */
+function phoneRows(
+  snapshot: ReturnType<typeof useCommercialAi>["snapshot"]
+): CommercialAiSeller[] {
+  if (snapshot.sellers.some((s) => s.id === snapshot.currentUserId)) {
+    return snapshot.sellers;
+  }
+  const me: CommercialAiSeller = {
+    id: snapshot.currentUserId,
+    name: `${snapshot.currentUserName} (vos)`,
+    shortName: snapshot.currentUserName.split(" ")[0] ?? "Vos",
+    color: "#64748b",
+  };
+  return [me, ...snapshot.sellers];
+}
+
 /** Configuración del asistente del vendedor por WhatsApp (solo gerentes). */
 export function WhatsAppSettings() {
   const { snapshot } = useCommercialAi();
@@ -60,15 +79,9 @@ export function WhatsAppSettings() {
             consulte los números de todo el equipo por WhatsApp.
           </p>
         </div>
-        {snapshot.sellers.length === 0 ? (
-          <p className="p-4 text-muted-foreground text-sm">
-            No hay vendedores en el equipo.
-          </p>
-        ) : (
-          snapshot.sellers.map((seller) => (
-            <SellerPhoneRow key={seller.id} seller={seller} />
-          ))
-        )}
+        {phoneRows(snapshot).map((seller) => (
+          <SellerPhoneRow key={seller.id} seller={seller} />
+        ))}
       </Card>
     </div>
   );

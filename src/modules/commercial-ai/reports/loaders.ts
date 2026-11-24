@@ -222,8 +222,35 @@ class Lookups {
       full_name: string | null;
       email: string | null;
     }[];
+    if (!rows.length) {
+      // Sin sesión (envíos programados): los nombres salen de la clave de servicio.
+      return this.loadMembersWithoutSession();
+    }
     return new Map(
       rows.map((m) => [m.user_id, m.full_name || m.email || "Usuario"])
+    );
+  }
+
+  private async loadMembersWithoutSession() {
+    const { data } = await this.ctx.db
+      .from("organization_members")
+      .select("user_id")
+      .eq("organization_id", this.ctx.organizationId);
+    const ids = (data ?? []).map((m) => m.user_id as string);
+    const users = await Promise.all(
+      ids.map((id) =>
+        this.ctx.db.auth.admin
+          .getUserById(id)
+          .then(({ data: u }) => u.user)
+          .catch(() => null)
+      )
+    );
+    return new Map(
+      ids.map((id, i) => {
+        const user = users[i];
+        const name = user?.user_metadata?.full_name as string | undefined;
+        return [id, name || user?.email || "Usuario"];
+      })
     );
   }
 }

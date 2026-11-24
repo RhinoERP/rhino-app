@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { isExplicitConfirmation } from "@/modules/whatsapp/server/confirmation";
 import type { WhatsAppInboundMessage } from "@/modules/whatsapp/server/meta-webhook";
 import { audioCost, WHATSAPP_MESSAGE_USD } from "../credits";
+import { takePendingReports } from "../reports/report-pending";
 import { isAiEnabled } from "../service/ai-client";
 import {
   type AssistantMessage,
@@ -174,16 +175,13 @@ export async function sendSellerText(
 
 const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Plantilla aprobada en Meta para escribirle primero al vendedor (fuera de las
- * 24 h desde su último mensaje). Debe tener un parámetro {{1}} con el nombre y
- * un botón de respuesta rápida "Ver mi día".
- */
-async function sendDigestTemplate(
+/** Manda una plantilla aprobada en Meta (para escribir fuera de las 24 h). */
+export async function sendSellerTemplate(
   target: SellerTarget,
-  firstName: string
+  template: string,
+  parameters: string[],
+  language = process.env.WHATSAPP_SELLER_DIGEST_LANGUAGE ?? "es_AR"
 ): Promise<boolean> {
-  const template = process.env.WHATSAPP_SELLER_DIGEST_TEMPLATE;
   const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
   if (!(template && token)) {
     return false;
@@ -203,20 +201,68 @@ async function sendDigestTemplate(
         type: "template",
         template: {
           name: template,
-          language: {
-            code: process.env.WHATSAPP_SELLER_DIGEST_LANGUAGE ?? "es_AR",
-          },
-          components: [
-            { type: "body", parameters: [{ type: "text", text: firstName }] },
-          ],
+          language: { code: language },
+          components: parameters.length
+            ? [
+                {
+                  type: "body",
+                  parameters: parameters.map((text) => ({
+                    type: "text",
+                    text,
+                  })),
+                },
+              ]
+            : [],
         },
       }),
     }
   );
-  if (response.ok) {
-    await chargeMessage(target);
+  if (!response.ok) {
+    console.warn(
+      `IA Comercial WhatsApp: Meta rechazó la plantilla ${template}`,
+      await metaErrorText(response)
+    );
+    return false;
   }
-  return response.ok;
+  await chargeMessage(target);
+  return true;
+}
+
+/** ¿El vendedor nos escribió en las últimas 24 h? (se le puede mandar texto libre) */
+export async function sellerInWindow(
+  admin: SupabaseClient,
+  target: SellerTarget
+): Promise<boolean> {
+  const { data: last } = await admin
+    .from("commercial_ai_whatsapp_messages")
+    .select("created_at")
+    .eq("organization_id", target.organizationId)
+    .eq("user_id", target.userId)
+    .eq("direction", "in")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return Boolean(
+    last &&
+      Date.now() - new Date(last.created_at as string).getTime() <
+        SESSION_WINDOW_MS
+  );
+}
+
+/**
+ * Plantilla aprobada en Meta para escribirle primero al vendedor (fuera de las
+ * 24 h desde su último mensaje). Debe tener un parámetro {{1}} con el nombre y
+ * un botón de respuesta rápida "Ver mi día".
+ */
+function sendDigestTemplate(
+  target: SellerTarget,
+  firstName: string
+): Promise<boolean> {
+  return sendSellerTemplate(
+    target,
+    process.env.WHATSAPP_SELLER_DIGEST_TEMPLATE ?? "",
+    [firstName]
+  );
 }
 
 export type DigestRunResult = {
@@ -247,20 +293,7 @@ async function sendDigestTo(
     return "skipped";
   }
   target.userName = snapshot.currentUserName;
-  const { data: last } = await admin
-    .from("commercial_ai_whatsapp_messages")
-    .select("created_at")
-    .eq("organization_id", target.organizationId)
-    .eq("user_id", target.userId)
-    .eq("direction", "in")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const inWindow =
-    last &&
-    Date.now() - new Date(last.created_at as string).getTime() <
-      SESSION_WINDOW_MS;
-  if (inWindow) {
+  if (await sellerInWindow(admin, target)) {
     await sendSellerText(target, dayDigest(snapshot));
     return "sentText";
   }
@@ -378,6 +411,11 @@ async function reply(
       return pendingText(snapshot);
     case "ayuda":
       return helpText(firstName);
+    case "reporte":
+      return (
+        (await takePendingReports(target.organizationId, target.userId)) ??
+        "No tenés reportes esperando. Los programás desde *Reportes* en la app 📊"
+      );
     default:
       break;
   }
