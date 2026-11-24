@@ -227,13 +227,6 @@ export default async function SalesPage({
               : "Consulta tus ventas registradas en la organización."}
           </p>
         </div>
-        {accessContext.canViewAll ? (
-          <Button asChild className="w-full md:w-auto" variant="outline">
-            <Link href={`/org/${orgSlug}/ventas/historicas`}>
-              Ventas históricas
-            </Link>
-          </Button>
-        ) : null}
         {accessContext.canManage && !isProductionEnabled ? (
           <Button asChild className="w-full md:w-auto">
             <Link href={`/org/${orgSlug}/preventa/nueva`}>

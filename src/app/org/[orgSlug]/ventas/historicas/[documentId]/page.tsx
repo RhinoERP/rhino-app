@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { getChessHistoricalSalesDetail } from "@/modules/sales/historical/service/chess-historical-sales.service";
+import {
+  type ChessHistoricalSalesLink,
+  getChessHistoricalSalesDetail,
+} from "@/modules/sales/historical/service/chess-historical-sales.service";
 
 type HistoricalSalesDetailPageProps = {
   params: Promise<{ orgSlug: string; documentId: string }>;
@@ -21,6 +24,10 @@ function formatAmount(value: number) {
     style: "currency",
     currency: "ARS",
   }).format(Number(value));
+}
+
+function formatOptionalAmount(value: number | null) {
+  return value == null ? "—" : formatAmount(value);
 }
 
 function documentClassLabel(documentClass: string, isFiscal: boolean) {
@@ -52,6 +59,61 @@ function settlementLabel(status: string, cancelled: boolean) {
   return "Saldo sin conciliar";
 }
 
+function RelatedDocumentLink({
+  orgSlug,
+  link,
+}: {
+  orgSlug: string;
+  link: ChessHistoricalSalesLink;
+}) {
+  const href = link.target_document_id
+    ? `/org/${orgSlug}/ventas/historicas/${link.target_document_id}`
+    : `/org/${orgSlug}/ventas/historicas/referencia?key=${encodeURIComponent(link.target_source_key)}`;
+  const printedNumber =
+    link.target_printed_number ||
+    `${link.target_document_code} ${link.target_letter} ${link.target_series}-${link.target_number}`;
+  const relationLabel =
+    link.relation_type === "CREDIT_NOTE_TO_DOCUMENT"
+      ? "Nota vinculada a:"
+      : "Relacionado con:";
+
+  return (
+    <li
+      className="flex flex-wrap items-center gap-x-2"
+      key={`${link.target_source_key}|${link.relation_type}`}
+    >
+      <span>{relationLabel}</span>
+      <Link className="font-medium text-primary hover:underline" href={href}>
+        {printedNumber}
+      </Link>
+      <span className="text-muted-foreground">
+        {link.target_document_name || "Referencia CHESS"}
+        {link.target_document_date
+          ? ` · ${formatDate(link.target_document_date)}`
+          : ""}
+      </span>
+      {link.related_lines.length > 0 ? (
+        <details className="basis-full pl-4 text-muted-foreground">
+          <summary className="cursor-pointer">
+            {link.related_lines.length} artículos/líneas relacionados
+          </summary>
+          <ul className="mt-1 space-y-1">
+            {link.related_lines.map((line) => (
+              <li
+                key={`${line.line_number ?? ""}-${line.product_chess_code ?? ""}-${line.description ?? ""}`}
+              >
+                {line.product_chess_code ? `${line.product_chess_code} · ` : ""}
+                {line.description || "Línea sin descripción"}
+                {line.line_number ? ` (línea ${line.line_number})` : ""}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </li>
+  );
+}
+
 export default async function HistoricalSalesDetailPage({
   params,
 }: HistoricalSalesDetailPageProps) {
@@ -67,6 +129,22 @@ export default async function HistoricalSalesDetailPage({
     document.customer?.fantasy_name ||
     document.customer?.business_name ||
     `Cliente CHESS ${document.customer_chess_code ?? "sin vincular"}`;
+  const documentAmounts = [
+    ["Bruto", document.gross_amount],
+    ["Bonificación", document.discount_amount],
+    ["Neto gravado", document.net_taxable_amount],
+    ["Neto otros", document.net_other_amount],
+    ["No gravado", document.non_taxable_amount],
+    ["Exento", document.exempt_amount],
+    ["IVA 1", document.vat_1_amount],
+    ["IVA 1 fiscal", document.vat_1_fiscal_amount],
+    ["IVA 2", document.vat_2_amount],
+    ["Percepción 2,12", document.perception_212_amount],
+    ["Percepción 3,337", document.perception_3337_amount],
+    ["Percepción IIBB", document.perception_iibb_amount],
+    ["Impuestos internos", document.internal_tax_amount],
+    ["Detracción", document.detraccion_amount],
+  ] as const;
 
   return (
     <main className="space-y-6">
@@ -134,37 +212,42 @@ export default async function HistoricalSalesDetailPage({
         </div>
       </section>
 
+      <section className="space-y-3 rounded-lg border bg-card p-4">
+        <div>
+          <h2 className="font-semibold">Impuestos y descuentos</h2>
+          <p className="text-muted-foreground text-sm">
+            Desglose original informado por CHESS. El importe con signo
+            comercial se muestra en el resumen del comprobante.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {documentAmounts.map(([label, value]) => (
+            <div className="rounded-md bg-muted/30 p-3" key={label}>
+              <p className="text-muted-foreground text-xs">{label}</p>
+              <p className="font-medium tabular-nums">
+                {formatOptionalAmount(value)}
+              </p>
+            </div>
+          ))}
+          <div className="rounded-md bg-muted/30 p-3">
+            <p className="text-muted-foreground text-xs">Total</p>
+            <p className="font-medium tabular-nums">
+              {formatAmount(Number(document.total_amount))}
+            </p>
+          </div>
+        </div>
+      </section>
+
       {links.length > 0 ? (
         <section className="space-y-3 rounded-lg border bg-card p-4">
           <h2 className="font-semibold">Comprobantes relacionados</h2>
           <ul className="space-y-2 text-sm">
             {links.map((link) => (
-              <li className="flex flex-wrap items-center gap-x-2" key={link.id}>
-                <span>
-                  {link.relation_type === "CREDIT_NOTE_TO_DOCUMENT"
-                    ? "Nota vinculada a:"
-                    : "Relacionado con:"}
-                </span>
-                {link.target_document_id ? (
-                  <Link
-                    className="font-medium text-primary hover:underline"
-                    href={`/org/${orgSlug}/ventas/historicas/${link.target_document_id}`}
-                  >
-                    {link.target_document_code} {link.target_letter}{" "}
-                    {link.target_series}-{link.target_number}
-                  </Link>
-                ) : (
-                  <span className="font-medium">
-                    {link.target_document_code} {link.target_letter}{" "}
-                    {link.target_series}-{link.target_number}
-                  </span>
-                )}
-                {link.target_description ? (
-                  <span className="text-muted-foreground">
-                    · {link.target_product_chess_code} {link.target_description}
-                  </span>
-                ) : null}
-              </li>
+              <RelatedDocumentLink
+                key={`${link.target_source_key}|${link.relation_type}`}
+                link={link}
+                orgSlug={orgSlug}
+              />
             ))}
           </ul>
         </section>
@@ -200,6 +283,16 @@ export default async function HistoricalSalesDetailPage({
                 <th className="px-4 py-3 text-right font-medium">
                   Precio CHESS
                 </th>
+                <th className="px-4 py-3 text-right font-medium">Bruto</th>
+                <th className="px-4 py-3 text-right font-medium">Bonif. %</th>
+                <th className="px-4 py-3 text-right font-medium">
+                  Bonificación
+                </th>
+                <th className="px-4 py-3 text-right font-medium">
+                  Neto gravado
+                </th>
+                <th className="px-4 py-3 text-right font-medium">IVA 1</th>
+                <th className="px-4 py-3 text-right font-medium">IVA 2</th>
                 <th className="px-4 py-3 text-right font-medium">Importe</th>
               </tr>
             </thead>
@@ -226,6 +319,46 @@ export default async function HistoricalSalesDetailPage({
                         unidades por bulto
                       </p>
                     ) : null}
+                    <details className="mt-1 text-muted-foreground text-xs">
+                      <summary className="cursor-pointer">
+                        Otros impuestos y cargos
+                      </summary>
+                      <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1">
+                        <span>
+                          No gravado:{" "}
+                          {formatOptionalAmount(item.non_taxable_amount)}
+                        </span>
+                        <span>
+                          Exento: {formatOptionalAmount(item.exempt_amount)}
+                        </span>
+                        <span>
+                          Percepción 2,12:{" "}
+                          {formatOptionalAmount(item.perception_212_amount)}
+                        </span>
+                        <span>
+                          Percepción 3,337:{" "}
+                          {formatOptionalAmount(item.perception_3337_amount)}
+                        </span>
+                        <span>
+                          IIBB:{" "}
+                          {formatOptionalAmount(item.perception_iibb_amount)}
+                        </span>
+                        <span>
+                          Impuestos internos:{" "}
+                          {formatOptionalAmount(item.internal_tax_amount)}
+                        </span>
+                        <span>
+                          Detracción:{" "}
+                          {formatOptionalAmount(item.detraccion_amount)}
+                        </span>
+                        <span>
+                          Flete: {formatOptionalAmount(item.freight_amount)}
+                        </span>
+                        <span>
+                          Precio final: {formatOptionalAmount(item.final_price)}
+                        </span>
+                      </div>
+                    </details>
                     {item.cancelled ? (
                       <p className="text-amber-700 text-xs">
                         Línea anulada en CHESS
@@ -254,6 +387,24 @@ export default async function HistoricalSalesDetailPage({
                     {formatAmount(Number(item.unit_price))}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
+                    {formatOptionalAmount(item.gross_amount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatAmount(Number(item.discount_percentage))}%
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatAmount(Number(item.discount_amount))}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatAmount(Number(item.net_amount))}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatAmount(Number(item.tax_iva_1))}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatAmount(Number(item.tax_iva_2))}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
                     {formatAmount(
                       Number(item.total_amount) * document.revenue_sign
                     )}
@@ -264,7 +415,7 @@ export default async function HistoricalSalesDetailPage({
                 <tr>
                   <td
                     className="px-4 py-8 text-center text-muted-foreground"
-                    colSpan={7}
+                    colSpan={13}
                   >
                     Este comprobante no tiene líneas de artículos disponibles.
                   </td>
