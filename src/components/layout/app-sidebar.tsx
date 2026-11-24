@@ -4,6 +4,7 @@ import {
   BookOpenIcon,
   ChartLineUpIcon,
   ClipboardTextIcon,
+  ClockCounterClockwiseIcon,
   CurrencyDollarSimpleIcon,
   HandCoinsIcon,
   HandshakeIcon,
@@ -198,6 +199,17 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/notas-de-debito`,
           icon: <ReceiptIcon weight="duotone" />,
           requiredPermission: "debitnotes.read",
+        },
+      ],
+    },
+    {
+      title: "Históricos",
+      items: [
+        {
+          title: "Ventas",
+          url: `/org/${orgSlug}/ventas/historicas`,
+          icon: <ClockCounterClockwiseIcon weight="duotone" />,
+          requiredPermission: ["sales.read.all", "sales.manage.all"],
         },
       ],
     },

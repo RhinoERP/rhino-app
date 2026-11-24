@@ -44,13 +44,15 @@ export default async function HistoricalSalesPage({
   const dateTo = query.hasta?.trim() || undefined;
   const documentCode = query.tipo?.trim() || undefined;
 
-  const [result, productMetrics] = await Promise.all([
+  const [pageResult, productMetrics] = await Promise.all([
     getChessHistoricalSalesPage(orgSlug, {
       ...pagination,
       documentCode,
       dateFrom,
       dateTo,
-    }),
+    })
+      .then((data) => ({ data }))
+      .catch((error: unknown) => ({ error })),
     getChessHistoricalSalesProductMetrics(
       orgSlug,
       dateFrom || "1900-01-01",
@@ -59,9 +61,27 @@ export default async function HistoricalSalesPage({
     ),
   ]);
 
-  if (!(result && productMetrics)) {
+  const searchFailed =
+    "error" in pageResult && Boolean(pagination.search?.trim());
+  if (searchFailed) {
+    console.error(
+      "No se pudo buscar en ventas históricas CHESS:",
+      pageResult.error
+    );
+  } else if ("error" in pageResult) {
+    throw pageResult.error;
+  }
+
+  const result = "data" in pageResult ? pageResult.data : null;
+  if (!(productMetrics && (searchFailed || result))) {
     notFound();
   }
+  const pageData = result ?? {
+    data: [],
+    totalCount: 0,
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+  };
 
   return (
     <main className="space-y-6">
@@ -140,18 +160,36 @@ export default async function HistoricalSalesPage({
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-center justify-between text-muted-foreground text-sm">
-          <span>{result.totalCount.toLocaleString("es-AR")} comprobantes</span>
-          <span>Listado paginado en servidor</span>
-        </div>
-        <HistoricalSalesDataTable
-          data={result.data}
-          orgSlug={orgSlug}
-          pageCount={Math.max(
-            1,
-            Math.ceil(result.totalCount / result.pageSize)
-          )}
-        />
+        {searchFailed ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
+            role="alert"
+          >
+            <p className="text-sm">
+              No pudimos realizar la búsqueda. Probá con otro nombre o número de
+              comprobante.
+            </p>
+            <Button asChild variant="outline">
+              <Link href={`/org/${orgSlug}/ventas/historicas`}>
+                Limpiar búsqueda
+              </Link>
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="text-muted-foreground text-sm">
+              {pageData.totalCount.toLocaleString("es-AR")} comprobantes
+            </div>
+            <HistoricalSalesDataTable
+              data={pageData.data}
+              orgSlug={orgSlug}
+              pageCount={Math.max(
+                1,
+                Math.ceil(pageData.totalCount / pageData.pageSize)
+              )}
+            />
+          </>
+        )}
       </section>
     </main>
   );

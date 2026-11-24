@@ -6,6 +6,11 @@ import {
   type ChessHistoricalDocumentLink,
   groupChessHistoricalLinks,
 } from "./chess-historical-link-grouping";
+import {
+  buildHistoricalTextSearchConditions,
+  normalizeHistoricalSearch,
+  quotePostgrestFilterValue,
+} from "./chess-historical-search";
 
 const DOCUMENT_SELECT = `
   id,
@@ -42,7 +47,6 @@ const DOCUMENT_SELECT = `
   customer:customers(business_name,fantasy_name)
 `;
 
-const NON_FILTER_CHARS = /[%,()]/g;
 const NUMERIC_DOCUMENT_NUMBER = /^\d+$/;
 
 export type ChessHistoricalSalesFilters = {
@@ -133,15 +137,12 @@ async function applyHistoricalSearch(
   orgId: string,
   rawSearch: string
 ) {
-  const search = rawSearch.trim().replace(NON_FILTER_CHARS, " ").trim();
+  const search = normalizeHistoricalSearch(rawSearch);
   if (!search) {
     return query;
   }
 
-  const conditions = [
-    `printed_number.ilike.%${search}%`,
-    `document_code.ilike.%${search}%`,
-  ];
+  const conditions = buildHistoricalTextSearchConditions(search);
   if (NUMERIC_DOCUMENT_NUMBER.test(search)) {
     conditions.push(`document_number.eq.${Number.parseInt(search, 10)}`);
   }
@@ -150,7 +151,9 @@ async function applyHistoricalSearch(
     .from("customers")
     .select("id")
     .eq("organization_id", orgId)
-    .or(`business_name.ilike.%${search}%,fantasy_name.ilike.%${search}%`)
+    .or(
+      `business_name.ilike.${quotePostgrestFilterValue(`%${search}%`)},fantasy_name.ilike.${quotePostgrestFilterValue(`%${search}%`)}`
+    )
     .limit(200);
   if (error) {
     throw new Error(
