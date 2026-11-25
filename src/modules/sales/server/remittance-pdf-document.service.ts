@@ -1,11 +1,14 @@
 import "server-only";
 
+import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { generateRemittanceHTML } from "../service/remittance-generator.service";
 import { getSalesOrderById } from "../service/sales.service";
 import { renderRemittancePdfDocument } from "./remittance-pdf-renderer.service";
+import { findSaleFiscalRemittance } from "./sale-fiscal-remittance.service";
 
 type RemittancePdfDocument = {
   filename: string;
@@ -27,6 +30,23 @@ export async function generateRemittancePdfDocument(params: {
 
   if (!sale) {
     throw new Error("Venta no encontrada");
+  }
+
+  if (params.type === "REMITO_FINAL" && organization) {
+    const fiscal = await findSaleFiscalRemittance(
+      params.orgSlug,
+      params.saleId,
+      organization.id
+    );
+    if (fiscal) {
+      const html = generateRemittanceHTML(fiscal);
+      return {
+        html,
+        content: await renderHtmlToPdfBuffer(html),
+        filename: `Remito_${fiscal.documentNumber}.pdf`,
+        saleNumber: sale.sale_number ?? null,
+      };
+    }
   }
 
   const singlePageDuplicate =

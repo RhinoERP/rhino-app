@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { ensure } from "../utils/with-permission-guard";
+import { getOrganizationSettings } from "./get-organization-settings.action";
 
 const remittanceSettingsSchema = z.object({
   autoEnabled: z.boolean(),
@@ -25,6 +27,7 @@ export async function updateRemittanceSettings(
   settings: RemittanceSettingsInput
 ): Promise<ActionResult> {
   try {
+    await ensure("organization.admin", orgSlug);
     const validated = remittanceSettingsSchema.parse(settings);
 
     const supabase = await createClient();
@@ -53,7 +56,14 @@ export async function updateRemittanceSettings(
       remittance_prefix: validated.prefix,
     };
 
-    if (validated.startingNumber !== undefined) {
+    const fiscal = await getOrganizationSettings(orgSlug);
+    if (!fiscal.success) {
+      throw new Error("No se pudo verificar la configuración fiscal.");
+    }
+    if (
+      validated.startingNumber !== undefined &&
+      !fiscal.data?.remittance_fiscal_enabled
+    ) {
       updateData.remittance_last_number = validated.startingNumber;
     }
 

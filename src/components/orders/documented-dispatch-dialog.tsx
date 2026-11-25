@@ -3,11 +3,13 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useEffect, useId, useRef, useState } from "react";
+import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { CAI_ERROR, CAI_PRIMARY_ACTION } from "@/components/arca/cai-ui-styles";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -27,8 +29,13 @@ import {
 } from "@/modules/orders/actions/prepare-order-remittances.action";
 
 const integerPattern = /^\d+$/;
+const transportCuitPattern = /^\d{11}$/;
 const amountPattern = /^\d+(?:[.,]\d{1,2})?$/;
 const fieldsSchema = z.object({
+  transportThirdParty: z.boolean(),
+  transportName: z.string().trim(),
+  transportCuit: z.string().trim(),
+  transportAddress: z.string().trim(),
   documents: z
     .array(
       z.object({
@@ -51,6 +58,30 @@ const fieldsSchema = z.object({
 });
 type Fields = z.infer<typeof fieldsSchema>;
 
+function fiscalTransport(values: Fields, fiscal: boolean) {
+  if (!(fiscal && values.transportThirdParty)) {
+    return { data: undefined };
+  }
+  if (
+    !(
+      values.transportName &&
+      values.transportAddress &&
+      transportCuitPattern.test(values.transportCuit)
+    )
+  ) {
+    return {
+      error: "Completá nombre, CUIT sin guiones y domicilio del transportista.",
+    };
+  }
+  return {
+    data: {
+      name: values.transportName,
+      cuit: values.transportCuit,
+      address: values.transportAddress,
+    },
+  };
+}
+
 export function DocumentedDispatchDialog({
   orgSlug,
   childOrderIds,
@@ -61,6 +92,7 @@ export function DocumentedDispatchDialog({
   onSuccess?: () => void;
 }) {
   const router = useRouter();
+  const transportId = useId();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -68,11 +100,23 @@ export function DocumentedDispatchDialog({
   const [attempted, setAttempted] = useState(false);
   const [plan, setPlan] = useState<PreparedOrderRemittances | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (error) {
+      errorRef.current?.focus();
+    }
+  }, [error]);
   const requestKey = useRef("");
   const pendingRef = useRef(false);
   const form = useForm<Fields>({
     resolver: zodResolver(fieldsSchema),
-    defaultValues: { documents: [] },
+    defaultValues: {
+      documents: [],
+      transportThirdParty: false,
+      transportName: "",
+      transportCuit: "",
+      transportAddress: "",
+    },
   });
   const { fields } = useFieldArray({
     control: form.control,
@@ -97,6 +141,10 @@ export function DocumentedDispatchDialog({
       }
       setPlan(result.data);
       form.reset({
+        transportThirdParty: !!result.data.carrierName,
+        transportName: result.data.carrierName ?? "",
+        transportCuit: "",
+        transportAddress: "",
         documents: result.data.documents.map((document) => ({
           number: "",
           packageCount: "",
@@ -123,6 +171,11 @@ export function DocumentedDispatchDialog({
       setError("Completá el número de cada remito.");
       return;
     }
+    const transport = fiscalTransport(values, !!plan.fiscalAuthorization);
+    if (transport.error) {
+      setError(transport.error);
+      return;
+    }
     pendingRef.current = true;
     setPending(true);
     setAttempted(true);
@@ -134,6 +187,7 @@ export function DocumentedDispatchDialog({
         sourceFingerprint: plan.sourceFingerprint,
         idempotencyKey: requestKey.current,
         automaticNumbering: plan.automaticNumbering,
+        transport: transport.data,
         documents: values.documents.map((document) => ({
           number: document.number,
           packageCount:
@@ -179,6 +233,7 @@ export function DocumentedDispatchDialog({
   return (
     <>
       <Button
+        className={CAI_PRIMARY_ACTION}
         disabled={loading || pending || !childOrderIds.length}
         onClick={prepare}
         size="sm"
@@ -209,9 +264,23 @@ export function DocumentedDispatchDialog({
             </div>
           )}
           {error && (
-            <p className="text-destructive text-sm" role="alert">
+            <p className={CAI_ERROR} ref={errorRef} role="alert" tabIndex={-1}>
               {error}
             </p>
+          )}
+          {!(loading || plan) && (
+            <DialogFooter>
+              <Button
+                onClick={() => setOpen(false)}
+                type="button"
+                variant="outline"
+              >
+                Cerrar
+              </Button>
+              <Button onClick={prepare} type="button" variant="outline">
+                Reintentar preparación
+              </Button>
+            </DialogFooter>
           )}
           {plan && (
             <form className="space-y-4" onSubmit={submit}>
@@ -221,6 +290,83 @@ export function DocumentedDispatchDialog({
                   ? "Los números definitivos se asignan al confirmar."
                   : "Indicá el número preimpreso de cada hoja."}
               </p>
+              {plan.fiscalAuthorization && (
+                <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                  <p className="font-medium">
+                    Remitos R con CAI {plan.fiscalAuthorization.cai}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Punto de venta {plan.fiscalAuthorization.pointOfSale} ·
+                    Vencimiento{" "}
+                    {plan.fiscalAuthorization.expiresAt
+                      .split("-")
+                      .reverse()
+                      .join("/")}
+                    . Los números se asignan al confirmar y se conservan al
+                    reimprimir.
+                  </p>
+                </div>
+              )}
+              {plan.fiscalAuthorization && (
+                <fieldset
+                  className="space-y-3 rounded-md border p-3"
+                  disabled={pending || attempted}
+                >
+                  <div className="flex items-center gap-2">
+                    <Controller
+                      control={form.control}
+                      name="transportThirdParty"
+                      render={({ field }) => (
+                        <Checkbox
+                          checked={field.value}
+                          id={`${transportId}-third-party`}
+                          onCheckedChange={(checked) =>
+                            field.onChange(checked === true)
+                          }
+                        />
+                      )}
+                    />
+                    <Label htmlFor={`${transportId}-third-party`}>
+                      Interviene un transporte de terceros
+                    </Label>
+                  </div>
+                  {form.watch("transportThirdParty") && (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor={`${transportId}-name`}>
+                          Transportista
+                        </Label>
+                        <Input
+                          id={`${transportId}-name`}
+                          maxLength={200}
+                          {...form.register("transportName")}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`${transportId}-cuit`}>
+                          CUIT sin guiones
+                        </Label>
+                        <Input
+                          id={`${transportId}-cuit`}
+                          inputMode="numeric"
+                          maxLength={11}
+                          {...form.register("transportCuit")}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`${transportId}-address`}>
+                          Domicilio
+                        </Label>
+                        <Input
+                          id={`${transportId}-address`}
+                          maxLength={300}
+                          {...form.register("transportAddress")}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </fieldset>
+              )}
               {fields.map((field, index) => (
                 <section
                   className="space-y-3 rounded-md border p-3"
@@ -247,13 +393,21 @@ export function DocumentedDispatchDialog({
                     <div>
                       <Label htmlFor={`${field.id}-packages`}>Bultos</Label>
                       <Input
+                        aria-describedby={`${field.id}-packages-error`}
+                        aria-invalid={
+                          !!form.formState.errors.documents?.[index]
+                            ?.packageCount
+                        }
                         id={`${field.id}-packages`}
                         inputMode="numeric"
                         placeholder="Sin especificar"
                         readOnly={attempted}
                         {...form.register(`documents.${index}.packageCount`)}
                       />
-                      <p className="text-destructive text-xs">
+                      <p
+                        className={CAI_ERROR}
+                        id={`${field.id}-packages-error`}
+                      >
                         {
                           form.formState.errors.documents?.[index]?.packageCount
                             ?.message
@@ -265,13 +419,21 @@ export function DocumentedDispatchDialog({
                         Valor declarado
                       </Label>
                       <Input
+                        aria-describedby={`${field.id}-declared-error`}
+                        aria-invalid={
+                          !!form.formState.errors.documents?.[index]
+                            ?.declaredValue
+                        }
                         id={`${field.id}-declared`}
                         inputMode="decimal"
                         placeholder="Sin especificar"
                         readOnly={attempted}
                         {...form.register(`documents.${index}.declaredValue`)}
                       />
-                      <p className="text-destructive text-xs">
+                      <p
+                        className={CAI_ERROR}
+                        id={`${field.id}-declared-error`}
+                      >
                         {
                           form.formState.errors.documents?.[index]
                             ?.declaredValue?.message
@@ -315,7 +477,11 @@ export function DocumentedDispatchDialog({
                 >
                   Cerrar
                 </Button>
-                <Button disabled={pending} type="submit">
+                <Button
+                  className={CAI_PRIMARY_ACTION}
+                  disabled={pending}
+                  type="submit"
+                >
                   {pending ? "Confirmando…" : confirmationLabel}
                 </Button>
               </DialogFooter>

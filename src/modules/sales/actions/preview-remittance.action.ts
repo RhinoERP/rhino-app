@@ -6,6 +6,7 @@ import { getRemittanceFinalVisibility } from "@/modules/organizations/types/orga
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { findSaleFiscalRemittance } from "../server/sale-fiscal-remittance.service";
 import {
   buildRemittanceFromSale,
   generateRemittanceHTML,
@@ -35,6 +36,17 @@ export async function previewRemittanceAction(
 
     if (!sale) {
       return { success: false, error: "Venta no encontrada" };
+    }
+
+    if (type === "REMITO_FINAL" && organization) {
+      const fiscal = await findSaleFiscalRemittance(
+        orgSlug,
+        saleId,
+        organization.id
+      );
+      if (fiscal) {
+        return { success: true, html: generateRemittanceHTML(fiscal) };
+      }
     }
 
     const singlePageDuplicate =

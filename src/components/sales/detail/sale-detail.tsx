@@ -2500,7 +2500,10 @@ export function SaleDetail({
                 : "Marcar como entregada"}
             </Button>
           ) : null}
-          {canManageSale && isConfirmedSale && !relatedOrder ? (
+          {canManageSale &&
+          isConfirmedSale &&
+          !relatedOrder &&
+          !orgSettings?.remittance_fiscal_enabled ? (
             <Button
               disabled={isDispatching || isProductionLocked}
               onClick={() => setIsDispatchDialogOpen(true)}
