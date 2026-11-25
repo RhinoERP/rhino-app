@@ -132,7 +132,13 @@ export async function sellerTargetFor(
 const TRAILING_SLASH = /\/$/;
 
 function reportLink(slug: string, reportId: string): string | null {
+  // En una rama de prueba, el link va a esa misma versión (no a producción).
+  const branchUrl =
+    process.env.VERCEL_ENV === "preview" && process.env.VERCEL_BRANCH_URL
+      ? `https://${process.env.VERCEL_BRANCH_URL}`
+      : null;
   const base =
+    branchUrl ??
     process.env.NEXT_PUBLIC_APP_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
   return base
