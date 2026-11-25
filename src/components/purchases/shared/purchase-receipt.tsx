@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getPricePerIndividualUnit } from "@/modules/inventory/utils/case-units";
 import {
   getReceiptVariantsAction,
   getReceiptWarehousesAction,
@@ -73,6 +74,7 @@ export type ReceivedItemForm = {
   orderedUnitQuantity: number;
   unitCost: number;
   unit_of_measure?: string | null;
+  units_per_box?: number | null;
   weight_per_unit?: number | null;
   has_variants?: boolean;
   variant_stocks?: Record<string, Record<string, number>> | null;
@@ -92,6 +94,7 @@ const receiptFormSchema = z.object({
       orderedUnitQuantity: z.number().nonnegative(),
       unitCost: z.number().nonnegative(),
       unit_of_measure: z.string().nullable().optional(),
+      units_per_box: z.number().nullable().optional(),
       weight_per_unit: z.number().nullable().optional(),
       has_variants: z.boolean().optional(),
       variant_stocks: z
@@ -118,6 +121,7 @@ type PurchaseReceiptProps = {
     items: (PurchaseOrderItem & {
       product_name?: string;
       unit_of_measure?: string | null;
+      units_per_box?: number | null;
       weight_per_unit?: number | null;
       has_variants?: boolean | null;
       tax_override?: ItemTaxInput[] | null;
@@ -185,6 +189,7 @@ function buildInitialItems(
       orderedUnitQuantity: pendingUnitQuantity,
       unitCost: item.unit_cost ?? 0,
       unit_of_measure: item.unit_of_measure ?? null,
+      units_per_box: item.units_per_box ?? null,
       weight_per_unit: item.weight_per_unit ?? null,
       has_variants: item.has_variants ?? false,
       variant_stocks: pendingVariants,
@@ -577,8 +582,15 @@ export function PurchaseReceipt({
       received: true,
       orderedQuantity: 0,
       orderedUnitQuantity: 0,
-      unitCost: product.cost_price ?? 0,
+      unitCost:
+        product.unit_of_measure === "CAJA" && product.units_per_box
+          ? getPricePerIndividualUnit(
+              product.cost_price ?? 0,
+              product.units_per_box
+            )
+          : (product.cost_price ?? 0),
       unit_of_measure: product.unit_of_measure,
+      units_per_box: product.units_per_box ?? null,
       has_variants: product.has_variants,
       variant_stocks: product.has_variants ? {} : null,
       lots: product.has_variants

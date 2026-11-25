@@ -5,6 +5,7 @@ import type { EventoVentaPos } from "@/modules/accounting/types";
 import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import type { ArcaSaleInvoiceResult } from "@/modules/arca/types";
+import { getTransactionProductUnits } from "@/modules/inventory/service/transaction-units.service";
 import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
@@ -121,6 +122,7 @@ type NormalizedPosSaleItem = {
   isWholeUnit: boolean;
   effectiveQuantity: number;
   unitPrice: number;
+  unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"];
   discountAmount: number;
   subtotal: number;
   lotId: string | null;
@@ -855,7 +857,9 @@ function normalizePosItem(
     weightQuantity: weightQuantity ? truncateQuantity(weightQuantity) : null,
     isWholeUnit: item.isWholeUnit ?? false,
     effectiveQuantity: truncateQuantity(effectiveQuantity),
-    unitPrice: truncateMoney(unitPrice),
+    unitPrice:
+      item.unitOfMeasure === "CAJA" ? unitPrice : truncateMoney(unitPrice),
+    unitOfMeasure: item.unitOfMeasure,
     discountAmount: safeDiscount,
     subtotal,
     lotId: item.lotId ?? null,
@@ -1281,6 +1285,19 @@ async function buildStockAdjustmentContext(params: {
 
     if (!product) {
       throw new Error("No se pudo validar un producto del carrito.");
+    }
+    if (item.unitOfMeasure && item.unitOfMeasure !== product.unitOfMeasure) {
+      throw new Error(
+        `La unidad del producto ${product.name} cambió. Actualiza el carrito.`
+      );
+    }
+    if (
+      product.unitOfMeasure === "CAJA" &&
+      (!Number.isSafeInteger(item.quantity) || item.weightQuantity !== null)
+    ) {
+      throw new Error(
+        `La cantidad de ${product.name} debe ingresarse en cajas y unidades enteras.`
+      );
     }
 
     const variant = item.productVariantId
@@ -2216,7 +2233,7 @@ export async function searchPosProductsForTerminal(params: {
       supabase
         .from("products")
         .select(
-          "id, barcode, tracks_stock_units, weight_per_unit, has_variants"
+          "id, barcode, tracks_stock_units, weight_per_unit, units_per_box, has_variants"
         )
         .eq("organization_id", org.id)
         .in("id", productIds),
@@ -2284,6 +2301,7 @@ export async function searchPosProductsForTerminal(params: {
       barcode: string | null;
       tracksStockUnits: boolean;
       weightPerUnit: number | null;
+      unitsPerBox: number | null;
       hasVariants: boolean;
     }
   >();
@@ -2297,6 +2315,7 @@ export async function searchPosProductsForTerminal(params: {
       barcode: row.barcode ?? null,
       tracksStockUnits: Boolean(row.tracks_stock_units),
       weightPerUnit: row.weight_per_unit ?? null,
+      unitsPerBox: row.units_per_box ?? null,
       hasVariants: Boolean(row.has_variants),
     });
   }
@@ -2358,6 +2377,7 @@ export async function searchPosProductsForTerminal(params: {
       unitOfMeasure:
         (row.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
         "UN",
+      unitsPerBox: details?.unitsPerBox ?? null,
       tracksStockUnits: details?.tracksStockUnits ?? false,
       weightPerUnit: details?.weightPerUnit ?? null,
       hasVariants: details?.hasVariants ?? false,
@@ -2878,7 +2898,20 @@ export async function createPosSale(
   }
   const sessionId = session.id;
 
-  const items = normalizePosItems(payload.items);
+  const productUnits = await getTransactionProductUnits(
+    supabase,
+    org.id,
+    payload.items.map((item) => item.productId)
+  );
+  const items = normalizePosItems(
+    payload.items.map((item) => {
+      const unitOfMeasure = productUnits.get(item.productId)?.unit_of_measure;
+      if (item.unitOfMeasure && item.unitOfMeasure !== unitOfMeasure) {
+        throw new Error("La unidad del producto cambió; actualizá el carrito");
+      }
+      return { ...item, unitOfMeasure };
+    })
+  );
 
   const subtotalAmount = truncateMoney(
     items.reduce((sum, item) => sum + item.subtotal, 0)

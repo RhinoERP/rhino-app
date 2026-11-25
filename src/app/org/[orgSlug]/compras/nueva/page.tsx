@@ -179,6 +179,7 @@ function NewPurchaseContent() {
           subtotal: item.subtotal,
           discount_percentage: item.discount_percent ?? 0,
           unit_of_measure: item.unit_of_measure,
+          units_per_box: item.units_per_box ?? null,
           variant_stocks: item.has_variants ? item.variant_stocks : undefined,
           taxes: item.taxes,
         };

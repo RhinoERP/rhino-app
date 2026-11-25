@@ -45,6 +45,7 @@ type PurchaseOrderWithItems = Omit<PurchaseOrder, "fallback_taxes"> & {
     product_name?: string;
     weight_per_unit?: number | null;
     unit_of_measure?: string | null;
+    units_per_box?: number | null;
     total_weight_kg?: number | null;
     has_variants?: boolean;
     tax_override?: ItemTaxInput[] | null;
@@ -175,6 +176,7 @@ function mapPurchaseOrderItemToDetailItem(
     unit_cost: item.unit_cost ?? 0,
     subtotal: item.subtotal ?? 0,
     unit_of_measure: unitOfMeasure ?? undefined,
+    units_per_box: item.units_per_box ?? undefined,
     weight_per_unit: weightPerUnit ?? undefined,
     total_weight_kg: totalWeightKg,
     price_per_kg: pricePerKg,
@@ -371,6 +373,7 @@ export function PurchaseDetail({
       subtotal: item.subtotal,
       discount_percentage: item.discount_percent ?? 0,
       unit_of_measure: item.unit_of_measure,
+      units_per_box: item.units_per_box ?? null,
       variant_stocks: item.variant_stocks ?? null,
       taxes: item.taxes,
     })),

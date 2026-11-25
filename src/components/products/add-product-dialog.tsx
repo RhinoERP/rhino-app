@@ -56,37 +56,59 @@ import {
   normalizeTalleValue,
   normalizeVariantValue,
 } from "@/modules/inventory/utils/variant-utils";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { Tax } from "@/modules/taxes/types";
 import { VariantCombinationPreview } from "./variant-combination-preview";
 
-const productSchema = z.object({
-  name: z.string().min(1, "El nombre del producto es obligatorio"),
-  sku: z.string().min(1, "El SKU es obligatorio"),
-  barcode: z.string().optional(),
-  description: z.string().optional(),
-  brand: z.string().optional(),
-  profit_margin: z
-    .number()
-    .min(0, "El margen debe ser mayor o igual a 0")
-    .optional(),
-  min_stock: z
-    .number()
-    .min(0, "El stock mínimo debe ser mayor o igual a 0")
-    .optional(),
-  category_id: z.string().optional(),
-  supplier_id: z.string().optional(),
-  unit_of_measure: z.enum(["UN", "KG", "LT", "MT"]),
-  units_per_box: z.number().optional(),
-  boxes_per_pallet: z.number().optional(),
-  weight_per_unit: z.number().optional(),
-  tracks_stock_units: z.boolean().optional(),
-  image_url: z.string().optional(),
-  accounting_account_code: z.string().optional(),
-  has_variants: z.boolean().optional(),
-  talles: z.array(z.string().min(1)).optional(),
-  colores: z.array(z.string().min(1)).optional(),
-  tax_ids: z.array(z.string()).optional(),
-});
+const productSchema = z
+  .object({
+    name: z.string().min(1, "El nombre del producto es obligatorio"),
+    sku: z.string().min(1, "El SKU es obligatorio"),
+    barcode: z.string().optional(),
+    description: z.string().optional(),
+    brand: z.string().optional(),
+    profit_margin: z
+      .number()
+      .min(0, "El margen debe ser mayor o igual a 0")
+      .optional(),
+    min_stock: z
+      .number()
+      .min(0, "El stock mínimo debe ser mayor o igual a 0")
+      .optional(),
+    category_id: z.string().optional(),
+    supplier_id: z.string().optional(),
+    unit_of_measure: z.enum(["UN", "KG", "LT", "MT", "CAJA"]),
+    units_per_box: z.number().optional(),
+    boxes_per_pallet: z.number().optional(),
+    weight_per_unit: z.number().optional(),
+    tracks_stock_units: z.boolean().optional(),
+    image_url: z.string().optional(),
+    accounting_account_code: z.string().optional(),
+    has_variants: z.boolean().optional(),
+    talles: z.array(z.string().min(1)).optional(),
+    colores: z.array(z.string().min(1)).optional(),
+    tax_ids: z.array(z.string()).optional(),
+  })
+  .superRefine((values, context) => {
+    if (
+      values.unit_of_measure === "CAJA" &&
+      (!Number.isSafeInteger(values.units_per_box) ||
+        (values.units_per_box ?? 0) <= 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["units_per_box"],
+        message: "Indica cuántas unidades contiene cada caja",
+      });
+    }
+    if (values.unit_of_measure === "CAJA" && values.has_variants) {
+      context.addIssue({
+        code: "custom",
+        path: ["has_variants"],
+        message: "Los productos por caja no admiten variantes",
+      });
+    }
+  });
 
 type ProductFormValues = z.infer<typeof productSchema>;
 
@@ -127,6 +149,8 @@ export function AddProductDialog({
   selectedProductTaxIds = EMPTY_SELECTED_TAX_IDS,
   isAccountingEnabled = false,
 }: AddProductDialogProps) {
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const caseUnitsEnabled = orgSettings?.case_units_enabled ?? false;
   const router = useRouter();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -684,6 +708,15 @@ export function AddProductDialog({
                   <SelectItem value="KG">Kilogramo</SelectItem>
                   <SelectItem value="LT">Litro</SelectItem>
                   <SelectItem value="MT">Metro</SelectItem>
+                  {(caseUnitsEnabled ||
+                    product?.unit_of_measure === "CAJA") && (
+                    <SelectItem
+                      disabled={Boolean(hasVariantsEnabled)}
+                      value="CAJA"
+                    >
+                      Caja
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -729,6 +762,11 @@ export function AddProductDialog({
                   })}
                   disabled={isSubmitting}
                 />
+                {errors.units_per_box && (
+                  <p className="text-destructive text-sm">
+                    {errors.units_per_box.message}
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-2">
@@ -797,6 +835,7 @@ export function AddProductDialog({
                       checked={hasVariantsEnabled ?? false}
                       disabled={
                         isSubmitting ||
+                        selectedUnitOfMeasure === "CAJA" ||
                         (isEditing && Boolean(product?.has_variants))
                       }
                       onCheckedChange={(checked) => {

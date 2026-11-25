@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { requireAuth } from "@/lib/supabase/auth";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Json } from "@/types/supabase";
+import { assertCaseQuantity } from "./transaction-units.service";
 import { assertWarehouseAccess } from "./warehouse-stock.service";
 
 export const stockTransferItemSchema = z.object({
@@ -71,6 +72,22 @@ function buildTransferItem(
   if (!product) {
     throw new Error("Producto del lote no encontrado en la organización");
   }
+  const tracksUnits = validateTransferQuantity(item, lot, product);
+  return {
+    source_lot_id: item.sourceLotId,
+    quantity: item.quantity,
+    unit_quantity: tracksUnits ? (item.unitQuantity ?? 0) : 0,
+  };
+}
+
+function validateTransferQuantity(
+  item: TransferItemInput,
+  lot: TransferLot,
+  product: TransferProduct
+): boolean {
+  if (product.unit_of_measure === "CAJA") {
+    assertCaseQuantity(item.quantity);
+  }
   const tracksUnits =
     (product.unit_of_measure === "KG" || product.unit_of_measure === "LT") &&
     Boolean(product.tracks_stock_units);
@@ -92,11 +109,7 @@ function buildTransferItem(
   } else if (unitQuantity !== 0) {
     throw new Error("El producto no registra piezas por separado");
   }
-  return {
-    source_lot_id: item.sourceLotId,
-    quantity: item.quantity,
-    unit_quantity: tracksUnits ? unitQuantity : 0,
-  };
+  return tracksUnits;
 }
 
 export async function createStockTransferForOrg(

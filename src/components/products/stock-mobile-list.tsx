@@ -23,6 +23,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
 import type { StockItem } from "@/modules/inventory/types";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import { compareTalles } from "@/modules/inventory/utils/variant-utils";
 
 function getUnitLabel(unitOfMeasure: string): string {
@@ -34,6 +35,9 @@ function getUnitLabel(unitOfMeasure: string): string {
   }
   if (unitOfMeasure === "MT") {
     return "m";
+  }
+  if (unitOfMeasure === "CAJA") {
+    return "caja";
   }
   return "un";
 }
@@ -52,8 +56,10 @@ function StockSku({ sku }: { sku: string | null | undefined }) {
 
 function StockPriceTag({
   salePrice,
+  unitOfMeasure,
 }: {
   salePrice: number | null | undefined;
+  unitOfMeasure: string;
 }) {
   let formattedPrice = "-";
   if (salePrice != null) {
@@ -65,7 +71,9 @@ function StockPriceTag({
 
   return (
     <div className="rounded-md bg-primary/10 px-3 py-1.5">
-      <div className="text-muted-foreground text-xs">Precio</div>
+      <div className="text-muted-foreground text-xs">
+        {unitOfMeasure === "CAJA" ? "Precio/caja" : "Precio"}
+      </div>
       <div className="font-bold text-lg text-primary tabular-nums">
         {formattedPrice}
       </div>
@@ -79,12 +87,14 @@ function StockQuantityTag({
   isLowStock,
   tracksUnits,
   totalUnits,
+  caseQuantityLabel,
 }: {
   totalStock: number;
   unitLabel: string;
   isLowStock: boolean;
   tracksUnits: boolean;
   totalUnits: number;
+  caseQuantityLabel?: string;
 }) {
   return (
     <div
@@ -103,11 +113,11 @@ function StockQuantityTag({
           isLowStock ? "text-destructive" : ""
         }`}
       >
-        {totalStock.toLocaleString("es-AR", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 2,
-        })}{" "}
-        {unitLabel}
+        {caseQuantityLabel ??
+          `${totalStock.toLocaleString("es-AR", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+          })} ${unitLabel}`}
       </div>
       {tracksUnits ? (
         <div className="text-muted-foreground text-xs tabular-nums">
@@ -260,6 +270,16 @@ function StockMobileCard({
   const totalUnits = item.total_unit_stock ?? 0;
   const unitLabel = getUnitLabel(unitOfMeasure);
   const totalStock = item.total_stock ?? 0;
+  const caseQuantityLabel =
+    unitOfMeasure === "CAJA" && item.units_per_box
+      ? (() => {
+          const quantity = splitCaseUnitQuantity(
+            totalStock,
+            item.units_per_box ?? 0
+          );
+          return `${quantity.boxes.toLocaleString("es-AR")} caja(s) · ${quantity.units.toLocaleString("es-AR")} un.`;
+        })()
+      : undefined;
   const isLowStock = totalStock <= 0;
   const href = `/org/${orgSlug}/stock/${item.product_id}`;
 
@@ -296,10 +316,14 @@ function StockMobileCard({
             {/* Price & Stock - Highlighted */}
             <div className="flex flex-wrap items-center gap-3">
               {/* Sale Price */}
-              <StockPriceTag salePrice={item.sale_price} />
+              <StockPriceTag
+                salePrice={item.sale_price}
+                unitOfMeasure={unitOfMeasure}
+              />
 
               {/* Stock */}
               <StockQuantityTag
+                caseQuantityLabel={caseQuantityLabel}
                 isLowStock={isLowStock}
                 totalStock={totalStock}
                 totalUnits={totalUnits}

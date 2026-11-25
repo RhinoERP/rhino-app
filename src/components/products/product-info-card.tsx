@@ -54,6 +54,7 @@ const unitOfMeasureLabels: Record<Product["unit_of_measure"], string> = {
   KG: "Kilogramo",
   LT: "Litro",
   MT: "Metro",
+  CAJA: "Caja",
 };
 
 const resolveSalePriceValue = (
@@ -259,13 +260,21 @@ export function ProductInfoCard({
               </p>
               <div className="grid gap-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Precio de venta</span>
+                  <span className="text-muted-foreground">
+                    {product.unit_of_measure === "CAJA"
+                      ? "Precio de venta por caja"
+                      : "Precio de venta"}
+                  </span>
                   <span className="font-semibold">{formattedSalePrice}</span>
                 </div>
                 {canManageInventory ? (
                   <>
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">Costo</span>
+                      <span className="text-muted-foreground">
+                        {product.unit_of_measure === "CAJA"
+                          ? "Costo por caja"
+                          : "Costo"}
+                      </span>
                       <span className="font-semibold">
                         {formattedCostPrice}
                       </span>

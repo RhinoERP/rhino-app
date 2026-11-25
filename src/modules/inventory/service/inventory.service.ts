@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -139,6 +140,25 @@ function validateProfitMargin(profitMargin: number | undefined) {
     throw new Error("El margen debe ser mayor o igual a 0");
   }
 }
+
+function validateCasePackaging(input: {
+  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"];
+  units_per_box?: number;
+  has_variants?: boolean;
+}) {
+  if (input.unit_of_measure !== "CAJA") {
+    return;
+  }
+  if (
+    !Number.isSafeInteger(input.units_per_box) ||
+    (input.units_per_box ?? 0) <= 0
+  ) {
+    throw new Error("Las unidades por caja deben ser un entero mayor que 0");
+  }
+  if (input.has_variants) {
+    throw new Error("Los productos por caja no admiten variantes");
+  }
+}
 export type CreateProductInput = {
   orgSlug: string;
   name: string;
@@ -167,6 +187,7 @@ export type CreateProductInput = {
 type ProductMeta = {
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   tracks_stock_units: boolean | null;
+  units_per_box: number | null;
   has_variants: boolean | null;
 };
 
@@ -310,7 +331,9 @@ async function fetchProductMetaById(
     chunkIds(productIds).map((chunk) =>
       supabase
         .from("products")
-        .select("id, unit_of_measure, tracks_stock_units, has_variants")
+        .select(
+          "id, unit_of_measure, tracks_stock_units, units_per_box, has_variants"
+        )
         .eq("organization_id", orgId)
         .in("id", chunk)
     )
@@ -331,6 +354,7 @@ async function fetchProductMetaById(
     productMetaById.set(product.id, {
       unit_of_measure: product.unit_of_measure ?? null,
       tracks_stock_units: product.tracks_stock_units ?? null,
+      units_per_box: product.units_per_box ?? null,
       has_variants: product.has_variants ?? null,
     });
   }
@@ -385,6 +409,7 @@ function buildStockItems(
         is_active: item.is_active ?? true,
         unit_of_measure: unitOfMeasure,
         tracks_stock_units: tracksUnits,
+        units_per_box: productMeta?.units_per_box ?? null,
         total_unit_stock: totalUnits,
         has_variants: hasVariants,
       };
@@ -476,6 +501,7 @@ export async function createProductForOrg(
   }
 
   validateProfitMargin(profit_margin);
+  validateCasePackaging(input);
   const combinations = getProductCreationVariants(
     has_variants,
     talles,
@@ -486,6 +512,13 @@ export async function createProductForOrg(
 
   if (!org?.id) {
     throw new Error("Organización no encontrada");
+  }
+
+  if (
+    input.unit_of_measure === "CAJA" &&
+    !(await getOrgSettings(orgSlug)).case_units_enabled
+  ) {
+    throw new Error("La unidad Caja no está habilitada para esta organización");
   }
 
   const supabase = await createClient();
@@ -558,6 +591,7 @@ export async function updateProductForOrg(
   }
 
   validateProfitMargin(profit_margin);
+  validateCasePackaging(input);
 
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -591,14 +625,23 @@ export async function updateProductForOrg(
 
   const { data: currentProduct, error: currentProductError } = await supabase
     .from("products")
-    .select("has_variants")
+    .select("has_variants, unit_of_measure")
     .eq("id", productId)
+    .eq("organization_id", org.id)
     .single();
 
   if (currentProductError) {
     throw new Error(
       `Error al consultar el producto: ${currentProductError.message}`
     );
+  }
+
+  if (
+    unit_of_measure === "CAJA" &&
+    currentProduct?.unit_of_measure !== "CAJA" &&
+    !(await getOrgSettings(orgSlug)).case_units_enabled
+  ) {
+    throw new Error("La unidad Caja no está habilitada para esta organización");
   }
 
   if (
@@ -1825,6 +1868,12 @@ export async function createProductLotForOrg(
     throw new Error("Producto no encontrado para esta organización");
   }
 
+  if (product.unit_of_measure === "CAJA" && !Number.isSafeInteger(quantity)) {
+    throw new Error(
+      "El stock de un producto por caja debe expresarse en unidades enteras"
+    );
+  }
+
   let finalExpirationDate = expirationDate;
   if (product.has_variants && !input.productVariantId) {
     throw new Error("Seleccioná una variante para crear su existencia");
@@ -2007,6 +2056,11 @@ export async function updateProductLotForOrg(
 
   if (!product) {
     throw new Error("Producto no encontrado para esta organización");
+  }
+  if (product.unit_of_measure === "CAJA" && !Number.isSafeInteger(quantity)) {
+    throw new Error(
+      "El stock de un producto por caja debe expresarse en unidades enteras"
+    );
   }
 
   const { data: lot, error: lotError } = await supabase
@@ -2518,6 +2572,7 @@ export type DistributorCatalogItem = {
   total_stock: number;
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   distributor_price: number | null;
+  units_per_box?: number | null;
 };
 
 const DISTRIBUTOR_CATALOG_SORT_COLUMNS: Record<string, string> = {
@@ -2547,10 +2602,14 @@ function buildDistributorCatalogItem(
     total_stock: number | null;
     unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   },
-  costPrice: number | null,
-  hasVariants: boolean,
-  marginPercent: number
+  pricing: {
+    costPrice: number | null;
+    hasVariants: boolean;
+    marginPercent: number;
+    unitsPerBox: number | null;
+  }
 ): DistributorCatalogItem | null {
+  const { costPrice, hasVariants, marginPercent, unitsPerBox } = pricing;
   if (!item.product_id) {
     return null;
   }
@@ -2561,6 +2620,7 @@ function buildDistributorCatalogItem(
     name: item.product_name ?? "",
     brand: item.brand ?? null,
     has_variants: hasVariants,
+    units_per_box: unitsPerBox,
     total_stock: item.total_stock ?? 0,
     unit_of_measure: item.unit_of_measure ?? null,
     distributor_price:
@@ -2577,11 +2637,13 @@ async function fetchDistributorCatalogPriceMeta(
 ): Promise<{
   costByProduct: Map<string, number | null>;
   hasVariantsByProduct: Map<string, boolean>;
+  unitsPerBoxByProduct: Map<string, number | null>;
 }> {
   if (productIds.length === 0) {
     return {
       costByProduct: new Map<string, number | null>(),
       hasVariantsByProduct: new Map<string, boolean>(),
+      unitsPerBoxByProduct: new Map<string, number | null>(),
     };
   }
 
@@ -2593,7 +2655,7 @@ async function fetchDistributorCatalogPriceMeta(
       .in("id", productIds),
     supabase
       .from("products")
-      .select("id, has_variants")
+      .select("id, has_variants, units_per_box")
       .eq("organization_id", orgId)
       .in("id", productIds),
   ]);
@@ -2603,6 +2665,9 @@ async function fetchDistributorCatalogPriceMeta(
   }
 
   return {
+    unitsPerBoxByProduct: new Map(
+      (variantsResult.data ?? []).map((row) => [row.id, row.units_per_box])
+    ),
     costByProduct: new Map<string, number | null>(
       (costsResult.data ?? []).map((row) => [row.id ?? "", row.cost_price])
     ),
@@ -2676,8 +2741,9 @@ export async function getDistributorCatalog(
 
   let costByProduct = new Map<string, number | null>();
   let hasVariantsByProduct = new Map<string, boolean>();
+  let unitsPerBoxByProduct = new Map<string, number | null>();
   if (productIds.length > 0) {
-    ({ costByProduct, hasVariantsByProduct } =
+    ({ costByProduct, hasVariantsByProduct, unitsPerBoxByProduct } =
       await fetchDistributorCatalogPriceMeta(supabase, org.id, productIds));
   }
 
@@ -2685,12 +2751,12 @@ export async function getDistributorCatalog(
 
   const items = rows
     .map((row) =>
-      buildDistributorCatalogItem(
-        row,
-        costByProduct.get(row.product_id ?? "") ?? null,
-        hasVariantsByProduct.get(row.product_id ?? "") ?? false,
-        safeMargin
-      )
+      buildDistributorCatalogItem(row, {
+        costPrice: costByProduct.get(row.product_id ?? "") ?? null,
+        hasVariants: hasVariantsByProduct.get(row.product_id ?? "") ?? false,
+        marginPercent: safeMargin,
+        unitsPerBox: unitsPerBoxByProduct.get(row.product_id ?? "") ?? null,
+      })
     )
     .filter((item): item is DistributorCatalogItem => item !== null);
 

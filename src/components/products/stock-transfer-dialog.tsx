@@ -84,6 +84,9 @@ function getStockUnitSuffix(unit: string | null): string {
   if (unit === "LT") {
     return " lt";
   }
+  if (unit === "CAJA") {
+    return " un.";
+  }
   return "";
 }
 
@@ -93,6 +96,9 @@ function getQuantityLabel(unit: string | null): string {
   }
   if (unit === "LT") {
     return "Cantidad (lt)";
+  }
+  if (unit === "CAJA") {
+    return "Unidades";
   }
   return "Cantidad";
 }
@@ -448,9 +454,13 @@ export function StockTransferDialog({
                     <FormControl>
                       <Input
                         disabled={pending}
-                        inputMode="decimal"
+                        inputMode={
+                          product.unit_of_measure === "CAJA"
+                            ? "numeric"
+                            : "decimal"
+                        }
                         placeholder="0"
-                        step="0.01"
+                        step={product.unit_of_measure === "CAJA" ? "1" : "0.01"}
                         {...field}
                       />
                     </FormControl>

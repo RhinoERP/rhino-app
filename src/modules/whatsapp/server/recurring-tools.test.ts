@@ -245,6 +245,30 @@ function pendingCart() {
 }
 
 describe("recurring commercial tools", () => {
+  it("quotes CAJA as individual units while retaining the verified commercial box price", async () => {
+    testDb.tables.products[0].unit_of_measure = "CAJA";
+    testDb.tables.products[0].units_per_box = 6;
+    testDb.tables.products_with_price[0].calculated_sale_price = 100;
+    expect(
+      await executeCommercialTool(context, "get_offer", { product_id: product })
+    ).toMatchObject({
+      unitOfMeasure: "UN",
+      commercialUnitOfMeasure: "CAJA",
+      unitsPerBox: 6,
+      unitPrice: 100 / 6,
+      pricePerBox: 100,
+    });
+    pendingCart();
+    await expect(
+      executeCommercialTool(context, "upsert_cart_item", {
+        ...version,
+        product_id: product,
+        quantity: 1.5,
+      })
+    ).rejects.toThrow("cantidad entera");
+    expect(testDb.rpc).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid price even when a previously quoted cart is confirmed", async () => {
     pendingCart();
     testDb.tables.products_with_price[0].calculated_sale_price = null;

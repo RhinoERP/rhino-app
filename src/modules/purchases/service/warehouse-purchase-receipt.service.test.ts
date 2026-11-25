@@ -4,9 +4,13 @@ import {
   type ReceiptLine,
 } from "./purchase-receipts.service";
 
-const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  from: vi.fn(),
+  products: vi.fn(),
+}));
 vi.mock("@/lib/supabase/admin-client", () => ({
-  createAdminClient: () => ({ rpc: mocks.rpc }),
+  createAdminClient: () => ({ rpc: mocks.rpc, from: mocks.from }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/modules/organizations/service/organizations.service", () => ({
@@ -47,6 +51,17 @@ describe("RPC de recepción por depósito", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ data: true, error: null });
+    mocks.products.mockReturnValue([
+      { id: "product-a", unit_of_measure: "UN", units_per_box: null },
+    ]);
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockImplementation(async () => ({
+        data: mocks.products(),
+        error: null,
+      })),
+    });
   });
 
   it("envía depósito, identidad y ambas cantidades a la RPC nueva", async () => {
@@ -101,5 +116,19 @@ describe("RPC de recepción por depósito", () => {
         p_fiscal: { mode: "receipt", items: [{ variant_stocks: null }] },
       })
     );
+  });
+
+  it("rechaza cantidades fraccionarias al recibir productos por caja", async () => {
+    mocks.products.mockReturnValue([
+      { id: "product-a", unit_of_measure: "CAJA", units_per_box: 6 },
+    ]);
+
+    await expect(
+      applyAtomicPurchaseReceipt({
+        ...input,
+        lines: [{ ...line, quantity: 1.5 }],
+      })
+    ).rejects.toThrow("unidades enteras");
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });

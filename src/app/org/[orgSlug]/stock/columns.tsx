@@ -9,13 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import type { StockItem } from "@/modules/inventory/types";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 
 function getUnitsCellData(item: StockItem): {
   unitsValue: number | null;
   isLowStock: boolean;
 } {
   const unitOfMeasure = item.unit_of_measure ?? "UN";
-  const isUnitProduct = unitOfMeasure === "UN";
+  const isUnitProduct = unitOfMeasure === "UN" || unitOfMeasure === "CAJA";
   const tracksUnits =
     (unitOfMeasure === "KG" || unitOfMeasure === "LT") &&
     Boolean(item.tracks_stock_units);
@@ -60,11 +61,18 @@ function renderUnitsCell(item: StockItem) {
           isLowStock ? "text-destructive" : "text-foreground"
         }`}
       >
-        {unitsValue.toLocaleString("es-AR", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 0,
-        })}{" "}
-        un
+        {item.unit_of_measure === "CAJA" && item.units_per_box
+          ? (() => {
+              const quantity = splitCaseUnitQuantity(
+                unitsValue,
+                item.units_per_box
+              );
+              return `${quantity.boxes.toLocaleString("es-AR")} caja(s) · ${quantity.units.toLocaleString("es-AR")} un.`;
+            })()
+          : `${unitsValue.toLocaleString("es-AR", {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
+            })} un`}
       </span>
     </div>
   );
@@ -274,7 +282,7 @@ export function createColumns(
       id: "stock_units",
       accessorFn: (row) => {
         const unit = row.unit_of_measure ?? "UN";
-        if (unit === "UN") {
+        if (unit === "UN" || unit === "CAJA") {
           return row.total_stock ?? 0;
         }
         if ((unit === "KG" || unit === "LT") && row.tracks_stock_units) {
@@ -323,6 +331,7 @@ export function createColumns(
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
+            {row.original.unit_of_measure === "CAJA" ? " / caja" : ""}
           </span>
         ) : (
           <span className="text-muted-foreground text-sm">-</span>

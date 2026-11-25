@@ -556,8 +556,8 @@ function normalizeLoadedSaleItem(item: {
       item.unit_quantity !== null && item.unit_quantity !== undefined
         ? Number(item.unit_quantity)
         : null,
-    unitPrice: truncateMoney(Number(item.unit_price ?? 0)),
-    basePrice: truncateMoney(Number(item.base_price ?? item.unit_price ?? 0)),
+    unitPrice: Number(item.unit_price ?? 0),
+    basePrice: Number(item.base_price ?? item.unit_price ?? 0),
     discountAmount:
       item.discount_amount !== null && item.discount_amount !== undefined
         ? truncateMoney(Number(item.discount_amount))
