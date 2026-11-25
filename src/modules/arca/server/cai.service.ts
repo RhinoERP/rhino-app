@@ -492,55 +492,71 @@ export async function reconcileCaiOperation(
   assertQuery(update.error);
 }
 
+const CAI_USAGE_PAGE_SIZE = 500;
+const CAI_USAGE_MAX_ROWS = 10_000;
+const caiUsageRowsSchema = z.array(
+  z.object({
+    id: z.uuid(),
+    document_number: z.string(),
+    issue_date: z.string(),
+    status: z.string(),
+    header_snapshot: z.object({
+      remittance: z.object({
+        fiscal: z.object({
+          cai: z.string(),
+          pointOfSale: z.number(),
+          number: z.number(),
+        }),
+      }),
+    }),
+  })
+);
+
 export async function getCaiUsageReport(orgSlug: string, month: string) {
   const { organization } = await access(orgSlug);
   const parsed = z.string().regex(MONTH_PATTERN).parse(month);
   const [year, number] = parsed.split("-").map(Number);
   const end = `${number === 12 ? year + 1 : year}-${String(number === 12 ? 1 : number + 1).padStart(2, "0")}-01`;
-  const result = await createAdminClient()
-    .from("order_remittances")
-    .select("document_number, issue_date, status, header_snapshot")
-    .eq("organization_id", organization.id)
-    .gte("issue_date", `${parsed}-01`)
-    .lt("issue_date", end)
-    .order("document_number")
-    .limit(10_001);
-  assertQuery(result.error);
-  const rows = z
-    .array(
-      z.object({
-        document_number: z.string(),
-        issue_date: z.string(),
-        status: z.string(),
-        header_snapshot: z.object({
-          remittance: z.object({
-            fiscal: z
-              .object({
-                cai: z.string(),
-                pointOfSale: z.number(),
-                number: z.number(),
-              })
-              .optional(),
-          }),
-        }),
-      })
-    )
-    .parse(result.data);
-  if (rows.length > 10_000) {
-    throw new Error(
-      "El período supera los 10.000 documentos. Solicitá una exportación ampliada."
-    );
+  const db = createAdminClient();
+  const rows: z.infer<typeof caiUsageRowsSchema> = [];
+  let afterId: string | undefined;
+  while (true) {
+    let query = db
+      .from("order_remittances")
+      .select("id, document_number, issue_date, status, header_snapshot")
+      .eq("organization_id", organization.id)
+      .gte("issue_date", `${parsed}-01`)
+      .lt("issue_date", end)
+      .not("header_snapshot->remittance->fiscal", "is", null)
+      .order("id")
+      .limit(
+        Math.min(CAI_USAGE_PAGE_SIZE, CAI_USAGE_MAX_ROWS + 1 - rows.length)
+      );
+    if (afterId) {
+      query = query.gt("id", afterId);
+    }
+    const result = await query;
+    assertQuery(result.error);
+    const page = caiUsageRowsSchema.parse(result.data);
+    if (!page.length) {
+      break;
+    }
+    rows.push(...page);
+    if (rows.length > CAI_USAGE_MAX_ROWS) {
+      throw new Error(
+        "El período supera los 10.000 documentos. Solicitá una exportación ampliada."
+      );
+    }
+    // A short page can be the API's own row cap, not the end of the period.
+    // Keyset pagination avoids skipping rows when an earlier page changes.
+    afterId = page.at(-1)?.id;
   }
-  return rows.flatMap((row) =>
-    row.header_snapshot.remittance.fiscal
-      ? [
-          {
-            date: row.issue_date,
-            documentNumber: row.document_number,
-            status: row.status,
-            ...row.header_snapshot.remittance.fiscal,
-          },
-        ]
-      : []
-  );
+  return rows
+    .map((row) => ({
+      date: row.issue_date,
+      documentNumber: row.document_number,
+      status: row.status,
+      ...row.header_snapshot.remittance.fiscal,
+    }))
+    .sort((a, b) => a.documentNumber.localeCompare(b.documentNumber));
 }

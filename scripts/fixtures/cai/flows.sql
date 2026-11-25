@@ -1,15 +1,16 @@
 SET request.jwt.claim.role='service_role';
-INSERT INTO organizations VALUES('10000000-0000-4000-8000-000000000001','30710158230',false),('10000000-0000-4000-8000-000000000002','20111111112',false);
+INSERT INTO organizations(id,cuit,remittance_auto_enabled) VALUES('10000000-0000-4000-8000-000000000001','30710158230',false),('10000000-0000-4000-8000-000000000002','20111111112',false);
 INSERT INTO auth.users VALUES('20000000-0000-4000-8000-000000000001');
-INSERT INTO order_remittance_batches VALUES('30000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001');
-INSERT INTO orders VALUES('50000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001');
+INSERT INTO orders(id,organization_id) VALUES('50000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001');
+INSERT INTO order_remittance_batches(id,organization_id,parent_order_id,dispatch_group_id,idempotency_key,request_fingerprint,created_by) VALUES('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',gen_random_uuid(),'fixture','20000000-0000-4000-8000-000000000001');
 SELECT save_remittance_fiscal_settings('10000000-0000-4000-8000-000000000001','{"enabled":true,"mode":"self_printed","loginCuit":"20111111112","pointOfSale":9,"businessName":"Safe","address":"Calle 123","vatCondition":"IVA RESPONSABLE INSCRITO","grossIncome":"123","activityStart":"2020-01-01"}');
 INSERT INTO remittance_cai_authorizations(id,organization_id,cuit,point_of_sale,mode,cai,expires_at)
 VALUES('60000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','30710158230',9,'self_printed','12345678901234',current_date+10);
 SELECT activate_remittance_cai('10000000-0000-4000-8000-000000000001','{"authorizationId":"60000000-0000-4000-8000-000000000001","firstNumber":1,"lastNumber":2,"lastUsedNumber":0,"printerName":"","printerCuit":"","printerRegistration":"","printedAt":"","evidence":"Constancia de ARCA 123","confirmed":true}');
 CREATE FUNCTION test_issue_cai() RETURNS uuid LANGUAGE plpgsql AS $$ DECLARE result uuid; BEGIN
- INSERT INTO order_remittances(organization_id,batch_id,document_number,header_snapshot)
- VALUES('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',gen_random_uuid()::text,'{"remittance":{"customer":{"businessName":"Cliente","cuit":"20111111112","address":"Calle 456"}}}') RETURNING id INTO result;
+ PERFORM 1 FROM organizations WHERE id='10000000-0000-4000-8000-000000000001' FOR UPDATE;
+ INSERT INTO order_remittances(organization_id,batch_id,document_number,document_position,issue_date,subtotal,discount_total,total,currency,header_snapshot)
+ VALUES('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',gen_random_uuid()::text,(SELECT coalesce(max(document_position),0)+1 FROM order_remittances WHERE batch_id='30000000-0000-4000-8000-000000000001'),current_date,0,0,0,'ARS','{"remittance":{"customer":{"businessName":"Cliente","cuit":"20111111112","address":"Calle 456"}}}') RETURNING id INTO result;
  RETURN result;
 END; $$;
 SELECT test_issue_cai();

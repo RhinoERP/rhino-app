@@ -4,7 +4,7 @@ Rhino obtiene autorizaciones mediante AFIP SDK y asigna la numeración al confir
 
 ## Puesta en marcha
 
-1. Aplicar `supabase/migrations/20261123000000_remittance_cai.sql` después de las migraciones existentes de remitos y despacho.
+1. Aplicar `supabase/migrations/20261123000000_remittance_cai.sql` y luego `20261124000000_separate_cai_remittance_numbering.sql`, después de las migraciones existentes de remitos y despacho. La segunda separa por completo la asignación fiscal del contador histórico; no reescribir una migración que ya se haya aplicado.
 2. Mantener `AFIP_SDK_ACCESS_TOKEN` del proyecto que contiene la credencial. La recepción digital utiliza la clave `ARCA_SECRETS_MASTER_KEY` ya usada por la integración ARCA.
 3. En el panel de AFIP SDK, guardar el CUIT de login y su clave fiscal en Configuración → Credenciales de ARCA. Guardar la credencial no prueba el acceso: se comprueba en la operación.
 4. En Rhino, entrar a Configuración → Comprobantes → Remitos con CAI. Completar CUIT de acceso, punto de venta específico de remitos, modalidad y datos fiscales del emisor. El CUIT representado se toma de la organización.
@@ -23,6 +23,7 @@ La solicitud utiliza el contrato público `cai-request`: comprobante 91, punto d
 - En los documentos del despacho, Compartir recepción permite copiar un enlace para enviar junto al PDF. El destinatario confirma nombre y recepción sin cuenta. El enlace contiene una capacidad criptográfica; la base guarda solamente su hash. No se envían mensajes automáticamente.
 - La confirmación de recepción es idempotente y se rechaza si el documento fue anulado. Se muestra su estado en los documentos del despacho.
 - Control mensual exporta los remitos utilizados en el período como TSV, con punto de venta, número, CAI y estado. No presenta una declaración en ARCA.
+- La consulta mensual filtra los documentos fiscales en el servidor y pagina por identificador hasta agotar los resultados, incluso si la API recorta una página. Admite hasta 10.000 remitos fiscales por período; un error de lectura o un período mayor se rechazan sin descargar un informe parcial.
 
 ## Renovación y errores
 
@@ -37,13 +38,19 @@ La solicitud utiliza el contrato público `cai-request`: comprobante 91, punto d
 
 ```sh
 pnpm exec vitest run src/modules/arca
-bash scripts/test-cai-db.sh
 pnpm exec tsc --noEmit
 pnpm lint
 pnpm build
 ```
 
-El script de base de datos usa un contenedor PostgreSQL descartable y no modifica Supabase remoto. Verifica el ciclo de autorización, numeración concurrente, rollback, vencimiento, agotamiento, inmutabilidad, intentos duplicados, protección del acceso y recepción idempotente.
+Para las pruebas SQL se usa PostgreSQL 16 nativo en un directorio temporal, sin Docker ni dependencias nuevas en la aplicación:
+
+```sh
+npm install --prefix /tmp/rhino-cai-native-pg --no-package-lock --no-audit --no-fund embedded-postgres@16.16.0-beta.19
+CAI_TEST_POSTGRES_PACKAGE_ROOT=/tmp/rhino-cai-native-pg bash scripts/test-cai-db.sh
+```
+
+El script solo conecta al proceso PostgreSQL temporal que crea en localhost y elimina sus datos al terminar; no carga las credenciales de Rhino ni admite una URL de Supabase remoto. Carga las tablas documentales y las funciones reales de consulta de fuentes, huella y persistencia desde las migraciones. Verifica el ciclo de autorización, numeración concurrente con dos conexiones, rollback, vencimiento, agotamiento, inmutabilidad, intentos duplicados, acceso y recepción idempotente. La regresión de persistencia comprueba CAI con numeración anterior deshabilitada, contador histórico intacto incluso en su valor máximo, reintentos, autoimpresión, preimpresos y conservación de la numeración manual/automática anterior.
 
 La interfaz bloquea las solicitudes mientras haya datos fiscales sin guardar. Las validaciones se limitan al CUIT, punto de venta, tipo de comprobante y cantidad verificados; vencen a la hora para solicitar y a los quince minutos para anular. Una operación incierta puede conciliarse con evidencia; los intentos en curso requieren esperar al menos diez minutos. Los errores de confirmación se muestran dentro del diálogo y conservan los datos para reintentar.
 
