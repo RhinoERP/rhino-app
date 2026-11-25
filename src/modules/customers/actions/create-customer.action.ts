@@ -31,6 +31,7 @@ export type CreateCustomerActionParams = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  price_level_id?: string | null;
   customer_channel?: CustomerChannel;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
@@ -58,6 +59,7 @@ export async function createCustomerAction(
       tax_condition: params.tax_condition,
       client_number: params.client_number,
       sales_price_list_id: params.sales_price_list_id,
+      price_level_id: params.price_level_id,
       customer_channel: params.customer_channel,
       assigned_seller_id: params.assigned_seller_id,
       preferred_carrier_id: params.preferred_carrier_id,
