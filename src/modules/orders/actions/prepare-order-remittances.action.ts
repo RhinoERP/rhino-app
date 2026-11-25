@@ -10,6 +10,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { RemittanceData } from "@/modules/sales/service/remittance-generator.service";
 import type { Database } from "@/types/supabase";
+import { getFiscalRemittanceContext } from "../server/fiscal-remittance-context.service";
 import {
   fetchOrderRemittanceRows,
   getOrderRemittanceData,
@@ -26,6 +27,7 @@ const prepareSchema = z.object({
 });
 
 export type PreparedOrderRemittances = {
+  fiscalAuthorization?: Awaited<ReturnType<typeof getFiscalRemittanceContext>>;
   automaticNumbering: boolean;
   parentOrderId: string;
   childOrderIds: string[];
@@ -85,7 +87,8 @@ function preparationConfiguration(
   if (
     !(
       settings.success &&
-      settings.data?.remittance_mask_printing_enabled &&
+      (settings.data?.remittance_mask_printing_enabled ||
+        settings.data?.remittance_fiscal_enabled) &&
       numbering.success &&
       numbering.data
     )
@@ -95,7 +98,8 @@ function preparationConfiguration(
     );
   }
   return {
-    automaticNumbering: numbering.data.autoEnabled,
+    automaticNumbering:
+      settings.data.remittance_fiscal_enabled || numbering.data.autoEnabled,
     percentage: settings.data.dispatch_declared_value_percentage,
   };
 }
@@ -283,6 +287,9 @@ export async function prepareOrderRemittancesAction(
       quoteId,
       standaloneOrderId,
     });
+    const fiscalAuthorization = settings.data?.remittance_fiscal_enabled
+      ? await getFiscalRemittanceContext(org.id, documents.length)
+      : undefined;
     const after = await admin.rpc(
       "order_remittance_source_fingerprint",
       fingerprintArgs
@@ -296,6 +303,7 @@ export async function prepareOrderRemittancesAction(
     return {
       success: true,
       data: {
+        fiscalAuthorization,
         automaticNumbering: configuration.automaticNumbering,
         parentOrderId,
         childOrderIds: ids,

@@ -224,7 +224,8 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const rawSaleStatus = String(sale.status);
   const canManageSale = sale.access?.canManage ?? false;
-  const canDispatchSale = sale.status === "CONFIRMED";
+  const canDispatchSale =
+    sale.status === "CONFIRMED" && !orgSettings?.remittance_fiscal_enabled;
   const canDeliverSale = sale.status === "DISPATCH";
   const canReturnProducts =
     canManageSale &&

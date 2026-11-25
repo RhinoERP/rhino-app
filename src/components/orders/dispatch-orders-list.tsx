@@ -745,7 +745,10 @@ function PreparingDispatchControls({
   if (settingsLoading) {
     return <Spinner className="size-4" />;
   }
-  if (documentSettings?.remittance_mask_printing_enabled) {
+  if (
+    documentSettings?.remittance_mask_printing_enabled ||
+    documentSettings?.remittance_fiscal_enabled
+  ) {
     return (
       <div className="space-y-2">
         <DocumentedDispatchDialog
@@ -995,7 +998,10 @@ function MultiDispatchBar({
   if (settingsLoading) {
     return <Spinner className="size-4" />;
   }
-  if (documentSettings?.remittance_mask_printing_enabled) {
+  if (
+    documentSettings?.remittance_mask_printing_enabled ||
+    documentSettings?.remittance_fiscal_enabled
+  ) {
     return (
       <div className="sticky bottom-4 z-10 mx-auto flex max-w-3xl items-center gap-3 rounded-md border bg-background p-4 shadow-lg">
         <Button onClick={onClear} size="sm" variant="ghost">

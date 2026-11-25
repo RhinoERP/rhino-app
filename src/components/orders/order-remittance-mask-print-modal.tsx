@@ -18,7 +18,11 @@ export function OrderRemittanceMaskPrintModal({
 }: OrderRemittanceMaskPrintModalProps) {
   const { data: settings } = useOrgSettings(orgSlug);
 
-  if (!settings?.remittance_mask_printing_enabled) {
+  if (
+    !settings?.remittance_mask_printing_enabled ||
+    (settings.remittance_fiscal_enabled &&
+      settings.remittance_fiscal_mode === "self_printed")
+  ) {
     return null;
   }
 

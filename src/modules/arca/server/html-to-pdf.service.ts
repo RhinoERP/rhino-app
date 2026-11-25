@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 import chromium from "@sparticuz/chromium-min";
 import type { Browser, Page } from "puppeteer-core";
 import puppeteer from "puppeteer-core";
+import { paginateFiscalRemittanceDocument } from "@/modules/sales/server/remittance-pagination";
 import { paginateFiscalInvoiceDocument } from "./fiscal-invoice-pagination";
 
 const DEFAULT_CHROMIUM_PACK_URL =
@@ -130,6 +131,7 @@ async function withHtmlPage<T>(
     });
     await waitForPageAssets(page);
     await page.evaluate(paginateFiscalInvoiceDocument);
+    await page.evaluate(paginateFiscalRemittanceDocument);
     return await operation(page);
   } catch (error) {
     throw new Error(

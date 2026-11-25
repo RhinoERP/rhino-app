@@ -205,3 +205,46 @@ describe("remittance product variants", () => {
     expect(generateRemittanceHTML(data)).not.toContain('class="variant"');
   });
 });
+
+describe("fiscal remittance rendering", () => {
+  it("keeps fiscal identity, authorization and transport on full-page original and duplicate", () => {
+    const data = remittanceWithItems("REMITO_FINAL");
+    data.singlePageDuplicate = true;
+    data.fiscal = {
+      authorizationId: "60000000-0000-4000-8000-000000000001",
+      cai: "12345678901234",
+      expiresAt: "2026-12-31",
+      pointOfSale: 9,
+      number: 1,
+      mode: "self_printed",
+      firstNumber: 1,
+      lastNumber: null,
+      businessName: "Safe fiscal <SA>",
+      cuit: "30710158230",
+      address: "Domicilio histórico",
+      vatCondition: "IVA RESPONSABLE INSCRITO",
+      grossIncome: "123",
+      activityStart: "2020-01-01",
+      printerName: "",
+      printerCuit: "",
+      printerRegistration: "",
+      printedAt: "",
+    };
+    data.transport = {
+      name: "Transporte Ejemplo",
+      cuit: "20111111112",
+      address: "Calle Transporte 123",
+    };
+    const html = generateRemittanceHTML(data);
+    expect(html).toContain("Safe fiscal &lt;SA&gt;");
+    expect(html).toContain("12345678901234");
+    expect(html).toContain("31/12/2026");
+    expect(html).toContain("DOCUMENTO NO VALIDO COMO FACTURA");
+    expect(html).toContain('class="fiscal-letter">R');
+    expect(html).toContain("ORIGINAL");
+    expect(html).toContain("DUPLICADO");
+    expect(html).toContain("Transporte Ejemplo");
+    expect(html).toContain("Calle Transporte 123");
+    expect(html).not.toContain('class="single-page"');
+  });
+});

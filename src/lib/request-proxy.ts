@@ -3,9 +3,21 @@ import { isPublicLegalPath } from "@/lib/legal";
 import { updateSession } from "@/lib/supabase/proxy";
 
 const WHATSAPP_TOOL_PATH = /^\/api\/internal\/whatsapp-agent\/tools\/[^/]+$/;
+const REMITTANCE_RECEIPT_PATH =
+  /^\/remitos\/recepcion\/[a-f0-9-]{36}\.[A-Za-z0-9_-]{43}$/;
 
 export async function handleRequestProxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  if (
+    REMITTANCE_RECEIPT_PATH.test(pathname) &&
+    ["GET", "HEAD", "POST"].includes(request.method)
+  ) {
+    const response = NextResponse.next({ request });
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return response;
+  }
   if (
     isPublicLegalPath(pathname) &&
     (request.method === "GET" || request.method === "HEAD")

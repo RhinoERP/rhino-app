@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
@@ -21,6 +22,28 @@ export async function getSavedOrderRemittancesAction(
   await ensure(READ_PERMISSIONS.orders, orgSlug);
   z.uuid().parse(parentOrderId);
   const documents = await listSavedOrderRemittances(orgSlug, parentOrderId);
+  const receipts = documents.length
+    ? await createAdminClient()
+        .from("remittance_receipts")
+        .select("remittance_id,received_at,receiver_name")
+        .eq("organization_id", documents[0].organization_id)
+        .in(
+          "remittance_id",
+          documents.map((document) => document.id)
+        )
+    : null;
+  if (receipts?.error) {
+    throw new Error("No se pudo consultar el estado de recepción.");
+  }
+  const receiptRows = z
+    .array(
+      z.object({
+        remittance_id: z.string(),
+        received_at: z.string().nullable(),
+        receiver_name: z.string().nullable(),
+      })
+    )
+    .parse(receipts?.data ?? []);
   return documents.map((document) => ({
     id: document.id,
     batchId: document.batch_id,
@@ -42,6 +65,12 @@ export async function getSavedOrderRemittancesAction(
       ),
     ],
     pdfUrl: document.pdf_url,
+    fiscal:
+      document.status === "ISSUED"
+        ? (savedRemittanceData(document).remittance.fiscal ?? null)
+        : null,
+    receipt:
+      receiptRows.find((row) => row.remittance_id === document.id) ?? null,
   }));
 }
 
@@ -62,6 +91,11 @@ export async function previewSavedRemittanceMasksAction(
     const documents = await loadSavedRemittances(orgSlug, ids);
     const masks = documents.map((document) => {
       const data = savedRemittanceData(document);
+      if (data.remittance.fiscal?.mode === "self_printed") {
+        throw new Error(
+          "Este remito se emite completo desde Rhino. Descargá el PDF del documento."
+        );
+      }
       return {
         ...buildRemittanceMaskData(data.remittance, {
           carrierName: data.carrierName,
