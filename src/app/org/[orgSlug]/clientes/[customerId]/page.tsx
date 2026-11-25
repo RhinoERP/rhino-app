@@ -25,6 +25,7 @@ import {
 } from "@/modules/collections/service/collections.service";
 import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignments/service/assignments.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
+import type { Customer } from "@/modules/customers/types";
 import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-notes.service";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
@@ -32,6 +33,7 @@ import { getOrgSettings } from "@/modules/organizations/service/org-settings.ser
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
+import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
 import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
@@ -56,6 +58,25 @@ const dateFormatter = new Intl.DateTimeFormat("es-AR", {
   hour: "2-digit",
   minute: "2-digit",
 });
+
+async function getAssignedCustomerPricing(
+  orgSlug: string,
+  customer: Pick<Customer, "price_level_id" | "sales_price_list_id">
+) {
+  const [assignedPriceList, priceLevels] = await Promise.all([
+    customer.sales_price_list_id
+      ? getSalesPriceListById(orgSlug, customer.sales_price_list_id)
+      : Promise.resolve(null),
+    customer.price_level_id
+      ? getPriceLevelsByOrgSlug(orgSlug)
+      : Promise.resolve([]),
+  ]);
+  return {
+    assignedPriceList,
+    assignedPriceLevel:
+      priceLevels.find((level) => level.id === customer.price_level_id) ?? null,
+  };
+}
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes independent customer detail cards
 export default async function CustomerDetailsPage({
@@ -105,9 +126,8 @@ export default async function CustomerDetailsPage({
 
   const { stats, recentSales, ...customer } = customerWithStats;
 
-  const assignedPriceList = customer.sales_price_list_id
-    ? await getSalesPriceListById(orgSlug, customer.sales_price_list_id)
-    : null;
+  const { assignedPriceList, assignedPriceLevel } =
+    await getAssignedCustomerPricing(orgSlug, customer);
 
   const displayName = customer.fantasy_name || customer.business_name;
   const siteAccess = await getSalesAccessContext(orgSlug);
@@ -187,6 +207,7 @@ export default async function CustomerDetailsPage({
           {/* Mobile: Info Card appears here (first) */}
           <div className="block lg:hidden">
             <CustomerInfoCard
+              assignedPriceLevel={assignedPriceLevel}
               assignedPriceList={assignedPriceList}
               canReadCollections={canReadCollections}
               createdAt={createdAt}
@@ -244,6 +265,7 @@ export default async function CustomerDetailsPage({
         {/* Desktop: Info Card appears here (sidebar) */}
         <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <CustomerInfoCard
+            assignedPriceLevel={assignedPriceLevel}
             assignedPriceList={assignedPriceList}
             canReadCollections={canReadCollections}
             createdAt={createdAt}
