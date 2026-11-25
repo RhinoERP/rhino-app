@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { secureLogout } from "@/lib/auth/secure-logout";
 import type { Organization } from "@/modules/organizations/types";
@@ -47,6 +48,11 @@ export function MobileOrganizationSwitcher({
 
   return (
     <div className="sticky top-0 z-40 flex items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-backdrop-filter:bg-background/80 md:hidden">
+      <SidebarTrigger
+        aria-label="Abrir menú de accesos"
+        className="size-11 shrink-0"
+        title="Todos los accesos"
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button

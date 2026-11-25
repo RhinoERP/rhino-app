@@ -44,6 +44,10 @@ import {
   type SalesQuotePricingMethod,
 } from "@/modules/sales-quote-requests/competitive-pricing";
 import { quoteProductStockLabel } from "@/modules/sales-quote-requests/product-stock";
+import {
+  type QuoteSellingUnit,
+  quoteSellingUnitFactor,
+} from "@/modules/sales-quote-requests/selling-unit";
 import type { SalesQuoteRequestEditValues } from "@/modules/sales-quote-requests/service/my-sales-quote-requests.service";
 import type { CreateSalesQuoteRequestInput } from "@/modules/sales-quote-requests/service/sales-quote-requests.service";
 import { canShareSyncedOfflineQuote } from "@/modules/sales-quote-requests/whatsapp-approval-share";
@@ -59,6 +63,7 @@ type RequestItemDraft = {
   id: string;
   productId: string;
   productVariantId: string | null;
+  sellingUnit: QuoteSellingUnit;
   quantity: string;
   pricingMethod: SalesQuotePricingMethod;
   competitorUnitPrice: string;
@@ -139,6 +144,13 @@ function buildLineView(params: {
     return { item, product: null, baseUnitPrice: 0, suggestion: null };
   }
 
+  let factor: number;
+  try {
+    factor = quoteSellingUnitFactor(product, item.sellingUnit);
+  } catch {
+    return { item, product, baseUnitPrice: 0, suggestion: null };
+  }
+
   const snapshotBasePrice = priceLevel
     ? params.snapshotPriceByLevel?.[product.id]?.[priceLevel.id]
     : undefined;
@@ -157,11 +169,14 @@ function buildLineView(params: {
           basePrice: snapshotBasePrice,
           adjustments: priceAdjustments,
         }).price;
-  const baseUnitPrice = convertPriceToQuoteCurrency(
-    salePrice,
-    product.currency,
-    currency,
-    exchangeRate
+  const baseUnitPrice = truncateMoney(
+    factor *
+      convertPriceToQuoteCurrency(
+        salePrice,
+        product.currency,
+        currency,
+        exchangeRate
+      )
   );
   const selectedAgreedPrice =
     item.agreedUnitPrice == null || item.agreedUnitPrice.trim() === ""
@@ -280,6 +295,7 @@ function buildRequestValues(params: {
     items: params.items.map((item) => ({
       productId: item.productId,
       productVariantId: item.productVariantId,
+      sellingUnit: item.sellingUnit,
       quantity: item.quantityNumber,
       pricingMethod: item.pricingMethod,
       competitorUnitPrice: item.competitorPriceNumber,
@@ -418,13 +434,10 @@ export function SalesQuoteRequestForm({
 }: SalesQuoteRequestFormProps) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState(initialValues?.customerId ?? "");
-  const [customerSegment, setCustomerSegment] = useState<
-    "ACTIVE" | "NEW" | "REACTIVATED"
-  >(initialValues?.customerSegment ?? "ACTIVE");
+  const customerSegment = initialValues?.customerSegment ?? "ACTIVE";
   const [sellerZone, setSellerZone] = useState(initialValues?.sellerZone ?? "");
-  const [currency, setCurrency] = useState<"ARS" | "USD">(
-    initialValues?.currency ?? "ARS"
-  );
+  // Preserve historical USD requests on edit; all new requests are in pesos.
+  const currency = initialValues?.currency ?? "ARS";
   const [exchangeRate, setExchangeRate] = useState(
     initialValues?.exchangeRate?.toString() ?? ""
   );
@@ -451,6 +464,7 @@ export function SalesQuoteRequestForm({
       id: `initial-${index}`,
       productId: item.productId,
       productVariantId: item.productVariantId,
+      sellingUnit: item.sellingUnit ?? "UNIDADES",
       quantity: item.quantity.toString(),
       pricingMethod: item.pricingMethod,
       competitorUnitPrice: item.competitorUnitPrice.toString(),
@@ -461,12 +475,10 @@ export function SalesQuoteRequestForm({
   );
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedVariantId, setSelectedVariantId] = useState("");
+  const [selectedSellingUnit, setSelectedSellingUnit] =
+    useState<QuoteSellingUnit>("UNIDADES");
   const [isPending, startTransition] = useTransition();
   const [isAddingItem, startAddingItem] = useTransition();
-  const [createdQuote, setCreatedQuote] = useState<{
-    requestId: string;
-    customerName: string;
-  } | null>(null);
   const [offlineQuoteCommands, setOfflineQuoteCommands] = useState<
     StoredOfflineSalesQuoteCommand[]
   >([]);
@@ -567,7 +579,6 @@ export function SalesQuoteRequestForm({
         ? customer.sales_price_list_id
         : ""
     );
-    setCreatedQuote(null);
   };
 
   const priceLevel = priceLevels.find((level) => level.id === priceLevelId);
@@ -638,6 +649,7 @@ export function SalesQuoteRequestForm({
           productVariantId: selectedProduct.hasVariants
             ? selectedVariantId
             : null,
+          sellingUnit: selectedSellingUnit,
           quantity: "1",
           pricingMethod: "COMPETITOR",
           competitorUnitPrice: "",
@@ -648,7 +660,7 @@ export function SalesQuoteRequestForm({
       ]);
       setSelectedProductId("");
       setSelectedVariantId("");
-      setCreatedQuote(null);
+      setSelectedSellingUnit("UNIDADES");
     });
   };
 
@@ -659,7 +671,6 @@ export function SalesQuoteRequestForm({
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...values } : item))
     );
-    setCreatedQuote(null);
   };
 
   const updatePricingMethod = (
@@ -729,8 +740,7 @@ export function SalesQuoteRequestForm({
   };
 
   async function handleQuoteSubmissionResult(
-    result: Awaited<ReturnType<typeof submitOrQueueQuote>>,
-    quoteCustomerName: string
+    result: Awaited<ReturnType<typeof submitOrQueueQuote>>
   ) {
     if (result.type === "missing-snapshot") {
       toast.error(
@@ -765,13 +775,9 @@ export function SalesQuoteRequestForm({
       return;
     }
 
-    setCreatedQuote({
-      requestId: result.requestId,
-      customerName: quoteCustomerName,
-    });
-    setItems([]);
-    setObservations("");
     toast.success("Solicitud enviada a aprobación");
+    router.push(`/org/${orgSlug}/solicitudes-venta`);
+    router.refresh();
   }
 
   const handleSubmit = () => {
@@ -810,7 +816,6 @@ export function SalesQuoteRequestForm({
       return;
     }
 
-    const quoteCustomerName = customerName(selectedCustomer);
     startTransition(async () => {
       const values = buildRequestValues({
         orgSlug,
@@ -836,7 +841,7 @@ export function SalesQuoteRequestForm({
         orgSlug,
         values,
       });
-      await handleQuoteSubmissionResult(result, quoteCustomerName);
+      await handleQuoteSubmissionResult(result);
     });
   };
 
@@ -938,21 +943,6 @@ export function SalesQuoteRequestForm({
                 value={customerId}
               />
             </Field>
-            <Field label="Segmento del cliente">
-              <select
-                className={selectClassName}
-                onChange={(event) =>
-                  setCustomerSegment(
-                    event.target.value as typeof customerSegment
-                  )
-                }
-                value={customerSegment}
-              >
-                <option value="ACTIVE">Activo</option>
-                <option value="NEW">Nuevo</option>
-                <option value="REACTIVATED">Reactivado</option>
-              </select>
-            </Field>
             <Field label="Zona del vendedor">
               <Input
                 maxLength={120}
@@ -960,18 +950,6 @@ export function SalesQuoteRequestForm({
                 placeholder="Ej.: Zona 6"
                 value={sellerZone}
               />
-            </Field>
-            <Field label="Moneda de la solicitud">
-              <select
-                className={selectClassName}
-                onChange={(event) =>
-                  setCurrency(event.target.value as "ARS" | "USD")
-                }
-                value={currency}
-              >
-                <option value="ARS">ARS</option>
-                <option value="USD">USD</option>
-              </select>
             </Field>
             {exchangeRequired && (
               <Field label="Tipo de cambio">
@@ -985,20 +963,6 @@ export function SalesQuoteRequestForm({
                 />
               </Field>
             )}
-            <Field label="Nivel de precio">
-              <select
-                className={selectClassName}
-                onChange={(event) => setPriceLevelId(event.target.value)}
-                value={priceLevelId}
-              >
-                <option value="">Precio base del producto</option>
-                {priceLevels.map((level) => (
-                  <option key={level.id} value={level.id}>
-                    {level.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
             <Field label="Lista especial de venta">
               <select
                 className={selectClassName}
@@ -1078,6 +1042,7 @@ export function SalesQuoteRequestForm({
                     onChange={(value) => {
                       setSelectedProductId(value);
                       setSelectedVariantId("");
+                      setSelectedSellingUnit("UNIDADES");
                     }}
                     options={productOptions}
                     placeholder="Buscar producto"
@@ -1094,12 +1059,8 @@ export function SalesQuoteRequestForm({
                   </p>
                 )}
               </div>
-              <Field
-                label={
-                  selectedProduct?.hasVariants ? "Variante" : "Unidad de venta"
-                }
-              >
-                {selectedProduct?.hasVariants ? (
+              {selectedProduct?.hasVariants && (
+                <Field label="Variante">
                   <SearchableCatalogPicker
                     label="Variante"
                     onChange={setSelectedVariantId}
@@ -1115,6 +1076,28 @@ export function SalesQuoteRequestForm({
                     searchPlaceholder="Buscar color o talle"
                     value={selectedVariantId}
                   />
+                </Field>
+              )}
+              <Field label="Unidad de venta">
+                {selectedProduct?.unitOfMeasure === "UN" ? (
+                  <select
+                    aria-label="Unidad de venta"
+                    className={selectClassName}
+                    onChange={(event) =>
+                      setSelectedSellingUnit(
+                        event.target.value as QuoteSellingUnit
+                      )
+                    }
+                    value={selectedSellingUnit}
+                  >
+                    <option value="UNIDADES">UNIDADES</option>
+                    {Number.isInteger(selectedProduct.unitsPerBox) &&
+                      (selectedProduct.unitsPerBox ?? 0) > 0 && (
+                        <option value="CAJAS">
+                          CAJAS ({selectedProduct.unitsPerBox} unidades)
+                        </option>
+                      )}
+                  </select>
                 ) : (
                   <div className="flex h-9 min-w-0 items-center rounded-md border bg-muted/30 px-3 text-muted-foreground text-sm">
                     {selectedProduct?.unitOfMeasure ?? "Seleccioná un producto"}
@@ -1221,19 +1204,6 @@ export function SalesQuoteRequestForm({
                 Los impuestos se estiman usando los impuestos asignados a cada
                 producto.
               </p>
-              {createdQuote && (
-                <div className="space-y-2 rounded-md border border-emerald-600/30 bg-emerald-600/5 p-3 text-sm">
-                  <p>
-                    Solicitud enviada. Referencia:{" "}
-                    {createdQuote.requestId.slice(0, 8)}
-                  </p>
-                  <WhatsAppApprovalShare
-                    customerName={createdQuote.customerName}
-                    orgSlug={orgSlug}
-                    requestId={createdQuote.requestId}
-                  />
-                </div>
-              )}
               <Button
                 className="w-full"
                 disabled={isPending || items.length === 0 || !customerId}
@@ -1289,6 +1259,7 @@ function getAdjustmentLabel(
   return "Sin ajuste sugerido";
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: displays pricing modes and valid sale units for each quote line.
 function RequestItemCard({
   item,
   product,
@@ -1341,13 +1312,10 @@ function RequestItemCard({
             {formatCurrency(baseUnitPrice, currency)}
           </p>
         </div>
-        <Button onClick={onRemove} size="sm" type="button" variant="ghost">
-          Quitar
-        </Button>
       </div>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Field
-          label={`Cantidad (${product?.unitOfMeasure ?? "unidad"})`}
+          label={`Cantidad (${item.sellingUnit === "CAJAS" ? "cajas" : (product?.unitOfMeasure ?? "unidad")})`}
           labelClassName={itemLabelClassName}
         >
           <Input
@@ -1358,6 +1326,31 @@ function RequestItemCard({
             value={item.quantity}
           />
         </Field>
+        {product?.unitOfMeasure === "UN" && (
+          <Field label="Unidad de venta" labelClassName={itemLabelClassName}>
+            <select
+              aria-label="Unidad de venta del producto"
+              className={selectClassName}
+              onChange={(event) =>
+                onUpdate({
+                  sellingUnit: event.target.value as QuoteSellingUnit,
+                  agreedUnitPrice: null,
+                  competitorUnitPrice: "",
+                  discountPercentage: "",
+                })
+              }
+              value={item.sellingUnit}
+            >
+              <option value="UNIDADES">UNIDADES</option>
+              {Number.isInteger(product.unitsPerBox) &&
+                (product.unitsPerBox ?? 0) > 0 && (
+                  <option value="CAJAS">
+                    CAJAS ({product.unitsPerBox} unidades)
+                  </option>
+                )}
+            </select>
+          </Field>
+        )}
         <Field label="Modalidad de precio" labelClassName={itemLabelClassName}>
           <select
             className={selectClassName}
@@ -1460,6 +1453,17 @@ function RequestItemCard({
             value={item.comment}
           />
         </Field>
+      </div>
+      <div className="mt-4 flex justify-end border-t pt-3">
+        <Button
+          className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={onRemove}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Quitar producto
+        </Button>
       </div>
     </div>
   );

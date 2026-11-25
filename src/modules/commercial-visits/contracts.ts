@@ -243,6 +243,7 @@ export const customerSiteSchema = z.object({
   name: z.string(),
   address: z.string(),
   city: z.string(),
+  postalCode: z.string().optional(),
   notes: z.string().nullable(),
   active: z.boolean(),
   latitude: z.number().nullable(),
@@ -250,6 +251,45 @@ export const customerSiteSchema = z.object({
 });
 export const customerSitesSchema = z.array(customerSiteSchema);
 export type CustomerSite = z.infer<typeof customerSiteSchema>;
+
+export const siteProposalSchema = z.object({
+  id: z.uuid(),
+  customerId: z.uuid(),
+  customerName: z.string(),
+  siteId: z.uuid().nullable(),
+  name: z.string(),
+  address: z.string(),
+  city: z.string(),
+  postalCode: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  proposedAt: z.string(),
+});
+export const siteProposalsSchema = z.array(siteProposalSchema);
+export type SiteProposal = z.infer<typeof siteProposalSchema>;
+
+export const proposeSiteSchema = z.object({
+  action: z.literal("proposeSite"),
+  customerId: z.uuid(),
+  siteId: z.uuid().optional(),
+  name: z.string().trim().min(1).max(120),
+  address: z.string().trim().min(1).max(500),
+  city: z.string().trim().min(1).max(120),
+  postalCode: z.string().trim().max(16).default(""),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+});
+export const decideSiteProposalSchema = z
+  .object({
+    action: z.literal("decideSiteProposal"),
+    proposalId: z.uuid(),
+    approved: z.boolean(),
+    reason: z.string().trim().max(1000).optional(),
+  })
+  .refine(
+    (value) => value.approved || Boolean(value.reason?.trim()),
+    "Indicá el motivo del rechazo"
+  );
 
 export const saveCustomerSiteSchema = z
   .object({
@@ -259,6 +299,7 @@ export const saveCustomerSiteSchema = z
     name: z.string().trim().min(1).max(120),
     address: z.string().trim().min(1).max(500),
     city: z.string().trim().min(1).max(120),
+    postalCode: z.string().trim().max(16).default(""),
     notes: z.string().trim().max(1000).optional(),
     active: z.boolean(),
     latitude: z.number().finite().min(-90).max(90).nullable(),

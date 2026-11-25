@@ -1,22 +1,15 @@
 "use client";
 
-import { MagnifyingGlassIcon, UsersIcon, XIcon } from "@phosphor-icons/react";
+import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { ClientesExportButton } from "@/components/customers/clientes-export-button";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Button } from "@/components/ui/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -40,6 +33,7 @@ type DataTableProps = {
 const STATUS_OPTIONS = [
   { value: "active", label: "Activos" },
   { value: "archived", label: "Inactivos" },
+  { value: "all", label: "Todos" },
 ];
 
 export function CustomersDataTable({
@@ -59,11 +53,6 @@ export function CustomersDataTable({
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-
-  const everHadData = useRef(false);
-  if (customers.length > 0) {
-    everHadData.current = true;
-  }
 
   const isFiltered = status !== "active" || !!sellerId || !!search;
 
@@ -134,32 +123,6 @@ export function CustomersDataTable({
   const filteredData = table
     .getFilteredRowModel()
     .rows.map((row) => row.original);
-
-  if (customers.length === 0 && !everHadData.current) {
-    return (
-      <div className="rounded-md border">
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <UsersIcon className="size-6" weight="duotone" />
-            </EmptyMedia>
-            <EmptyTitle>No hay clientes</EmptyTitle>
-            <EmptyDescription>
-              Aún no has agregado ningún cliente a esta organización.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <AddCustomerDialog
-              onCreated={() => {
-                window.location.reload();
-              }}
-              orgSlug={orgSlug}
-            />
-          </EmptyContent>
-        </Empty>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -247,6 +210,70 @@ export function CustomersDataTable({
       </div>
 
       <div className="block md:hidden">
+        <div className="space-y-3 rounded-lg border p-3">
+          <label
+            className="block space-y-1 text-sm"
+            htmlFor="mobile-customer-search"
+          >
+            <span>Buscar cliente</span>
+            <div className="relative">
+              <MagnifyingGlassIcon className="pointer-events-none absolute top-3.5 left-3 size-4 text-muted-foreground" />
+              <Input
+                className="h-11 pl-9 text-base"
+                id="mobile-customer-search"
+                onChange={(event) => {
+                  setSearch(event.target.value || null);
+                  table.setPageIndex(0);
+                }}
+                placeholder="Nombre, número, CUIT o ciudad"
+                value={search}
+              />
+            </div>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <Select onValueChange={onStatusChange} value={status}>
+              <SelectTrigger
+                aria-label="Estado de clientes"
+                className="h-11 w-full"
+              >
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              onValueChange={(value) =>
+                onSellerChange(value === "__all__" ? "" : value)
+              }
+              value={sellerId || "__all__"}
+            >
+              <SelectTrigger
+                aria-label="Filtrar por vendedor"
+                className="h-11 w-full"
+              >
+                <SelectValue placeholder="Vendedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Todos los vendedores</SelectItem>
+                {sellersOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {isFiltered && (
+            <Button onClick={onResetFilters} type="button" variant="outline">
+              <XIcon /> Limpiar filtros
+            </Button>
+          )}
+        </div>
         <CustomersMobileList
           customers={filteredData}
           EmptyStateAction={
@@ -257,8 +284,14 @@ export function CustomersDataTable({
               orgSlug={orgSlug}
             />
           }
+          emptyDescription={
+            isFiltered
+              ? "No hay clientes que coincidan con estos filtros. Probá limpiar los filtros."
+              : "No hay clientes activos visibles. Probá el filtro Todos."
+          }
           orgSlug={orgSlug}
         />
+        <DataTablePagination table={table} />
       </div>
     </div>
   );

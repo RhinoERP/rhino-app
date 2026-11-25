@@ -145,12 +145,14 @@ type CustomersMobileListProps = {
   customers: Customer[];
   orgSlug: string;
   EmptyStateAction?: React.ReactNode;
+  emptyDescription?: string;
 };
 
 export function CustomersMobileList({
   customers,
   orgSlug,
   EmptyStateAction,
+  emptyDescription,
 }: CustomersMobileListProps) {
   if (customers.length === 0) {
     return (
@@ -162,7 +164,7 @@ export function CustomersMobileList({
             </EmptyMedia>
             <EmptyTitle>No hay clientes</EmptyTitle>
             <EmptyDescription>
-              Aún no has agregado ningún cliente a esta organización.
+              {emptyDescription ?? "No hay clientes para mostrar."}
             </EmptyDescription>
           </EmptyHeader>
           {EmptyStateAction && <EmptyContent>{EmptyStateAction}</EmptyContent>}

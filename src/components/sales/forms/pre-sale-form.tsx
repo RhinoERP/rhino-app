@@ -6,6 +6,7 @@ import { es } from "date-fns/locale";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   ChevronsUpDown,
   FileText,
   MoreHorizontal,
@@ -16,6 +17,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PreSaleCustomerAccount } from "@/components/collections/pre-sale-customer-account";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -121,11 +123,13 @@ import {
 
 type PreSaleFormProps = {
   orgSlug: string;
+  canReadCollections?: boolean;
   organization: {
     name: string;
     cuit: string | null;
   };
   initialSellerId?: string;
+  initialCustomerId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
@@ -568,8 +572,10 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several hooks and handlers
 export function PreSaleForm({
   orgSlug,
+  canReadCollections = false,
   organization,
   initialSellerId,
+  initialCustomerId,
   customers,
   sellers,
   products,
@@ -577,7 +583,7 @@ export function PreSaleForm({
   priceLevels,
 }: PreSaleFormProps) {
   const router = useRouter();
-  const [customerId, setCustomerId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>(initialCustomerId ?? "");
   const [sellerId, setSellerId] = useState<string>("");
   const [selectedPriceLevelId, setSelectedPriceLevelId] = useState<string>("");
   const [productPrices, setProductPrices] = useState<Map<string, number>>(
@@ -623,6 +629,9 @@ export function PreSaleForm({
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const [items, setItems] = useState<ItemState[]>([]);
+  const [collapsedItemIds, setCollapsedItemIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -636,7 +645,10 @@ export function PreSaleForm({
   const sellerOptions = useMemo(
     () =>
       sellers
-        .filter((member) => Boolean(member.user_id))
+        .filter(
+          (member) =>
+            Boolean(member.user_id) && member.is_active && !member.disabled_at
+        )
         .map((member) => ({
           id: member.user_id,
           label: buildSellerLabel(member),
@@ -1233,6 +1245,11 @@ export function PreSaleForm({
     const pricePerKg = getPricePerKg(unitOfMeasure, adjustedPrice);
     const unitPrice = adjustedPrice;
 
+    setCollapsedItemIds((current) => {
+      const next = new Set(current);
+      next.delete(product.id);
+      return next;
+    });
     setItems((prev) => {
       const exists = prev.find(
         (item) => item.type === "product" && item.productId === product.id
@@ -1359,6 +1376,11 @@ export function PreSaleForm({
 
   const handleRemoveItem = (itemId: string) => {
     setItems((prev) => prev.filter((item) => item.id !== itemId));
+    setCollapsedItemIds((current) => {
+      const next = new Set(current);
+      next.delete(itemId);
+      return next;
+    });
   };
 
   const handleUpdateItemQuantity = (itemId: string, quantity: number) => {
@@ -1557,6 +1579,7 @@ export function PreSaleForm({
 
       setSuccessMessage("Preventa creada correctamente");
       setItems([]);
+      setCollapsedItemIds(new Set());
       setObservations("");
       router.push(`/org/${orgSlug}/ventas`);
     } catch (mutationError) {
@@ -2248,6 +2271,12 @@ export function PreSaleForm({
             </CardContent>
           </Card>
 
+          <PreSaleCustomerAccount
+            canReadCollections={canReadCollections}
+            customerId={customerId}
+            orgSlug={orgSlug}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">
@@ -2803,12 +2832,52 @@ export function PreSaleForm({
                         );
                       }
 
+                      const isCollapsed = collapsedItemIds.has(item.id);
+                      const itemSubtotal = calculateItemTotals(item).subtotal;
                       return (
-                        <div
-                          className="grid min-w-0 gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
-                          key={item.id}
-                        >
-                          {/*
+                        <div key={item.id}>
+                          {isCollapsed && (
+                            <button
+                              aria-controls={`pre-sale-item-${item.id}`}
+                              aria-expanded={false}
+                              aria-label={`Editar ${item.name}`}
+                              className="flex min-h-16 w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+                              onClick={() =>
+                                setCollapsedItemIds((current) => {
+                                  const next = new Set(current);
+                                  next.delete(item.id);
+                                  return next;
+                                })
+                              }
+                              type="button"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium">
+                                  {item.name}
+                                </span>
+                                <span className="block truncate text-muted-foreground text-xs">
+                                  SKU {item.sku}
+                                </span>
+                              </span>
+                              <span className="flex shrink-0 items-center gap-1 font-semibold text-sm">
+                                {formatCurrency(itemSubtotal)}
+                                <ChevronDown
+                                  aria-hidden="true"
+                                  className="size-4 text-muted-foreground"
+                                />
+                              </span>
+                            </button>
+                          )}
+                          <div
+                            className={cn(
+                              "min-w-0 gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] md:items-center",
+                              isCollapsed
+                                ? "hidden md:grid"
+                                : "grid grid-cols-2"
+                            )}
+                            id={`pre-sale-item-${item.id}`}
+                          >
+                            {/*
                         Layout:
                         - Product info
                         - Quantity input
@@ -2818,58 +2887,32 @@ export function PreSaleForm({
                         - Subtotal
                         - Remove action
                       */}
-                          <div className="min-w-0 overflow-hidden">
-                            <div className="min-w-0 space-y-1">
-                              <p className="break-words font-medium leading-snug">
-                                {item.name}
-                              </p>
-                              {item.brand ? (
-                                <p className="break-words text-muted-foreground text-xs">
-                                  {item.brand}
+                            <div className="col-span-2 min-w-0 overflow-hidden md:col-span-1">
+                              <div className="min-w-0 space-y-1">
+                                <p className="break-words font-medium leading-snug">
+                                  {item.name}
                                 </p>
-                              ) : null}
+                                {item.brand ? (
+                                  <p className="break-words text-muted-foreground text-xs">
+                                    {item.brand}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <p className="break-all text-muted-foreground text-sm">
+                                SKU {item.sku}
+                              </p>
                             </div>
-                            <p className="break-all text-muted-foreground text-sm">
-                              SKU {item.sku}
-                            </p>
-                          </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.quantity || Number.isNaN(item.quantity)
-                                  ? ""
-                                  : item.quantity
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              {measureLabel}
-                            </span>
-                            {itemIsWeightOrVolume ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Cantidad
+                              </span>
                               <Input
                                 className="h-8 w-full"
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleMeasureInputChange(
+                                  handleQuantityInputChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -2878,172 +2921,216 @@ export function PreSaleForm({
                                 step="0.01"
                                 type="number"
                                 value={
-                                  !measureValue || Number.isNaN(measureValue)
+                                  !item.quantity || Number.isNaN(item.quantity)
                                     ? ""
-                                    : measureValue
+                                    : item.quantity
                                 }
                               />
-                            ) : (
-                              <span className="text-sm">{unitLabel}</span>
-                            )}
-                          </div>
+                            </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Precio unitario
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleUnitPriceInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.unitPrice || Number.isNaN(item.unitPrice)
-                                  ? ""
-                                  : item.unitPrice
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Descuento %
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                handleDiscountInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
-                                  ? ""
-                                  : item.discountPercent
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col items-start gap-1 sm:items-end">
-                            <span className="text-muted-foreground text-xs">
-                              Subtotal
-                            </span>
-                            <p className="font-medium">
-                              {formatCurrency(
-                                calculateItemTotals(item).subtotal
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                {measureLabel}
+                              </span>
+                              {itemIsWeightOrVolume ? (
+                                <Input
+                                  className="h-8 w-full"
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleMeasureInputChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !measureValue || Number.isNaN(measureValue)
+                                      ? ""
+                                      : measureValue
+                                  }
+                                />
+                              ) : (
+                                <span className="text-sm">{unitLabel}</span>
                               )}
-                            </p>
-                          </div>
+                            </div>
 
-                          <div className="flex items-center justify-start sm:justify-end">
-                            <Button
-                              onClick={() => handleRemoveItem(item.id)}
-                              size="icon"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-
-                          {taxIndicator ? (
-                            <div className="flex w-full items-start justify-between gap-3 border-t pt-2 sm:col-span-7">
-                              <p
-                                className={cn(
-                                  "min-w-0 flex-1 text-xs leading-relaxed",
-                                  taxIndicator.variant === "product" ||
-                                    taxIndicator.variant === "manual"
-                                    ? "text-primary"
-                                    : "text-muted-foreground"
-                                )}
-                              >
-                                <span className="font-medium">
-                                  {taxIndicator.label}
-                                </span>
-                                {taxIndicator.summary
-                                  ? `: ${taxIndicator.summary}`
-                                  : null}
-                              </p>
-                              <Popover
-                                onOpenChange={(open) =>
-                                  setOpenItemTaxPickerId(open ? item.id : null)
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Precio unitario
+                              </span>
+                              <Input
+                                className="h-8 w-full"
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(event) =>
+                                  handleUnitPriceInputChange(
+                                    item.id,
+                                    event.target.value
+                                  )
                                 }
-                                open={openItemTaxPickerId === item.id}
+                                placeholder="0"
+                                step="0.01"
+                                type="number"
+                                value={
+                                  !item.unitPrice ||
+                                  Number.isNaN(item.unitPrice)
+                                    ? ""
+                                    : item.unitPrice
+                                }
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Descuento %
+                              </span>
+                              <Input
+                                className="h-8 w-full"
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  handleDiscountInputChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={
+                                  Number.isNaN(item.discountPercent) ||
+                                  item.discountPercent === 0
+                                    ? ""
+                                    : item.discountPercent
+                                }
+                              />
+                            </div>
+
+                            <div className="flex flex-col items-start gap-1 md:items-end">
+                              <span className="text-muted-foreground text-xs">
+                                Subtotal
+                              </span>
+                              <p className="font-medium">
+                                {formatCurrency(itemSubtotal)}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-end">
+                              <Button
+                                aria-label={`Quitar ${item.name}`}
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
                               >
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    aria-label={`Cambiar impuestos de ${item.name}`}
-                                    className="hidden"
-                                    size="icon"
-                                    type="button"
-                                    variant="ghost"
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent
-                                  align="end"
-                                  className="w-80 p-0"
-                                  sideOffset={6}
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            {taxIndicator ? (
+                              <div className="col-span-2 flex w-full items-start justify-between gap-3 border-t pt-2 md:col-span-7">
+                                <p
+                                  className={cn(
+                                    "min-w-0 flex-1 text-xs leading-relaxed",
+                                    taxIndicator.variant === "product" ||
+                                      taxIndicator.variant === "manual"
+                                      ? "text-primary"
+                                      : "text-muted-foreground"
+                                  )}
                                 >
-                                  <Command>
-                                    <CommandInput placeholder="Buscar impuesto..." />
-                                    <CommandList>
-                                      <CommandEmpty>
-                                        No se encontraron impuestos.
-                                      </CommandEmpty>
-                                      <CommandGroup>
-                                        <CommandItem
-                                          onSelect={() =>
-                                            handleUseSaleTaxesForItem(item.id)
-                                          }
-                                          value={`default-${item.id}`}
-                                        >
-                                          <span className="flex-1 truncate">
-                                            Usar impuesto de venta
-                                          </span>
-                                          {currentItemTaxIds.size === 0 ? (
-                                            <Check className="h-4 w-4 shrink-0 text-primary" />
-                                          ) : null}
-                                        </CommandItem>
-                                        {taxes.map((tax) => (
+                                  <span className="font-medium">
+                                    {taxIndicator.label}
+                                  </span>
+                                  {taxIndicator.summary
+                                    ? `: ${taxIndicator.summary}`
+                                    : null}
+                                </p>
+                                <Popover
+                                  onOpenChange={(open) =>
+                                    setOpenItemTaxPickerId(
+                                      open ? item.id : null
+                                    )
+                                  }
+                                  open={openItemTaxPickerId === item.id}
+                                >
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      aria-label={`Cambiar impuestos de ${item.name}`}
+                                      className="hidden"
+                                      size="icon"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent
+                                    align="end"
+                                    className="w-80 p-0"
+                                    sideOffset={6}
+                                  >
+                                    <Command>
+                                      <CommandInput placeholder="Buscar impuesto..." />
+                                      <CommandList>
+                                        <CommandEmpty>
+                                          No se encontraron impuestos.
+                                        </CommandEmpty>
+                                        <CommandGroup>
                                           <CommandItem
-                                            key={tax.id}
                                             onSelect={() =>
-                                              handleItemTaxToggle(item.id, tax)
+                                              handleUseSaleTaxesForItem(item.id)
                                             }
-                                            value={`${tax.name} ${tax.rate}`}
+                                            value={`default-${item.id}`}
                                           >
                                             <span className="flex-1 truncate">
-                                              {tax.name} ({tax.rate}%)
+                                              Usar impuesto de venta
                                             </span>
-                                            {currentItemTaxIds.has(tax.id) ? (
+                                            {currentItemTaxIds.size === 0 ? (
                                               <Check className="h-4 w-4 shrink-0 text-primary" />
                                             ) : null}
                                           </CommandItem>
-                                        ))}
-                                      </CommandGroup>
-                                    </CommandList>
-                                  </Command>
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          ) : null}
+                                          {taxes.map((tax) => (
+                                            <CommandItem
+                                              key={tax.id}
+                                              onSelect={() =>
+                                                handleItemTaxToggle(
+                                                  item.id,
+                                                  tax
+                                                )
+                                              }
+                                              value={`${tax.name} ${tax.rate}`}
+                                            >
+                                              <span className="flex-1 truncate">
+                                                {tax.name} ({tax.rate}%)
+                                              </span>
+                                              {currentItemTaxIds.has(tax.id) ? (
+                                                <Check className="h-4 w-4 shrink-0 text-primary" />
+                                              ) : null}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            ) : null}
+                            <Button
+                              className="col-span-2 min-h-11 md:hidden"
+                              onClick={() =>
+                                setCollapsedItemIds((current) =>
+                                  new Set(current).add(item.id)
+                                )
+                              }
+                              type="button"
+                              variant="outline"
+                            >
+                              Ok
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}

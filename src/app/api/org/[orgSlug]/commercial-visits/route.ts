@@ -3,11 +3,14 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import {
   customerSitesSchema,
+  decideSiteProposalSchema,
+  proposeSiteSchema,
   type RouteDayResult,
   reviewQueueSchema,
   routeAdminListSchema,
   routeDayResultSchema,
   saveCustomerSiteSchema,
+  siteProposalsSchema,
   visitAdminDaySchema,
   visitCommandSchema,
   visitDayResultSchema,
@@ -130,6 +133,28 @@ function getView(request: NextRequest): {
       kind: "other",
     };
   }
+  if (view === "mapSites") {
+    return {
+      name: "commercial_site_catalog",
+      schema: customerSitesSchema,
+      args: {},
+      adminOnly: false,
+      kind: "other",
+    };
+  }
+  if (view === "siteProposals") {
+    const customerId = request.nextUrl.searchParams.get("customerId");
+    if (customerId && !z.uuid().safeParse(customerId).success) {
+      return null;
+    }
+    return {
+      name: "commercial_site_proposal_queue",
+      schema: siteProposalsSchema,
+      args: { p_customer: customerId || null },
+      adminOnly: !customerId,
+      kind: "other",
+    };
+  }
   if (view === "adminRoutes") {
     return {
       name: "commercial_route_admin_list",
@@ -231,7 +256,12 @@ export async function POST(request: NextRequest, context: Context) {
   const { orgSlug } = await context.params;
   const body: unknown = await request.json().catch(() => null);
   const command = z
-    .union([visitCommandSchema, saveCustomerSiteSchema])
+    .union([
+      visitCommandSchema,
+      saveCustomerSiteSchema,
+      proposeSiteSchema,
+      decideSiteProposalSchema,
+    ])
     .safeParse(body);
   if (!command.success) {
     return NextResponse.json(
@@ -241,7 +271,8 @@ export async function POST(request: NextRequest, context: Context) {
   }
   const adminOnly =
     command.data.action === "decideLocation" ||
-    command.data.action === "saveSite";
+    command.data.action === "saveSite" ||
+    command.data.action === "decideSiteProposal";
   const org = await authorize(orgSlug, adminOnly);
   if (!org) {
     return NextResponse.json(
@@ -340,7 +371,7 @@ export async function POST(request: NextRequest, context: Context) {
       };
       break;
     case "saveSite":
-      name = "commercial_site_save";
+      name = "commercial_site_save_with_postcode";
       args = {
         p_org: org.id,
         p_customer: input.customerId,
@@ -348,10 +379,34 @@ export async function POST(request: NextRequest, context: Context) {
         p_name: input.name,
         p_address: input.address,
         p_city: input.city,
+        p_postal_code: input.postalCode,
         p_notes: input.notes ?? null,
         p_active: input.active,
         p_lat: input.latitude,
         p_lng: input.longitude,
+      };
+      break;
+    case "proposeSite":
+      name = "commercial_site_propose_from_customer";
+      args = {
+        p_org: org.id,
+        p_customer: input.customerId,
+        p_site: input.siteId ?? null,
+        p_name: input.name,
+        p_address: input.address,
+        p_city: input.city,
+        p_postal_code: input.postalCode,
+        p_lat: input.latitude,
+        p_lng: input.longitude,
+      };
+      break;
+    case "decideSiteProposal":
+      name = "commercial_site_proposal_decide";
+      args = {
+        p_org: org.id,
+        p_proposal: input.proposalId,
+        p_approve: input.approved,
+        p_reason: input.reason ?? null,
       };
       break;
     default:
@@ -360,8 +415,40 @@ export async function POST(request: NextRequest, context: Context) {
         { status: 400, headers: PRIVATE_HEADERS }
       );
   }
-  const { data, error } = await callVisitRpc(name, args);
+  let { data, error } = await callVisitRpc(name, args);
+  // Keep existing site editing usable in test environments awaiting the new
+  // migration. Postal codes are never silently discarded.
+  if (
+    input.action === "saveSite" &&
+    !input.postalCode &&
+    (error?.code === "PGRST202" || error?.code === "42883")
+  ) {
+    ({ data, error } = await callVisitRpc("commercial_site_save", {
+      p_org: args.p_org,
+      p_customer: args.p_customer,
+      p_site: args.p_site,
+      p_name: args.p_name,
+      p_address: args.p_address,
+      p_city: args.p_city,
+      p_notes: args.p_notes,
+      p_active: args.p_active,
+      p_lat: args.p_lat,
+      p_lng: args.p_lng,
+    }));
+  }
   if (error) {
+    if (
+      input.action === "saveSite" &&
+      (error.code === "PGRST202" || error.code === "42883")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Falta aplicar la migración de códigos postales de sucursales.",
+        },
+        { status: 503, headers: PRIVATE_HEADERS }
+      );
+    }
     return rpcErrorResponse(error, "No se pudo guardar la visita");
   }
   return NextResponse.json(

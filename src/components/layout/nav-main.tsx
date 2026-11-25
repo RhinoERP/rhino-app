@@ -11,6 +11,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 type NavItem = {
@@ -33,6 +34,7 @@ type NavMainProps = {
 
 export function NavMain({ categories }: NavMainProps) {
   const pathname = usePathname();
+  const { isMobile, setOpenMobile } = useSidebar();
 
   return (
     <>
@@ -97,7 +99,14 @@ export function NavMain({ categories }: NavMainProps) {
                       isActive={isActive}
                       tooltip={item.title}
                     >
-                      <Link href={item.url}>
+                      <Link
+                        href={item.url}
+                        onClick={() => {
+                          if (isMobile) {
+                            setOpenMobile(false);
+                          }
+                        }}
+                      >
                         {item.icon}
                         <span>{item.title}</span>
                       </Link>

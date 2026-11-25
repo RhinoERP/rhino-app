@@ -14,6 +14,7 @@ import {
 } from "@/modules/sales/service/sales.service";
 import { buildItemizedTaxPlan } from "@/modules/taxes/item-tax-calculations";
 import { calculateCompetitivePriceSuggestion } from "../competitive-pricing";
+import { quoteSellingUnitFactor, quoteUnitSnapshot } from "../selling-unit";
 import { createSalesQuoteRequestSchema } from "./sales-quote-requests.service";
 
 export const offlineSalesQuoteRequestCommandSchema = z.object({
@@ -202,6 +203,14 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
         409
       );
     }
+    try {
+      quoteSellingUnitFactor(product, item.sellingUnit);
+    } catch {
+      throw new OfflineQuoteRequestError(
+        "El snapshot no incluye unidades por caja válidas para este producto",
+        409
+      );
+    }
     const assignment = snapshot.customerPriceAssignments.find(
       (entry) =>
         entry.customerId === customer.id &&
@@ -225,11 +234,15 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
         400
       );
     }
-    const baseUnitPrice = convertPriceToQuoteCurrency(
-      baseProductPrice,
-      product.currency,
-      command.quote.currency,
-      command.quote.exchangeRate
+    const factor = quoteSellingUnitFactor(product, item.sellingUnit);
+    const baseUnitPrice = truncateMoney(
+      factor *
+        convertPriceToQuoteCurrency(
+          baseProductPrice,
+          product.currency,
+          command.quote.currency,
+          command.quote.exchangeRate
+        )
     );
     const pricing = calculateCompetitivePriceSuggestion(
       baseUnitPrice,
@@ -252,11 +265,14 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
     const unitCost =
       costProductCurrency == null
         ? null
-        : convertPriceToQuoteCurrency(
-            costProductCurrency,
-            product.currency,
-            command.quote.currency,
-            command.quote.exchangeRate
+        : truncateMoney(
+            factor *
+              convertPriceToQuoteCurrency(
+                costProductCurrency,
+                product.currency,
+                command.quote.currency,
+                command.quote.exchangeRate
+              )
           );
     return { item, index, product, variant, pricing, lineSubtotal, unitCost };
   });
@@ -284,7 +300,10 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
       ? `${line.product.name} - ${line.variant.talle} / ${line.variant.color}`
       : line.product.name,
     sku_snapshot: line.product.sku,
-    unit_of_measure_snapshot: line.product.unitOfMeasure,
+    unit_of_measure_snapshot: quoteUnitSnapshot(
+      line.product,
+      line.item.sellingUnit
+    ),
     product_currency_snapshot: line.product.currency,
     quantity: line.item.quantity,
     pricing_method: line.item.pricingMethod,

@@ -194,7 +194,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Clientes",
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
-          requiredPermission: ["customers.read", "customers.read.all"],
+          requiredPermission: [
+            "customers.read",
+            "customers.read.all",
+            "customers.manage",
+          ],
         },
         {
           title: "WhatsApp",
@@ -251,6 +255,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: [
             "pos.read",
             "pos.read.all",
+            "pos.manage",
             "mercadolibre.access",
           ],
           module: "pos",
@@ -337,6 +342,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: [
             "inventory.read",
             "inventory.read.all",
+            "inventory.manage",
             "mercadolibre.access",
           ],
         },

@@ -44,6 +44,7 @@ export type SalesQuoteRequestEditValues = {
   items: Array<{
     productId: string;
     productVariantId: string | null;
+    sellingUnit?: "UNIDADES" | "CAJAS";
     quantity: number;
     pricingMethod: SalesQuotePricingMethod;
     competitorUnitPrice: number;
@@ -118,6 +119,7 @@ type EditableRequestRow = {
 type EditableItemRow = {
   product_id: string;
   product_variant_id: string | null;
+  unit_of_measure_snapshot: string | null;
   quantity: number;
   pricing_method: SalesQuotePricingMethod;
   competitor_unit_price: number;
@@ -349,7 +351,7 @@ export async function getOwnSalesQuoteRequestForEdit(params: {
   const itemsQuery = database
     .from("sales_quote_request_items")
     .select(
-      "product_id, product_variant_id, quantity, pricing_method, competitor_unit_price, agreed_unit_price, discount_percentage, product_comment"
+      "product_id, product_variant_id, unit_of_measure_snapshot, quantity, pricing_method, competitor_unit_price, agreed_unit_price, discount_percentage, product_comment"
     )
     .eq("request_id", request.id)
     .order("line_number", { ascending: true });
@@ -382,6 +384,9 @@ export async function getOwnSalesQuoteRequestForEdit(params: {
       agreedUnitPrice: item.agreed_unit_price,
       discountPercentage: item.discount_percentage,
       comment: item.product_comment ?? "",
+      sellingUnit: item.unit_of_measure_snapshot?.startsWith("CAJAS (")
+        ? "CAJAS"
+        : "UNIDADES",
     })),
   };
 }

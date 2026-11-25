@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SearchableCatalogPicker } from "@/components/ui/searchable-catalog-picker";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  type CustomerSite,
+  customerSitesSchema,
   type RouteDayResult,
   routeDayResultSchema,
 } from "@/modules/commercial-visits/contracts";
 import { routeEventLabels } from "@/modules/commercial-visits/route-event-labels";
+import { getVisitMapPoints } from "@/modules/commercial-visits/visit-map-points";
 import { VisitDocumentDialog } from "./visit-document-dialog";
+import { VisitMap } from "./visit-map";
 import { VisitPointDialog } from "./visit-point-dialog";
 
 type Route = RouteDayResult["routes"][number];
@@ -451,9 +455,19 @@ export function VisitDay({ orgSlug }: { orgSlug: string }) {
   const [data, setData] = useState<RouteDayResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingRoutes, setLoadingRoutes] = useState(true);
+  const [mapSites, setMapSites] = useState<CustomerSite[]>([]);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [loadingMap, setLoadingMap] = useState(true);
+  const loadSequence = useRef(0);
   const url = `/api/org/${encodeURIComponent(orgSlug)}/commercial-visits`;
+  const mapPoints = useMemo(
+    () => (data ? getVisitMapPoints(data, mapSites) : []),
+    [data, mapSites]
+  );
   const load = useCallback(
     async (selectedDay: string) => {
+      loadSequence.current += 1;
+      const sequence = loadSequence.current;
       const response = await fetch(`${url}?view=routes&day=${selectedDay}`, {
         cache: "no-store",
       });
@@ -464,10 +478,35 @@ export function VisitDay({ orgSlug }: { orgSlug: string }) {
             "No se pudieron cargar las rutas"
         );
       }
-      setData(routeDayResultSchema.parse(result));
+      const parsed = routeDayResultSchema.parse(result);
+      if (sequence === loadSequence.current) {
+        setData(parsed);
+      }
     },
     [url]
   );
+  const loadMapSites = useCallback(async () => {
+    try {
+      const response = await fetch(`${url}?view=mapSites`, {
+        cache: "no-store",
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          (result as { error?: string }).error ??
+            "No se pudieron cargar los puntos del mapa"
+        );
+      }
+      setMapSites(customerSitesSchema.parse(result));
+      setMapError(null);
+    } catch (error) {
+      setMapError(
+        error instanceof Error ? error.message : "No se pudo cargar el mapa"
+      );
+    } finally {
+      setLoadingMap(false);
+    }
+  }, [url]);
   useEffect(() => {
     const current = todayLocal();
     setDay(current);
@@ -478,7 +517,25 @@ export function VisitDay({ orgSlug }: { orgSlug: string }) {
         )
       )
       .finally(() => setLoadingRoutes(false));
-  }, [load]);
+    loadMapSites();
+  }, [load, loadMapSites]);
+  useEffect(() => {
+    const refresh = () => {
+      if (day !== todayLocal() || document.visibilityState !== "visible") {
+        return;
+      }
+      load(day).catch(() => {
+        // Preserve the current route list when a background refresh fails.
+      });
+      loadMapSites();
+    };
+    window.addEventListener("focus", refresh);
+    const interval = window.setInterval(refresh, 60_000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.clearInterval(interval);
+    };
+  }, [day, load, loadMapSites]);
   async function send(command: Record<string, unknown>): Promise<boolean> {
     setBusy(true);
     try {
@@ -492,6 +549,7 @@ export function VisitDay({ orgSlug }: { orgSlug: string }) {
         throw new Error(result.error ?? "No se pudo guardar la ruta");
       }
       await load(day);
+      loadMapSites();
       toast.success("Ruta actualizada");
       return true;
     } catch (error) {
@@ -544,6 +602,28 @@ export function VisitDay({ orgSlug }: { orgSlug: string }) {
         <output className="flex items-center gap-2 text-muted-foreground text-sm">
           <Spinner aria-label="Cargando" /> Cargando visitas…
         </output>
+      )}
+      {!loadingRoutes && data && (
+        <div className="space-y-2">
+          {mapError && (
+            <div className="flex flex-wrap items-center gap-2 text-destructive text-sm">
+              No se pudieron cargar los puntos: {mapError}
+              <Button
+                onClick={() => loadMapSites()}
+                size="sm"
+                variant="outline"
+              >
+                Reintentar
+              </Button>
+            </div>
+          )}
+          {loadingMap && (
+            <output className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Spinner aria-label="Cargando" /> Cargando mapa…
+            </output>
+          )}
+          {!(loadingMap || mapError) && <VisitMap points={mapPoints} />}
+        </div>
       )}
       {data?.routes.map((route) => (
         <RouteCard

@@ -15,10 +15,12 @@ import {
   calculateCompetitivePriceSuggestion,
   type SalesQuotePricingMethod,
 } from "../competitive-pricing";
+import { quoteSellingUnitFactor, quoteUnitSnapshot } from "../selling-unit";
 
 const itemInputSchema = z.object({
   productId: z.string().uuid(),
   productVariantId: z.string().uuid().nullable().optional(),
+  sellingUnit: z.enum(["UNIDADES", "CAJAS"]).optional(),
   quantity: z.number().finite().positive(),
   pricingMethod: z.enum(["COMPETITOR", "PERCENTAGE", "LIST_PRICE"]),
   competitorUnitPrice: z.number().finite().nonnegative(),
@@ -107,7 +109,10 @@ function mapRequestLine(params: {
       ? `${params.product.name} - ${params.variant.talle} / ${params.variant.color}`
       : params.product.name,
     sku_snapshot: params.product.sku,
-    unit_of_measure_snapshot: params.product.unitOfMeasure,
+    unit_of_measure_snapshot: quoteUnitSnapshot(
+      params.product,
+      params.item.sellingUnit
+    ),
     product_currency_snapshot: params.product.currency,
     quantity: params.item.quantity,
     pricing_method: params.item.pricingMethod,
@@ -205,6 +210,7 @@ function prepareRequestLine(params: {
     currency,
     exchangeRate
   );
+  const factor = quoteSellingUnitFactor(product, item.sellingUnit);
   const unitCost =
     product.costPrice == null
       ? null
@@ -215,7 +221,14 @@ function prepareRequestLine(params: {
           exchangeRate
         );
 
-  return { item, index, product, variant, baseUnitPrice, unitCost };
+  return {
+    item,
+    index,
+    product,
+    variant,
+    baseUnitPrice: truncateMoney(baseUnitPrice * factor),
+    unitCost: unitCost == null ? null : truncateMoney(unitCost * factor),
+  };
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates access, catalog ownership, pricing and fiscal snapshots before creating a request.

@@ -9,6 +9,8 @@ import {
   type ReviewQueue,
   reviewQueueSchema,
   routeAdminListSchema,
+  type SiteProposal,
+  siteProposalsSchema,
   visitAdminDaySchema,
 } from "@/modules/commercial-visits/contracts";
 import { VisitDocumentDialog } from "./visit-document-dialog";
@@ -38,6 +40,9 @@ export function VisitReview({ orgSlug }: { orgSlug: string }) {
     customer: string;
   } | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
+  const [siteRejection, setSiteRejection] = useState<string | null>(null);
+  const [siteProposals, setSiteProposals] = useState<SiteProposal[]>([]);
+  const [siteReason, setSiteReason] = useState("");
   const [historyDay, setHistoryDay] = useState("");
   const [historicalVisits, setHistoricalVisits] = useState<ReturnType<
     typeof visitAdminDaySchema.parse
@@ -61,6 +66,17 @@ export function VisitReview({ orgSlug }: { orgSlug: string }) {
       throw new Error("No se pudieron cargar las rutas comerciales");
     }
     setRoutes(routeAdminListSchema.parse(routeResult));
+    const proposalResponse = await fetch(`${url}?view=siteProposals`, {
+      cache: "no-store",
+    });
+    const proposalResult: unknown = await proposalResponse.json();
+    if (!proposalResponse.ok) {
+      throw new Error(
+        (proposalResult as { error?: string }).error ??
+          "No se pudieron cargar las sucursales propuestas"
+      );
+    }
+    setSiteProposals(siteProposalsSchema.parse(proposalResult));
   }, [url]);
 
   useEffect(() => {
@@ -382,6 +398,97 @@ export function VisitReview({ orgSlug }: { orgSlug: string }) {
                       toast.error("Ingresá el motivo del rechazo");
                     }
                   }}
+                >
+                  Confirmar rechazo
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+      <h2 className="font-semibold">
+        Sucursales y puntos propuestos desde clientes
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        Las propuestas de vendedores no modifican las sucursales hasta que un
+        administrador revise y apruebe cada punto.
+      </p>
+      {siteProposals.length === 0 && (
+        <p className="text-muted-foreground text-sm">
+          No hay sucursales pendientes de aprobación.
+        </p>
+      )}
+      {siteProposals.map((proposal) => (
+        <Card key={proposal.id}>
+          <CardContent className="space-y-2 p-4">
+            <p className="font-medium">
+              {proposal.customerName} · {proposal.name}
+              {proposal.siteId ? " (cambio de sucursal)" : " (nueva sucursal)"}
+            </p>
+            <p className="text-sm">
+              {proposal.address}, {proposal.city}
+              {proposal.postalCode && ` · CP ${proposal.postalCode}`}
+            </p>
+            <a
+              className="text-primary text-sm underline"
+              href={`https://www.openstreetmap.org/?mlat=${proposal.latitude}&mlon=${proposal.longitude}#map=17/${proposal.latitude}/${proposal.longitude}`}
+              referrerPolicy="no-referrer"
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Revisar punto en mapa externo
+            </a>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  submit({
+                    action: "decideSiteProposal",
+                    proposalId: proposal.id,
+                    approved: true,
+                  })
+                }
+              >
+                Aprobar sucursal y punto
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setSiteRejection(
+                    siteRejection === proposal.id ? null : proposal.id
+                  );
+                  setSiteReason("");
+                }}
+                variant="outline"
+              >
+                Rechazar
+              </Button>
+            </div>
+            {siteRejection === proposal.id && (
+              <div className="flex flex-wrap gap-2">
+                <input
+                  aria-label="Motivo de rechazo de la sucursal"
+                  className="min-w-0 flex-1 rounded-md border p-2"
+                  maxLength={1000}
+                  onChange={(event) => setSiteReason(event.target.value)}
+                  placeholder="Motivo de rechazo"
+                  value={siteReason}
+                />
+                <Button
+                  disabled={busy || !siteReason.trim()}
+                  onClick={() =>
+                    submit({
+                      action: "decideSiteProposal",
+                      proposalId: proposal.id,
+                      approved: false,
+                      reason: siteReason.trim(),
+                    }).then((saved) => {
+                      if (saved) {
+                        setSiteRejection(null);
+                        setSiteReason("");
+                      }
+                    })
+                  }
                 >
                   Confirmar rechazo
                 </Button>

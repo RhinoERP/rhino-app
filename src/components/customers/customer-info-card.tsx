@@ -9,6 +9,7 @@ import {
   WhatsappLogo,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
+import { CustomerOpenReceivablesSection } from "@/components/collections/pre-sale-customer-account";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +40,47 @@ function formatPhoneForWhatsApp(phone: string): string {
   return digitsOnly;
 }
 
+const HAS_DIGIT = /\d/;
+
+function CustomerPhoneActions({ phone }: { phone: string | null }) {
+  const dialNumber = phone?.replace(/[^\d+]/g, "") ?? "";
+  if (!HAS_DIGIT.test(dialNumber)) {
+    return (
+      <p className="text-muted-foreground text-sm">Teléfono no informado</p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+        <PhoneIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="break-all">{phone}</span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        <Button asChild className="min-h-11" size="sm" variant="outline">
+          <a href={`tel:${dialNumber}`}>
+            <PhoneIcon className="mr-1.5 size-4" /> Llamar
+          </a>
+        </Button>
+        <Button
+          asChild
+          className="min-h-11 bg-[#25D366] hover:bg-[#20BA5A]"
+          size="sm"
+        >
+          <a
+            href={`https://wa.me/${formatPhoneForWhatsApp(phone ?? "")}`}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <WhatsappLogo className="mr-1.5 h-4 w-4" weight="fill" />
+            WhatsApp
+          </a>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 type CustomerInfoCardProps = {
   customer: Customer;
   orgSlug: string;
@@ -46,6 +88,7 @@ type CustomerInfoCardProps = {
   updatedAt: string | null;
   mapsLink: string | null;
   assignedPriceList?: SalesPriceList | null;
+  canReadCollections?: boolean;
 };
 
 export function CustomerInfoCard({
@@ -55,12 +98,10 @@ export function CustomerInfoCard({
   updatedAt,
   mapsLink,
   assignedPriceList,
+  canReadCollections = false,
 }: CustomerInfoCardProps) {
   const router = useRouter();
 
-  const whatsappUrl = customer.phone
-    ? `https://wa.me/${formatPhoneForWhatsApp(customer.phone)}`
-    : null;
   const taxConditionLabel =
     getCustomerTaxConditionLabel(customer.tax_condition) ??
     customer.tax_condition ??
@@ -125,6 +166,24 @@ export function CustomerInfoCard({
 
         <Separator />
 
+        <section aria-label="Deudas de cuenta corriente" className="space-y-3">
+          <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
+            Deudas de cuenta corriente
+          </p>
+          <p className="text-muted-foreground text-xs">
+            Facturas pendientes visibles para tu usuario. Los saldos a favor
+            figuran por separado y no se descuentan aquí.
+          </p>
+          <CustomerOpenReceivablesSection
+            canReadCollections={canReadCollections}
+            compact
+            customerId={customer.id}
+            orgSlug={orgSlug}
+          />
+        </section>
+
+        <Separator />
+
         {/* Contact - Mobile Optimized with Action Buttons */}
         <div className="space-y-3">
           <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
@@ -145,33 +204,7 @@ export function CustomerInfoCard({
             <p className="text-muted-foreground text-sm">Email no informado</p>
           )}
 
-          {customer.phone ? (
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                <PhoneIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="truncate">{customer.phone}</span>
-              </div>
-              <Button
-                asChild
-                className="bg-[#25D366] hover:bg-[#20BA5A]"
-                size="sm"
-                variant="default"
-              >
-                <a
-                  href={whatsappUrl ?? "#"}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  <WhatsappLogo className="mr-1.5 h-4 w-4" weight="fill" />
-                  WhatsApp
-                </a>
-              </Button>
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              Teléfono no informado
-            </p>
-          )}
+          <CustomerPhoneActions phone={customer.phone} />
         </div>
 
         <Separator />

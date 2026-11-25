@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  decideSiteProposalSchema,
+  proposeSiteSchema,
   saveCustomerSiteSchema,
   visitCommandSchema,
   visitDayResultSchema,
@@ -198,5 +200,36 @@ describe("commercial visit commands", () => {
         customers: [],
       }).success
     ).toBe(false);
+  });
+
+  it("requires a real point and an explicit decision for customer-site proposals", () => {
+    const proposal = {
+      action: "proposeSite",
+      customerId: id,
+      name: "Sucursal",
+      address: "Calle 123",
+      city: "Rosario",
+      postalCode: "2000",
+      latitude: -32.95,
+      longitude: -60.66,
+    };
+    expect(proposeSiteSchema.safeParse(proposal).success).toBe(true);
+    expect(
+      proposeSiteSchema.safeParse({ ...proposal, latitude: null }).success
+    ).toBe(false);
+    expect(
+      decideSiteProposalSchema.safeParse({
+        action: "decideSiteProposal",
+        proposalId: id,
+        approved: false,
+      }).success
+    ).toBe(false);
+    expect(
+      decideSiteProposalSchema.safeParse({
+        action: "decideSiteProposal",
+        proposalId: id,
+        approved: true,
+      }).success
+    ).toBe(true);
   });
 });

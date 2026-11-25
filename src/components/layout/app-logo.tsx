@@ -35,7 +35,10 @@ export function AppLogo() {
         </div>
       </div>
       <div className="group-data-[collapsible=icon]:hidden">
-        <SidebarTrigger className="-ml-1" />
+        <SidebarTrigger
+          aria-label="Cerrar menú de accesos"
+          className="-ml-1 size-11 md:size-7"
+        />
       </div>
     </div>
   );
