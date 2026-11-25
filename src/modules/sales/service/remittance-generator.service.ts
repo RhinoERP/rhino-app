@@ -518,6 +518,21 @@ export function generateRemittanceHTML(data: RemittanceData): string {
 </html>`;
 }
 
+function getDocumentUnitPrice(
+  item: SalesOrderDetail["items"][number],
+  type: RemittanceData["type"]
+): number {
+  // Match the sale's weight-pricing basis; unitPrice can hold a per-piece
+  // equivalent while basePrice holds the price per kg/lt/m.
+  const usesBasePrice =
+    type === "PRESUPUESTO" &&
+    item.type === "product" &&
+    item.tracksStockUnits &&
+    (item.weightQuantity ?? 0) > 0 &&
+    Number.isFinite(item.basePrice);
+  return usesBasePrice ? item.basePrice : item.unitPrice;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: builds complex remittance structure from sale
 export function buildRemittanceFromSale(
   sale: SalesOrderDetail,
@@ -570,7 +585,7 @@ export function buildRemittanceFromSale(
         item.type === "adjustment"
           ? undefined
           : (item.weightQuantity ?? undefined),
-      unitPrice: item.unitPrice,
+      unitPrice: getDocumentUnitPrice(item, type),
       subtotal: truncateMoney(lineSubtotal),
       discountPercentage:
         item.type === "adjustment"
