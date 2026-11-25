@@ -32,6 +32,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
@@ -39,6 +40,7 @@ import { CUSTOMER_TAX_CONDITION_OPTIONS } from "@/modules/customers/tax-conditio
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
+import { usePriceLevels } from "@/modules/price-levels/hooks/use-price-levels";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
 import { Checkbox } from "../ui/checkbox";
 import {
@@ -112,6 +114,9 @@ const customerSchema = z.object({
   delivery_address: z.string().optional().nullable(),
   delivery_city: z.string().optional().nullable(),
   sales_price_list_id: z.string().optional(),
+  price_level_id: z
+    .union([z.uuid("Seleccioná un nivel de margen válido"), z.literal("")])
+    .optional(),
   assigned_seller_id: z.string().optional(),
   preferred_carrier_id: z.string().optional(),
   due_days: z.number().int().min(1).nullable().optional(),
@@ -211,6 +216,7 @@ const EMPTY_CUSTOMER_FORM_VALUES = {
   delivery_address: null,
   delivery_city: null,
   sales_price_list_id: "",
+  price_level_id: "",
   assigned_seller_id: "",
   preferred_carrier_id: "",
   due_days: null,
@@ -238,6 +244,7 @@ const getDefaultCustomerValues = (customer?: Customer | null) => {
     delivery_address = null,
     delivery_city = null,
     sales_price_list_id,
+    price_level_id,
     assigned_seller_id,
     preferred_carrier_id,
     due_days = null,
@@ -260,6 +267,7 @@ const getDefaultCustomerValues = (customer?: Customer | null) => {
     delivery_address,
     delivery_city,
     sales_price_list_id: toFormString(sales_price_list_id),
+    price_level_id: toFormString(price_level_id),
     assigned_seller_id: toFormString(assigned_seller_id),
     preferred_carrier_id: toFormString(preferred_carrier_id),
     due_days,
@@ -283,6 +291,12 @@ export function AddCustomerDialog({
 }: AddCustomerDialogProps) {
   const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
   const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
+  const {
+    data: priceLevels = [],
+    isFetching: priceLevelsFetching,
+    isError: priceLevelsError,
+    refetch: refetchPriceLevels,
+  } = usePriceLevels(orgSlug);
   const { data: sellers = [] } = useOrgSellers(orgSlug);
   const { data: carriers = [] } = useCarriers(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
@@ -309,7 +323,7 @@ export function AddCustomerDialog({
   const initialPhone = fromWhatsApp?.phone;
   const emptyPriceList = fromWhatsApp
     ? "Seleccioná una lista"
-    : "Ninguna (precio base)";
+    : "Ninguna (sin ajuste adicional)";
   const defaultValues = useMemo(() => {
     const defaults = getDefaultCustomerValues(customer);
     return initialPhone && !customer
@@ -974,13 +988,93 @@ export function AddCustomerDialog({
                 )}
               </div>
 
+              {!fromWhatsApp && (
+                <FormField
+                  control={form.control}
+                  name="price_level_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nivel de margen (Opcional)</FormLabel>
+                      <Select
+                        disabled={
+                          isSubmitting ||
+                          priceLevelsError ||
+                          (priceLevelsFetching && priceLevels.length === 0)
+                        }
+                        onValueChange={(value) =>
+                          field.onChange(value === "none" ? "" : value)
+                        }
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Sin nivel (margen de cada producto)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            Sin nivel (margen de cada producto)
+                          </SelectItem>
+                          {field.value &&
+                            !priceLevels.some(
+                              (level) => level.id === field.value
+                            ) && (
+                              <SelectItem disabled value={field.value}>
+                                Nivel asignado no disponible
+                              </SelectItem>
+                            )}
+                          {priceLevels
+                            .filter(
+                              (level) =>
+                                level.is_active || level.id === field.value
+                            )
+                            .map((level) => (
+                              <SelectItem key={level.id} value={level.id}>
+                                {level.name} · {level.margin}%
+                                {!level.is_active && " · Inactivo"}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {priceLevelsFetching && priceLevels.length === 0 && (
+                        <output>Cargando niveles de margen...</output>
+                      )}
+                      {priceLevelsError && (
+                        <div className="space-y-2" role="alert">
+                          <p className="text-destructive text-sm">
+                            No se pudieron cargar los niveles de margen.
+                          </p>
+                          <Button
+                            disabled={priceLevelsFetching}
+                            onClick={() => refetchPriceLevels()}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Reintentar
+                          </Button>
+                        </div>
+                      )}
+                      <p className="text-muted-foreground text-xs">
+                        Reemplaza el margen de cada producto al calcular el
+                        precio sobre su costo disponible. La lista especial se
+                        aplica después.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
               <FormField
                 control={form.control}
                 name="sales_price_list_id"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>
-                      Lista de precios de venta{!fromWhatsApp && " (Opcional)"}
+                      {fromWhatsApp
+                        ? "Lista de precios de venta"
+                        : "Lista especial (Opcional)"}
                     </FormLabel>
                     <Popover
                       onOpenChange={setIsPriceListPickerOpen}
@@ -1030,7 +1124,7 @@ export function AddCustomerDialog({
                                     field.value ? "opacity-0" : "opacity-100"
                                   )}
                                 />
-                                Ninguna (precio base)
+                                Ninguna (sin ajuste adicional)
                               </CommandItem>
                               {salesPriceLists.map((list) => (
                                 <CommandItem
@@ -1052,8 +1146,9 @@ export function AddCustomerDialog({
                                   <div className="flex flex-col">
                                     <span>{list.name}</span>
                                     <span className="text-muted-foreground text-xs">
-                                      {list.percentage > 0 ? "+" : ""}
-                                      {list.percentage}%
+                                      {list.type === "PRICE"
+                                        ? formatCurrency(list.value)
+                                        : `${list.value > 0 ? "+" : ""}${list.value}%`}
                                     </span>
                                   </div>
                                 </CommandItem>
@@ -1064,8 +1159,9 @@ export function AddCustomerDialog({
                       </PopoverContent>
                     </Popover>
                     <p className="text-muted-foreground text-xs">
-                      Lista de precios que se aplicará a todas las ventas de
-                      este cliente.
+                      {fromWhatsApp
+                        ? "Lista de precios que se aplicará a las ventas de este cliente."
+                        : "Recargo o descuento que se aplica sobre el precio resultante del nivel de margen o del producto."}
                     </p>
                     <FormMessage />
                   </FormItem>

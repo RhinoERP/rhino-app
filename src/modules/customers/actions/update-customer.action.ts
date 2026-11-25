@@ -32,6 +32,7 @@ export type UpdateCustomerActionParams = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  price_level_id?: string | null;
   customer_channel?: CustomerChannel;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
@@ -62,6 +63,7 @@ export async function updateCustomerAction(
       "tax_condition",
       "client_number",
       "sales_price_list_id",
+      "price_level_id",
       "customer_channel",
       "assigned_seller_id",
       "preferred_carrier_id",
@@ -76,9 +78,14 @@ export async function updateCustomerAction(
       }
     }
 
-    const customer = await updateCustomerById(params.customerId, customerData);
+    const customer = await updateCustomerById(
+      params.orgSlug,
+      params.customerId,
+      customerData
+    );
 
     revalidatePath(`/org/${params.orgSlug}/clientes`);
+    revalidatePath(`/org/${params.orgSlug}/clientes/${params.customerId}`);
 
     return {
       success: true,
