@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAuth } from "@/lib/supabase/auth";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updateSalesPriceList } from "../service/sales-price-lists.service";
 import type { SalesPriceList, UpdateSalesPriceListInput } from "../types";
 
@@ -20,8 +20,8 @@ export async function updateSalesPriceListAction(
   priceListId: string,
   input: UpdateSalesPriceListInput
 ): Promise<UpdateSalesPriceListActionResult> {
+  await ensure("pricelists.manage", orgSlug);
   try {
-    await requireAuth();
     const priceList = await updateSalesPriceList(orgSlug, priceListId, input);
 
     revalidatePath(`/org/${orgSlug}/precios/listas-de-precios-venta`);

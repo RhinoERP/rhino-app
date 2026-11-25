@@ -1,7 +1,8 @@
 "use server";
 
-import { requireAuth } from "@/lib/supabase/auth";
+import { revalidatePath } from "next/cache";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createPriceLevel } from "../service/price-levels.service";
 import type { CreatePriceLevelInput, PriceLevel } from "../types";
 
@@ -14,9 +15,8 @@ export type CreatePriceLevelActionResult = {
 export async function createPriceLevelAction(
   input: CreatePriceLevelInput
 ): Promise<CreatePriceLevelActionResult> {
+  await ensure("pricelists.manage", input.orgSlug);
   try {
-    await requireAuth();
-
     const org = await getOrganizationBySlug(input.orgSlug);
     const commissionsEnabled = org?.commissions_enabled === true;
 
@@ -27,6 +27,11 @@ export async function createPriceLevelAction(
         ? input.extraCommissionRate
         : undefined,
     });
+
+    revalidatePath(`/org/${input.orgSlug}/precios/listas-de-precios-venta`);
+    revalidatePath(
+      `/org/${input.orgSlug}/configuracion/listas-de-precios-venta`
+    );
 
     return { success: true, priceLevel };
   } catch (error) {

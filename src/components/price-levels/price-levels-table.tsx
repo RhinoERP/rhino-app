@@ -4,6 +4,7 @@ import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,6 +57,8 @@ export function PriceLevelsTable({
   priceLevels,
   commissionsEnabled = false,
 }: PriceLevelsTableProps) {
+  const { can } = usePermissions();
+  const canManage = can("pricelists.manage");
   const router = useRouter();
   const [editing, setEditing] = useState<PriceLevelWithStatus | null>(null);
   const [deleting, setDeleting] = useState<PriceLevelWithStatus | null>(null);
@@ -93,16 +96,18 @@ export function PriceLevelsTable({
             55).
           </p>
         </div>
-        <PriceLevelDialog
-          commissionsEnabled={commissionsEnabled}
-          orgSlug={orgSlug}
-        />
+        {canManage && (
+          <PriceLevelDialog
+            commissionsEnabled={commissionsEnabled}
+            orgSlug={orgSlug}
+          />
+        )}
       </div>
 
       {priceLevels.length === 0 ? (
         <div className="rounded-md border p-6 text-muted-foreground text-sm">
-          No hay niveles de margen creados. Creá el primero para poder asignarlo
-          a los clientes.
+          No hay niveles de margen creados.
+          {canManage && " Creá el primero para poder asignarlo a los clientes."}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border">
@@ -136,31 +141,33 @@ export function PriceLevelsTable({
                   </TableCell>
                   <TableCell>{statusBadge(level.is_active)}</TableCell>
                   <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          aria-label="Acciones"
-                          size="icon"
-                          variant="ghost"
-                        >
-                          <DotsThreeOutlineVerticalIcon weight="bold" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => setEditing(level)}>
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onSelect={() => {
-                            setDeleteError(null);
-                            setDeleting(level);
-                          }}
-                        >
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {canManage && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            aria-label="Acciones"
+                            size="icon"
+                            variant="ghost"
+                          >
+                            <DotsThreeOutlineVerticalIcon weight="bold" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => setEditing(level)}>
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onSelect={() => {
+                              setDeleteError(null);
+                              setDeleting(level);
+                            }}
+                          >
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -169,7 +176,7 @@ export function PriceLevelsTable({
         </div>
       )}
 
-      {editing && (
+      {canManage && editing && (
         <PriceLevelDialog
           commissionsEnabled={commissionsEnabled}
           onOpenChange={(open) => {
@@ -185,7 +192,7 @@ export function PriceLevelsTable({
 
       <Dialog
         onOpenChange={(v) => setDeleting(v ? deleting : null)}
-        open={Boolean(deleting)}
+        open={canManage && Boolean(deleting)}
       >
         <DialogContent>
           <DialogHeader>

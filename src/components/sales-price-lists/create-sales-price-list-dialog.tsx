@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -101,6 +102,7 @@ export function CreateSalesPriceListDialog({
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
 }: SalesPriceListDialogProps) {
+  const { can } = usePermissions();
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -253,6 +255,10 @@ export function CreateSalesPriceListDialog({
     }
   };
 
+  if (!can("pricelists.manage")) {
+    return null;
+  }
+
   return (
     <Dialog
       onOpenChange={(value) => {
@@ -264,7 +270,7 @@ export function CreateSalesPriceListDialog({
       }}
       open={open}
     >
-      {!trigger && (
+      {!trigger && externalOpen === undefined && (
         <DialogTrigger asChild>
           <Button>
             <Plus className="mr-2 h-4 w-4" />
@@ -283,7 +289,7 @@ export function CreateSalesPriceListDialog({
           <DialogDescription>
             {isEditing
               ? "Actualiza los datos de la lista de precios."
-              : "Crea una nueva lista de precios con ajuste por porcentaje o precio fijo."}
+              : "Ajusta el precio de venta por porcentaje o importe fijo. Para definir un margen sobre el costo, usá Niveles de margen."}
           </DialogDescription>
         </DialogHeader>
 
