@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAuth } from "@/lib/supabase/auth";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updatePriceLevel } from "../service/price-levels.service";
 import type { PriceLevel, UpdatePriceLevelInput } from "../types";
 
@@ -15,9 +15,8 @@ export async function updatePriceLevelAction(
   priceLevelId: string,
   input: UpdatePriceLevelInput
 ): Promise<UpdatePriceLevelActionResult> {
+  await ensure("pricelists.manage", orgSlug);
   try {
-    await requireAuth();
-
     const org = await getOrganizationBySlug(orgSlug);
     const commissionsEnabled = org?.commissions_enabled === true;
 

@@ -9,6 +9,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Calendar, DollarSign, FileText, Percent } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { CreateSalesPriceListDialog } from "@/components/sales-price-lists/create-sales-price-list-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,7 @@ function SalesPriceListActionsCell({
   priceList,
   orgSlug,
 }: SalesPriceListActionsCellProps) {
+  const { can } = usePermissions();
   const router = useRouter();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -91,6 +93,10 @@ function SalesPriceListActionsCell({
       setDeleteError("No se pudo eliminar la lista de precios");
     }
   };
+
+  if (!can("pricelists.manage")) {
+    return null;
+  }
 
   return (
     <>

@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Calendar, DollarSign, FileText, Percent } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { CreateSalesPriceListDialog } from "@/components/sales-price-lists/create-sales-price-list-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +65,9 @@ function SalesPriceListActionsCell({
   priceList,
   orgSlug,
 }: SalesPriceListActionsCellProps) {
+  const { can } = usePermissions();
+  const canManage = can("pricelists.manage");
+  const canAssignCustomers = can("customers.manage");
   const router = useRouter();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -88,50 +92,64 @@ function SalesPriceListActionsCell({
     }
   };
 
+  if (!(canManage || canAssignCustomers)) {
+    return null;
+  }
+
   return (
     <>
       <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="Acciones" size="icon" variant="ghost">
+              <DotsThreeOutlineVerticalIcon weight="bold" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {canManage && (
+              <DropdownMenuItem onSelect={() => setIsEditDialogOpen(true)}>
+                Editar
+              </DropdownMenuItem>
+            )}
+            {canAssignCustomers && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  router.push(
+                    `/org/${orgSlug}/sales-lists/${priceList.id}/assign-customers`
+                  );
+                }}
+              >
+                Asignar clientes
+              </DropdownMenuItem>
+            )}
+            {canManage && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() => {
+                  setDeleteError(null);
+                  setIsDeleteDialogOpen(true);
+                }}
+              >
+                Eliminar
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {canManage && isEditDialogOpen && (
         <CreateSalesPriceListDialog
           onOpenChange={setIsEditDialogOpen}
           open={isEditDialogOpen}
           orgSlug={orgSlug}
           priceList={priceList}
-          trigger={
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button aria-label="Acciones" size="icon" variant="ghost">
-                  <DotsThreeOutlineVerticalIcon weight="bold" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setIsEditDialogOpen(true)}>
-                  Editar
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    router.push(
-                      `/org/${orgSlug}/sales-lists/${priceList.id}/assign-customers`
-                    );
-                  }}
-                >
-                  Asignar clientes
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onSelect={() => {
-                    setDeleteError(null);
-                    setIsDeleteDialogOpen(true);
-                  }}
-                >
-                  Eliminar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          }
         />
-      </div>
+      )}
 
-      <Dialog onOpenChange={setIsDeleteDialogOpen} open={isDeleteDialogOpen}>
+      <Dialog
+        onOpenChange={setIsDeleteDialogOpen}
+        open={canManage && isDeleteDialogOpen}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Eliminar lista de precios</DialogTitle>
