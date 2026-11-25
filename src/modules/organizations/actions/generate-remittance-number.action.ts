@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationSettings } from "./get-organization-settings.action";
 
 type ActionResult = {
   success: boolean;
@@ -12,6 +13,17 @@ export async function generateRemittanceNumber(
   orgSlug: string
 ): Promise<ActionResult> {
   try {
+    const settings = await getOrganizationSettings(orgSlug);
+    if (!settings.success) {
+      return { success: false, error: settings.error };
+    }
+    if (settings.data?.remittance_fiscal_enabled) {
+      return {
+        success: false,
+        error:
+          "El número fiscal se asigna al confirmar el despacho con remitos.",
+      };
+    }
     const supabase = await createClient();
 
     const {

@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { createTypedAdminClient as createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
+import { fiscalSnapshotSchema } from "@/modules/arca/cai";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { RemittanceData } from "@/modules/sales/service/remittance-generator.service";
 
@@ -11,6 +12,10 @@ export const remittanceHeaderSnapshotSchema = z.object({
   remittance: z.object({
     type: z.enum(["PRESUPUESTO", "REMITO_FINAL"]),
     date: z.string(),
+    fiscal: fiscalSnapshotSchema.optional(),
+    transport: z
+      .object({ name: z.string(), cuit: z.string(), address: z.string() })
+      .optional(),
     currency: z.string().optional(),
     invoiceNumber: text,
     issuer: z.object({

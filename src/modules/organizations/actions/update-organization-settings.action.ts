@@ -22,6 +22,8 @@ export async function updateOrganizationSettings(
   try {
     const {
       remittance_mask_printing_enabled: _platformFeatureFlag,
+      remittance_fiscal_enabled: _fiscalFeatureFlag,
+      remittance_fiscal_mode: _fiscalMode,
       ...orgSettings
     } = settings;
     const supabase = await createClient();

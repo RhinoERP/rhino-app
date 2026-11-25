@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   rows: vi.fn(),
   rpc: vi.fn(),
 }));
+vi.mock("server-only", () => ({}));
 vi.mock("@/modules/organizations/utils/with-permission-guard", () => ({
   ensure: vi.fn(),
 }));

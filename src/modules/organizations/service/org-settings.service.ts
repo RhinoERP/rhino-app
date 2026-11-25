@@ -15,6 +15,10 @@ export const OrgSettingsSchema = z.object({
   remittance_final_show_line_total: z.boolean().default(false),
   remittance_final_show_total: z.boolean().default(false),
   remittance_mask_printing_enabled: z.boolean().default(false),
+  remittance_fiscal_enabled: z.boolean().default(false),
+  remittance_fiscal_mode: z
+    .enum(["self_printed", "preprinted"])
+    .default("self_printed"),
   invoice_email_from_name: z.string().trim().max(80).default(""),
   invoice_email_subject_template: z.string().trim().max(160).default(""),
   invoice_email_body_template: z.string().trim().max(2000).default(""),

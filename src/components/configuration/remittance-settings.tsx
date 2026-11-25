@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { CAI_ERROR, CAI_PRIMARY_ACTION } from "@/components/arca/cai-ui-styles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -23,6 +24,7 @@ import { getOrganizationSettings } from "@/modules/organizations/actions/get-org
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { updateOrganizationSettings } from "@/modules/organizations/actions/update-organization-settings.action";
 import { updateRemittanceSettings } from "@/modules/organizations/actions/update-remittance-settings.action";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 
 const formSchema = z.object({
   autoEnabled: z.boolean(),
@@ -122,6 +124,10 @@ type RemittanceSettingsProps = {
 export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [loadVersion, setLoadVersion] = useState(0);
+  const { data: liveSettings } = useOrgSettings(orgSlug);
+  const fiscalEnabled = liveSettings?.remittance_fiscal_enabled ?? false;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -143,42 +149,82 @@ export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
   const prefix = form.watch("prefix");
   const startingNumber = form.watch("startingNumber");
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry explicitly restarts the initial load without resetting the form on background refreshes.
   useEffect(() => {
+    let active = true;
+    setIsLoading(true);
+    setLoadError("");
     Promise.all([
       getRemittanceSettings(orgSlug),
       getOrganizationSettings(orgSlug),
-    ]).then(([remittance, orgSettings]) => {
-      form.reset(buildFormDefaults(remittance, orgSettings));
-      setIsLoading(false);
-    });
-  }, [orgSlug, form]);
+    ])
+      .then(([remittance, orgSettings]) => {
+        if (
+          !(
+            remittance.success &&
+            remittance.data &&
+            orgSettings.success &&
+            orgSettings.data
+          )
+        ) {
+          throw new Error("No se pudo cargar la configuración de remitos.");
+        }
+        if (active) {
+          form.reset(buildFormDefaults(remittance, orgSettings));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setLoadError(
+            "No se pudo cargar la configuración de remitos. Reintentá antes de modificarla."
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [orgSlug, form, loadVersion]);
 
   async function onSubmit(values: FormValues) {
     setIsSaving(true);
-    const [remittanceResult, orgSettingsResult] = await Promise.all([
-      updateRemittanceSettings(orgSlug, {
-        autoEnabled: values.autoEnabled,
-        prefix: values.prefix,
-        startingNumber: values.startingNumber,
-      }),
-      updateOrganizationSettings(orgSlug, {
-        remittance_single_page_duplicate: values.singlePageDuplicate,
-        remittance_final_show_sku: values.remittanceFinalShowSku,
-        remittance_final_show_weight: values.remittanceFinalShowWeight,
-        remittance_final_show_unit_price: values.remittanceFinalShowUnitPrice,
-        remittance_final_show_discount: values.remittanceFinalShowDiscount,
-        remittance_final_show_line_total: values.remittanceFinalShowLineTotal,
-        remittance_final_show_total: values.remittanceFinalShowTotal,
-      }),
-    ]);
-    setIsSaving(false);
+    try {
+      const [remittanceResult, orgSettingsResult] = await Promise.all([
+        updateRemittanceSettings(orgSlug, {
+          autoEnabled: values.autoEnabled,
+          prefix: values.prefix,
+          startingNumber: values.startingNumber,
+        }),
+        updateOrganizationSettings(orgSlug, {
+          remittance_single_page_duplicate: values.singlePageDuplicate,
+          remittance_final_show_sku: values.remittanceFinalShowSku,
+          remittance_final_show_weight: values.remittanceFinalShowWeight,
+          remittance_final_show_unit_price: values.remittanceFinalShowUnitPrice,
+          remittance_final_show_discount: values.remittanceFinalShowDiscount,
+          remittance_final_show_line_total: values.remittanceFinalShowLineTotal,
+          remittance_final_show_total: values.remittanceFinalShowTotal,
+        }),
+      ]);
 
-    if (remittanceResult.success && orgSettingsResult.success) {
-      toast.success("Configuración guardada");
-    } else {
+      if (remittanceResult.success && orgSettingsResult.success) {
+        toast.success("Configuración guardada");
+      } else {
+        toast.error(
+          remittanceResult.error ??
+            orgSettingsResult.error ??
+            "Error al guardar"
+        );
+      }
+    } catch {
       toast.error(
-        remittanceResult.error ?? orgSettingsResult.error ?? "Error al guardar"
+        "No se pudo guardar la configuración. Revisá la conexión y volvé a intentarlo."
       );
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -191,103 +237,131 @@ export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
-          <div className="h-24 animate-pulse rounded-md bg-muted" />
-        ) : (
+        {isLoading && (
+          <div
+            aria-busy="true"
+            className="h-24 animate-pulse rounded-md bg-muted"
+          >
+            <span className="sr-only">Cargando configuración de remitos…</span>
+          </div>
+        )}
+        {loadError && (
+          <div className="space-y-3">
+            <p className={CAI_ERROR} role="alert">
+              {loadError}
+            </p>
+            <Button
+              onClick={() => setLoadVersion((value) => value + 1)}
+              type="button"
+              variant="outline"
+            >
+              Reintentar
+            </Button>
+          </div>
+        )}
+        {!(isLoading || loadError) && (
           <Form {...form}>
             <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
-              <FormField
-                control={form.control}
-                name="autoEnabled"
-                render={({ field }) => (
-                  <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
-                    <div className="min-w-0">
-                      <FormLabel className="text-base">
-                        Numeración automática
-                      </FormLabel>
-                      <FormDescription>
-                        El N° de remito se genera automáticamente al despachar
-                        una venta
-                      </FormDescription>
-                    </div>
-                    <FormControl className="shrink-0">
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              {autoEnabled && (
-                <div className="space-y-4 rounded-lg border p-4">
-                  <FormField
-                    control={form.control}
-                    name="prefix"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Prefijo</FormLabel>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            className="w-40 uppercase"
-                            onChange={(e) =>
-                              field.onChange(e.target.value.toUpperCase())
-                            }
-                            placeholder="Ej: REM"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Opcional. Solo letras y números, máx. 10 caracteres.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="startingNumber"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Contador actual</FormLabel>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            className="w-40"
-                            min={0}
-                            onChange={(e) =>
-                              field.onChange(
-                                e.target.value === ""
-                                  ? 0
-                                  : Number(e.target.value)
-                              )
-                            }
-                            type="number"
-                            value={field.value}
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          El próximo remito usará este número + 1. Ajustalo si
-                          ya tenés remitos ingresados manualmente.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                    <span className="text-muted-foreground">
-                      Próximo remito:{" "}
-                    </span>
-                    <span className="font-mono font-semibold">
-                      {formatPreview(prefix, Number(startingNumber) || 0)}
-                    </span>
-                  </div>
-                </div>
+              {fiscalEnabled && (
+                <p className="rounded-md border bg-muted/40 p-3 text-sm">
+                  La numeración fiscal se administra en Remitos con CAI. El
+                  prefijo y contador de esta sección se conservan para la
+                  numeración anterior.
+                </p>
               )}
+              <fieldset className="space-y-5" disabled={fiscalEnabled}>
+                <FormField
+                  control={form.control}
+                  name="autoEnabled"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                      <div className="min-w-0">
+                        <FormLabel className="text-base">
+                          Numeración automática
+                        </FormLabel>
+                        <FormDescription>
+                          El N° de remito se genera automáticamente al despachar
+                          una venta
+                        </FormDescription>
+                      </div>
+                      <FormControl className="shrink-0">
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
 
+                {autoEnabled && (
+                  <div className="space-y-4 rounded-lg border p-4">
+                    <FormField
+                      control={form.control}
+                      name="prefix"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Prefijo</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              className="w-40 uppercase"
+                              onChange={(e) =>
+                                field.onChange(e.target.value.toUpperCase())
+                              }
+                              placeholder="Ej: REM"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Opcional. Solo letras y números, máx. 10 caracteres.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="startingNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contador actual</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              className="w-40"
+                              min={0}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === ""
+                                    ? 0
+                                    : Number(e.target.value)
+                                )
+                              }
+                              type="number"
+                              value={field.value}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            El próximo remito usará este número + 1. Ajustalo si
+                            ya tenés remitos ingresados manualmente.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
+                      <span className="text-muted-foreground">
+                        Próximo remito:{" "}
+                      </span>
+                      <span className="font-mono font-semibold">
+                        {formatPreview(prefix, Number(startingNumber) || 0)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </fieldset>
               <FormField
                 control={form.control}
                 name="singlePageDuplicate"
@@ -351,7 +425,11 @@ export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
               </div>
 
               <div className="flex justify-end">
-                <Button disabled={isSaving} type="submit">
+                <Button
+                  className={CAI_PRIMARY_ACTION}
+                  disabled={isSaving}
+                  type="submit"
+                >
                   {isSaving ? "Guardando..." : "Guardar"}
                 </Button>
               </div>

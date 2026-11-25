@@ -4892,6 +4892,16 @@ export async function dispatchSaleOrder(
     accessContext
   );
 
+  const remittanceConfiguration = await getOrganizationSettings(orgSlug);
+  if (!remittanceConfiguration.success) {
+    throw new Error("No se pudo verificar la configuración de remitos.");
+  }
+  if (remittanceConfiguration.data?.remittance_fiscal_enabled) {
+    throw new Error(
+      "Esta empresa emite remitos con CAI. Confirmá el envío desde Pedidos / Despacho para conservar la autorización y la numeración fiscal."
+    );
+  }
+
   const currentStatus = sale.status as SalesOrderStatus;
 
   if (currentStatus === "CANCELLED") {
@@ -6841,6 +6851,14 @@ export async function regenerateSaleLevelRemito(params: {
       getOrganizationBySlug(orgSlug),
       getOrganizationSettings(orgSlug),
     ]);
+
+    if (
+      type === "REMITO_FINAL" &&
+      orgSettingsResult.success &&
+      orgSettingsResult.data?.remittance_fiscal_enabled
+    ) {
+      return;
+    }
 
     const doc = await renderRemittancePdfDocument({
       sale,

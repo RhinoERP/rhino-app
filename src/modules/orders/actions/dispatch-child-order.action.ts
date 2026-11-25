@@ -70,7 +70,12 @@ export async function dispatchChildOrderAction(
     if (!settings.success) {
       throw new Error("No se pudo verificar la configuración de remitos.");
     }
-    if (settings.data?.remittance_mask_printing_enabled) {
+    if (
+      [
+        settings.data?.remittance_mask_printing_enabled,
+        settings.data?.remittance_fiscal_enabled,
+      ].includes(true)
+    ) {
       throw new Error(
         "Actualizá la página y usá Preparar remitos para confirmar el despacho."
       );

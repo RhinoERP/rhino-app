@@ -39,6 +39,14 @@ describe.each([
   });
 
   it.each([
+    [
+      "GET",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ],
+    [
+      "POST",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ],
     ["GET", "/api/webhooks/whatsapp"],
     ["POST", "/api/webhooks/whatsapp"],
     ["POST", "/api/internal/whatsapp-agent/tools/search_catalog"],
@@ -54,6 +62,15 @@ describe.each([
   });
 
   it.each([
+    ["GET", "/remitos/recepcion/invalid"],
+    [
+      "GET",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/extra",
+    ],
+    [
+      "DELETE",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ],
     ["GET", "/org/acme/whatsapp/conversaciones"],
     ["POST", "/api/org/acme/whatsapp/simulate"],
     ["POST", "/api/webhooks/whatsapp-extra"],

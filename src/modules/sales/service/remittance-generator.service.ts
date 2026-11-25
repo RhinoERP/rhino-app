@@ -3,6 +3,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { computeLineGross } from "@/lib/line-values";
 import { formatAmountInWords } from "@/lib/number-to-words";
+import type { FiscalRemittanceSnapshot } from "@/modules/arca/cai";
 import type { SalesOrderDetail } from "./sales.service";
 
 export type RemittanceFinalVisibility = {
@@ -27,6 +28,8 @@ export const REMITTANCE_FINAL_VISIBILITY_DEFAULTS: RemittanceFinalVisibility = {
  * Remittance data structure for PDF generation
  */
 export type RemittanceData = {
+  fiscal?: FiscalRemittanceSnapshot;
+  transport?: { name: string; cuit: string; address: string };
   type: "PRESUPUESTO" | "REMITO_FINAL";
   documentNumber?: string;
   saleNumber?: number | null;
@@ -103,15 +106,26 @@ const MAX_ITEMS_FOR_SINGLE_PAGE = 10;
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes the printable layouts and opted-in columns
 export function generateRemittanceHTML(data: RemittanceData): string {
   const isFinalRemittance = data.type === "REMITO_FINAL";
+  const fiscal = isFinalRemittance ? data.fiscal : undefined;
+  const issuer = fiscal
+    ? {
+        ...data.issuer,
+        businessName: fiscal.businessName,
+        cuit: fiscal.cuit,
+        legalAddress: fiscal.address,
+      }
+    : data.issuer;
   const finalVisibility =
     data.finalRemittanceVisibility ?? REMITTANCE_FINAL_VISIBILITY_DEFAULTS;
   const useSinglePage =
+    !fiscal &&
     data.singlePageDuplicate === true &&
     data.items.length <= MAX_ITEMS_FOR_SINGLE_PAGE;
   const displayCurrency = data.currency === "USD" ? "USD" : "ARS";
   const totalWordsLabel = displayCurrency === "USD" ? "Dólares" : "Pesos";
   const documentCopyClass = [
     "document-copy",
+    fiscal ? "document-copy--fiscal" : "",
     isFinalRemittance ? "document-copy--remittance" : "",
     isFinalRemittance && !useSinglePage
       ? "document-copy--remittance-expanded"
@@ -164,27 +178,38 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes the conditional document sections in one printable template
   const buildDocumentContent = () => `
   <div class="page-header">
-    <div class="header-left">
-      ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
+      <div class="header-left">
+      ${issuer.logoUrl ? `<img src="${escapeHtml(issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
       <div>
-        ${data.issuer.logoUrl ? "" : `<div class="company-name">${escapeHtml(data.issuer.businessName)}</div>`}
-        ${data.issuer.cuit || data.issuer.legalAddress ? `<div class="issuer-details">${data.issuer.cuit ? `CUIT: ${displayValue(data.issuer.cuit, "")}` : ""}${data.issuer.cuit && data.issuer.legalAddress ? " · " : ""}${data.issuer.legalAddress ? displayValue(data.issuer.legalAddress, "") : ""}</div>` : ""}
+        ${issuer.logoUrl && !fiscal ? "" : `<div class="company-name">${escapeHtml(issuer.businessName)}</div>`}
+        ${issuer.cuit || issuer.legalAddress ? `<div class="issuer-details">${issuer.cuit ? `CUIT: ${displayValue(issuer.cuit, "")}` : ""}${issuer.cuit && issuer.legalAddress ? " · " : ""}${issuer.legalAddress ? displayValue(issuer.legalAddress, "") : ""}</div>` : ""}
       </div>
     </div>
     <div class="header-right">
+      ${fiscal ? '<div class="fiscal-letter">R</div><div class="doctype-dates">Código 091</div>' : ""}
       <div class="doctype-label">${documentTitle}</div>
-      <div class="doctype-number">N° ${displayDocumentNumber}</div>
+      <div class="doctype-number">N° ${escapeHtml(displayDocumentNumber)}</div>
       <div class="doctype-dates">Fecha: ${formatDateOnly(data.date)}${data.expirationDate ? ` · Vencimiento: ${formatDateOnly(data.expirationDate)}` : ""}</div>
     </div>
   </div>
 
   <div class="divider"></div>
+  ${
+    fiscal
+      ? `<div class="fiscal-details">
+    <strong>DOCUMENTO NO VALIDO COMO FACTURA</strong><br>
+    ${displayValue(fiscal.vatCondition)} · Ingresos Brutos: ${displayValue(fiscal.grossIncome)} · Inicio de actividad: ${formatDateOnly(fiscal.activityStart)}<br>
+    CAI: <strong>${displayValue(fiscal.cai)}</strong> · Vencimiento: ${formatDateOnly(fiscal.expiresAt)}
+    ${fiscal.mode === "preprinted" ? `<br>Imprenta: ${displayValue(fiscal.printerName)} · CUIT: ${displayValue(fiscal.printerCuit)} · Habilitación: ${displayValue(fiscal.printerRegistration)}<br>Fecha de impresión: ${formatDateOnly(fiscal.printedAt)} · Numeración autorizada: ${fiscal.firstNumber} a ${fiscal.lastNumber}` : ""}
+  </div>`
+      : ""
+  }
 
   <div class="info-wrap">
     <div class="info-row">
       <div class="info-cell"><span class="lbl">Razón Social:</span> <span class="val-bold">${displayValue(data.customer.businessName)}</span></div>
       <div class="info-cell"><span class="lbl">CUIT / DNI:</span> ${displayValue(data.customer.cuit)}</div>
-      <div class="info-cell"><span class="lbl">Cond. de Venta:</span> ${displayValue(data.customer.taxCondition)}</div>
+      <div class="info-cell"><span class="lbl">${fiscal ? "Cond. IVA:" : "Cond. de Venta:"}</span> ${displayValue(data.customer.taxCondition)}</div>
     </div>
     <div class="info-row">
       <div class="info-cell info-cell--wide"><span class="lbl">Dirección:</span> ${displayValue(data.customer.address)}</div>
@@ -204,6 +229,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   </div>
 
   <div class="table-wrap">
+    ${fiscal && data.transport ? `<div class="fiscal-details"><strong>Transporte:</strong> ${displayValue(data.transport.name)} · CUIT: ${displayValue(data.transport.cuit)}<br>Domicilio: ${displayValue(data.transport.address)}</div>` : ""}
     <table>
       <thead>
         <tr>
@@ -318,6 +344,9 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .doctype-number { font-size:18px; font-weight:700; line-height:1.1; margin-bottom:2px; }
   .doctype-dates { font-size:8px; color:var(--muted); }
 
+  .fiscal-copy { text-align:right; font-size:8px; font-weight:700; margin-bottom:6px; }
+  .fiscal-letter { display:inline-block; border:1px solid var(--dark); padding:3px 10px; font-size:22px; font-weight:700; }
+  .fiscal-details { margin-bottom:10px; padding:8px; border:1px solid var(--bmd); border-radius:4px; font-size:8px; line-height:1.6; break-inside:avoid; }
   /* DIVIDER */
   .divider {
     height: 2px;
@@ -460,6 +489,9 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .document-copy--remittance .disclaimer { color:#555; }
   .document-copy--remittance-expanded .table-wrap { min-height:170mm; }
   .document-copy--remittance-expanded .sig-wrap { margin-top:16px; }
+  .document-copy--fiscal { height:297mm; }
+  .document-copy--fiscal .table-wrap { min-height:0; }
+  .document-copy--fiscal td { padding:5px 6px; }
 
   /* PAGE BREAKS */
   .document-copy + .document-copy { page-break-before:always; }
@@ -478,8 +510,8 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   </div>
   `
       : `
-  <div class="${documentCopyClass}">${buildDocumentContent()}</div>
-  <div class="${documentCopyClass}">${buildDocumentContent()}</div>
+  <div class="${documentCopyClass}">${fiscal ? '<div class="fiscal-copy">ORIGINAL</div>' : ""}${buildDocumentContent()}</div>
+  <div class="${documentCopyClass}">${fiscal ? '<div class="fiscal-copy">DUPLICADO</div>' : ""}${buildDocumentContent()}</div>
   `
   }
 </body>

@@ -29,6 +29,13 @@ const documentInputSchema = z.object({
     ),
 });
 const confirmOrderRemittancesSchema = z.object({
+  transport: z
+    .object({
+      name: z.string().trim().min(1).max(200),
+      cuit: z.string().regex(/^\d{11}$/),
+      address: z.string().trim().min(1).max(300),
+    })
+    .optional(),
   orgSlug: z.string().trim().min(1),
   childOrderIds: z.array(z.uuid()).min(1),
   sourceFingerprint: z.string().regex(/^[a-f0-9]{32}$/),
@@ -43,6 +50,13 @@ export type ConfirmOrderRemittancesInput = z.input<
 function serializeJson(value: unknown) {
   const serialized: unknown = JSON.parse(JSON.stringify(value));
   return z.json().parse(serialized);
+}
+
+/** Fiscal allocation is added by the database after the request fingerprint. */
+function remittanceRequestHeader(snapshot: unknown) {
+  const parsed = remittanceHeaderSnapshotSchema.parse(snapshot);
+  const { fiscal: _allocatedFiscalData, ...remittance } = parsed.remittance;
+  return { ...parsed, remittance };
 }
 
 async function buildDocumentPayload(
@@ -89,7 +103,7 @@ async function buildDocumentPayload(
         package_count: input.documents[index].packageCount,
         declared_value: input.documents[index].declaredValue,
         currency: document.currency,
-        header_snapshot: document.header_snapshot,
+        header_snapshot: remittanceRequestHeader(document.header_snapshot),
         lines: [...document.lines]
           .sort((a, b) => a.line_position - b.line_position)
           .map((line) => ({
@@ -148,7 +162,10 @@ async function buildDocumentPayload(
       declared_value: input.documents[index].declaredValue,
       currency: plan.header.currency ?? "ARS",
       header_snapshot: remittanceHeaderSnapshotSchema.parse({
-        remittance: plan.header,
+        remittance: {
+          ...plan.header,
+          ...(input.transport ? { transport: input.transport } : {}),
+        },
         carrierName: plan.carrierName,
         purchaseOrderNumber: null,
       }),

@@ -11,6 +11,7 @@ import {
   previewSavedRemittanceMasksAction,
 } from "@/modules/orders/actions/saved-order-remittances.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
+import { RemittanceReceiptLink } from "./remittance-receipt-link";
 
 function SavedMasks({
   orgSlug,
@@ -63,6 +64,19 @@ export function SavedRemittanceDocuments({
     (document) => !childOrderId || document.orderIds.includes(childOrderId)
   );
   const active = documents.filter((document) => document.status === "ISSUED");
+  const maskDocuments = active.filter(
+    (document) => document.fiscal?.mode !== "self_printed"
+  );
+  if (query.isPending) {
+    return (
+      <div
+        aria-busy="true"
+        className="h-20 animate-pulse rounded-md border bg-muted/40"
+      >
+        <span className="sr-only">Cargando remitos del despacho…</span>
+      </div>
+    );
+  }
   if (query.isError) {
     return (
       <p className="text-destructive text-sm">
@@ -119,10 +133,10 @@ export function SavedRemittanceDocuments({
     <section className="space-y-3 rounded-md border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium text-sm">Remitos del despacho</h3>
-        {active.length > 1 && (
+        {maskDocuments.length > 1 && (
           <SavedMasks
             all
-            ids={active.map((document) => document.id)}
+            ids={maskDocuments.map((document) => document.id)}
             orgSlug={orgSlug}
           />
         )}
@@ -132,9 +146,12 @@ export function SavedRemittanceDocuments({
           className="flex flex-wrap items-center justify-between gap-2 border-t pt-2"
           key={document.id}
         >
-          <span className="text-sm">
+          <span className="min-w-0 max-w-full break-words text-sm">
             Remito {document.number} · {document.lineCount} líneas
             {document.status !== "ISSUED" && " · Anulado"}
+            {document.fiscal && ` · CAI ${document.fiscal.cai}`}
+            {document.receipt?.received_at &&
+              ` · Recibido por ${document.receipt.receiver_name}`}
           </span>
           {document.status === "ISSUED" && (
             <div className="flex flex-wrap gap-2">
@@ -147,7 +164,15 @@ export function SavedRemittanceDocuments({
               >
                 {downloading === document.id ? "Generando…" : "Descargar PDF"}
               </Button>
-              <SavedMasks ids={[document.id]} orgSlug={orgSlug} />
+              {document.fiscal?.mode !== "self_printed" && (
+                <SavedMasks ids={[document.id]} orgSlug={orgSlug} />
+              )}
+              {document.fiscal && !document.receipt?.received_at && (
+                <RemittanceReceiptLink
+                  documentId={document.id}
+                  orgSlug={orgSlug}
+                />
+              )}
             </div>
           )}
         </div>

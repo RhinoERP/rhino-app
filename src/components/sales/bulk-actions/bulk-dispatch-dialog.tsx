@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -66,7 +67,7 @@ export function BulkDispatchDialog({
   const [results, setResults] = useState<BulkSaleResult[] | null>(null);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || orgSettings?.remittance_fiscal_enabled !== false) {
       return;
     }
 
@@ -102,7 +103,7 @@ export function BulkDispatchDialog({
         setIsGenerating(false);
       }
     });
-  }, [open, orgSlug, selectedSales]);
+  }, [open, orgSlug, selectedSales, orgSettings?.remittance_fiscal_enabled]);
 
   const updateRemittance = (saleId: string, value: string) => {
     setEntries((prev) =>
@@ -148,6 +149,35 @@ export function BulkDispatchDialog({
       onSuccess();
     }
   };
+
+  if (orgSettings?.remittance_fiscal_enabled) {
+    return (
+      <Dialog onOpenChange={onOpenChange} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Despacho con remitos R</DialogTitle>
+            <DialogDescription>
+              Esta empresa emite remitos con CAI. Prepará los envíos desde
+              Despacho para generar cada documento con su autorización y
+              numeración fiscal.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              onClick={() => onOpenChange(false)}
+              type="button"
+              variant="outline"
+            >
+              Cerrar
+            </Button>
+            <Button asChild>
+              <Link href={`/org/${orgSlug}/despacho`}>Ir a Despacho</Link>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <>
