@@ -3,8 +3,10 @@ import { PriceLevelsTable } from "@/components/price-levels/price-levels-table";
 import { CreateSalesPriceListDialog } from "@/components/sales-price-lists/create-sales-price-list-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getQueryClient } from "@/lib/get-query-client";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import { salesPriceListsServerQueryOptions } from "@/modules/sales-price-lists/queries/queries.server";
 import { SalesPriceListsDataTable } from "./data-table";
@@ -19,6 +21,7 @@ export default async function SalesPriceListsPage({
   params,
 }: SalesPriceListsPageProps) {
   const { orgSlug } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.pricelists);
   const queryClient = getQueryClient();
 
   const [org, priceLevels] = await Promise.all([

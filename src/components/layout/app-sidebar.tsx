@@ -38,6 +38,7 @@ import {
   isOrganizationModuleEnabled,
   type OrganizationModule,
 } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { AppLogo } from "./app-logo";
 import { NavMain } from "./nav-main";
 import { OrganizationSwitcher } from "./organization-switcher";
@@ -358,7 +359,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Listas especiales",
           url: `/org/${orgSlug}/precios/listas-de-precios-venta`,
           icon: <ListBulletsIcon weight="duotone" />,
-          requiredPermission: ["pricelists.read", "pricelists.read.all"],
+          requiredPermission: READ_PERMISSIONS.pricelists,
         },
         {
           title: "Venta mayorista",

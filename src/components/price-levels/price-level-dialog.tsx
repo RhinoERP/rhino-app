@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -85,6 +86,7 @@ export function PriceLevelDialog({
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
 }: PriceLevelDialogProps) {
+  const { can } = usePermissions();
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -205,6 +207,10 @@ export function PriceLevelDialog({
     }
   };
 
+  if (!can("pricelists.manage")) {
+    return null;
+  }
+
   return (
     <Dialog
       onOpenChange={(value) => {
@@ -216,7 +222,7 @@ export function PriceLevelDialog({
       }}
       open={open}
     >
-      {!trigger && (
+      {!trigger && externalOpen === undefined && (
         <DialogTrigger asChild>
           <Button>
             <Plus className="mr-2 h-4 w-4" />
