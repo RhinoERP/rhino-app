@@ -6,9 +6,10 @@ whatsapp_db_container="rhino-whatsapp-test-$$"
 trap 'docker stop "$whatsapp_db_container" >/dev/null 2>&1 || true' EXIT
 docker run --rm -d --name "$whatsapp_db_container" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16-alpine >/dev/null
 for attempt in {1..30}; do
-  if docker exec "$whatsapp_db_container" pg_isready -U postgres >/dev/null 2>&1; then break; fi
+  if docker exec "$whatsapp_db_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
+docker exec "$whatsapp_db_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null
 for sql_file in \
   scripts/fixtures/whatsapp/bootstrap.sql \
   supabase/migrations/20260902000000_create_whatsapp_agent_foundation.sql \
@@ -17,8 +18,10 @@ for sql_file in \
   supabase/migrations/20261017010000_whatsapp_business_hours_and_response_delay.sql \
   supabase/migrations/20261026000000_gate_whatsapp_modules.sql \
   supabase/migrations/20261027000000_whatsapp_recurring_orders.sql \
+  supabase/migrations/20261104000000_whatsapp_rpc_permissions.sql \
   scripts/fixtures/whatsapp/module-gates.sql \
-  scripts/fixtures/whatsapp/recurring-orders.sql; do
+  scripts/fixtures/whatsapp/recurring-orders.sql \
+  scripts/fixtures/whatsapp/agent-safety.sql; do
   docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -v ON_ERROR_STOP=1 < "$sql_file"
 done
 
@@ -39,12 +42,30 @@ SQL
 
 docker exec "$whatsapp_db_container" createdb -U postgres whatsapp_bundle
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/bootstrap.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < supabase/migrations/20260701000000_create_notifications.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < supabase/migrations/20260703000000_add_notification_archiving.sql
 for pass in 1 2; do
   node scripts/build-whatsapp-release-sql.mjs | docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1
 done
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/module-gates.sql
 
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/recurring-orders.sql
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 < scripts/fixtures/whatsapp/customer-pricing.sql
+docker exec "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 -c "BEGIN; SELECT run_whatsapp_pricing_concurrent_create(); SELECT pg_sleep(1); COMMIT;" &
+whatsapp_first_pid=$!
+docker exec "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 -c "SELECT run_whatsapp_pricing_concurrent_create();" &
+whatsapp_second_pid=$!
+wait "$whatsapp_first_pid"
+wait "$whatsapp_second_pid"
+docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1 <<'SQL'
+DO $$ BEGIN
+  IF (SELECT count(*) FROM customers c JOIN pricing_fixture f ON c.organization_id=f.org WHERE c.phone='+5491188881111')<>1
+    OR NOT EXISTS (SELECT 1 FROM whatsapp_conversations w JOIN pricing_fixture f ON w.id=f.race_chat
+      JOIN customers c ON c.id=w.customer_id WHERE c.phone='+5491188881111')
+  THEN RAISE EXCEPTION 'Concurrent assisted registration did not produce exactly one linked customer'; END IF;
+END $$;
+SELECT 'WhatsApp concurrent assisted registration checks passed';
+SQL
 # A full rerun must not recreate the old one-sale-per-chat unique index.
 node scripts/build-whatsapp-release-sql.mjs | docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_bundle -v ON_ERROR_STOP=1
 
@@ -59,7 +80,8 @@ for sql_file in \
   supabase/migrations/20261026000000_gate_whatsapp_modules.sql \
   scripts/fixtures/whatsapp/module-gates.sql \
   scripts/fixtures/whatsapp/legacy-orders.sql \
-  supabase/migrations/20261027000000_whatsapp_recurring_orders.sql; do
+  supabase/migrations/20261027000000_whatsapp_recurring_orders.sql \
+  supabase/migrations/20261104000000_whatsapp_rpc_permissions.sql; do
   docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_legacy -v ON_ERROR_STOP=1 --single-transaction < "$sql_file"
 done
 docker exec -i "$whatsapp_db_container" psql -XqAt -U postgres -d whatsapp_legacy -v ON_ERROR_STOP=1 <<'SQL'

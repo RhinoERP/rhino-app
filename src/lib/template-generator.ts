@@ -18,6 +18,11 @@ export type ProductTemplateRow = {
 };
 
 export type StockTemplateRow = {
+  deposito?: string;
+  id_deposito?: string;
+  talle?: string;
+  color?: string;
+  id_lote?: string;
   sku: string;
   proveedor: string;
   cantidad_kg_lt: string;
@@ -141,7 +146,8 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
     {
       header: "Proveedor",
-      description: "Nombre del proveedor (opcional).",
+      description:
+        "Nombre del proveedor (opcional). Si lo completás, debe existir en la organización antes de importar.",
       required: false,
     },
     {
@@ -215,7 +221,8 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
     {
       header: "Proveedor",
-      description: "Nombre del proveedor (opcional).",
+      description:
+        "Nombre del proveedor (opcional). Si lo completás, debe existir en la organización antes de importar.",
       required: false,
     },
     {
@@ -252,13 +259,13 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Talles",
       description:
-        "Lista de talles separados por coma (opcional, ej: M, L, XL). Si ponés talles, tenés que poner al menos un color (y viceversa).",
+        "Lista de talles separados por coma, guardada como texto (ej: 0,1 o M,L,XL). Solo se crean variantes si completás también Colores; con una sola columna se importa un producto simple.",
       required: false,
     },
     {
       header: "Colores",
       description:
-        "Lista de colores separados por coma (opcional, ej: Rojo, Azul). Si ponés talles, tenés que poner al menos un color (y viceversa).",
+        "Lista de colores separados por coma (opcional, ej: Rojo, Azul). Solo se crean variantes si completás también Talles; con una sola columna se importa un producto simple.",
       required: false,
     },
     {
@@ -269,6 +276,18 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
   ],
   stock: [
+    {
+      header: "Depósito",
+      description:
+        "Nombre exacto del depósito habilitado. Obligatorio si hay varios; todas las cantidades son saldos de este depósito, no del total de la organización.",
+      required: false,
+    },
+    {
+      header: "ID de depósito",
+      description:
+        "ID del depósito, opcional. Usalo si hay nombres repetidos; si completás nombre e ID deben coincidir.",
+      required: false,
+    },
     {
       header: "SKU",
       description: "Código SKU del producto (obligatorio).",
@@ -294,12 +313,31 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
     {
       header: "Número de lote",
-      description: "Número de lote (opcional).",
+      description:
+        "Número de lote. Obligatorio para productos simples; DEFAULT por defecto para variantes.",
       required: false,
     },
     {
       header: "Fecha de vencimiento",
       description: "Fecha de vencimiento en formato DD/MM/AAAA (opcional).",
+      required: false,
+    },
+    {
+      header: "Talle",
+      description:
+        "Talle exacto, obligatorio para productos con variantes. Dejar vacío para productos simples.",
+      required: false,
+    },
+    {
+      header: "Color",
+      description:
+        "Color exacto, obligatorio para productos con variantes. Dejar vacío para productos simples.",
+      required: false,
+    },
+    {
+      header: "ID de lote",
+      description:
+        "ID de la existencia. Obligatorio si depósito, producto, variante, lote y vencimiento identifican más de una fila. No se elige el primer lote automáticamente.",
       required: false,
     },
   ],
@@ -685,11 +723,14 @@ export function downloadTemplate(
 
     if (type === "products_variants") {
       instructionsRows.push([
-        "- En Talles y Colores, separá los valores con coma (ej: M, L, XL). Si completás una columna, completá la otra.",
+        "- Configurá Talles y Colores como Texto antes de escribir listas con comas (ej: 0,1 u 8,9). Solo se crean variantes al completar ambas columnas; una sola columna indica un producto simple.",
       ]);
     }
 
     if (type === "products" || type === "products_variants") {
+      instructionsRows.push([
+        "- Si indicás un proveedor, crealo antes en la organización y usá su nombre exacto. Un proveedor inexistente o ambiguo impide importar esa fila.",
+      ]);
       instructionsRows.push([
         "- En Impuestos, usá los nombres exactos de los impuestos disponibles en la organización, separados por coma.",
       ]);
@@ -790,6 +831,11 @@ function buildValidValuesRows(
   const rows: string[][] = [];
 
   if (type === "products" || type === "products_variants") {
+    if (suppliers.length > 0) {
+      rows.push(...suppliers.map((supplier) => ["Proveedores", supplier]));
+    } else {
+      rows.push(["Proveedores", "No hay proveedores registrados."]);
+    }
     if (categories.length > 0) {
       rows.push(...categories.map((category) => ["Categorías", category]));
     } else {

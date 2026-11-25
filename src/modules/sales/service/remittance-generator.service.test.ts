@@ -5,6 +5,7 @@ import {
   generateRemittanceHTML,
   REMITTANCE_FINAL_VISIBILITY_DEFAULTS,
 } from "./remittance-generator.service";
+import type { SalesOrderItemDetail } from "./sales.service";
 
 const HIDDEN_MONEY_VALUES_REGEX = /9876[,.]?54|19753[,.]?08|17777[,.]?77/;
 
@@ -60,6 +61,98 @@ describe("remittance invoice reference", () => {
 
     expect(data.invoiceNumber).toBeUndefined();
     expect(generateRemittanceHTML(data)).not.toContain("Factura:</span>");
+  });
+});
+
+function weightedSaleItem(
+  overrides: Partial<SalesOrderItemDetail> = {}
+): SalesOrderItemDetail {
+  return {
+    id: "weighted-line",
+    type: "product",
+    productId: "weighted-product",
+    name: "Panceta ahumada en mitades",
+    sku: "800-605",
+    quantity: 10,
+    weightQuantity: 21,
+    unitPrice: 25_229.4,
+    basePrice: 12_014,
+    discountPercent: 0,
+    subtotal: 252_294,
+    unitOfMeasure: "KG",
+    tracksStockUnits: true,
+    averageQuantityPerUnit: 2.1,
+    ...overrides,
+  };
+}
+
+describe("budget price per measurement unit", () => {
+  it("prints the kg price for 800-605 and preserves 800-314 prices, line discounts and totals", () => {
+    const sale = saleWithArcaStatus("not_requested", null);
+    sale.items = [
+      weightedSaleItem(),
+      weightedSaleItem({
+        id: "other-line",
+        productId: "other-product",
+        sku: "800-314",
+        quantity: 4,
+        weightQuantity: 20,
+        unitPrice: 4511,
+        basePrice: 4511,
+        subtotal: 90_220,
+        averageQuantityPerUnit: 5,
+      }),
+      weightedSaleItem({
+        id: "discounted-line",
+        sku: "800-210",
+        quantity: 4,
+        weightQuantity: 20,
+        unitPrice: 5689,
+        basePrice: 5689,
+        discountPercent: 4,
+        subtotal: 109_228.8,
+        averageQuantityPerUnit: 5,
+      }),
+    ];
+
+    const budget = buildRemittanceFromSale(sale, "PRESUPUESTO");
+    expect(budget.items.map((item) => item.unitPrice)).toEqual([
+      12_014, 4511, 5689,
+    ]);
+    expect(budget.items.map((item) => item.subtotal)).toEqual([
+      252_294, 90_220, 109_228.8,
+    ]);
+    expect(budget.items[2].discountPercentage).toBe(4);
+    expect(budget.subtotal).toBe(451_742.8);
+    expect(budget.total).toBe(451_742.8);
+    const html = generateRemittanceHTML(budget);
+    expect(html).toContain("12.014,00");
+    expect(html).toContain("4.511,00");
+    expect(html).not.toContain("25.229,40");
+    expect(sale.items[0].unitPrice).toBe(25_229.4);
+  });
+
+  it.each([
+    { tracksStockUnits: false },
+    { unitOfMeasure: "UN", tracksStockUnits: false, weightQuantity: null },
+    { weightQuantity: null },
+    { weightQuantity: 0 },
+    { type: "adjustment", productId: null },
+    { basePrice: Number.NaN },
+  ] satisfies Partial<SalesOrderItemDetail>[])("keeps the stored unit price when weight pricing is not available: %j", (overrides) => {
+    const sale = saleWithArcaStatus("not_requested", null);
+    sale.items = [weightedSaleItem(overrides)];
+    expect(
+      buildRemittanceFromSale(sale, "PRESUPUESTO").items[0].unitPrice
+    ).toBe(25_229.4);
+  });
+
+  it("keeps the existing final-remittance price mapping", () => {
+    const sale = saleWithArcaStatus("not_requested", null);
+    sale.items = [weightedSaleItem()];
+    const remittance = buildRemittanceFromSale(sale, "REMITO_FINAL");
+    expect(remittance.items[0].unitPrice).toBe(25_229.4);
+    expect(remittance.items[0].subtotal).toBe(252_294);
   });
 });
 
@@ -203,5 +296,48 @@ describe("remittance product variants", () => {
     data.items[0].variantName = undefined;
 
     expect(generateRemittanceHTML(data)).not.toContain('class="variant"');
+  });
+});
+
+describe("fiscal remittance rendering", () => {
+  it("keeps fiscal identity, authorization and transport on full-page original and duplicate", () => {
+    const data = remittanceWithItems("REMITO_FINAL");
+    data.singlePageDuplicate = true;
+    data.fiscal = {
+      authorizationId: "60000000-0000-4000-8000-000000000001",
+      cai: "12345678901234",
+      expiresAt: "2026-12-31",
+      pointOfSale: 9,
+      number: 1,
+      mode: "self_printed",
+      firstNumber: 1,
+      lastNumber: null,
+      businessName: "Safe fiscal <SA>",
+      cuit: "30710158230",
+      address: "Domicilio histórico",
+      vatCondition: "IVA RESPONSABLE INSCRITO",
+      grossIncome: "123",
+      activityStart: "2020-01-01",
+      printerName: "",
+      printerCuit: "",
+      printerRegistration: "",
+      printedAt: "",
+    };
+    data.transport = {
+      name: "Transporte Ejemplo",
+      cuit: "20111111112",
+      address: "Calle Transporte 123",
+    };
+    const html = generateRemittanceHTML(data);
+    expect(html).toContain("Safe fiscal &lt;SA&gt;");
+    expect(html).toContain("12345678901234");
+    expect(html).toContain("31/12/2026");
+    expect(html).toContain("DOCUMENTO NO VALIDO COMO FACTURA");
+    expect(html).toContain('class="fiscal-letter">R');
+    expect(html).toContain("ORIGINAL");
+    expect(html).toContain("DUPLICADO");
+    expect(html).toContain("Transporte Ejemplo");
+    expect(html).toContain("Calle Transporte 123");
+    expect(html).not.toContain('class="single-page"');
   });
 });

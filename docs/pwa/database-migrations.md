@@ -88,3 +88,9 @@ Se confirmó que `.env.prod` apunta a otro proyecto que ensayo. Consultas GET va
 **Conclusión de esta revisión (solo lectura):** producción no está lista para recibir la app nueva de PWA, cotizaciones offline, Visitas y sucursales. Ensayo tiene objetos y cron que producción no tiene; además, en producción `anon` aún puede ejecutar el lookup de replay. Para preparar un despliegue seguro se requiere revisar dependencias y estado efectivo de la base productiva, preparar SQL específico y ordenado para este entorno, verificar permisos y cron, y recién después desplegar el código. No usar `db push` ni `migration repair` sobre los historiales divergentes. No se modificaron datos ni esquema productivos durante la revisión.
 
 Una consulta `HEAD` previa informó `error = null` incluso cuando el HTTP era `404`; **no utilizar HEAD como prueba de existencia** para esta API. La comprobación anterior se corrigió con GET vacío. Este archivo local `.env.prod` tampoco declara las claves de firma/cifrado offline; puede no reflejar las variables efectivas del despliegue y deben verificarse allí **sin compartir sus valores**.
+
+## Integración de `feat/pwa-v2` con `main` (25/11)
+
+El merge incorpora migraciones de Remitos desde `main` que comparten las versiones `20261112000000`, `20261112010000` y `20261112020000` con las de Visitas ya aplicadas manualmente en ensayo. También `20261125000000_sales_pricing_management_access.sql` comparte versión con `20261125000000_customer_site_postal_codes.sql`. No se renombraron ni reejecutaron archivos aplicados.
+
+**Bloqueo de despliegue:** la compilación y las pruebas del código no verifican el esquema remoto. Antes de cualquier PR que despliegue la app o ejecute migraciones, conciliar por entorno el historial, las versiones duplicadas y las dependencias de los archivos afectados. No usar `supabase db push`, `migration repair` ni desplegar en producción sin esa revisión.

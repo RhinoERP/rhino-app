@@ -23,6 +23,12 @@ import type { StockItem } from "@/modules/inventory/types";
 type StockExportButtonProps = {
   orgSlug: string;
   table: Table<StockItem>;
+  filters?: {
+    warehouseId?: string;
+    search?: string;
+    category?: string;
+    status?: string;
+  };
 };
 
 function getRowValue(
@@ -42,7 +48,11 @@ function getRowValue(
   return "";
 }
 
-export function StockExportButton({ orgSlug, table }: StockExportButtonProps) {
+export function StockExportButton({
+  orgSlug,
+  table,
+  filters,
+}: StockExportButtonProps) {
   const [exporting, setExporting] = useState(false);
 
   const handleExport = async (
@@ -73,7 +83,7 @@ export function StockExportButton({ orgSlug, table }: StockExportButtonProps) {
           sheetName: "Stock",
         });
       } else {
-        const data = await getStockExportAction(orgSlug);
+        const data = await getStockExportAction(orgSlug, filters);
         const rows = data.map((row) =>
           visibleColumns.map((col) =>
             getRowValue(

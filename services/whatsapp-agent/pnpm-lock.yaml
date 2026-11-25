@@ -8,6 +8,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.86.0
         version: 2.86.0
+      music-metadata:
+        specifier: 12.3.4
+        version: 12.3.4
     devDependencies:
       '@types/node':
         specifier: ^22.15.29
@@ -22,6 +25,9 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@22.19.2)(msw@2.12.3(@types/node@22.19.2)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.11.3)(@types/node@22.19.2)(esbuild@0.27.0)(jiti@2.6.1)(terser@5.51.2)(tsx@4.22.4))
 packages:
+  '@borewit/text-codec@0.2.3':
+    resolution:
+      integrity: sha512-49CycTz1aAZmvFcwkeFyhud1HUmRIB5Tabf7ALV+VA4Iu85MTfz2cUwzPagMFAdVBvrWdkCxG67I30tUwwpKsw==
   '@edge-runtime/primitives@4.1.0':
     resolution:
       integrity: sha512-Vw0lbJ2lvRUqc7/soqygUX216Xb8T3WBZ987oywz6aJqRxcwSVWwr9e+Nqo2m9bxobA9mdbWNNoRY6S9eko1EQ==
@@ -775,6 +781,14 @@ packages:
       integrity: sha512-BaC9sv5+HGNy1ulZwY8/Ev7EjfYYmWD4fOMw9bDBqTawEj6JHAiOHeTwXLRzVaeSay4p17xYLN2NSCoGgXMQnw==
     engines:
       node: '>=20.0.0'
+  '@tokenizer/inflate@0.6.0':
+    resolution:
+      integrity: sha512-+0RDxhBkyT9xMnGdJAwmats9yxRLR8ypJrQgrnLqOu4Gv/aHlnxYgdGVy2QTwvBl6IF/w2Hr+ZNirH+iMUbVZA==
+    engines:
+      node: '>=18'
+  '@tokenizer/token@0.3.0':
+    resolution:
+      integrity: sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==
   '@tybys/wasm-util@0.10.1':
     resolution:
       integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==
@@ -878,6 +892,11 @@ packages:
   commander@2.20.3:
     resolution:
       integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==
+  content-type@3.1.1:
+    resolution:
+      integrity: sha512-GW4qUsfFo59d0HbUibDlWv5wPz+vAAcaTWbKIuKCf0JkC7wWkSyf8f13IpXn5JkeMlB2P8iTSSIjwXljorg2vA==
+    engines:
+      node: '>=22'
   convert-source-map@2.0.0:
     resolution:
       integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==
@@ -886,6 +905,16 @@ packages:
       integrity: sha512-9Kr/j4O16ISv8zBBhJoi4bXOYNTkFLOqSL3UDB0njXxCXNezjeyVrJyGOWtgfs/q2km1gwBcfH8q1yEGoMYunA==
     engines:
       node: '>=18'
+  debug@4.4.3:
+    resolution:
+      integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==
+    engines:
+      node: '>=6.0'
+    peerDependencies:
+      supports-color: '*'
+    peerDependenciesMeta:
+      supports-color:
+        optional: true
   detect-libc@2.1.2:
     resolution:
       integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==
@@ -932,6 +961,11 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+  file-type@22.3.0:
+    resolution:
+      integrity: sha512-PrPedgnnWl5bWz3JHgar0QSzRvzeyFh7dZ9JpYOgcPZu4KALS9zw4MMa6qXRYyjeBsAlpaWB2boLuG991+0HIQ==
+    engines:
+      node: '>=22'
   fsevents@2.3.3:
     resolution:
       integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==
@@ -957,6 +991,9 @@ packages:
       integrity: sha512-kmgmea2nguZEvRqW79gDqNXyxA3OS5WIgMVffrHpqXV4F/J4UmNIw2vstixioLTNSkd5rFB8G0s3Lwzogm6OFw==
     engines:
       node: '>=20.0.0'
+  ieee754@1.2.1:
+    resolution:
+      integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==
   is-fullwidth-code-point@3.0.0:
     resolution:
       integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==
@@ -1084,6 +1121,14 @@ packages:
   magic-string@0.30.21:
     resolution:
       integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==
+  media-typer@2.0.0:
+    resolution:
+      integrity: sha512-kOy3OxT2HH39N70UnKgu4NWDZjLOz8W/mfyvniHjRH/DrL3f2pOfvWQ4p60offbbtDAnXWp0v9LfMIqMec269Q==
+    engines:
+      node: '>=18'
+  ms@2.1.3:
+    resolution:
+      integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==
   msw@2.12.3:
     resolution:
       integrity: sha512-/5rpGC0eK8LlFqsHaBmL19/PVKxu/CCt8pO1vzp9X6SDLsRDh/Ccudkf3Ur5lyaKxJz9ndAx+LaThdv0ySqB6A==
@@ -1095,6 +1140,11 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+  music-metadata@12.3.4:
+    resolution:
+      integrity: sha512-M0t4TlnpaNMd1XBb1rW3BmSIosxTXmXtdOVYsx1wb56l1Jbij08JV9bKEAIn68f19+xO7s7sm/7IzdnfR8BJwQ==
+    engines:
+      node: '>=22'
   mute-stream@2.0.0:
     resolution:
       integrity: sha512-WWdIxpyjEn+FhQJQQv9aQAYlHoNVdzIzUySNV1gHUPDSdZJ3yZn7pAAbQcV7B56Mvu881q9FZV+0Vx2xC44VWA==
@@ -1195,6 +1245,11 @@ packages:
       integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==
     engines:
       node: '>=8'
+  strtok3@10.7.0:
+    resolution:
+      integrity: sha512-iAqrCpp7UXD2FZiHWhLXqdJ6CmNeVzRkkHAyyhhKMVtbVm2KtPX3D/bJNonvtcyLTHS4rwqP2pz9fsjK1K4z0Q==
+    engines:
+      node: '>=18'
   tagged-tag@1.0.0:
     resolution:
       integrity: sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng==
@@ -1231,6 +1286,11 @@ packages:
     resolution:
       integrity: sha512-8PWx8tvC4jDB39BQw1m4x8y5MH1BcQ5xHeL2n7UVFulMPH/3Q0uiamahFJ3lXA0zO2SUyRXuVVbWSDmstlt9YA==
     hasBin: true
+  token-types@6.2.0:
+    resolution:
+      integrity: sha512-s9euYHM//T3loJtbNUYdbAzsMlvKBeRS+XCLFy+UGosMQH19Hwjap5k19i4PPAEJJBsVIpMpVTxl4fIqCuNfUg==
+    engines:
+      node: '>=14.16'
   tough-cookie@6.0.0:
     resolution:
       integrity: sha512-kXuRi1mtaKMrsLUxz3sQYvVl37B0Ns6MzfrtV5DvJceE9bPyspOqk9xxv7XbZWcfLWbFmm997vl83qUWVJA64w==
@@ -1256,6 +1316,11 @@ packages:
     engines:
       node: '>=14.17'
     hasBin: true
+  uint8array-extras@1.6.0:
+    resolution:
+      integrity: sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q==
+    engines:
+      node: '>=18'
   undici-types@6.21.0:
     resolution:
       integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==
@@ -1348,6 +1413,9 @@ packages:
     engines:
       node: '>=8'
     hasBin: true
+  win-guid@0.2.1:
+    resolution:
+      integrity: sha512-gEIQU4mkgl2OPeoNrWflcJFJ3Ae2BPd4eCsHHA/XikslkIVms/nHhvnvzIZV7VLmBvtFlDOzLt9rrZT+n6D67A==
   wrap-ansi@6.2.0:
     resolution:
       integrity: sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==
@@ -1393,6 +1461,7 @@ packages:
       node: '>=18'
 snapshots:
   '@edge-runtime/primitives@4.1.0': {}
+  '@borewit/text-codec@0.2.3': {}
   '@edge-runtime/vm@3.2.0':
     dependencies:
       '@edge-runtime/primitives': 4.1.0
@@ -1644,6 +1713,14 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+  '@tokenizer/inflate@0.6.0':
+    dependencies:
+      debug: 4.4.3
+      strtok3: 10.7.0
+      token-types: 6.2.0
+    transitivePeerDependencies:
+      - supports-color
+  '@tokenizer/token@0.3.0': {}
   '@tybys/wasm-util@0.10.1':
     dependencies:
       tslib: 2.8.1
@@ -1721,6 +1798,10 @@ snapshots:
   detect-libc@2.1.2: {}
   emoji-regex@8.0.0: {}
   es-module-lexer@2.0.0: {}
+  content-type@3.1.1: {}
+  debug@4.4.3:
+    dependencies:
+      ms: 2.1.3
   esbuild@0.27.0:
     optionalDependencies:
       '@esbuild/aix-ppc64': 0.27.0
@@ -1785,6 +1866,14 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
       picomatch: 4.0.3
+  file-type@22.3.0:
+    dependencies:
+      '@tokenizer/inflate': 0.6.0
+      strtok3: 10.7.0
+      token-types: 6.2.0
+      uint8array-extras: 1.6.0
+    transitivePeerDependencies:
+      - supports-color
   fsevents@2.3.3:
     optional: true
   get-caller-file@2.0.5: {}
@@ -1794,6 +1883,7 @@ snapshots:
   is-fullwidth-code-point@3.0.0: {}
   is-node-process@1.2.0: {}
   jiti@2.6.1: {}
+  ieee754@1.2.1: {}
   lightningcss-android-arm64@1.32.0:
     optional: true
   lightningcss-darwin-arm64@1.32.0:
@@ -1834,6 +1924,8 @@ snapshots:
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
+  media-typer@2.0.0: {}
+  ms@2.1.3: {}
   msw@2.12.3(@types/node@22.19.2)(typescript@5.9.3):
     dependencies:
       '@inquirer/confirm': 5.1.21(@types/node@22.19.2)
@@ -1868,6 +1960,20 @@ snapshots:
   picocolors@1.1.1: {}
   picomatch@4.0.3: {}
   picomatch@4.0.4: {}
+  music-metadata@12.3.4:
+    dependencies:
+      '@borewit/text-codec': 0.2.3
+      '@tokenizer/token': 0.3.0
+      content-type: 3.1.1
+      debug: 4.4.3
+      file-type: 22.3.0
+      media-typer: 2.0.0
+      strtok3: 10.7.0
+      token-types: 6.2.0
+      uint8array-extras: 1.6.0
+      win-guid: 0.2.1
+    transitivePeerDependencies:
+      - supports-color
   postcss@8.5.8:
     dependencies:
       nanoid: 3.3.11
@@ -1919,6 +2025,9 @@ snapshots:
     dependencies:
       ansi-regex: 5.0.1
   tagged-tag@1.0.0: {}
+  strtok3@10.7.0:
+    dependencies:
+      '@tokenizer/token': 0.3.0
   terser@5.51.2:
     dependencies:
       '@jridgewell/source-map': 0.3.11
@@ -1936,6 +2045,11 @@ snapshots:
   tldts@7.0.19:
     dependencies:
       tldts-core: 7.0.19
+  token-types@6.2.0:
+    dependencies:
+      '@borewit/text-codec': 0.2.3
+      '@tokenizer/token': 0.3.0
+      ieee754: 1.2.1
   tough-cookie@6.0.0:
     dependencies:
       tldts: 7.0.19
@@ -1951,6 +2065,7 @@ snapshots:
   typescript@5.9.3: {}
   undici-types@6.21.0: {}
   until-async@3.0.2: {}
+  uint8array-extras@1.6.0: {}
   vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.11.3)(@types/node@22.19.2)(esbuild@0.27.0)(jiti@2.6.1)(terser@5.51.2)(tsx@4.22.4):
     dependencies:
       lightningcss: 1.32.0
@@ -2000,6 +2115,7 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+  win-guid@0.2.1: {}
   wrap-ansi@6.2.0:
     dependencies:
       ansi-styles: 4.3.0

@@ -1,9 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { createSerwistRoute } from "@serwist/turbopack";
 
-// Public HTML references build-specific chunks. A local rebuild without a git
-// commit must refresh these documents too; otherwise they retain old chunk URLs.
-const revision = randomUUID();
+// Keep the revision stable across requests while refreshing the offline pages
+// when a new build is published.
+const revision =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  process.env.BUILD_ID ||
+  process.env.NEXT_BUILD_ID ||
+  spawnSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf-8",
+  }).stdout.trim() ||
+  process.env.npm_package_version ||
+  "rhinos-pwa-build-v1";
 
 const serviceWorkerRoute = createSerwistRoute({
   additionalPrecacheEntries: [

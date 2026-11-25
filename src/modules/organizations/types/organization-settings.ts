@@ -6,6 +6,7 @@ import { z } from "zod";
  * Existing settings (remittance_auto_enabled, etc.) remain in organizations.
  */
 export const organizationSettingsSchema = z.object({
+  invoice_backed_debt_enabled: z.boolean().default(false),
   accounting_integration_enabled: z.boolean().default(false),
   automatic_accounting_enabled: z.boolean().default(false),
   credit_note_accounting_modal_enabled: z.boolean().default(false),
@@ -17,6 +18,10 @@ export const organizationSettingsSchema = z.object({
   remittance_final_show_line_total: z.boolean().default(false),
   remittance_final_show_total: z.boolean().default(false),
   remittance_mask_printing_enabled: z.boolean().default(false),
+  remittance_fiscal_enabled: z.boolean().default(false),
+  remittance_fiscal_mode: z
+    .enum(["self_printed", "preprinted"])
+    .default("self_printed"),
   dispatch_declared_value_percentage: z.number().min(0).max(100).default(0),
   invoice_email_from_name: z.string().trim().max(80).default(""),
   invoice_email_subject_template: z.string().trim().max(160).default(""),
@@ -96,6 +101,7 @@ export type OrganizationSettingsData = z.infer<
 >;
 
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
+  invoice_backed_debt_enabled: false,
   accounting_integration_enabled: false,
   automatic_accounting_enabled: false,
   credit_note_accounting_modal_enabled: false,
@@ -107,6 +113,8 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   remittance_final_show_line_total: false,
   remittance_final_show_total: false,
   remittance_mask_printing_enabled: false,
+  remittance_fiscal_enabled: false,
+  remittance_fiscal_mode: "self_printed",
   dispatch_declared_value_percentage: 0,
   invoice_email_from_name: "",
   invoice_email_subject_template: "",

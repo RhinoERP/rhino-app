@@ -1,6 +1,7 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef, FilterFn } from "@tanstack/react-table";
 import {
   getFilteredRowModel,
@@ -10,6 +11,7 @@ import {
 import { CheckCircle2, CircleDot, Plus, Wallet, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
@@ -42,10 +44,13 @@ import {
 } from "@/components/ui/select";
 import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { getPosWarehousesAction } from "@/modules/pos/actions/get-pos-warehouses.action";
 import { openPosSessionAction } from "@/modules/pos/actions/open-pos-session.action";
-import type {
-  PosCashControlTerminal,
-  PosSessionSummary,
+import {
+  type OpenPosSessionInput,
+  openPosSessionSchema,
+  type PosCashControlTerminal,
+  type PosSessionSummary,
 } from "@/modules/pos/types";
 import { directSaleDefaultOpenTerminalQueryKey } from "@/modules/sales/queries/query-keys";
 
@@ -434,8 +439,16 @@ export function CashControlSessionsTab({
     sortSessionsByOpenedAtDesc(sessions)
   );
   const [isOpenDialogOpen, setIsOpenDialogOpen] = useState(false);
-  const [selectedTerminalId, setSelectedTerminalId] = useState<string>("");
-  const [startingCashInput, setStartingCashInput] = useState<string>("0");
+  const openingForm = useForm<OpenPosSessionInput>({
+    resolver: zodResolver(openPosSessionSchema),
+    defaultValues: { orgSlug, terminalId: "", startingCash: 0 },
+  });
+  const warehousesQuery = useQuery({
+    queryKey: ["pos-warehouses", orgSlug],
+    queryFn: () => getPosWarehousesAction(orgSlug),
+    enabled: isOpenDialogOpen,
+    staleTime: 0,
+  });
   const [openErrorMessage, setOpenErrorMessage] = useState<string | null>(null);
   const [isOpeningSession, startOpeningSession] = useTransition();
 
@@ -546,31 +559,29 @@ export function CashControlSessionsTab({
     }
 
     const firstAvailableTerminal = availableTerminals[0];
-    setSelectedTerminalId(firstAvailableTerminal?.id ?? "");
-    setStartingCashInput("0");
+    openingForm.reset({
+      orgSlug,
+      terminalId: firstAvailableTerminal?.id ?? "",
+      startingCash: 0,
+    });
     setOpenErrorMessage(null);
   };
 
-  const handleOpenSession = () => {
+  const handleOpenSession = openingForm.handleSubmit((values) => {
     setOpenErrorMessage(null);
-
-    if (!selectedTerminalId) {
-      setOpenErrorMessage("Selecciona una terminal para abrir la caja.");
-      return;
-    }
-
-    const startingCash = parseMoneyInput(startingCashInput);
-
-    if (startingCash === null) {
-      setOpenErrorMessage("Ingresa un monto inicial válido.");
+    const warehouses = warehousesQuery.data ?? [];
+    const warehouseId =
+      values.warehouseId ??
+      (warehouses.length === 1 ? warehouses[0].id : undefined);
+    if (!warehouseId) {
+      setOpenErrorMessage("Seleccioná un depósito habilitado.");
       return;
     }
 
     startOpeningSession(async () => {
       const result = await openPosSessionAction({
-        orgSlug,
-        terminalId: selectedTerminalId,
-        startingCash,
+        ...values,
+        warehouseId,
       });
 
       if (!result.success) {
@@ -599,7 +610,7 @@ export function CashControlSessionsTab({
       toast.success("Sesión de caja abierta correctamente.");
       router.refresh();
     });
-  };
+  });
 
   const handleCloseSession = () => {
     if (!sessionToClose) {
@@ -737,22 +748,71 @@ export function CashControlSessionsTab({
           <div className="grid gap-4 py-2">
             <div className="space-y-2">
               <Label htmlFor="terminal-id">Terminal</Label>
-              <Select
-                onValueChange={setSelectedTerminalId}
-                value={selectedTerminalId}
-              >
-                <SelectTrigger id="terminal-id">
-                  <SelectValue placeholder="Selecciona una terminal" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTerminals.map((terminal) => (
-                    <SelectItem key={terminal.id} value={terminal.id}>
-                      {getTerminalOptionLabel(terminal)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Controller
+                control={openingForm.control}
+                name="terminalId"
+                render={({ field }) => (
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <SelectTrigger id="terminal-id">
+                      <SelectValue placeholder="Selecciona una terminal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTerminals.map((terminal) => (
+                        <SelectItem key={terminal.id} value={terminal.id}>
+                          {getTerminalOptionLabel(terminal)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </div>
+
+            {warehousesQuery.isPending && (
+              <output>Cargando depósitos...</output>
+            )}
+            {warehousesQuery.isError && (
+              <p className="text-destructive text-sm" role="alert">
+                No se pudieron cargar los depósitos. Cerrá la ventana e intentá
+                nuevamente.
+              </p>
+            )}
+            {warehousesQuery.isSuccess && warehousesQuery.data.length === 0 && (
+              <p className="text-destructive text-sm" role="alert">
+                No tenés depósitos habilitados para venta directa.
+              </p>
+            )}
+            {warehousesQuery.data?.length === 1 && (
+              <p className="text-muted-foreground text-sm">
+                Depósito: {warehousesQuery.data[0].name}
+              </p>
+            )}
+            {(warehousesQuery.data?.length ?? 0) > 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="opening-warehouse">Depósito</Label>
+                <Controller
+                  control={openingForm.control}
+                  name="warehouseId"
+                  render={({ field }) => (
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value ?? ""}
+                    >
+                      <SelectTrigger id="opening-warehouse">
+                        <SelectValue placeholder="Seleccioná un depósito" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {warehousesQuery.data?.map((warehouse) => (
+                          <SelectItem key={warehouse.id} value={warehouse.id}>
+                            {warehouse.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="starting-cash">Monto inicial</Label>
@@ -760,12 +820,18 @@ export function CashControlSessionsTab({
                 id="starting-cash"
                 inputMode="decimal"
                 min={0}
-                onChange={(event) => setStartingCashInput(event.target.value)}
                 placeholder="10000"
                 step="0.01"
                 type="number"
-                value={startingCashInput}
+                {...openingForm.register("startingCash", {
+                  valueAsNumber: true,
+                })}
               />
+              {openingForm.formState.errors.startingCash && (
+                <p className="text-destructive text-sm" role="alert">
+                  Ingresá un monto inicial válido.
+                </p>
+              )}
             </div>
 
             {openErrorMessage && (
@@ -789,7 +855,15 @@ export function CashControlSessionsTab({
             >
               Cancelar
             </Button>
-            <Button disabled={openingDisabled} onClick={handleOpenSession}>
+            <Button
+              disabled={
+                openingDisabled ||
+                warehousesQuery.isFetching ||
+                warehousesQuery.isError ||
+                !warehousesQuery.data?.length
+              }
+              onClick={handleOpenSession}
+            >
               {isOpeningSession ? "Abriendo..." : "Abrir caja"}
             </Button>
           </DialogFooter>

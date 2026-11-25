@@ -69,6 +69,12 @@ type SalesOrderSale = Pick<
     | null;
 };
 
+type CustomerSalesOrderSale = SalesOrderSale & { customer_id: string };
+
+function hasCustomerId(sale: SalesOrderSale): sale is CustomerSalesOrderSale {
+  return Boolean(sale.customer_id);
+}
+
 const SALES_SELECT = `
   id,
   customer_id,
@@ -100,7 +106,7 @@ function normalizeCustomerField(
   return normalized?.[field] || null;
 }
 
-function toRouteSheetSale(sale: SalesOrderSale): RouteSheetSale {
+function toRouteSheetSale(sale: CustomerSalesOrderSale): RouteSheetSale {
   return {
     id: sale.id,
     customer_id: sale.customer_id,
@@ -152,6 +158,9 @@ function buildRouteSheetsWithSales(params: {
 }): RouteSheetWithSales[] {
   const salesByRouteSheet = new Map<string, RouteSheetSale[]>();
   for (const sale of params.sales) {
+    if (!hasCustomerId(sale)) {
+      continue;
+    }
     const routeSheetId = (sale as { route_sheet_id?: string | null })
       .route_sheet_id;
     if (!routeSheetId) {
@@ -268,6 +277,7 @@ export async function getRouteSheetPageData(
   });
 
   const availableSales = ((available ?? []) as unknown as SalesOrderSale[])
+    .filter(hasCustomerId)
     .map(toRouteSheetSale)
     .sort((a, b) =>
       String(a.sale_number ?? "").localeCompare(
@@ -514,15 +524,18 @@ export async function getRouteSheetWithSales(
     throw new Error("No tienes permisos para ver esta hoja de ruta");
   }
 
-  const sortedSales = routeSales.map(toRouteSheetSale).sort((a, b) =>
-    String(a.sale_number ?? "").localeCompare(
-      String(b.sale_number ?? ""),
-      undefined,
-      {
-        numeric: true,
-      }
-    )
-  );
+  const sortedSales = routeSales
+    .filter(hasCustomerId)
+    .map(toRouteSheetSale)
+    .sort((a, b) =>
+      String(a.sale_number ?? "").localeCompare(
+        String(b.sale_number ?? ""),
+        undefined,
+        {
+          numeric: true,
+        }
+      )
+    );
 
   return {
     ...sheet,

@@ -7,10 +7,12 @@ import {
   buildRemittanceMaskData,
   generateRemittanceMaskHTML,
 } from "@/modules/sales/service/remittance-mask-generator.service";
+import { findSavedRemittance } from "../server/order-remittance-documents.service";
 import {
   getOrderRemittanceData,
   resolveRemittanceOrderIds,
 } from "../server/order-remittance-pdf-document.service";
+import { previewSavedRemittanceMasksAction } from "./saved-order-remittances.action";
 
 type PreviewOrderRemittanceMaskResult =
   | { success: true; html: string }
@@ -48,9 +50,23 @@ export async function previewOrderRemittanceMaskAction(
       };
     }
 
+    const saved = await findSavedRemittance(
+      orgSlug,
+      [childOrderId],
+      remitoNumber
+    );
+    if (saved) {
+      return previewSavedRemittanceMasksAction(
+        orgSlug,
+        [saved.id],
+        purchaseOrderNumber
+      );
+    }
+
     const childOrderIds = await resolveRemittanceOrderIds(
       childOrderId,
-      remitoNumber
+      remitoNumber,
+      orgSlug
     );
 
     const supabase = await createClient();

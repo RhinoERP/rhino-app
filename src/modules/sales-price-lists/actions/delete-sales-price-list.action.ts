@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAuth } from "@/lib/supabase/auth";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { deleteSalesPriceList } from "../service/sales-price-lists.service";
 
 export type DeleteSalesPriceListActionResult = {
@@ -13,8 +13,8 @@ export async function deleteSalesPriceListAction(
   orgSlug: string,
   priceListId: string
 ): Promise<DeleteSalesPriceListActionResult> {
+  await ensure("pricelists.manage", orgSlug);
   try {
-    await requireAuth();
     await deleteSalesPriceList(orgSlug, priceListId);
 
     revalidatePath(`/org/${orgSlug}/precios/listas-de-precios-venta`);

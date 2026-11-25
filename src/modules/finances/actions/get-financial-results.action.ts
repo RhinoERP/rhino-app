@@ -4,6 +4,11 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import {
+  readFiscalInvoiceRate,
+  readSaleDocumentRate,
+  type SaleExchangeRateSource,
+} from "@/modules/sales/document-exchange-rate";
 import type {
   ExpenseByCategoryResult,
   FinancialPeriod,
@@ -68,7 +73,9 @@ export async function getFinancialResultsAction(
     // Cuentas por cobrar pendientes
     supabase
       .from("accounts_receivable")
-      .select("pending_balance, currency, sales_orders(exchange_rate)")
+      .select(
+        "pending_balance, currency, sales_orders(exchange_rate, commercial_exchange_rate, commercial_snapshot, arca_status, invoice_type, invoice_number, arca_request_json), manual_fiscal_invoices(exchange_rate, arca_request_json)"
+      )
       .eq("organization_id", orgId)
       .eq("is_collection_deferred" as never, false)
       .in("status", ["PENDING", "PARTIALLY_PAID"]),
@@ -85,7 +92,7 @@ export async function getFinancialResultsAction(
     supabase
       .from("sales_advances")
       .select(
-        "amount, status, final_sale:sales_orders!sales_advances_final_sales_order_id_fkey(total_amount, currency, exchange_rate)"
+        "amount, status, final_sale:sales_orders!sales_advances_final_sales_order_id_fkey(total_amount, currency, exchange_rate, commercial_exchange_rate, commercial_snapshot, arca_status, invoice_type, invoice_number, arca_request_json)"
       )
       .eq("organization_id", orgId),
   ]);
@@ -115,25 +122,33 @@ export async function getFinancialResultsAction(
   const cashInflows = cashCollections;
   const netCashFlow = cashInflows - totalExpenses;
 
+  let unvaluedUsdBalanceCount = 0;
   const pendingReceivables = (arResult.data ?? []).reduce((sum, r) => {
     const row = r as {
       pending_balance: number;
       currency?: string | null;
-      sales_orders?:
-        | { exchange_rate: number | null }
-        | Array<{ exchange_rate: number | null }>
-        | null;
+      sales_orders?: SaleExchangeRateSource | SaleExchangeRateSource[] | null;
+      manual_fiscal_invoices?: {
+        exchange_rate: number | null;
+        arca_request_json: unknown;
+      } | null;
     };
     const balance = Number(row.pending_balance ?? 0);
     if ((row.currency ?? "ARS").toUpperCase() !== "USD") {
       return sum + balance;
     }
-    const rate = Array.isArray(row.sales_orders)
-      ? row.sales_orders[0]?.exchange_rate
-      : row.sales_orders?.exchange_rate;
-    return rate && Number(rate) > 0
-      ? sum + truncateMoney(balance * Number(rate))
-      : sum + balance;
+    const sale = Array.isArray(row.sales_orders)
+      ? row.sales_orders[0]
+      : row.sales_orders;
+    const manual = row.manual_fiscal_invoices;
+    const rate = manual
+      ? readFiscalInvoiceRate(manual.arca_request_json, manual.exchange_rate)
+      : readSaleDocumentRate(sale);
+    if (rate === null) {
+      unvaluedUsdBalanceCount += 1;
+      return sum;
+    }
+    return sum + truncateMoney(balance * rate);
   }, 0);
   const pendingPayables = (apResult.data ?? []).reduce((sum, r) => {
     const row = r as unknown as {
@@ -148,9 +163,11 @@ export async function getFinancialResultsAction(
     }
     const total = Number(row.total_amount ?? 0);
     const amountArs = Number(row.amount_ars ?? 0);
-    return total > 0 && amountArs > 0
-      ? sum + truncateMoney(balance * (amountArs / total))
-      : sum + balance;
+    if (!(total > 0 && amountArs > 0)) {
+      unvaluedUsdBalanceCount += 1;
+      return sum;
+    }
+    return sum + truncateMoney(balance * (amountArs / total));
   }, 0);
   const activeAdvances = (
     (advancesResult.data ?? []) as ActiveAdvanceRow[]
@@ -171,8 +188,12 @@ export async function getFinancialResultsAction(
     if ((finalSale?.currency ?? "ARS").toUpperCase() !== "USD") {
       return sum + net;
     }
-    const rate = Number(finalSale?.exchange_rate ?? 0);
-    return rate > 0 ? sum + truncateMoney(net * rate) : sum + net;
+    const rate = readSaleDocumentRate(finalSale);
+    if (rate === null) {
+      unvaluedUsdBalanceCount += 1;
+      return sum;
+    }
+    return sum + truncateMoney(net * rate);
   }, 0);
 
   return {
@@ -190,6 +211,7 @@ export async function getFinancialResultsAction(
     pendingPayables,
     deferredAdvanceBalance,
     deferredAdvanceCount: activeAdvances.length,
+    unvaluedUsdBalanceCount,
   };
 }
 
@@ -197,16 +219,18 @@ type ActiveAdvanceRow = {
   amount: number | null;
   status: string;
   final_sale:
-    | {
+    | (SaleExchangeRateSource & {
         total_amount: number | null;
         currency?: string | null;
         exchange_rate?: number | null;
-      }
-    | Array<{
-        total_amount: number | null;
-        currency?: string | null;
-        exchange_rate?: number | null;
-      }>
+      })
+    | Array<
+        SaleExchangeRateSource & {
+          total_amount: number | null;
+          currency?: string | null;
+          exchange_rate?: number | null;
+        }
+      >
     | null;
 };
 

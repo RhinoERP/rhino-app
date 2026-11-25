@@ -7,7 +7,9 @@ import {
   runCommercialModel,
   type ToolCallAudit,
 } from "./agent-core.js";
+import { AudioError } from "./audio/config.js";
 import { sendWhatsAppText } from "./meta-cloud.js";
+import { formatAssistantReply } from "./response-capitalization.js";
 import {
   type BusinessHours,
   getNextBusinessOpening,
@@ -63,7 +65,8 @@ export function isCommercialAgentConfigured(): boolean {
 }
 
 async function requestModel(
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ModelResponse> {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -72,6 +75,9 @@ async function requestModel(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
+      : AbortSignal.timeout(45_000),
   });
   if (!response.ok) {
     throw new Error(
@@ -83,7 +89,8 @@ async function requestModel(
 
 async function callCommercialTool(
   context: AgentContext,
-  call: ModelFunctionCall
+  call: ModelFunctionCall,
+  signal?: AbortSignal
 ): Promise<unknown> {
   let args: unknown;
   try {
@@ -101,6 +108,9 @@ async function callCommercialTool(
         "x-whatsapp-agent-token": serviceToken(),
       },
       body: JSON.stringify({ context, arguments: args }),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
+        : AbortSignal.timeout(20_000),
     }
   );
   const body = (await response.json()) as { result?: unknown; error?: string };
@@ -126,7 +136,7 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
     supabase
       .from("whatsapp_integrations")
       .select(
-        "phone_number_id, business_hours, response_delay_min_minutes, response_delay_max_minutes"
+        "phone_number_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, commercial_rules"
       )
       .eq("id", job.integration_id)
       .eq("organization_id", job.organization_id)
@@ -143,7 +153,7 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
       .single(),
     supabase
       .from("whatsapp_messages")
-      .select("id, direction, content, created_at")
+      .select("id, direction, message_type, content, created_at")
       .eq("conversation_id", job.conversation_id)
       .eq("organization_id", job.organization_id)
       .eq("integration_id", job.integration_id)
@@ -170,7 +180,11 @@ async function loadJobContext(supabase: SupabaseClient, job: AgentJob) {
     !latestInbound || latestInbound.id !== job.source_message_id;
   return {
     superseded,
+    audioUnavailable:
+      latestInbound?.message_type === "AUDIO" && !latestInbound.content,
     businessName: organization.name as string,
+    responseCapitalization:
+      integration.commercial_rules?.responseCapitalization,
     phoneNumberId: integration.phone_number_id as string,
     recipient: conversation.customer_phone as string,
     messages: ([...(messages ?? [])] as ConversationMessage[]).reverse(),
@@ -226,72 +240,203 @@ async function recordAgentRun(
   }
 }
 
+type StoredResponse = {
+  text: string;
+  order_prompt: boolean;
+  status: string;
+  pricing_context_key?: string | null;
+};
+
+type JobPricing = {
+  key?: string | null;
+  reason?: string | null;
+  historySince?: string | null;
+};
+
+async function readJobPricing(db: SupabaseClient, job: AgentJob) {
+  const { data, error } = await db.rpc("whatsapp_job_pricing", {
+    p_job_id: job.id,
+    p_lease_token: job.lease_token,
+  });
+  if (error || !data) {
+    throw new Error("No se pudo validar el acceso comercial del contacto");
+  }
+  return data as JobPricing;
+}
+
+function commercialContext(
+  job: AgentJob,
+  pricingKey: string | null
+): AgentContext {
+  return {
+    organizationId: job.organization_id,
+    integrationId: job.integration_id,
+    conversationId: job.conversation_id,
+    sourceMessageId: job.source_message_id,
+    jobId: job.lease_token ? job.id : undefined,
+    leaseToken: job.lease_token,
+    pricingKey,
+  };
+}
+
+async function readStoredResponse(
+  db: SupabaseClient,
+  job: AgentJob
+): Promise<StoredResponse | null> {
+  if (!job.lease_token) {
+    return null;
+  }
+  const result = await db.rpc("recover_whatsapp_outbox", {
+    p_job_id: job.id,
+    p_lease_token: job.lease_token,
+  });
+  if (result.error) {
+    throw new Error("No se pudo recuperar el estado del envío.");
+  }
+  const row = result.data as StoredResponse | null;
+  if (row?.status === "UNKNOWN") {
+    throw new AudioError(
+      "DELIVERY_REVIEW",
+      "La respuesta anterior requiere revisión antes de continuar."
+    );
+  }
+  return row;
+}
+
+async function produceCommercialOutput({
+  job,
+  context,
+  cached,
+  audit,
+  signal,
+  pricingKey,
+  historySince,
+}: {
+  job: AgentJob;
+  context: Awaited<ReturnType<typeof loadJobContext>>;
+  cached: StoredResponse | null;
+  audit: ToolCallAudit[];
+  signal: AbortSignal;
+  pricingKey: string | null;
+  historySince?: string | null;
+}) {
+  if (cached) {
+    return {
+      text: cached.text,
+      orderPrompt: cached.order_prompt,
+      usage: undefined as ModelResponse["usage"],
+    };
+  }
+  if (context.audioUnavailable) {
+    return {
+      text: formatAssistantReply(
+        "No pude transcribir el audio. ¿Podés reenviarlo más claro o escribir el mensaje?",
+        context.responseCapitalization
+      ),
+      orderPrompt: false,
+      usage: undefined as ModelResponse["usage"],
+    };
+  }
+  const response = await runCommercialModel({
+    model: model(),
+    businessName: context.businessName,
+    context: commercialContext(job, pricingKey),
+    messages: historySince
+      ? context.messages.filter(
+          (message) =>
+            message.direction === "INBOUND" ||
+            Date.parse(message.created_at) >= Date.parse(historySince)
+        )
+      : context.messages,
+    audit,
+    requestModel: (body) => requestModel(body, signal),
+    callTool: (toolContext, call) =>
+      callCommercialTool(toolContext, call, signal),
+  });
+  const rendered = (await callCommercialTool(
+    commercialContext(job, pricingKey),
+    {
+      type: "function_call",
+      call_id: "render-order",
+      name: "render_order_response",
+      arguments: JSON.stringify({ text: response.output_text?.trim() || "" }),
+    },
+    signal
+  )) as { text: string; orderPrompt: boolean };
+  const text = rendered.text?.trim();
+  if (!text) {
+    throw new Error("El asistente no produjo una respuesta para el cliente");
+  }
+  return { text, orderPrompt: rendered.orderPrompt, usage: response.usage };
+}
+
+async function loadAuthorizedTurn(supabase: SupabaseClient, job: AgentJob) {
+  // Reconcile a possibly accepted send even if a newer message supersedes it.
+  const cached = await readStoredResponse(supabase, job);
+  if (cached?.status === "SENT" || cached?.status === "CANCELLED") {
+    return null;
+  }
+  const context = await loadJobContext(supabase, job);
+  if (context.superseded) {
+    return null;
+  }
+  const pricing = await readJobPricing(supabase, job);
+  const pricingKey = pricing.key ?? null;
+  if (
+    pricing.reason ||
+    (cached && (cached.pricing_context_key ?? null) !== pricingKey)
+  ) {
+    return null;
+  }
+  return { cached, context, pricingKey, historySince: pricing.historySince };
+}
+
 async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
   const startedAt = Date.now();
   const toolCalls: ToolCallAudit[] = [];
   let run: AgentRun | null = null;
   try {
-    const jobContext = await loadJobContext(supabase, job);
-    if (jobContext.superseded) {
+    const turn = await loadAuthorizedTurn(supabase, job);
+    if (!turn) {
       return;
     }
+    const { cached, context, pricingKey, historySince } = turn;
     const now = new Date();
     const responseAt = job.human_delay_applied
-      ? getNextBusinessOpening(now, jobContext.businessHours)
-      : getNextResponseAt(now, jobContext.businessHours, {
-          minMinutes: jobContext.responseDelayMinMinutes,
-          maxMinutes: jobContext.responseDelayMaxMinutes,
+      ? getNextBusinessOpening(now, context.businessHours)
+      : getNextResponseAt(now, context.businessHours, {
+          minMinutes: context.responseDelayMinMinutes,
+          maxMinutes: context.responseDelayMaxMinutes,
         });
     if (responseAt) {
       return { deferUntil: responseAt.toISOString() };
     }
-
     run = await startAgentRun(supabase, job);
-    const response = await runCommercialModel({
-      model: model(),
-      businessName: jobContext.businessName,
-      context: {
-        organizationId: job.organization_id,
-        integrationId: job.integration_id,
-        conversationId: job.conversation_id,
-        sourceMessageId: job.source_message_id,
-      },
-      messages: jobContext.messages,
+    const output = await produceCommercialOutput({
+      job,
+      context,
+      cached,
+      pricingKey,
+      historySince,
       audit: toolCalls,
-      requestModel,
-      callTool: callCommercialTool,
+      signal: AbortSignal.timeout(90_000),
     });
-    const rendered = (await callCommercialTool(
-      {
-        organizationId: job.organization_id,
-        integrationId: job.integration_id,
-        conversationId: job.conversation_id,
-        sourceMessageId: job.source_message_id,
-      },
-      {
-        type: "function_call",
-        call_id: "render-order",
-        name: "render_order_response",
-        arguments: JSON.stringify({ text: response.output_text?.trim() || "" }),
-      }
-    )) as { text: string; orderPrompt: boolean };
-    const text = rendered.text?.trim();
-    if (!text) {
-      throw new Error("El asistente no produjo una respuesta para el cliente");
-    }
     await sendWhatsAppText(supabase, {
       integrationId: job.integration_id,
       conversationId: job.conversation_id,
-      phoneNumberId: jobContext.phoneNumberId,
-      recipient: jobContext.recipient,
-      text,
+      phoneNumberId: context.phoneNumberId,
+      recipient: context.recipient,
+      text: output.text,
       sourceMessageId: job.source_message_id,
-      orderPrompt: rendered.orderPrompt,
+      orderPrompt: output.orderPrompt,
+      pricingKey,
+      jobId: job.lease_token ? job.id : undefined,
+      leaseToken: job.lease_token,
     });
     await recordAgentRun(supabase, run.id, {
       status: "SUCCEEDED",
-      input_tokens: response.usage?.input_tokens ?? null,
-      output_tokens: response.usage?.output_tokens ?? null,
+      input_tokens: output.usage?.input_tokens ?? null,
+      output_tokens: output.usage?.output_tokens ?? null,
       latency_ms: Date.now() - startedAt,
       tool_calls: toolCalls,
       finished_at: new Date().toISOString(),
@@ -306,7 +451,7 @@ async function processCommercialJob(supabase: SupabaseClient, job: AgentJob) {
         tool_calls: toolCalls,
         finished_at: new Date().toISOString(),
       }).catch(() => {
-        // El error original debe conservarse aunque falle la auditoría de falla.
+        /* Preserve the original failure if audit persistence also fails. */
       });
     }
     throw error;

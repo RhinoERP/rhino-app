@@ -109,8 +109,10 @@ export type ConfirmSaleOrderInput = {
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  isVatExempt?: boolean;
   invoiceNumber?: string | null;
   commercialExchangeRate?: number | null;
+  fiscalExchangeRate?: number | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   accountingInformalEntryId?: string | null;
@@ -125,9 +127,11 @@ export type CreatePreSaleOrderInput = {
   customerId: string;
   sellerId: string;
   saleDate: string;
+  warehouseId?: string | null;
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  isVatExempt?: boolean;
   invoiceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;
@@ -155,6 +159,7 @@ export type DeliverSaleOrderInput = {
 export type UpdateSaleOrderInput = {
   orgSlug: string;
   saleId: string;
+  warehouseId?: string;
   customerId?: string;
   sellerId?: string;
   saleDate?: string;
@@ -163,6 +168,7 @@ export type UpdateSaleOrderInput = {
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
   commercialExchangeRate?: number | null;
+  fiscalExchangeRate?: number | null;
   remittanceNumber?: string | null;
   observations?: string | null;
   salesPriceListId?: string | null;

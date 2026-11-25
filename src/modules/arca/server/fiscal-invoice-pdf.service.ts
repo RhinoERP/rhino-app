@@ -2,6 +2,7 @@ import "server-only";
 
 import QRCode from "qrcode";
 import { remittanceIssuerConfig } from "@/config/remittance";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { computeLineGross } from "@/lib/line-values";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
@@ -43,6 +44,8 @@ type StoredWsfeRequest = {
   CbteFch?: number;
   MonId?: string;
   MonCotiz?: number;
+  ImpNeto?: number;
+  ImpOpEx?: number;
 };
 
 type PrintableFiscalInvoice = {
@@ -129,6 +132,10 @@ function extractWsfeRequest(
     typeof wsfeRequest.MonId === "string" ? wsfeRequest.MonId : undefined;
   const quote =
     typeof wsfeRequest.MonCotiz === "number" ? wsfeRequest.MonCotiz : undefined;
+  const netAmount =
+    typeof wsfeRequest.ImpNeto === "number" ? wsfeRequest.ImpNeto : undefined;
+  const exemptAmount =
+    typeof wsfeRequest.ImpOpEx === "number" ? wsfeRequest.ImpOpEx : undefined;
 
   return {
     DocTipo: docType,
@@ -136,6 +143,8 @@ function extractWsfeRequest(
     CbteFch: cbteDate,
     MonId: currency,
     MonCotiz: quote,
+    ImpNeto: netAmount,
+    ImpOpEx: exemptAmount,
   };
 }
 
@@ -325,8 +334,12 @@ function generateInvoiceItemsRows(
     .join("");
 }
 
-function generateTaxesRows(sale: SalesOrderDetail, currency: string): string {
-  if (sale.taxes.length === 0) {
+function generateTaxesRows(
+  sale: SalesOrderDetail,
+  currency: string,
+  hasExemptAmount: boolean
+): string {
+  if (sale.taxes.length === 0 && !hasExemptAmount) {
     return `
       <tr>
         <td>Impuestos</td>
@@ -345,6 +358,39 @@ function generateTaxesRows(sale: SalesOrderDetail, currency: string): string {
       `
     )
     .join("");
+}
+
+function getFiscalSummaryAmounts(
+  sale: SalesOrderDetail,
+  request: StoredWsfeRequest | null
+): {
+  hasExemptAmount: boolean;
+  taxableBase: number;
+  exemptBase: number;
+} {
+  const hasExemptAmount = (request?.ImpOpEx ?? 0) > 0;
+  if (!hasExemptAmount) {
+    return {
+      hasExemptAmount: false,
+      taxableBase: truncateMoney(sale.sub_total ?? 0),
+      exemptBase: 0,
+    };
+  }
+
+  const taxableBase = truncateMoney(request?.ImpNeto ?? 0);
+  const exemptNetBase = truncateMoney(request?.ImpOpEx ?? 0);
+  const discount = truncateMoney(sale.global_discount_amount ?? 0);
+  const fiscalBaseTotal = taxableBase + exemptNetBase;
+  const taxableDiscount =
+    fiscalBaseTotal > 0
+      ? truncateMoney((discount * taxableBase) / fiscalBaseTotal)
+      : 0;
+
+  return {
+    hasExemptAmount: true,
+    taxableBase: truncateMoney(taxableBase + taxableDiscount),
+    exemptBase: truncateMoney(exemptNetBase + discount - taxableDiscount),
+  };
 }
 
 function generateInvoiceItemsTable(
@@ -412,6 +458,7 @@ async function generateFiscalInvoiceHtml(params: {
   }
 
   const request = extractWsfeRequest(sale.arca_request_json);
+  const fiscalSummaryAmounts = getFiscalSummaryAmounts(sale, request);
   const fiscalCurrency = readAuthorizedFiscalCurrency(sale.arca_request_json);
   const displayCurrency = fiscalCurrency.code === "DOL" ? "USD" : "ARS";
   const commercialRate = formatCommercialExchangeRate(
@@ -607,8 +654,18 @@ async function generateFiscalInvoiceHtml(params: {
               <tbody>
                 <tr>
                   <td>Importe neto gravado</td>
-                  <td class="cell-right">${formatCurrency(sale.sub_total ?? 0, displayCurrency)}</td>
+                  <td class="cell-right">${formatCurrency(fiscalSummaryAmounts.taxableBase, displayCurrency)}</td>
                 </tr>
+                ${
+                  fiscalSummaryAmounts.hasExemptAmount
+                    ? `
+                <tr>
+                  <td>Importe exento</td>
+                  <td class="cell-right">${formatCurrency(fiscalSummaryAmounts.exemptBase, displayCurrency)}</td>
+                </tr>
+                `
+                    : ""
+                }
                 ${
                   sale.global_discount_amount && sale.global_discount_amount > 0
                     ? `
@@ -619,7 +676,11 @@ async function generateFiscalInvoiceHtml(params: {
                 `
                     : ""
                 }
-                ${generateTaxesRows(sale, displayCurrency)}
+                ${generateTaxesRows(
+                  sale,
+                  displayCurrency,
+                  fiscalSummaryAmounts.hasExemptAmount
+                )}
                 <tr>
                   <td>Importe total</td>
                   <td class="cell-right">${formatCurrency(sale.total_amount, displayCurrency)}</td>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { FiscalExchangeRateInput } from "@/components/arca/fiscal-exchange-rate-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,7 @@ export function SalesAdvanceCard(props: {
   const advances = summary?.advances ?? [];
   const latestAdvance = advances[0] ?? null;
   const displayCurrency = props.currency ?? latestAdvance?.currency ?? "ARS";
+  const [fiscalRate, setFiscalRate] = useState("");
   const remaining = summary?.remainingAmount ?? props.total;
   let statusLabel = "No configurado";
   if (latestAdvance) {
@@ -199,6 +201,15 @@ export function SalesAdvanceCard(props: {
               </Button>
             ) : null}
             {props.canIssueBalance &&
+            displayCurrency === "USD" &&
+            latestAdvance.originType === "PREVENTA" ? (
+              <FiscalExchangeRateInput
+                disabled={issuingBalance}
+                onChange={setFiscalRate}
+                value={fiscalRate}
+              />
+            ) : null}
+            {props.canIssueBalance &&
             latestAdvance.originType === "PREVENTA" ? (
               <Button
                 disabled={
@@ -212,6 +223,10 @@ export function SalesAdvanceCard(props: {
                     await issuePreventaBalanceAction({
                       orgSlug: props.orgSlug,
                       preventaId: props.saleId,
+                      fiscalExchangeRate:
+                        displayCurrency === "USD"
+                          ? Number(fiscalRate)
+                          : undefined,
                     });
                     toast.success("Factura de saldo emitida");
                     await refetch();

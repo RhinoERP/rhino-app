@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const orgSlug = searchParams.get("orgSlug");
     const supplierId = searchParams.get("supplierId");
+    const currency = searchParams.get("currency");
 
     if (!(orgSlug && supplierId)) {
       return NextResponse.json(
@@ -14,7 +15,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const balance = await getSupplierCreditBalance(orgSlug, supplierId);
+    const balance = await getSupplierCreditBalance(
+      orgSlug,
+      supplierId,
+      currency === "ARS" || currency === "USD" ? currency : undefined
+    );
 
     return NextResponse.json({ balance });
   } catch (error) {

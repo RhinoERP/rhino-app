@@ -2,6 +2,11 @@
 
 > Guía de arquitectura y backlog para el agregado de ventas conversacionales de Rhinos. Define el MVP de tesis y funciona como referencia de implementación.
 
+La incorporación de notas de voz en WhatsApp y el sandbox está definida en el
+[plan de implementación de audios](whatsapp-audio-plan.md), pendiente de ejecución.
+Incluye trabajos separados de transcripción y conversación, roles de workers y
+pruebas de escalabilidad y recuperación para la tesis.
+
 ## Objetivo y límites
 
 Permitir que un cliente de cada organización consulte productos, precios y disponibilidad por WhatsApp, arme un pedido conversacional y genere una **preventa supervisada**. El equipo comercial conserva el control: puede tomar una conversación, responder desde Rhinos y confirmar la venta mediante los flujos existentes.
@@ -67,6 +72,93 @@ El worker reclama trabajos pendientes, obtiene el contexto autorizado y opera el
 
 No procesa conversaciones en atención manual, pausadas ni asociadas a una integración inactiva.
 
+### Orientación comercial y objeciones
+
+El simulador y el worker comparten las mismas instrucciones comerciales. El
+agente usa la necesidad, el uso y el presupuesto ya expresados; pregunta un solo
+dato cuando cambia la recomendación y ofrece hasta dos opciones con diferencias
+respaldadas por el catálogo y las ofertas actuales. Una lista de marcas no
+reemplaza una recomendación. No afirma equivalencia, rendimiento ni popularidad
+sin datos, ni compara precios de presentaciones o monedas incompatibles.
+
+Las preguntas del bot usan sólo el signo de cierre `?`; el formateador compartido
+quita `¿` tanto en WhatsApp como en el simulador y conserva la configuración de
+mayúsculas. Los mensajes manuales de los vendedores no pasan por ese ajuste.
+
+El stock se consulta y valida internamente, pero las respuestas no anuncian
+existencias, faltantes ni cantidades disponibles. Ante una consulta directa de
+disponibilidad se aclara que requiere confirmación. Si falta disponibilidad para
+un producto solicitado, se conserva el carrito y se deriva a revisión humana;
+siguen vigentes los bloqueos de agregado, cotización y creación de preventa.
+
+El criterio comercial (`salesGuidance`) permite cargar equivalencias propias de
+cada organización, por ejemplo: “Holanda y Pategrás pueden ofrecerse como
+alternativas entre sí”. Con esa validación el bot ofrece la alternativa
+directamente, después de verificar catálogo y oferta, sin frases como “no tengo
+características verificadas”. Sin equivalencia cargada, presenta opciones y datos
+conocidos sin afirmar similitudes. Recomendar nunca autoriza una sustitución.
+
+Ante una marca faltante busca por categoría; ante una objeción de precio busca
+una alternativa comparable más económica. Después del primer rechazo comercial
+puede realizar una única propuesta argumentada. Una enumeración previa no cuenta
+como ese intento. Si el cliente vuelve a rechazar, pide terminar o no existe una
+alternativa pertinente con disponibilidad verificada, cierra cordialmente. Un
+agradecimiento no reinicia la venta. Las recomendaciones no autorizan iniciar ni
+modificar un carrito.
+
+Un no a una pregunta de confirmación o descarte se resuelve con
+`cancel_pending_action`, sin aprovecharlo para insistir ni alterar el pedido.
+El filtro de alcance conserva respuestas breves sobre uso, presupuesto y
+objeciones dentro de la conversación comercial.
+
+Casos de revisión conversacional al cambiar estas instrucciones:
+
+- Consulta amplia: orientar con diferencias verificadas o una pregunta útil.
+- Producto concreto: responder directamente sin un cuestionario previo.
+- Marca faltante seguida de “No, no, gracias”: una alternativa argumentada.
+- “Es caro”: menor precio comprobado para una presentación comparable.
+- Segundo rechazo, cierre explícito o agradecimiento: ninguna nueva oferta.
+- Alternativas sin stock o disponibilidad desconocida: no prometer disponibilidad.
+- Opciones de queso azul: nombre y precio por kg, sin stock ni peso por pieza.
+- Alternativa al Holanda: usar la equivalencia configurada y esperar la elección.
+- Peso por horma: responder sólo ante una consulta explícita, como aproximado.
+- Faltante al tomar o confirmar el pedido: conservar carrito y derivar a revisión.
+- Rechazo de cotización o descarte: cancelar sólo la acción pendiente.
+- Tema ajeno después de una consulta comercial: conservar el límite de alcance.
+
+El estado comercial incluye las políticas de entrega y retiro y el criterio
+comercial editables en Configuración. Se acompañan de fecha y hora locales para
+orientar sobre reparto sin confundirlo con el horario del bot. La logística
+pendiente de validación no interrumpe una compra, salvo que el cliente la haya
+puesto como condición para avanzar. El simulador consulta las políticas vigentes
+de la misma organización sin cambiar sus datos ni su circuito de preventas reales.
+
+`get_offer` expone presentación, piezas por caja, piezas disponibles y cantidad
+aproximada por pieza: usa la referencia del producto o, si hay control de piezas,
+el promedio de los lotes actuales. `upsert_cart_item.quantity_kind` distingue
+`SALE_UNIT` (kilos, litros o unidades de venta) y `PIECE` (piezas físicas). La
+conversión se calcula en el servidor y se conserva en el snapshot del carrito.
+La preventa mantiene las piezas y el peso separados cuando el producto controla
+ambos, identifica los valores estimados y conserva la cantidad pedida en su
+descripción. Un cambio de referencia exige actualizar y cotizar nuevamente.
+Los pesos de referencia no se muestran espontáneamente al ofrecer productos ni
+en la cotización. Para pedidos por piezas se muestran las piezas solicitadas y
+el total estimado, con la aclaración “El total es estimado y se ajusta al pesaje
+final”. El peso aproximado por horma se informa sólo cuando el cliente lo pregunta.
+
+`get_recommendations` consulta todos los productos activos que coincidan con la
+búsqueda, ordenados por cantidad de pedidos confirmados distintos en los últimos
+90 días. También puede buscar compras conjuntas con un producto. Excluye
+borradores, cancelaciones, fechas futuras y simulaciones; devuelve sólo opciones
+con stock verificado y no expone datos de clientes ni acredita segmentos como
+“distribuidores”. Se complementa con descripciones del catálogo y el criterio
+comercial validado por el equipo. Requiere la migración del 30 de octubre.
+
+El cierre exitoso se compone en el servidor a partir del carrito convertido por
+el mensaje actual: comunica la reconfirmación comercial y la coordinación de
+retiro o envío. Un fallo de creación no puede usar ese cierre. En atención humana
+se conservan los controles de reactivación para el operador fuera del chat.
+
 ### Flujo de preventa
 
 1. Identificar al cliente o solicitar el dato faltante.
@@ -89,6 +181,7 @@ La autenticación representa una integración de sistema. Toda operación valida
 | `find_customer_by_phone` | Buscar o reconocer al cliente de la organización. |
 | `search_catalog` | Buscar productos comercializables por nombre, SKU o categoría. |
 | `get_offer` | Consultar precio, lista aplicable y disponibilidad. |
+| `get_recommendations` | Consultar frecuencia de pedidos confirmados o compras conjuntas, con ofertas y stock actuales. |
 | `get_cart` / `upsert_cart_item` | Leer y actualizar el carrito persistente. |
 | `quote_cart` | Recalcular los totales con reglas comerciales vigentes. |
 | `create_pre_sale` | Crear una preventa sólo después de confirmación explícita. |
@@ -217,7 +310,7 @@ credenciales de producción y se complete una prueba real de punta a punta.
 
 - Confirmación autónoma de ventas.
 - Pagos, anticipos y medios de pago.
-- Seguimiento proactivo, campañas y plantillas de WhatsApp.
+- Campañas y plantillas de WhatsApp para contactar fuera de la ventana de atención.
 - Más canales y uso del agente por otros sistemas.
 
 ## Seguridad y operación
@@ -276,6 +369,15 @@ acción pendiente y mensaje de origen. Worker y sandbox usan el mismo motor y lo
 pedidos anteriores de ese chat, sin perfiles de preferencias ni acceso a otra
 integración (incluido otro sandbox).
 
+El modelo evalúa el alcance comercial con el mensaje completo y el historial;
+no hay una lista fija de palabras o productos que bloquee consultas antes de
+interpretarlas. Al cambiar de producto conserva el pedido pendiente, busca las
+nuevas opciones y pregunta sólo por datos faltantes. Si un mensaje combina una
+elección con otra consulta, atiende ambas. Un sí a una selección de producto no
+confirma una preventa: esa confirmación requiere una cotización y su acción
+pendiente vigente. Las consultas ajenas al negocio reciben la redirección
+comercial indicada en el prompt; también pasan por el modelo.
+
 Las mutaciones reciben carrito/versión y mensaje de origen. Una RPC bloquea la
 conversación, valida que el mensaje siga vigente y aplica cada transición. La
 conversión inserta cabecera, productos, impuestos y vínculos en una transacción;
@@ -288,3 +390,33 @@ y se vinculan al mensaje saliente realmente registrado. Un sí para descartar no
 puede confirmar una compra. Una modificación condicionada nunca cuenta como sí.
 La bandeja muestra el carrito pendiente y las preventas vinculadas; el sandbox
 permite varias compras sin Reiniciar y ofrece reactivación manual del bot.
+
+## Seguimiento automático por falta de respuesta
+
+Configuración de WhatsApp permite habilitar por empresa un único seguimiento,
+con espera inicial de 30 minutos e instrucciones editables para la IA. También
+aplica a consultas sobre productos sin carrito ni cotización: no requiere detectar
+una duda explícita. La espera se cuenta desde una respuesta ordinaria del bot
+aceptada por Meta, y respeta el horario y la zona horaria configurados.
+
+Al vencer, la IA evalúa el intercambio y devuelve SEND o SKIP sin herramientas ni
+mutaciones comerciales. Omite cierres, rechazos, solicitudes de no contacto,
+compras finalizadas y contexto insuficiente. La base excluye atención humana,
+cambios de control o estado comercial y ventanas vencidas. El límite de 24 horas
+se calcula desde la evidencia del último mensaje real del cliente, no desde la
+respuesta del bot. Esta versión no envía plantillas fuera de esa ventana.
+
+`whatsapp_follow_ups` guarda la programación, lease, intentos, decisión, motivo y
+uso del modelo. Su comando en `whatsapp_outbox` tiene `follow_up_id` propio y no
+ocupa la respuesta ordinaria por mensaje entrante. El texto se persiste antes del
+HTTP y se conserva ante reintentos confirmadamente seguros. Una entrega incierta
+queda UNKNOWN y se revisa desde los controles existentes del inbox.
+
+Una respuesta del cliente, toma humana, pausa, cierre o desactivación cancela los
+pendientes; reactivar no los recupera. Una nueva respuesta del cliente puede
+iniciar otro ciclo. El propio seguimiento no programa otro. Cambiar la espera
+sólo afecta nuevas programaciones; las instrucciones se leen al ejecutar.
+
+El consumidor corre dentro del daemon comercial, comprueba su protocolo de base
+y vuelve a validar autorización, ventana y horario justo antes del envío. La
+migración no recupera mensajes históricos. El simulador no programa seguimientos.

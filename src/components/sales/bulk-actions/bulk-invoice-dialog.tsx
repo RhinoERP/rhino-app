@@ -4,6 +4,7 @@ import { WarningCircleIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { FiscalExchangeRateInput } from "@/components/arca/fiscal-exchange-rate-input";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -83,6 +84,7 @@ export function BulkInvoiceDialog({
 }: BulkInvoiceDialogProps) {
   const queryClient = useQueryClient();
   const [isPending, setIsPending] = useState(false);
+  const [fiscalRates, setFiscalRates] = useState<Record<string, string>>({});
   const [results, setResults] = useState<
     Awaited<ReturnType<typeof bulkEmitSaleInvoicesAction>>["results"] | null
   >(null);
@@ -99,6 +101,20 @@ export function BulkInvoiceDialog({
   );
 
   const handleConfirm = async () => {
+    if (
+      selectedSales.some(
+        (sale) =>
+          sale.currency === "USD" &&
+          sale.arca_status !== "authorized" &&
+          !(
+            Number.isFinite(Number(fiscalRates[sale.id])) &&
+            Number(fiscalRates[sale.id]) > 0
+          )
+      )
+    ) {
+      toast.error("Ingresá la cotización fiscal para cada factura en USD.");
+      return;
+    }
     setIsPending(true);
 
     const result = await bulkEmitSaleInvoicesAction(
@@ -106,6 +122,10 @@ export function BulkInvoiceDialog({
       selectedSales.map((sale) => ({
         saleId: sale.id,
         saleNumber: getSaleLabel(sale),
+        fiscalExchangeRate:
+          sale.currency === "USD" && fiscalRates[sale.id]
+            ? Number(fiscalRates[sale.id])
+            : undefined,
       }))
     );
 
@@ -183,6 +203,27 @@ export function BulkInvoiceDialog({
                     </li>
                   ))}
                 </ul>
+                {selectedSales
+                  .filter(
+                    (sale) =>
+                      sale.currency === "USD" &&
+                      sale.arca_status !== "authorized"
+                  )
+                  .map((sale) => (
+                    <div className="rounded-md border p-3" key={sale.id}>
+                      <p className="text-sm">Factura {getSaleLabel(sale)}</p>
+                      <FiscalExchangeRateInput
+                        disabled={isPending}
+                        onChange={(value) =>
+                          setFiscalRates((current) => ({
+                            ...current,
+                            [sale.id]: value,
+                          }))
+                        }
+                        value={fiscalRates[sale.id] ?? ""}
+                      />
+                    </div>
+                  ))}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -9,6 +9,9 @@ export type AgentJob = {
   attempts: number;
   max_attempts: number;
   human_delay_applied: boolean;
+  lease_token?: string;
+  lease_expires_at?: string;
+  job_type?: "TRANSCRIBE_AUDIO" | "PROCESS_CONVERSATION";
 };
 
 export type AgentJobProcessorResult = undefined | { deferUntil: string };

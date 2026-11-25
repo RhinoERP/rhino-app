@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { StockReentryFallbackRequiredError } from "@/modules/inventory/utils/stock-reentry";
 import { directSalesQueryKey } from "@/modules/sales/queries/query-keys";
 import { processPosSaleReturnAction } from "../actions/process-pos-sale-return.action";
 import { posSaleReturnableItemsQueryKey } from "../queries/query-keys";
@@ -20,6 +21,9 @@ export function useProcessPosSaleReturnMutation(
       });
 
       if (!result.success) {
+        if (result.requiresDefaultFallback) {
+          throw new StockReentryFallbackRequiredError();
+        }
         throw new Error(
           result.error ?? "No se pudo procesar la devolución POS."
         );

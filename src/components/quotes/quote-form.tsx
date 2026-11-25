@@ -38,6 +38,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -49,6 +50,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -112,12 +114,14 @@ import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
 import {
   type ItemTaxInput,
+  removeVatTaxes,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
 import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
+import { QuoteWarehouseField } from "./quote-warehouse-field";
 
 const NO_PRICE_LIST = "none";
 
@@ -200,32 +204,40 @@ const toManualItemTax = (tax: Tax): ItemTaxInput => ({
 
 const getItemTaxIndicator = (
   item: QuoteItemFormValues,
-  fallbackTaxes: Tax[]
+  fallbackTaxes: Tax[],
+  isVatExempt = false
 ): {
   label: string;
   summary: string;
   variant: "product" | "manual" | "fallback" | "none";
 } => {
-  if (item.taxes && item.taxes.length > 0) {
-    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+  const itemTaxes = isVatExempt
+    ? removeVatTaxes(item.taxes ?? [])
+    : (item.taxes ?? []);
+  const applicableFallbackTaxes = isVatExempt
+    ? fallbackTaxes.filter((tax) => !isIvaTax(tax))
+    : fallbackTaxes;
+
+  if (itemTaxes.length > 0) {
+    const isManualOverride = itemTaxes.some((tax) => tax.source === "manual");
 
     return {
       label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
-      summary: formatTaxSummary(item.taxes),
+      summary: formatTaxSummary(itemTaxes),
       variant: isManualOverride ? "manual" : "product",
     };
   }
 
-  if (fallbackTaxes.length > 0) {
+  if (applicableFallbackTaxes.length > 0) {
     return {
       label: "Impuesto venta",
-      summary: formatTaxSummary(fallbackTaxes),
+      summary: formatTaxSummary(applicableFallbackTaxes),
       variant: "fallback",
     };
   }
 
   return {
-    label: "Sin impuesto",
+    label: isVatExempt ? "Operación exenta de IVA" : "Sin impuesto",
     summary: "",
     variant: "none",
   };
@@ -446,6 +458,7 @@ export function QuoteForm({
       priceLevelId: NO_PRICE_LIST,
       currency: "ARS",
       invoiceType: "NOTA_DE_VENTA",
+      isVatExempt: false,
       items: [],
       notes: "",
       paymentCondition: "",
@@ -523,6 +536,9 @@ export function QuoteForm({
 
   const formFallbackTaxes =
     useWatch({ control: form.control, name: "taxes" }) ?? [];
+  const isVatExempt =
+    useWatch({ control: form.control, name: "isVatExempt" }) ?? false;
+  const invoiceType = useWatch({ control: form.control, name: "invoiceType" });
 
   const selectedTaxes = useMemo(
     () =>
@@ -530,8 +546,9 @@ export function QuoteForm({
         .filter((tax) =>
           formFallbackTaxes.some((itemTax) => itemTax.taxId === tax.id)
         )
+        .filter((tax) => !(isVatExempt && isIvaTax(tax)))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [formFallbackTaxes, taxes]
+    [formFallbackTaxes, isVatExempt, taxes]
   );
 
   useEffect(() => {
@@ -598,6 +615,9 @@ export function QuoteForm({
     const current = form.getValues("taxes") ?? [];
     const isSelected = current.some((itemTax) => itemTax.taxId === taxId);
     const tax = taxes.find((t) => t.id === taxId);
+    if (isVatExempt && tax && isIvaTax(tax)) {
+      return;
+    }
 
     const next = isSelected
       ? current.filter((itemTax) => itemTax.taxId !== taxId)
@@ -625,6 +645,9 @@ export function QuoteForm({
   };
 
   const handleItemTaxToggle = (index: number, tax: Tax) => {
+    if (isVatExempt && isIvaTax(tax)) {
+      return;
+    }
     const currentItems = form.getValues("items");
     const item = currentItems[index];
     const currentTaxes = item.taxes ?? [];
@@ -1016,8 +1039,9 @@ export function QuoteForm({
       globalDiscountPercentage: globalDiscountPercentage ?? 0,
       fallbackTaxes: formFallbackTaxes,
       lines,
+      isVatExempt,
     });
-  }, [formItems, formFallbackTaxes, globalDiscountPercentage]);
+  }, [formItems, formFallbackTaxes, globalDiscountPercentage, isVatExempt]);
 
   const quoteTotal = totals.totalAmount;
   const advancePaymentPercentage = useWatch({
@@ -1109,6 +1133,7 @@ export function QuoteForm({
       <div className="flex flex-col gap-6 lg:col-span-9">
         <Form {...form}>
           <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
+            <QuoteWarehouseField orgSlug={orgSlug} />
             {/* Detalles principales del presupuesto */}
             <Card>
               <CardHeader>
@@ -1391,10 +1416,11 @@ export function QuoteForm({
                             {INVOICE_TYPE_OPTIONS.map((option) => (
                               <SelectItem
                                 disabled={
-                                  advancePaymentEnabled &&
-                                  option.value !== "FACTURA_A" &&
-                                  option.value !== "FACTURA_B" &&
-                                  option.value !== "FACTURA_C"
+                                  (advancePaymentEnabled &&
+                                    option.value !== "FACTURA_A" &&
+                                    option.value !== "FACTURA_B" &&
+                                    option.value !== "FACTURA_C") ||
+                                  (isVatExempt && option.value === "FACTURA_C")
                                 }
                                 key={option.value}
                                 value={option.value}
@@ -1405,6 +1431,32 @@ export function QuoteForm({
                           </SelectContent>
                         </Select>
                         <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="isVatExempt"
+                    render={({ field }) => (
+                      <FormItem className="flex items-start gap-3 rounded-md border p-3">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            disabled={invoiceType === "FACTURA_C"}
+                            onCheckedChange={(checked) =>
+                              field.onChange(checked === true)
+                            }
+                          />
+                        </FormControl>
+                        <div className="space-y-1">
+                          <FormLabel>Operación exenta de IVA</FormLabel>
+                          <FormDescription>
+                            ARCA informará la base como importe exento. El IVA
+                            no se aplica en esta operación; otros tributos se
+                            conservan.
+                          </FormDescription>
+                          <FormMessage />
+                        </div>
                       </FormItem>
                     )}
                   />
@@ -1464,6 +1516,9 @@ export function QuoteForm({
                           >
                             <p className="border-b px-3 py-2 text-muted-foreground text-xs">
                               Se aplican a los productos sin impuesto propio.
+                              {isVatExempt
+                                ? " El IVA no se aplica mientras la operación esté marcada exenta."
+                                : ""}
                             </p>
                             <Command>
                               <CommandInput placeholder="Buscar impuesto..." />
@@ -1474,6 +1529,7 @@ export function QuoteForm({
                                 <CommandGroup>
                                   {taxes.map((tax) => (
                                     <CommandItem
+                                      disabled={isVatExempt && isIvaTax(tax)}
                                       key={tax.id}
                                       onSelect={() => handleTaxToggle(tax.id)}
                                       value={tax.name}
@@ -1650,7 +1706,9 @@ export function QuoteForm({
                       ) ?? null
                     }
                     onSelectProduct={handleProductSelect}
+                    orgSlug={orgSlug}
                     products={products}
+                    warehouseId={form.watch("warehouseId")}
                   />
 
                   {/* Tabla de ítems seleccionados */}
@@ -1682,7 +1740,8 @@ export function QuoteForm({
                             const item = formItems[index] || field;
                             const taxIndicator = getItemTaxIndicator(
                               item,
-                              selectedTaxes
+                              selectedTaxes,
+                              isVatExempt
                             );
                             return (
                               <Fragment key={field.id}>
@@ -1905,6 +1964,10 @@ export function QuoteForm({
                                                 </CommandItem>
                                                 {taxes.map((tax) => (
                                                   <CommandItem
+                                                    disabled={
+                                                      isVatExempt &&
+                                                      isIvaTax(tax)
+                                                    }
                                                     key={tax.id}
                                                     onSelect={() =>
                                                       handleItemTaxToggle(
@@ -2148,6 +2211,7 @@ export function QuoteForm({
         onOpenChange={handleGridOpenChange}
         orgSlug={orgSlug}
         product={selectedProduct}
+        warehouseId={form.watch("warehouseId")}
       />
     </div>
   );

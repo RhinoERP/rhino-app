@@ -28,11 +28,17 @@ export const directSaleProductsClientQueryOptions = (params: {
   orgSlug: string;
   search: string;
   limit?: number;
+  terminalId?: string;
+  sessionId?: string;
 }) => {
   const { orgSlug, search, limit = 20 } = params;
 
   return {
-    queryKey: directSaleProductsQueryKey(orgSlug, search, limit),
+    queryKey: [
+      ...directSaleProductsQueryKey(orgSlug, search, limit),
+      params.terminalId,
+      params.sessionId,
+    ],
     queryFn: async (): Promise<DirectSaleProduct[]> => {
       const urlParams = new URLSearchParams();
       const normalizedSearch = search.trim();
@@ -42,6 +48,9 @@ export const directSaleProductsClientQueryOptions = (params: {
       }
 
       urlParams.set("limit", String(limit));
+      if (params.terminalId) {
+        urlParams.set("terminalId", params.terminalId);
+      }
 
       const res = await fetch(
         `/api/org/${orgSlug}/venta-directa/productos?${urlParams.toString()}`

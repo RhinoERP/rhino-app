@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { AudioError } from "./audio/config.js";
+
+const ARGENTINE_MOBILE_WA_ID = /^549\d{10}$/;
 
 export type SendWhatsAppTextInput = {
   integrationId: string;
@@ -8,19 +11,27 @@ export type SendWhatsAppTextInput = {
   text: string;
   sourceMessageId?: string;
   orderPrompt?: boolean;
+  pricingKey?: string | null;
+  jobId?: string;
+  leaseToken?: string;
+  deliveryLeaseExpiresAt?: string;
 };
 
-type MetaSendResponse = { messages?: Array<{ id?: string }> };
+type DeliveryStatus =
+  | "PENDING"
+  | "SENT"
+  | "UNKNOWN"
+  | "CANCELLED"
+  | "WINDOW_EXPIRED";
+type FinishDelivery = (
+  status: DeliveryStatus,
+  externalId?: string
+) => Promise<void>;
 
-export async function sendWhatsAppText(
+async function authorizeDelivery(
   supabase: SupabaseClient,
   input: SendWhatsAppTextInput
-): Promise<string> {
-  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
-  if (!token) {
-    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
-  }
-
+): Promise<void> {
   // Re-check after model/tool execution: superadmin may have disabled the
   // tenant or a human may have paused the conversation in the meantime.
   const { data: integration, error: integrationError } = await supabase
@@ -68,51 +79,342 @@ export async function sendWhatsAppText(
       "El canal está deshabilitado o la conversación fue pausada"
     );
   }
+}
 
-  const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
-  const response = await fetch(
-    `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: input.recipient,
-        type: "text",
-        text: { body: input.text },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`Meta rechazó el mensaje saliente (${response.status})`);
-  }
-  const responseBody = (await response.json()) as MetaSendResponse;
-  const externalMessageId = responseBody.messages?.[0]?.id;
-  if (!externalMessageId) {
-    throw new Error("Meta no devolvió un identificador de mensaje");
-  }
-
-  const { error } = await supabase.rpc("record_whatsapp_outbound_message", {
-    p_conversation_id: input.conversationId,
-    p_integration_id: input.integrationId,
-    p_external_message_id: externalMessageId,
-    p_message_type: "TEXT",
-    p_content: input.text,
-    p_payload: {
-      provider: "META_CLOUD",
-      sourceMessageId: input.sourceMessageId,
-      orderPrompt: input.orderPrompt ?? false,
-    },
-  });
-  if (error) {
+async function prepareDelivery(
+  db: SupabaseClient,
+  input: SendWhatsAppTextInput
+) {
+  if (!(input.jobId && input.leaseToken && input.sourceMessageId)) {
     throw new Error(
-      `No se pudo registrar el mensaje saliente: ${error.message}`
+      "El envío requiere un trabajo con lease y outbox persistente."
     );
   }
+  const pricingArgs =
+    input.pricingKey === undefined ? {} : { p_context_key: input.pricingKey };
+  const prepared = await db.rpc(
+    input.pricingKey === undefined
+      ? "prepare_whatsapp_outbox"
+      : "prepare_whatsapp_priced_outbox",
+    {
+      p_job_id: input.jobId,
+      p_lease_token: input.leaseToken,
+      p_text: input.text,
+      p_order_prompt: input.orderPrompt ?? false,
+      ...pricingArgs,
+    }
+  );
+  if (prepared.error || !prepared.data) {
+    throw new Error("No se pudo preparar el envío persistente.");
+  }
+  if (
+    prepared.data.conversation_id !== input.conversationId ||
+    prepared.data.integration_id !== input.integrationId ||
+    prepared.data.source_message_id !== input.sourceMessageId
+  ) {
+    throw new Error("La reserva no pertenece al mensaje y canal esperados.");
+  }
+  if (prepared.data.status === "SENT") {
+    return {
+      text: prepared.data.text as string,
+      sentId: prepared.data.external_message_id as string,
+    };
+  }
+  if (prepared.data.status !== "SENDING") {
+    throw new AudioError(
+      "DELIVERY_REVIEW",
+      "El envío requiere revisión o fue reemplazado por un mensaje posterior."
+    );
+  }
+  return {
+    text: prepared.data.text as string,
+    deliveryLeaseExpiresAt: prepared.data.lease_expires_at as string,
+    sentId: undefined as string | undefined,
+  };
+}
 
-  return externalMessageId;
+function rejectionStatus(status: number): DeliveryStatus {
+  if (status >= 500) {
+    return "UNKNOWN";
+  }
+  if (status === 429) {
+    return "PENDING";
+  }
+  return "CANCELLED";
+}
+
+async function dispatchToMeta(
+  input: SendWhatsAppTextInput,
+  token: string,
+  finish: FinishDelivery,
+  guard?: () => Promise<number | undefined>
+): Promise<string> {
+  const customerWindowEndsAt = await guard?.();
+  if (
+    !(
+      input.deliveryLeaseExpiresAt &&
+      Date.parse(input.deliveryLeaseExpiresAt) > Date.now()
+    )
+  ) {
+    throw new AudioError("DELIVERY_REVIEW", "La reserva de envío venció.");
+  }
+  if (
+    customerWindowEndsAt !== undefined &&
+    !(customerWindowEndsAt > Date.now())
+  ) {
+    await finish("WINDOW_EXPIRED");
+    throw new AudioError(
+      "WINDOW_EXPIRED",
+      "Venció la ventana de 24 horas antes de despachar el mensaje."
+    );
+  }
+  const recipient = input.recipient;
+  const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: recipient,
+          type: "text",
+          text: { body: input.text },
+        }),
+        signal: AbortSignal.timeout(20_000),
+      }
+    );
+  } catch {
+    await finish("UNKNOWN");
+    throw new AudioError(
+      "DELIVERY_UNKNOWN",
+      "Meta no confirmó el envío. Revisá la conversación antes de reenviarlo."
+    );
+  }
+  if (!response.ok) {
+    const rejection = (await response.json().catch(() => null)) as {
+      error?: { code?: number };
+    } | null;
+    const code = rejection?.error?.code;
+    // Meta's test-recipient list can store an Argentine mobile without the 9
+    // present in inbound wa_id. Only retry an explicitly rejected send; never
+    // change the conversation identity or retry an uncertain delivery.
+    if (
+      response.status === 400 &&
+      code === 131_030 &&
+      ARGENTINE_MOBILE_WA_ID.test(recipient)
+    ) {
+      return dispatchToMeta(
+        { ...input, recipient: `54${recipient.slice(3)}` },
+        token,
+        finish,
+        guard
+      );
+    }
+    await finish(rejectionStatus(response.status));
+    throw new AudioError(
+      "DELIVERY_REJECTED",
+      `Meta rechazó el mensaje saliente (${response.status}${typeof code === "number" ? `; código ${code}` : ""})`,
+      502,
+      response.status === 429
+    );
+  }
+  const body = (await response.json().catch(() => null)) as {
+    messages?: Array<{ id?: string }>;
+  } | null;
+  const id = body?.messages?.[0]?.id;
+  if (!id || typeof id !== "string") {
+    await finish("UNKNOWN");
+    throw new AudioError(
+      "DELIVERY_UNKNOWN",
+      "Meta no devolvió un identificador de mensaje. Revisá la conversación."
+    );
+  }
+  return id;
+}
+
+export async function sendWhatsAppText(
+  supabase: SupabaseClient,
+  input: SendWhatsAppTextInput
+): Promise<string> {
+  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
+  }
+  await authorizeDelivery(supabase, input);
+  const delivery = await prepareDelivery(supabase, input);
+  if (delivery.sentId) {
+    return delivery.sentId;
+  }
+  return deliverPreparedText(
+    supabase,
+    {
+      ...input,
+      text: delivery.text,
+      deliveryLeaseExpiresAt: delivery.deliveryLeaseExpiresAt,
+    },
+    token
+  );
+}
+
+async function deliverPreparedText(
+  supabase: SupabaseClient,
+  input: SendWhatsAppTextInput,
+  token: string,
+  command?: {
+    id: string;
+    guard:
+      | "guard_whatsapp_human_dispatch"
+      | "guard_whatsapp_follow_up_dispatch";
+  }
+): Promise<string> {
+  const commandId = command?.id;
+  const target = commandId
+    ? { p_command_id: commandId }
+    : { p_source_message_id: input.sourceMessageId };
+  const finish: FinishDelivery = async (status, externalId) => {
+    // A known Meta ID is retried only here: never repeat the provider POST.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const result = await supabase.rpc(
+          commandId ? "complete_whatsapp_command" : "complete_whatsapp_outbox",
+          {
+            ...target,
+            p_lease_token: input.leaseToken,
+            p_status: status,
+            p_external_message_id: externalId || null,
+          }
+        );
+        if (!result.error && result.data === true) {
+          return;
+        }
+      } catch {
+        // Retry persistence, including an acknowledgement lost after commit.
+      }
+    }
+    throw new AudioError(
+      "DELIVERY_PERSISTENCE",
+      "No se pudo registrar el resultado del envío; requiere revisión."
+    );
+  };
+  const guard =
+    commandId || input.pricingKey !== undefined
+      ? async () => {
+          const { data, error } = await supabase.rpc(
+            command?.guard ?? "guard_whatsapp_priced_dispatch",
+            {
+              ...target,
+              p_lease_token: input.leaseToken,
+              ...(commandId
+                ? {
+                    p_phone_number_id: input.phoneNumberId,
+                    p_recipient: input.recipient,
+                  }
+                : {}),
+            }
+          );
+          if (error) {
+            // This attempt has not contacted Meta. The existing backoff can retry.
+            await finish("PENDING");
+            throw new AudioError(
+              "DELIVERY_PREFLIGHT",
+              "No se pudo autorizar el envío."
+            );
+          }
+          if (data === null) {
+            throw new AudioError(
+              "DELIVERY_NOT_AUTHORIZED",
+              "El envío ya no está autorizado."
+            );
+          }
+          return commandId ? Date.parse(data) : undefined;
+        }
+      : undefined;
+  const id = await dispatchToMeta(input, token, finish, guard);
+  await finish("SENT", id);
+  return id;
+}
+
+export type PreparedFollowUp = {
+  id: string;
+  integration_id: string;
+  conversation_id: string;
+  phone_number_id: string;
+  recipient: string;
+  text: string;
+  lease_token: string;
+  lease_expires_at: string;
+};
+
+/** The follow-up RPC has already persisted the text and reserved this command. */
+export async function sendPreparedWhatsAppFollowUp(
+  db: SupabaseClient,
+  command: PreparedFollowUp
+): Promise<string> {
+  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
+  }
+  return await deliverPreparedText(
+    db,
+    {
+      integrationId: command.integration_id,
+      conversationId: command.conversation_id,
+      phoneNumberId: command.phone_number_id,
+      recipient: command.recipient,
+      text: command.text,
+      leaseToken: command.lease_token,
+      deliveryLeaseExpiresAt: command.lease_expires_at,
+    },
+    token,
+    { id: command.id, guard: "guard_whatsapp_follow_up_dispatch" }
+  );
+}
+
+export async function sendNextWhatsAppHumanMessage(
+  db: SupabaseClient
+): Promise<boolean> {
+  const token = process.env.WHATSAPP_META_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error("Falta WHATSAPP_META_ACCESS_TOKEN");
+  }
+  const { data: command, error: reservationError } = await db.rpc(
+    "reserve_whatsapp_human_dispatch"
+  );
+  if (reservationError) {
+    throw new Error("No se pudo reservar un envío humano");
+  }
+  if (!command) {
+    return false;
+  }
+  const input: SendWhatsAppTextInput = {
+    integrationId: command.integration_id,
+    conversationId: command.conversation_id,
+    phoneNumberId: command.phone_number_id,
+    recipient: command.recipient,
+    text: command.text,
+    leaseToken: command.lease_token,
+    deliveryLeaseExpiresAt: command.lease_expires_at,
+  };
+  try {
+    await deliverPreparedText(db, input, token, {
+      id: command.id,
+      guard: "guard_whatsapp_human_dispatch",
+    });
+  } catch (error) {
+    if (
+      !(
+        error instanceof AudioError &&
+        ["DELIVERY_NOT_AUTHORIZED", "WINDOW_EXPIRED"].includes(error.code)
+      )
+    ) {
+      throw error;
+    }
+  }
+  return true;
 }

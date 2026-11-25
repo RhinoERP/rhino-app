@@ -1,24 +1,16 @@
 "use server";
 
+import type { QueryData } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { INVOICE_TYPE_OPTIONS } from "../invoice-type-utils";
 import { confirmSaleOrder } from "../service/sales.service";
 import type { InvoiceType } from "../types";
 
-const VALID_INVOICE_TYPES = new Set<string>([
-  "FACTURA_A",
-  "FACTURA_A_RETENCION",
-  "FACTURA_B",
-  "FACTURA_C",
-  "NOTA_DE_VENTA",
-  "FACTURA_E",
-]);
-
 function toInvoiceType(value: string | null): InvoiceType | undefined {
-  if (value && VALID_INVOICE_TYPES.has(value)) {
-    return value as InvoiceType;
-  }
+  return INVOICE_TYPE_OPTIONS.find((option) => option.value === value)?.value;
 }
 
 export type BulkSaleResult = {
@@ -34,33 +26,25 @@ export type BulkActionResult = {
   error?: string;
 };
 
-type SaleRow = {
-  id: string;
-  sale_number: number | null;
-  customer_id: string;
-  user_id: string | null;
-  sale_date: string;
-  expiration_date: string | null;
-  credit_days: number | null;
-  invoice_type: string | null;
-  invoice_number: string | null;
-  observations: string | null;
-  global_discount_percentage: number | null;
-  sales_order_items: Array<{
-    id: string;
-    product_id: string | null;
-    description: string | null;
-    quantity: number;
-    unit_quantity: number | null;
-    unit_price: number;
-    discount_percentage: number | null;
-    quote_item_id: string | null;
-    sales_order_item_extras: Array<{
-      name_snapshot: string;
-      price_snapshot: number;
-    }> | null;
-  }> | null;
-};
+function draftSalesQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  saleIds: string[]
+) {
+  return supabase
+    .from("sales_orders")
+    .select(
+      `id, sale_number, customer_id, user_id, sale_date, expiration_date,
+       credit_days, invoice_type, invoice_number, observations,
+       global_discount_percentage,
+       sales_order_items(id, product_id, description, quantity, unit_quantity, unit_price, discount_percentage, quote_item_id, sales_order_item_extras(name_snapshot, price_snapshot))`
+    )
+    .eq("organization_id", orgId)
+    .in("id", saleIds)
+    .eq("status", "DRAFT");
+}
+
+type SaleRow = QueryData<ReturnType<typeof draftSalesQuery>>[number];
 
 async function confirmOneSale(
   orgSlug: string,
@@ -68,6 +52,9 @@ async function confirmOneSale(
 ): Promise<BulkSaleResult> {
   const saleLabel = sale.sale_number ? `#${sale.sale_number}` : sale.id;
   try {
+    if (!sale.customer_id) {
+      throw new Error("La venta no tiene un cliente asociado.");
+    }
     await confirmSaleOrder({
       orgSlug,
       saleId: sale.id,
@@ -129,17 +116,16 @@ export async function bulkConfirmSalesAction(
 
   try {
     const supabase = await createClient();
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org) {
+      throw new Error("Organización no encontrada");
+    }
 
-    const { data: sales, error: salesError } = await supabase
-      .from("sales_orders")
-      .select(
-        `id, sale_number, customer_id, user_id, sale_date, expiration_date,
-         credit_days, invoice_type, invoice_number, observations,
-         global_discount_percentage,
-          sales_order_items(id, product_id, description, quantity, unit_quantity, unit_price, discount_percentage, quote_item_id, sales_order_item_extras(name_snapshot, price_snapshot))`
-      )
-      .in("id", saleIds)
-      .eq("status", "DRAFT");
+    const { data: sales, error: salesError } = await draftSalesQuery(
+      supabase,
+      org.id,
+      saleIds
+    );
 
     if (salesError) {
       return {

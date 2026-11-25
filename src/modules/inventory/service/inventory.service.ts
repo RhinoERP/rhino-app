@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -19,6 +20,16 @@ import type {
   StockPaginatedParams,
 } from "../types";
 import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
+import { parseStockMetrics } from "../utils/stock-metrics-schema";
+import { getDefaultWarehouseId } from "./default-warehouse.service";
+import {
+  applyWarehouseStockMovement,
+  resolveInventoryWarehouseId,
+  setWarehouseStockBalance,
+} from "./stock-maintenance.service";
+import { fetchStockBalances, throwStockReadError } from "./stock-scope.service";
+import { createVariantsWithInitialBalances } from "./variant-balances.service";
+import { assertWarehouseAccess } from "./warehouse-stock.service";
 
 type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   categories?: { id: string; name: string } | null;
@@ -26,6 +37,19 @@ type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+const stockMovementSourceSchema = z
+  .enum([
+    "MANUAL",
+    "IMPORT",
+    "PURCHASE",
+    "SALE",
+    "POS",
+    "ORDER",
+    "RETURN",
+    "SYSTEM",
+  ])
+  .catch("SYSTEM");
 
 type PriceListItemWithList = {
   cost_price: number;
@@ -219,6 +243,9 @@ export async function getProductTaxIds(
 }
 
 type StockDetailRow = Database["public"]["Views"]["view_stock_detail"]["Row"];
+type StockCatalogRow = Omit<StockDetailRow, "total_stock">;
+const STOCK_CATALOG_COLUMNS =
+  "product_id, sku, product_name, description, brand, profit_margin, min_stock, unit_of_measure, is_active, image_url, organization_id, category_name, supplier_name, sale_price";
 
 const STOCK_QUERY_CHUNK_SIZE = 100;
 
@@ -237,7 +264,7 @@ function buildStockSummaryQuery(
 ) {
   let query = supabase
     .from("view_stock_detail")
-    .select("*")
+    .select(STOCK_CATALOG_COLUMNS)
     .eq("organization_id", orgId);
 
   if (filters.query) {
@@ -263,7 +290,7 @@ function buildStockSummaryQuery(
   return query.order("product_name");
 }
 
-function extractProductIds(data: StockDetailRow[]): string[] {
+function extractProductIds(data: StockCatalogRow[]): string[] {
   return data
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
@@ -311,138 +338,50 @@ async function fetchProductMetaById(
   return productMetaById;
 }
 
-function getProductsTrackingUnits(
-  productMetaById: Map<string, ProductMeta>
-): string[] {
-  const productIds: string[] = [];
-  for (const [id, meta] of productMetaById.entries()) {
-    if (
-      meta.tracks_stock_units &&
-      (meta.unit_of_measure === "KG" || meta.unit_of_measure === "LT")
-    ) {
-      productIds.push(id);
-    }
-  }
-  return productIds;
-}
-
-async function fetchUnitTotalsByProductId(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  productMetaById: Map<string, ProductMeta>
-): Promise<Map<string, number>> {
-  const unitTotalsByProductId = new Map<string, number>();
-  const productsTrackingUnits = getProductsTrackingUnits(productMetaById);
-  if (productsTrackingUnits.length === 0) {
-    return unitTotalsByProductId;
-  }
-
-  const results = await Promise.all(
-    chunkIds(productsTrackingUnits).map((chunk) =>
-      supabase
-        .from("product_lots")
-        .select("product_id, unit_quantity_available")
-        .eq("organization_id", orgId)
-        .in("product_id", chunk)
-    )
-  );
-  const lots = results.flatMap((result) => result.data ?? []);
-  const firstError = results.find((result) => result.error);
-
-  if (firstError?.error) {
-    throw new Error(`Error fetching stock units: ${firstError.error.message}`);
-  }
-
-  for (const lot of lots ?? []) {
-    if (!lot.product_id) {
-      continue;
-    }
-    const previous = unitTotalsByProductId.get(lot.product_id) ?? 0;
-    const delta = lot.unit_quantity_available ?? 0;
-    unitTotalsByProductId.set(lot.product_id, previous + delta);
-  }
-
-  return unitTotalsByProductId;
-}
-
-async function fetchVariantTotalsByProductId(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  productMetaById: Map<string, ProductMeta>
-): Promise<Map<string, number>> {
-  const variantTotals = new Map<string, number>();
-  const productIds: string[] = [];
-  for (const [id, meta] of productMetaById.entries()) {
-    if (meta.has_variants) {
-      productIds.push(id);
-    }
-  }
-
-  if (productIds.length === 0) {
-    return variantTotals;
-  }
-
-  const results = await Promise.all(
-    chunkIds(productIds).map((chunk) =>
-      supabase
-        .from("product_variants")
-        .select("product_id, lot_id, product_lots(quantity_available)")
-        .eq("organization_id", orgId)
-        .eq("is_active", true)
-        .in("product_id", chunk)
-    )
-  );
-  const data = results.flatMap((result) => result.data ?? []);
-  const firstError = results.find((result) => result.error);
-
-  if (firstError?.error) {
-    throw new Error(
-      `Error fetching variant stock: ${firstError.error.message}`
-    );
-  }
-
-  for (const row of data ?? []) {
-    const prev = variantTotals.get(row.product_id) ?? 0;
-    const lotStock =
-      (
-        row.product_lots as unknown as {
-          quantity_available: number;
-        } | null
-      )?.quantity_available ?? 0;
-    variantTotals.set(row.product_id, prev + lotStock);
-  }
-  return variantTotals;
+async function buildStockItemsForScope({
+  supabase,
+  orgId,
+  data,
+  warehouseId,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  data: StockCatalogRow[];
+  warehouseId?: string;
+}): Promise<StockItem[]> {
+  const ids = extractProductIds(data);
+  const [meta, balances] = await Promise.all([
+    fetchProductMetaById(supabase, orgId, ids),
+    fetchStockBalances(supabase, orgId, ids, warehouseId),
+  ]);
+  return buildStockItems(data, meta, balances);
 }
 
 function buildStockItems(
-  data: StockDetailRow[],
+  data: StockCatalogRow[],
   productMetaById: Map<string, ProductMeta>,
-  unitTotalsByProductId: Map<string, number>,
-  variantTotalsByProductId: Map<string, number>
+  balances: Map<string, { quantity: number; units: number }>
 ): StockItem[] {
   return data
     .filter((item) => item.product_id && item.sku && item.product_name)
     .map((item) => {
       const productId = item.product_id as string;
       const productMeta = productMetaById.get(productId);
+      const balance = balances.get(productId);
       const unitOfMeasure = productMeta?.unit_of_measure ?? null;
       const tracksUnits = productMeta?.tracks_stock_units ?? null;
       const hasVariants = productMeta?.has_variants ?? false;
       const totalUnits =
         tracksUnits && (unitOfMeasure === "KG" || unitOfMeasure === "LT")
-          ? (unitTotalsByProductId.get(productId) ?? 0)
+          ? (balance?.units ?? 0)
           : null;
-
-      const variantStock = hasVariants
-        ? (variantTotalsByProductId.get(productId) ?? 0)
-        : 0;
 
       return {
         ...item,
         product_id: productId,
         sku: item.sku as string,
         product_name: item.product_name as string,
-        total_stock: hasVariants ? variantStock : (item.total_stock ?? 0),
+        total_stock: balance?.quantity ?? 0,
         is_active: item.is_active ?? true,
         unit_of_measure: unitOfMeasure,
         tracks_stock_units: tracksUnits,
@@ -451,32 +390,77 @@ function buildStockItems(
       };
     });
 }
-/**
- * Creates a new product in the organization.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps validation and persistence together for clarity
+function getProductCreationVariants(
+  hasVariants: boolean | undefined,
+  talles: string[] | undefined,
+  colores: string[] | undefined
+) {
+  if (!hasVariants) {
+    return [];
+  }
+  if (
+    !(Array.isArray(talles) && Array.isArray(colores)) ||
+    talles.length === 0 ||
+    colores.length === 0
+  ) {
+    throw new Error(
+      "Se requiere al menos un talle y un color si el producto tiene variantes"
+    );
+  }
+  if (
+    talles.some((talle) => typeof talle !== "string" || !talle.trim()) ||
+    colores.some((color) => typeof color !== "string" || !color.trim())
+  ) {
+    throw new Error("Los talles y colores no pueden estar vacíos");
+  }
+  if (talles.length * colores.length > 1000) {
+    throw new Error(
+      "El producto admite hasta 1000 combinaciones de talle y color"
+    );
+  }
+  return talles.flatMap((talle) =>
+    colores.map((color) => ({ talle: talle.trim(), color: color.trim() }))
+  );
+}
+
+function buildProductCreationPayload(input: CreateProductInput) {
+  const canTrackUnits =
+    input.unit_of_measure === "KG" || input.unit_of_measure === "LT";
+  return {
+    name: input.name.trim(),
+    sku: input.sku.trim(),
+    barcode: resolveBarcodeValue(input.sku, input.barcode),
+    description: sanitizeOptionalText(input.description),
+    brand: sanitizeOptionalText(input.brand),
+    accounting_account_code: sanitizeOptionalText(
+      input.accounting_account_code
+    ),
+    profit_margin: input.profit_margin ?? null,
+    min_stock: input.min_stock ?? null,
+    ...(typeof input.sale_price === "number"
+      ? { sale_price: input.sale_price }
+      : {}),
+    category_id: input.category_id || null,
+    supplier_id: input.supplier_id || null,
+    unit_of_measure: input.unit_of_measure,
+    units_per_box: input.units_per_box || null,
+    boxes_per_pallet: input.boxes_per_pallet || null,
+    weight_per_unit: input.weight_per_unit || null,
+    image_url: sanitizeOptionalText(input.image_url),
+    tracks_stock_units: canTrackUnits && Boolean(input.tracks_stock_units),
+    has_variants: input.has_variants ?? false,
+  };
+}
+
+/** Creates the product and all initial associations in a single DB transaction. */
 export async function createProductForOrg(
   input: CreateProductInput
-): Promise<Product | Product[]> {
+): Promise<Product> {
   const {
     orgSlug,
     name,
     sku,
-    barcode,
-    description,
-    brand,
-    accounting_account_code,
-    sale_price,
     profit_margin,
-    min_stock,
-    category_id,
-    supplier_id,
-    unit_of_measure,
-    units_per_box,
-    boxes_per_pallet,
-    weight_per_unit,
-    image_url,
-    tracks_stock_units,
     has_variants,
     talles,
     colores,
@@ -492,6 +476,11 @@ export async function createProductForOrg(
   }
 
   validateProfitMargin(profit_margin);
+  const combinations = getProductCreationVariants(
+    has_variants,
+    talles,
+    colores
+  );
 
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -500,114 +489,22 @@ export async function createProductForOrg(
   }
 
   const supabase = await createClient();
-  const normalizedSku = sku.trim();
-  const resolvedBarcode = resolveBarcodeValue(normalizedSku, barcode);
-  await ensureBarcodeIsAvailable({
-    supabase,
-    organizationId: org.id,
-    barcode: resolvedBarcode,
-  });
+  const baseProductData = buildProductCreationPayload(input);
 
-  const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
-  const tracksUnits = canTrackUnits && Boolean(tracks_stock_units);
-
-  const baseProductData = {
-    organization_id: org.id,
-    description: sanitizeOptionalText(description),
-    brand: sanitizeOptionalText(brand),
-    accounting_account_code: sanitizeOptionalText(accounting_account_code),
-    profit_margin: profit_margin ?? null,
-    min_stock: min_stock ?? null,
-    ...(typeof sale_price === "number" ? { sale_price } : {}),
-    category_id: category_id || null,
-    supplier_id: supplier_id || null,
-    unit_of_measure,
-    units_per_box: units_per_box || null,
-    boxes_per_pallet: boxes_per_pallet || null,
-    weight_per_unit: weight_per_unit || null,
-    image_url: sanitizeOptionalText(image_url),
-    tracks_stock_units: tracksUnits,
-  };
-
-  // 1. Insertamos el producto principal UNA SOLA VEZ
   const { data: productData, error: productError } = await supabase
-    .from("products")
-    .insert({
-      ...baseProductData,
-      organization_id: org.id,
-      name: name.trim(),
-      sku: normalizedSku,
-      has_variants: has_variants ?? false,
-      barcode: resolvedBarcode,
-      is_active: true,
+    .rpc("create_inventory_product", {
+      p_org_id: org.id,
+      p_product: baseProductData,
+      p_variants: combinations,
+      ...(tax_ids ? { p_tax_ids: [...new Set(tax_ids.filter(Boolean))] } : {}),
     })
-    .select("*")
     .single();
 
   if (productError || !productData) {
     throw new Error(
-      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(productError?.message ?? "", resolvedBarcode)}`
+      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(productError?.message ?? "", baseProductData.barcode)}`
     );
   }
-
-  // 2. Si tiene variantes, creamos lotes DEFAULT y las guardamos
-  if (has_variants) {
-    if (!(talles && colores) || talles.length === 0 || colores.length === 0) {
-      throw new Error(
-        "Se requiere al menos un talle y un color si el producto tiene variantes"
-      );
-    }
-
-    const lotsToInsert = talles.flatMap(() =>
-      colores.map(() => ({
-        organization_id: org.id,
-        product_id: productData.id,
-        lot_number: "DEFAULT",
-        expiration_date: null,
-        quantity_available: 0,
-      }))
-    );
-
-    const { data: insertedLots, error: lotsError } = await supabase
-      .from("product_lots")
-      .insert(lotsToInsert)
-      .select("id");
-
-    if (lotsError || !insertedLots) {
-      throw new Error(
-        `Error al crear lotes para variantes: ${lotsError?.message}`
-      );
-    }
-
-    let i = 0;
-    const variantsToInsert = talles.flatMap((talle) =>
-      colores.map((color) => {
-        const lotId = insertedLots[i].id;
-        i += 1;
-        return {
-          organization_id: org.id,
-          product_id: productData.id,
-          talle,
-          color,
-          lot_id: lotId,
-        };
-      })
-    );
-
-    const { error: variantsError } = await supabase
-      .from("product_variants")
-      .insert(variantsToInsert);
-
-    if (variantsError) {
-      throw new Error(`Error al crear variantes: ${variantsError.message}`);
-    }
-  }
-  await syncProductTaxAssignments({
-    supabase,
-    orgId: org.id,
-    productId: productData.id,
-    taxIds: tax_ids,
-  });
 
   return productData;
 }
@@ -830,42 +727,14 @@ export async function updateProductForOrg(
     }
 
     if (missingCombinations.length > 0) {
-      const lotsToInsert = missingCombinations.map(() => ({
-        organization_id: org.id,
-        product_id: productId,
-        lot_number: "DEFAULT",
-        expiration_date: null,
-        quantity_available: 0,
-      }));
-
-      const { data: insertedLots, error: lotsError } = await supabase
-        .from("product_lots")
-        .insert(lotsToInsert)
-        .select("id");
-
-      if (lotsError || !insertedLots) {
-        throw new Error(
-          `Error al crear lotes para nuevas variantes: ${lotsError?.message}`
-        );
-      }
-
-      const variantsToInsert = missingCombinations.map((comb, i) => ({
-        organization_id: org.id,
-        product_id: productId,
-        talle: comb.talle,
-        color: comb.color,
-        lot_id: insertedLots[i].id,
-      }));
-
-      const { error: variantsError } = await supabase
-        .from("product_variants")
-        .insert(variantsToInsert);
-
-      if (variantsError) {
-        throw new Error(
-          `Error al crear nuevas variantes: ${variantsError.message}`
-        );
-      }
+      const warehouseId = await getDefaultWarehouseId(supabase, org.id);
+      await createVariantsWithInitialBalances({
+        supabase,
+        orgId: org.id,
+        productId,
+        warehouseId,
+        combinations: missingCombinations,
+      });
     }
   }
 
@@ -906,29 +775,16 @@ export async function getStockSummary(
     return [];
   }
 
-  const productIds = extractProductIds(data);
-  const productMetaById = await fetchProductMetaById(
-    supabase,
-    org.id,
-    productIds
-  );
-  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
+  return buildStockItemsForScope({ supabase, orgId: org.id, data });
+}
 
-  return buildStockItems(
-    data,
-    productMetaById,
-    unitTotalsByProductId,
-    variantTotalsByProductId
-  );
+async function assertOptionalStockWarehouseAccess(
+  orgSlug: string,
+  warehouseId?: string
+) {
+  if (warehouseId) {
+    await assertWarehouseAccess(orgSlug, warehouseId, { requireActive: false });
+  }
 }
 
 export async function getStockPaginated(
@@ -937,6 +793,7 @@ export async function getStockPaginated(
 ): Promise<PaginatedResult<StockItem>> {
   const page = Math.max(1, params.page);
   const pageSize = Math.min(100, Math.max(1, params.pageSize));
+  await assertOptionalStockWarehouseAccess(orgSlug, params.warehouseId);
 
   const ALLOWED_SORT_COLUMNS: string[] = [
     "product_name",
@@ -965,7 +822,7 @@ export async function getStockPaginated(
 
   let query = supabase
     .from("view_stock_detail")
-    .select("*", { count: "exact" })
+    .select(STOCK_CATALOG_COLUMNS, { count: "exact" })
     .eq("organization_id", org.id);
 
   if (params.skuPrefix) {
@@ -989,7 +846,7 @@ export async function getStockPaginated(
     query = query.eq("is_active", activeStatus);
   }
 
-  if (sort && sort.length > 0) {
+  if (sort.length > 0) {
     for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
@@ -1003,7 +860,12 @@ export async function getStockPaginated(
 
   const { data, error, count } = await query;
 
-  if (error || !data || data.length === 0) {
+  if (error) {
+    throw new Error(
+      `No se pudo consultar el catálogo de stock: ${error.message}`
+    );
+  }
+  if (!data || data.length === 0) {
     return {
       data: [],
       totalCount: count ?? 0,
@@ -1012,30 +874,13 @@ export async function getStockPaginated(
     };
   }
 
-  const productIds = extractProductIds(data);
-  const productMetaById = await fetchProductMetaById(
-    supabase,
-    org.id,
-    productIds
-  );
-  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-
   return {
-    data: buildStockItems(
+    data: await buildStockItemsForScope({
+      supabase,
+      orgId: org.id,
       data,
-      productMetaById,
-      unitTotalsByProductId,
-      variantTotalsByProductId
-    ),
+      warehouseId: params.warehouseId,
+    }),
     totalCount: count ?? 0,
     page,
     pageSize,
@@ -1049,8 +894,10 @@ export async function getAllStockForExport(
     category?: string;
     status?: string;
     skuPrefix?: string;
+    warehouseId?: string;
   }
 ): Promise<StockItem[]> {
+  await assertOptionalStockWarehouseAccess(orgSlug, filters?.warehouseId);
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -1063,10 +910,10 @@ export async function getAllStockForExport(
 
   let query = supabase
     .from("view_stock_detail")
-    .select("*")
+    .select(STOCK_CATALOG_COLUMNS)
     .eq("organization_id", org.id)
     .order("product_name")
-    .limit(10_000);
+    .order("product_id");
 
   if (filters?.skuPrefix) {
     query = query.ilike("sku", `${filters.skuPrefix}%`);
@@ -1088,294 +935,50 @@ export async function getAllStockForExport(
     query = query.eq("is_active", false);
   }
 
-  const { data, error } = await query;
-
-  if (error || !data) {
-    return [];
-  }
-
-  const productIds = extractProductIds(data);
-  const productMetaById = await fetchProductMetaById(
-    supabase,
-    org.id,
-    productIds
-  );
-  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
-    supabase,
-    org.id,
-    productMetaById
-  );
-
-  return buildStockItems(
-    data,
-    productMetaById,
-    unitTotalsByProductId,
-    variantTotalsByProductId
-  );
-}
-
-type StockAggregates = {
-  totalUnits: number;
-  totalKg: number;
-  totalLt: number;
-  totalStockValue: number;
-  lowStockCount: number;
-};
-
-type ProductMetricsRow = {
-  id: string | null;
-  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-  tracks_stock_units: boolean | null;
-  has_variants: boolean | null;
-  is_active: boolean | null;
-  min_stock: number | null;
-};
-
-type StockMetricsRow = {
-  product_id: string | null;
-  total_stock: number | null;
-};
-
-function buildStockMaps(products: ProductMetricsRow[]) {
-  const metaById = new Map<string, ProductMeta>();
-  const minStockById = new Map<string, number>();
-  const productIds: string[] = [];
-
-  for (const p of products) {
-    if (!p.id) {
-      continue;
+  const items: StockItem[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const result = await query.range(offset, offset + 999);
+    if (result.error) {
+      throw new Error(`No se pudo exportar el stock: ${result.error.message}`);
     }
-    productIds.push(p.id);
-    metaById.set(p.id, {
-      unit_of_measure: p.unit_of_measure ?? null,
-      tracks_stock_units: p.tracks_stock_units ?? null,
-      has_variants: p.has_variants ?? null,
-    });
-    if (p.min_stock != null) {
-      minStockById.set(p.id, p.min_stock);
+    items.push(
+      ...(await buildStockItemsForScope({
+        supabase,
+        orgId: org.id,
+        data: result.data ?? [],
+        warehouseId: filters?.warehouseId,
+      }))
+    );
+    if ((result.data?.length ?? 0) < 1000) {
+      break;
     }
   }
 
-  return { metaById, minStockById, productIds };
+  return items;
 }
 
-type AggregationContext = {
-  metaById: Map<string, ProductMeta>;
-  costById: Map<string, number>;
-  minStockById: Map<string, number>;
-  stockById: Map<string, number>;
-  unitTotals: Map<string, number>;
-  variantTotals: Map<string, number>;
-};
-
-function aggregateProduct(
-  product: string,
-  ctx: AggregationContext
-): {
-  units: number;
-  kg: number;
-  lt: number;
-  value: number;
-  isLow: boolean;
-} {
-  const meta = ctx.metaById.get(product);
-  const viewStock = ctx.stockById.get(product) ?? 0;
-  const totalStock =
-    (meta?.has_variants ?? false)
-      ? (ctx.variantTotals.get(product) ?? 0)
-      : viewStock;
-
-  if (totalStock <= 0) {
-    return { units: 0, kg: 0, lt: 0, value: 0, isLow: false };
-  }
-
-  const value = totalStock * (ctx.costById.get(product) ?? 0);
-  const unitStock = ctx.unitTotals.get(product) ?? totalStock;
-  const tracksUnits = meta?.tracks_stock_units ?? false;
-  const uom = meta?.unit_of_measure;
-
-  let units = 0;
-  let kg = 0;
-  let lt = 0;
-
-  if (tracksUnits && uom === "KG") {
-    kg = unitStock;
-  } else if (tracksUnits && uom === "LT") {
-    lt = unitStock;
-  } else {
-    units = totalStock;
-  }
-
-  const minStock = ctx.minStockById.get(product);
-  const isLow = minStock != null && totalStock <= minStock;
-
-  return { units, kg, lt, value, isLow };
-}
-
-function buildStockAggregation(
-  productIds: string[],
-  ctx: AggregationContext
-): StockAggregates {
-  let totalUnits = 0;
-  let totalKg = 0;
-  let totalLt = 0;
-  let totalStockValue = 0;
-  let lowStockCount = 0;
-
-  for (const product of productIds) {
-    const r = aggregateProduct(product, ctx);
-    totalUnits += r.units;
-    totalKg += r.kg;
-    totalLt += r.lt;
-    totalStockValue += r.value;
-    if (r.isLow) {
-      lowStockCount += 1;
-    }
-  }
-
-  return {
-    totalUnits,
-    totalKg: Math.round(totalKg * 10) / 10,
-    totalLt: Math.round(totalLt * 10) / 10,
-    totalStockValue,
-    lowStockCount,
-  };
-}
-
-async function computeStockAggregates(args: {
-  supabase: SupabaseServerClient;
-  orgId: string;
-  products: ProductMetricsRow[];
-  stockRows: StockMetricsRow[];
-  costById: Map<string, number>;
-}): Promise<StockAggregates> {
-  const { metaById, minStockById, productIds } = buildStockMaps(args.products);
-
-  const stockByProductId = new Map<string, number>();
-  for (const row of args.stockRows) {
-    const pid = row.product_id as string;
-    if (pid) {
-      stockByProductId.set(pid, Number(row.total_stock ?? 0));
-    }
-  }
-
-  const [unitTotals, variantTotals] = await Promise.all([
-    fetchUnitTotalsByProductId(args.supabase, args.orgId, metaById),
-    fetchVariantTotalsByProductId(args.supabase, args.orgId, metaById),
-  ]);
-
-  return buildStockAggregation(productIds, {
-    metaById,
-    costById: args.costById,
-    minStockById,
-    stockById: stockByProductId,
-    unitTotals,
-    variantTotals,
-  });
-}
-
-export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
+export async function getStockMetrics(
+  orgSlug: string,
+  warehouseId?: string,
+  signal?: AbortSignal
+): Promise<StockMetrics> {
   const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    return {
-      totalProducts: 0,
-      activeProducts: 0,
-      inactiveProducts: 0,
-      totalUnits: 0,
-      totalKg: 0,
-      totalLt: 0,
-      totalStockValue: 0,
-      lowStockCount: 0,
-    };
+  if (!org) {
+    throw new Error("Organización no encontrada");
   }
-
   const supabase = await createClient();
-
-  const [
-    { count: totalProducts },
-    { count: activeProducts },
-    { count: inactiveProducts },
-    productsResult,
-    costResult,
-    stockResult,
-  ] = await Promise.all([
-    supabase
-      .from("view_stock_detail")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id),
-    supabase
-      .from("view_stock_detail")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id)
-      .eq("is_active", true),
-    supabase
-      .from("view_stock_detail")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id)
-      .eq("is_active", false),
-    supabase
-      .from("products")
-      .select(
-        "id, unit_of_measure, tracks_stock_units, has_variants, is_active, min_stock"
-      )
-      .eq("organization_id", org.id),
-    supabase
-      .from("products_with_price")
-      .select("id, cost_price")
-      .eq("organization_id", org.id),
-    supabase
-      .from("view_stock_detail")
-      .select("product_id, total_stock")
-      .eq("organization_id", org.id)
-      .eq("is_active", true),
-  ]);
-
-  const products = productsResult.data ?? [];
-  const stockRows = stockResult.data ?? [];
-  const costById = new Map<string, number>();
-  for (const row of costResult.data ?? []) {
-    if (row.id) {
-      costById.set(row.id, row.cost_price ?? 0);
-    }
-  }
-
-  if (products.length === 0) {
-    return {
-      totalProducts: totalProducts ?? 0,
-      activeProducts: activeProducts ?? 0,
-      inactiveProducts: inactiveProducts ?? 0,
-      totalUnits: 0,
-      totalKg: 0,
-      totalLt: 0,
-      totalStockValue: 0,
-      lowStockCount: 0,
-    };
-  }
-
-  const aggregates = await computeStockAggregates({
-    supabase,
-    orgId: org.id,
-    products,
-    stockRows,
-    costById,
+  let query = supabase.rpc("get_inventory_stock_metrics", {
+    p_org_id: org.id,
+    ...(warehouseId ? { p_warehouse_id: warehouseId } : {}),
   });
-
-  return {
-    totalProducts: totalProducts ?? 0,
-    activeProducts: activeProducts ?? 0,
-    inactiveProducts: inactiveProducts ?? 0,
-    totalUnits: aggregates.totalUnits,
-    totalKg: aggregates.totalKg,
-    totalLt: aggregates.totalLt,
-    totalStockValue: aggregates.totalStockValue,
-    lowStockCount: aggregates.lowStockCount,
-  };
+  if (signal) {
+    query = query.abortSignal(signal);
+  }
+  const { data, error } = await query;
+  if (error) {
+    throwStockReadError(error);
+  }
+  return parseStockMetrics(data);
 }
 
 /**
@@ -1383,7 +986,8 @@ export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
  */
 export async function getProductVariantsWithStock(
   orgSlug: string,
-  productId: string
+  productId: string,
+  warehouseId?: string
 ): Promise<ProductVariantWithStock[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1395,7 +999,7 @@ export async function getProductVariantsWithStock(
 
   const { data, error } = await supabase
     .from("product_variants")
-    .select("*, product_lots(id, quantity_available)")
+    .select("*")
     .eq("organization_id", org.id)
     .eq("product_id", productId)
     .eq("is_active", true)
@@ -1406,56 +1010,20 @@ export async function getProductVariantsWithStock(
     throw new Error(`Error obteniendo variantes: ${error.message}`);
   }
 
-  return (data ?? []) as unknown as ProductVariantWithStock[];
-}
-
-/**
- * Adjusts the stock of a specific variant.
- */
-export async function adjustVariantStock(input: {
-  orgSlug: string;
-  variantId: string;
-  type: StockMovementType;
-  quantity: number;
-  reason: string;
-  createdBy?: string | null;
-  source?: StockMovementSource;
-}): Promise<void> {
-  const { orgSlug, variantId, type, quantity, reason, createdBy, source } =
-    input;
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-
-  const supabase = await createClient();
-
-  const { data: variant, error: variantError } = await supabase
-    .from("product_variants")
-    .select("product_id, lot_id")
-    .eq("id", variantId)
-    .eq("organization_id", org.id)
-    .single();
-
-  if (variantError || !variant) {
-    throw new Error(`Error obteniendo la variante: ${variantError?.message}`);
-  }
-
-  if (!variant.lot_id) {
-    throw new Error("La variante no tiene un lote asignado para ajustar stock");
-  }
-
-  await createStockMovementForOrg({
+  const balances = await getProductVariantsByProductId(
     orgSlug,
-    productId: variant.product_id,
-    lotId: variant.lot_id,
-    type,
-    quantity,
-    reason,
-    createdBy,
-    source,
-  });
+    productId,
+    warehouseId
+  );
+  const stockByVariant = new Map(
+    balances.map((variant) => [variant.id, variant.stock])
+  );
+  return (data ?? []).map((variant) => ({
+    ...variant,
+    product_lots: {
+      quantity_available: stockByVariant.get(variant.id) ?? 0,
+    },
+  }));
 }
 
 /**
@@ -1920,11 +1488,13 @@ const fetchTotalsForProduct = async (
 ) => {
   if (hasVariants) {
     const { data: variants, error: variantsError } = await supabase
-      .from("product_variants")
-      .select("lot_id, product_lots(quantity_available)")
+      .from("product_lots")
+      .select(
+        "quantity_available, variant:product_variants!product_lots_variant_fk!inner(is_active)"
+      )
       .eq("organization_id", orgId)
       .eq("product_id", productId)
-      .eq("is_active", true);
+      .eq("variant.is_active", true);
 
     if (variantsError) {
       throw new Error(`Error fetching variant stock: ${variantsError.message}`);
@@ -1932,12 +1502,7 @@ const fetchTotalsForProduct = async (
 
     const totalQuantity =
       variants?.reduce((acc, v) => {
-        const stock =
-          (
-            v.product_lots as unknown as {
-              quantity_available: number;
-            } | null
-          )?.quantity_available ?? 0;
+        const stock = v.quantity_available;
         return acc + stock;
       }, 0) ?? 0;
 
@@ -2089,7 +1654,7 @@ export async function getStockMovementsForProduct(
   orgSlug: string,
   productId: string,
   limit = 30,
-  lotId?: string
+  variantId?: string
 ): Promise<StockMovementWithLot[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -2101,7 +1666,7 @@ export async function getStockMovementsForProduct(
 
   const { data: lots, error: lotsError } = await supabase
     .from("product_lots")
-    .select("id")
+    .select("id, product_variant_id")
     .eq("organization_id", org.id)
     .eq("product_id", productId);
 
@@ -2109,17 +1674,16 @@ export async function getStockMovementsForProduct(
     throw new Error(`Error fetching product lots: ${lotsError.message}`);
   }
 
-  if (!lots || lots.length === 0) {
+  const relevantLots = variantId
+    ? (lots ?? []).filter((lot) => lot.product_variant_id === variantId)
+    : (lots ?? []);
+  if (relevantLots.length === 0) {
     return [];
   }
 
-  if (lotId && !lots.some((lot) => lot.id === lotId)) {
-    return [];
-  }
+  const lotIds = relevantLots.map((lot) => lot.id);
 
-  const lotIds = lots.map((lot) => lot.id);
-
-  const stockMovementSelect: string = `
+  const stockMovementSelect = `
         id,
         lot_id,
         type,
@@ -2131,12 +1695,12 @@ export async function getStockMovementsForProduct(
         source,
         created_by,
         created_at,
-        product_lots:lot_id (
+        product_lots:product_lots!stock_movements_lot_id_fkey (
           id,
           lot_number,
           expiration_date,
           product_id,
-          product_variants!product_variants_lot_id_fkey(talle, color)
+          product_variants:product_variants!product_lots_variant_fk(talle, color)
         )
       `;
   const movementsQuery = supabase
@@ -2145,11 +1709,9 @@ export async function getStockMovementsForProduct(
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
 
-  const filteredQuery = lotId
-    ? movementsQuery.eq("lot_id", lotId)
-    : movementsQuery.in("lot_id", lotIds);
-
-  const { data, error } = await filteredQuery.limit(limit);
+  const { data, error } = await movementsQuery
+    .in("lot_id", lotIds)
+    .limit(limit);
 
   if (error) {
     throw new Error(`Error fetching stock movements: ${error.message}`);
@@ -2173,36 +1735,12 @@ export async function getStockMovementsForProduct(
     }
   }
 
-  const movementRows = (data ?? []) as unknown as Array<{
-    id: string;
-    lot_id: string;
-    type: StockMovementWithLot["type"];
-    quantity: number;
-    previous_stock: number;
-    new_stock: number;
-    unit_quantity: number | null;
-    reason: string | null;
-    source: StockMovementSource;
-    created_by: string | null;
-    created_at: string | null;
-    product_lots: {
-      id: string;
-      lot_number: string;
-      expiration_date: string | null;
-      product_variants: Array<{ talle: string; color: string }> | null;
-    } | null;
-  }>;
+  const movementRows = data ?? [];
 
   return movementRows
     .filter((movement) => movement.product_lots)
     .map((movement) => {
-      const variant =
-        (
-          (movement.product_lots as Record<string, unknown>)
-            ?.product_variants as
-            | Array<{ talle: string; color: string }>
-            | undefined
-        )?.[0] ?? null;
+      const variant = movement.product_lots?.product_variants ?? null;
 
       return {
         id: movement.id,
@@ -2217,7 +1755,7 @@ export async function getStockMovementsForProduct(
         new_stock: movement.new_stock,
         unit_quantity: movement.unit_quantity ?? null,
         reason: movement.reason,
-        source: movement.source ?? "SYSTEM",
+        source: stockMovementSourceSchema.parse(movement.source),
         created_by: movement.created_by,
         created_by_name: movement.created_by
           ? (memberNames.get(movement.created_by) ?? "Usuario")
@@ -2229,6 +1767,8 @@ export async function getStockMovementsForProduct(
 
 export type CreateProductLotInput = {
   orgSlug: string;
+  warehouseId?: string;
+  productVariantId?: string;
   productId: string;
   lotNumber: string;
   expirationDate: string | null;
@@ -2286,6 +1826,21 @@ export async function createProductLotForOrg(
   }
 
   let finalExpirationDate = expirationDate;
+  if (product.has_variants && !input.productVariantId) {
+    throw new Error("Seleccioná una variante para crear su existencia");
+  }
+  if (input.productVariantId) {
+    const { data: variant, error: variantError } = await supabase
+      .from("product_variants")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("product_id", productId)
+      .eq("id", input.productVariantId)
+      .single();
+    if (variantError || !variant || !product.has_variants) {
+      throw new Error("La variante no pertenece al producto seleccionado");
+    }
+  }
   if (product.has_variants) {
     finalExpirationDate = null;
   } else if (!finalExpirationDate) {
@@ -2318,21 +1873,27 @@ export async function createProductLotForOrg(
         : 0;
   }
 
-  const resolvedExpiration = finalExpirationDate ?? NO_EXPIRATION_FALLBACK;
+  const resolvedExpiration = product.has_variants
+    ? null
+    : (finalExpirationDate ?? NO_EXPIRATION_FALLBACK);
+  const warehouseId = await resolveInventoryWarehouseId(
+    orgSlug,
+    input.warehouseId
+  );
 
   const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
     {
       organization_id: org.id,
+      warehouse_id: warehouseId,
       product_id: productId,
+      product_variant_id: input.productVariantId,
       lot_number: lotNumber.trim(),
       expiration_date: resolvedExpiration,
-      quantity_available:
-        createdBy && sanitizedQuantity > 0 ? 0 : sanitizedQuantity,
+      quantity_available: 0,
     };
 
   if (isUnitTracked) {
-    insertPayload.unit_quantity_available =
-      createdBy && sanitizedQuantity > 0 ? 0 : (sanitizedUnitQuantity ?? 0);
+    insertPayload.unit_quantity_available = 0;
   }
 
   const { data, error } = await supabase
@@ -2349,13 +1910,14 @@ export async function createProductLotForOrg(
     throw new Error("No se pudo crear el lote");
   }
 
-  if (createdBy && sanitizedQuantity > 0) {
+  if (sanitizedQuantity > 0 || (sanitizedUnitQuantity ?? 0) > 0) {
     try {
       await createStockMovementForOrg({
         orgSlug,
+        warehouseId,
         productId,
         lotId: data.id,
-        type: "INBOUND",
+        type: sanitizedQuantity > 0 ? "INBOUND" : "ADJUSTMENT",
         quantity: sanitizedQuantity,
         unitQuantity: isUnitTracked ? sanitizedUnitQuantity : undefined,
         reason: "Stock inicial del lote",
@@ -2377,6 +1939,7 @@ export async function createProductLotForOrg(
 
 export type UpdateProductLotInput = {
   orgSlug: string;
+  warehouseId?: string;
   productId: string;
   lotId: string;
   lotNumber: string;
@@ -2449,7 +2012,7 @@ export async function updateProductLotForOrg(
   const { data: lot, error: lotError } = await supabase
     .from("product_lots")
     .select(
-      "id, product_id, organization_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
+      "id, product_id, product_variant_id, warehouse_id, organization_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
     )
     .eq("id", lotId)
     .eq("organization_id", org.id)
@@ -2466,6 +2029,10 @@ export async function updateProductLotForOrg(
   if (lot.product_id !== productId) {
     throw new Error("El lote no pertenece al producto seleccionado");
   }
+  if (input.warehouseId && input.warehouseId !== lot.warehouse_id) {
+    throw new Error("No se puede mover un lote editando su depósito");
+  }
+  await resolveInventoryWarehouseId(orgSlug, lot.warehouse_id);
 
   const isUnitTracked =
     (product.unit_of_measure === "KG" || product.unit_of_measure === "LT") &&
@@ -2517,7 +2084,9 @@ export async function updateProductLotForOrg(
     }
   }
 
-  const resolvedExpiration = expirationDate ?? NO_EXPIRATION_FALLBACK;
+  const resolvedExpiration = lot.product_variant_id
+    ? expirationDate
+    : (expirationDate ?? NO_EXPIRATION_FALLBACK);
 
   const updatePayload: Database["public"]["Tables"]["product_lots"]["Update"] =
     {
@@ -2554,16 +2123,18 @@ export async function updateProductLotForOrg(
       );
     }
 
-    await createStockMovementForOrg({
+    await setWarehouseStockBalance({
       orgSlug,
+      warehouseId: lot.warehouse_id,
       productId,
       lotId,
-      type: "ADJUSTMENT",
-      quantity: quantityDelta,
-      unitQuantity: unitQuantityDelta,
+      productVariantId: lot.product_variant_id,
+      lotNumber: lotNumber.trim(),
+      expirationDate: resolvedExpiration,
+      quantity: normalizedQuantity,
+      unitQuantity: isUnitTracked ? sanitizedUnitQuantity : undefined,
       reason: "Edición manual del lote",
-      createdBy,
-      source: source ?? "MANUAL",
+      source: source === "IMPORT" ? "IMPORT" : "MANUAL",
     });
     updatedLot.quantity_available = normalizedQuantity;
     if (isUnitTracked) {
@@ -2599,7 +2170,7 @@ export async function deleteProductLotForOrg(
 
   const { data: lot, error: lotError } = await supabase
     .from("product_lots")
-    .select("id, product_id")
+    .select("id, product_id, warehouse_id")
     .eq("id", lotId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2615,6 +2186,7 @@ export async function deleteProductLotForOrg(
   if (lot.product_id !== productId) {
     throw new Error("El lote no pertenece al producto seleccionado");
   }
+  await resolveInventoryWarehouseId(orgSlug, lot.warehouse_id);
 
   const lotMovements = await fetchLotMovements(supabase, org.id, lotId);
   const lotUsage =
@@ -2670,6 +2242,7 @@ export async function deleteProductLotForOrg(
 
 export type CreateStockMovementInput = {
   orgSlug: string;
+  warehouseId?: string;
   productId: string;
   lotId: string;
   type: StockMovementType;
@@ -2683,234 +2256,21 @@ export type CreateStockMovementInput = {
 /**
  * Applies a stock movement to a lot and records it.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validation and business rules in one place improve clarity
 export async function createStockMovementForOrg(
   input: CreateStockMovementInput
 ) {
-  const {
-    orgSlug,
-    productId,
-    lotId,
-    type,
-    quantity,
-    reason,
-    unitQuantity,
-    createdBy,
-    source = "SYSTEM",
-  } = input;
-
-  if (!lotId) {
-    throw new Error("El lote es requerido");
-  }
-
-  const normalizedQuantity = Number.isFinite(quantity) ? quantity : 0;
-  const hasUnitQuantityInput =
-    unitQuantity !== undefined && unitQuantity !== null;
-  const normalizedUnitQuantity =
-    hasUnitQuantityInput && Number.isFinite(unitQuantity) ? unitQuantity : 0;
-
-  if ((type === "INBOUND" || type === "OUTBOUND") && normalizedQuantity <= 0) {
-    throw new Error("La cantidad debe ser mayor a 0");
-  }
-
   if (
-    type === "ADJUSTMENT" &&
-    normalizedQuantity === 0 &&
-    normalizedUnitQuantity === 0
+    input.type !== "INBOUND" &&
+    input.type !== "OUTBOUND" &&
+    input.type !== "ADJUSTMENT"
   ) {
-    throw new Error("La cantidad del ajuste no puede ser 0");
+    throw new Error("Tipo de movimiento no soportado");
   }
-
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-
-  const supabase = await createClient();
-
-  const { data: product, error: productError } = await supabase
-    .from("products")
-    .select("id, organization_id, unit_of_measure, tracks_stock_units")
-    .eq("id", productId)
-    .eq("organization_id", org.id)
-    .maybeSingle();
-
-  if (productError) {
-    throw new Error(`Error obteniendo el producto: ${productError.message}`);
-  }
-
-  if (!product) {
-    throw new Error("Producto no encontrado para esta organización");
-  }
-
-  const { data: lot, error: lotError } = await supabase
-    .from("product_lots")
-    .select(
-      "id, product_id, organization_id, quantity_available, unit_quantity_available"
-    )
-    .eq("id", lotId)
-    .eq("organization_id", org.id)
-    .maybeSingle();
-
-  if (lotError) {
-    throw new Error(`Error obteniendo el lote: ${lotError.message}`);
-  }
-
-  if (!lot) {
-    throw new Error("Lote no encontrado");
-  }
-
-  if (lot.product_id !== productId) {
-    throw new Error("El lote no pertenece al producto seleccionado");
-  }
-
-  const isUnitTracked =
-    (product.unit_of_measure === "KG" || product.unit_of_measure === "LT") &&
-    Boolean(product.tracks_stock_units);
-
-  const previousStock = lot.quantity_available ?? 0;
-  const previousUnitStock = lot.unit_quantity_available ?? 0;
-
-  let newStock = previousStock;
-  let newUnitStock = previousUnitStock;
-
-  switch (type) {
-    case "INBOUND": {
-      newStock = previousStock + normalizedQuantity;
-      if (isUnitTracked) {
-        if (!hasUnitQuantityInput || normalizedUnitQuantity <= 0) {
-          throw new Error("Ingresa las unidades para registrar el ingreso");
-        }
-        newUnitStock = previousUnitStock + normalizedUnitQuantity;
-      }
-      break;
-    }
-    case "OUTBOUND": {
-      if (normalizedQuantity > previousStock) {
-        throw new Error("No hay stock suficiente en el lote");
-      }
-      newStock = previousStock - normalizedQuantity;
-      if (isUnitTracked) {
-        if (!hasUnitQuantityInput || normalizedUnitQuantity <= 0) {
-          throw new Error("Ingresa las unidades para registrar la salida");
-        }
-        if (normalizedUnitQuantity > previousUnitStock) {
-          throw new Error("No hay unidades suficientes en el lote");
-        }
-        newUnitStock = previousUnitStock - normalizedUnitQuantity;
-      }
-      break;
-    }
-    case "ADJUSTMENT": {
-      newStock = previousStock + normalizedQuantity;
-      if (isUnitTracked && hasUnitQuantityInput) {
-        newUnitStock = previousUnitStock + normalizedUnitQuantity;
-      }
-      break;
-    }
-    default: {
-      throw new Error("Tipo de movimiento no soportado");
-    }
-  }
-
-  if (newStock < 0) {
-    throw new Error("El stock resultante no puede ser negativo");
-  }
-
-  if (isUnitTracked && newUnitStock < 0) {
-    throw new Error("El stock de unidades no puede ser negativo");
-  }
-
-  const lotUpdatePayload: Database["public"]["Tables"]["product_lots"]["Update"] =
-    {
-      quantity_available: newStock,
-      updated_at: new Date().toISOString(),
-    };
-
-  if (isUnitTracked) {
-    lotUpdatePayload.unit_quantity_available = newUnitStock;
-  }
-
-  const { error: updateError } = await supabase
-    .from("product_lots")
-    .update(lotUpdatePayload)
-    .eq("id", lotId)
-    .eq("organization_id", org.id);
-
-  if (updateError) {
-    throw new Error(`No se pudo actualizar el lote: ${updateError.message}`);
-  }
-
-  const movementQuantity =
-    type === "ADJUSTMENT"
-      ? Math.abs(newStock - previousStock)
-      : normalizedQuantity;
-
-  let movementUnitQuantity: number | null = null;
-
-  if (isUnitTracked) {
-    if (type === "INBOUND") {
-      movementUnitQuantity = normalizedUnitQuantity;
-    } else if (type === "OUTBOUND") {
-      movementUnitQuantity = -normalizedUnitQuantity;
-    } else if (hasUnitQuantityInput) {
-      movementUnitQuantity = newUnitStock - previousUnitStock;
-    }
-
-    if (movementUnitQuantity === 0) {
-      movementUnitQuantity = null;
-    }
-  }
-
-  const movementPayload = {
-    organization_id: org.id,
-    lot_id: lotId,
-    type,
-    quantity: movementQuantity,
-    previous_stock: previousStock,
-    new_stock: newStock,
-    unit_quantity: movementUnitQuantity,
-    reason: reason?.trim() || null,
-    created_by: createdBy ?? null,
-    source,
-  };
-
-  const { data: movement, error: movementError } = await supabase
-    .from("stock_movements")
-    .insert(
-      movementPayload as Database["public"]["Tables"]["stock_movements"]["Insert"]
-    )
-    .select("*")
-    .maybeSingle();
-
-  if (movementError) {
-    const rollbackPayload: Database["public"]["Tables"]["product_lots"]["Update"] =
-      {
-        quantity_available: previousStock,
-        updated_at: new Date().toISOString(),
-      };
-
-    if (isUnitTracked) {
-      rollbackPayload.unit_quantity_available = previousUnitStock;
-    }
-
-    await supabase
-      .from("product_lots")
-      .update(rollbackPayload)
-      .eq("id", lotId)
-      .eq("organization_id", org.id);
-
-    throw new Error(
-      `No se pudo registrar el movimiento: ${movementError.message}`
-    );
-  }
-
-  if (!movement) {
-    throw new Error("No se pudo registrar el movimiento");
-  }
-
-  return movement;
+  return await applyWarehouseStockMovement({
+    ...input,
+    type: input.type,
+    source: input.source === "IMPORT" ? "IMPORT" : "MANUAL",
+  });
 }
 
 /**
@@ -2983,13 +2343,13 @@ export type ProductVariantRow = {
   id: string;
   talle: string;
   color: string;
-  lotId: string | null;
   stock: number;
 };
 
 export async function getProductVariantsByProductId(
   orgSlug: string,
-  productId: string
+  productId: string,
+  warehouseId?: string
 ): Promise<ProductVariantRow[]> {
   const supabase = await createClient();
 
@@ -3003,9 +2363,13 @@ export async function getProductVariantsByProductId(
     throw new Error("Organización no encontrada");
   }
 
+  if (warehouseId) {
+    await assertWarehouseAccess(orgSlug, warehouseId, { requireActive: false });
+  }
+
   const { data, error } = await supabase
     .from("product_variants")
-    .select("id, talle, color, lot_id, product_lots(quantity_available)")
+    .select("id, talle, color")
     .eq("organization_id", org.id)
     .eq("product_id", productId)
     .eq("is_active", true)
@@ -3015,49 +2379,41 @@ export async function getProductVariantsByProductId(
   if (error) {
     throw new Error(`Error al obtener variantes: ${error.message}`);
   }
+  let lotsQuery = supabase
+    .from("product_lots")
+    .select("id, product_variant_id, quantity_available")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId);
+  if (warehouseId) {
+    lotsQuery = lotsQuery.eq("warehouse_id", warehouseId);
+  }
+  const lots: {
+    product_variant_id: string | null;
+    quantity_available: number;
+  }[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data: pageLots, error: lotsError } = await lotsQuery
+      .order("id")
+      .range(offset, offset + 999);
+    if (lotsError) {
+      throw new Error(
+        `Error al obtener saldos de variantes: ${lotsError.message}`
+      );
+    }
+    lots.push(...(pageLots ?? []));
+    if ((pageLots?.length ?? 0) < 1000) {
+      break;
+    }
+  }
 
   return (data ?? []).map((v) => ({
     id: v.id,
     talle: v.talle,
     color: v.color,
-    lotId: v.lot_id,
-    stock:
-      (
-        v.product_lots as unknown as {
-          quantity_available: number;
-        } | null
-      )?.quantity_available ?? 0,
+    stock: (lots ?? [])
+      .filter((lot) => lot.product_variant_id === v.id)
+      .reduce((sum, lot) => sum + lot.quantity_available, 0),
   }));
-}
-
-/**
- * Gets the current stock for a single variant by looking up its lot.
- */
-export async function getVariantCurrentStock(
-  variantId: string
-): Promise<{ productId: string; currentStock: number }> {
-  const supabase = await createClient();
-
-  const { data: variant, error } = await supabase
-    .from("product_variants")
-    .select("product_id, product_lots(quantity_available)")
-    .eq("id", variantId)
-    .single();
-
-  if (error || !variant) {
-    throw new Error(
-      `Error obteniendo la variante: ${error?.message ?? "No encontrada"}`
-    );
-  }
-
-  const currentStock =
-    (
-      variant.product_lots as unknown as {
-        quantity_available: number;
-      } | null
-    )?.quantity_available ?? 0;
-
-  return { productId: variant.product_id, currentStock };
 }
 
 /**
@@ -3141,36 +2497,15 @@ export async function updateProductVariantsForOrg(
     }
   }
 
-  for (const { talle, color } of newCombinations) {
-    const { data: lot, error: lotError } = await supabase
-      .from("product_lots")
-      .insert({
-        organization_id: org.id,
-        product_id: productId,
-        lot_number: "DEFAULT",
-        quantity_available: 0,
-        unit_quantity_available: 0,
-      })
-      .select("id")
-      .single();
-
-    if (lotError || !lot) {
-      throw new Error(`Error al crear lote DEFAULT: ${lotError?.message}`);
-    }
-
-    const { error: insertError } = await supabase
-      .from("product_variants")
-      .insert({
-        organization_id: org.id,
-        product_id: productId,
-        talle,
-        color,
-        lot_id: lot.id,
-      });
-
-    if (insertError) {
-      throw new Error(`Error al insertar variante: ${insertError.message}`);
-    }
+  if (newCombinations.length > 0) {
+    const warehouseId = await getDefaultWarehouseId(supabase, org.id);
+    await createVariantsWithInitialBalances({
+      supabase,
+      orgId: org.id,
+      productId,
+      warehouseId,
+      combinations: newCombinations,
+    });
   }
 }
 

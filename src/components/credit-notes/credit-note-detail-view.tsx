@@ -107,7 +107,7 @@ function getFinancialTreatmentLabel(creditNote: CreditNote): string {
   }
 
   if (creditNote.appliedToReceivableAmount > 0) {
-    return `Aplicada a factura (${formatCurrency(creditNote.appliedToReceivableAmount)})`;
+    return `Aplicada a factura (${formatCurrency(creditNote.appliedToReceivableAmount, creditNote.sale?.currency)})`;
   }
 
   return "Aplicación a factura solicitada";
@@ -291,6 +291,36 @@ function CreditNoteArcaSection({
   );
 }
 
+function FiscalBreakdown({ creditNote }: { creditNote: CreditNote }) {
+  const b = creditNote.fiscalBreakdown;
+  if (!b) {
+    return creditNote.salesOrderId && creditNote.arcaStatus === "authorized" ? (
+      <p className="text-muted-foreground">
+        Desglose fiscal autorizado no disponible.
+      </p>
+    ) : null;
+  }
+  const rows = [
+    { label: "Neto gravado", amount: b.netAmount },
+    ...(b.exemptAmount > 0
+      ? [{ label: "Exento", amount: b.exemptAmount }]
+      : []),
+    ...(b.untaxedAmount > 0
+      ? [{ label: "No gravado", amount: b.untaxedAmount }]
+      : []),
+    ...b.taxes.map((tax) => ({
+      label: `${tax.name}${tax.rate > 0 ? ` ${tax.rate}%` : ""}`,
+      amount: tax.taxAmount,
+    })),
+  ];
+  return rows.map((row, index) => (
+    <div className="flex justify-between" key={`${row.label}-${index}`}>
+      <dt>{row.label}</dt>
+      <dd>{formatCurrency(row.amount, creditNote.sale?.currency)}</dd>
+    </div>
+  ));
+}
+
 export function CreditNoteDetailView({
   creditNote,
   orgSlug,
@@ -364,8 +394,11 @@ export function CreditNoteDetailView({
               <Separator />
               <div className="flex justify-between font-medium">
                 <dt>Monto</dt>
-                <dd className="text-lg">{formatCurrency(creditNote.amount)}</dd>
+                <dd className="text-lg">
+                  {formatCurrency(creditNote.amount, creditNote.sale?.currency)}
+                </dd>
               </div>
+              <FiscalBreakdown creditNote={creditNote} />
             </dl>
           </CardContent>
         </Card>
@@ -422,7 +455,12 @@ export function CreditNoteDetailView({
               {creditNote.sale?.totalAmount != null && (
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Total venta</dt>
-                  <dd>{formatCurrency(creditNote.sale.totalAmount)}</dd>
+                  <dd>
+                    {formatCurrency(
+                      creditNote.sale.totalAmount,
+                      creditNote.sale.currency
+                    )}
+                  </dd>
                 </div>
               )}
               <CreditNoteFinancialTreatment creditNote={creditNote} />
@@ -456,13 +494,22 @@ export function CreditNoteDetailView({
                       <td className="py-2">{item.description}</td>
                       <td className="py-2 text-right">{item.quantity}</td>
                       <td className="py-2 text-right">
-                        {formatCurrency(item.netAmount)}
+                        {formatCurrency(
+                          item.netAmount,
+                          creditNote.sale?.currency
+                        )}
                       </td>
                       <td className="py-2 text-right">
-                        {formatCurrency(item.taxAmount)}
+                        {formatCurrency(
+                          item.taxAmount,
+                          creditNote.sale?.currency
+                        )}
                       </td>
                       <td className="py-2 text-right font-medium">
-                        {formatCurrency(item.totalAmount)}
+                        {formatCurrency(
+                          item.totalAmount,
+                          creditNote.sale?.currency
+                        )}
                       </td>
                     </tr>
                   ))}

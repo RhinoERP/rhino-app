@@ -14,6 +14,8 @@ import {
   TruckIcon,
   UserGearIcon,
   UsersIcon,
+  WarehouseIcon,
+  WhatsappLogoIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -26,7 +28,7 @@ type ConfigNavItem = {
   url: (slug: string) => string;
   icon: Icon;
   exact?: boolean;
-  module?: "pos" | "accounting";
+  module?: "pos" | "accounting" | "whatsapp";
   requiredPermission?: string;
 };
 
@@ -38,6 +40,12 @@ const configNavItems: ConfigNavItem[] = [
     url: (slug: string) => `/org/${slug}/configuracion`,
     icon: BuildingIcon,
     exact: true,
+    requiredPermission: ADMIN_PERMISSION,
+  },
+  {
+    title: "Depósitos",
+    url: (slug: string) => `/org/${slug}/configuracion/depositos`,
+    icon: WarehouseIcon,
     requiredPermission: ADMIN_PERMISSION,
   },
   {
@@ -122,6 +130,13 @@ const configNavItems: ConfigNavItem[] = [
     requiredPermission: ADMIN_PERMISSION,
   },
   {
+    title: "WhatsApp",
+    url: (slug: string) => `/org/${slug}/configuracion/whatsapp`,
+    icon: WhatsappLogoIcon,
+    module: "whatsapp",
+    requiredPermission: "whatsapp.configure",
+  },
+  {
     title: "Emails de factura",
     url: (slug: string) => `/org/${slug}/configuracion/emails-de-factura`,
     icon: EnvelopeSimpleIcon,
@@ -133,12 +148,14 @@ type ConfigurationNavProps = {
   orgSlug: string;
   posEnabled: boolean;
   accountingEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export function ConfigurationNav({
   orgSlug,
   posEnabled,
   accountingEnabled,
+  whatsappEnabled,
 }: ConfigurationNavProps) {
   const pathname = usePathname();
   const { can } = usePermissions();
@@ -146,6 +163,7 @@ export function ConfigurationNav({
     wholesale_enabled: true,
     pos_enabled: posEnabled,
     accounting_enabled: accountingEnabled,
+    whatsapp_enabled: whatsappEnabled,
   };
 
   return (

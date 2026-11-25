@@ -103,6 +103,7 @@ export type ReceivePurchaseActionInput = {
   orgSlug: string;
   purchaseOrderId: string;
   receiptId: string;
+  warehouseId?: string;
   closePurchase: boolean;
   receivedItems: ReceivedItemWithLotsInput[];
 };

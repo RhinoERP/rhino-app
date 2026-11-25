@@ -7,6 +7,7 @@ import { SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { StockReentryFallbackDialog } from "@/components/products/stock-reentry-fallback-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -179,6 +180,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const queryClient = useQueryClient();
   const deletePreSaleMutation = useDeletePreSale(orgSlug);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -222,7 +224,8 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const rawSaleStatus = String(sale.status);
   const canManageSale = sale.access?.canManage ?? false;
-  const canDispatchSale = sale.status === "CONFIRMED";
+  const canDispatchSale =
+    sale.status === "CONFIRMED" && !orgSettings?.remittance_fiscal_enabled;
   const canDeliverSale = sale.status === "DISPATCH";
   const canReturnProducts =
     canManageSale &&
@@ -234,14 +237,22 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const canShowDeleteAction =
     canManageSale && (canDeletePreSale || isCancelledSale);
 
-  const handleCancelSale = async () => {
+  const handleCancelSale = async (allowDefaultFallback = false) => {
     setCancelError(null);
     setIsCanceling(true);
 
     try {
-      const result = await cancelSaleAction(orgSlug, sale.id);
+      const result = await cancelSaleAction(
+        orgSlug,
+        sale.id,
+        allowDefaultFallback
+      );
 
       if (!result.success) {
+        if (result.requiresDefaultFallback) {
+          setFallbackOpen(true);
+          return;
+        }
         setCancelError(result.error ?? "No se pudo cancelar la venta");
         return;
       }
@@ -387,6 +398,15 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
       </div>
 
       <Dialog onOpenChange={setShowCancelDialog} open={showCancelDialog}>
+        <StockReentryFallbackDialog
+          onConfirm={() => {
+            setFallbackOpen(false);
+            return handleCancelSale(true);
+          }}
+          onOpenChange={setFallbackOpen}
+          open={fallbackOpen}
+          pending={isCanceling}
+        />
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Cancelar venta</DialogTitle>
@@ -413,7 +433,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
             </Button>
             <Button
               disabled={isCanceling}
-              onClick={handleCancelSale}
+              onClick={() => handleCancelSale()}
               type="button"
               variant="destructive"
             >

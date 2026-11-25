@@ -55,6 +55,7 @@ type CommissionRow = {
   sales_order_id: string;
   base_commission_rate: number;
   extra_commission_rate: number;
+  supplier_commission_rate: number;
   commission_amount: number;
   paid_amount: number;
   created_at: string;
@@ -246,7 +247,12 @@ function createSaleFromRow(
 ): CommissionSale {
   const saleData = Array.isArray(row.sale) ? row.sale[0] : row.sale;
   const subTotal = saleData?.sub_total ?? 0;
-  const commissionRate = row.base_commission_rate + row.extra_commission_rate;
+  const commissionRate = Math.max(
+    0,
+    row.base_commission_rate +
+      row.extra_commission_rate +
+      row.supplier_commission_rate
+  );
   return {
     id: row.sales_order_id,
     saleNumber: saleData?.sale_number ?? null,
@@ -420,7 +426,7 @@ export async function getCommissionsPaginated(
     .from("commissions")
     .select(
       `id, user_id, sales_order_id, base_commission_rate, extra_commission_rate,
-       commission_amount, paid_amount, created_at`
+       supplier_commission_rate, commission_amount, paid_amount, created_at`
     )
     .eq("organization_id", org.id)
     .in("user_id", pageUserIds)

@@ -40,7 +40,9 @@ function mapDirectSaleToTicketData(
 ): TicketSaleData {
   const items = sale.items.map((item) => ({
     quantity: Number(item.quantity ?? 0),
-    product: item.product?.name ?? item.product?.sku ?? "Producto",
+    product: item.variant
+      ? `${item.product?.name ?? item.product?.sku ?? "Producto"} — ${item.variant.color} / ${item.variant.talle}`
+      : (item.product?.name ?? item.product?.sku ?? "Producto"),
     unitPrice: Number(item.unit_price ?? 0),
     subtotal: Number(item.subtotal ?? 0),
     quantityKind: resolveTicketQuantityKind(item.product?.unitOfMeasure),

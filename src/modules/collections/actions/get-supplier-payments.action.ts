@@ -2,6 +2,7 @@
 
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getPayableInvoiceDocuments } from "@/modules/collections/service/payable-documents.service";
 import { ensureCollectionsRead } from "@/modules/collections/utils/permissions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -19,6 +20,8 @@ export type SupplierPaymentEntry = {
   payment_group_id: string | null;
   purchase_number: number | null;
   purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
+  invoice_reference?: string | null;
 };
 
 type SupplierPaymentsInput = {
@@ -112,6 +115,10 @@ const normalizePaymentRow = (
       typeof account?.purchase_order_id === "string"
         ? account.purchase_order_id
         : null,
+    supplier_invoice_id:
+      typeof account?.supplier_invoice_id === "string"
+        ? account.supplier_invoice_id
+        : null,
   };
 };
 
@@ -123,6 +130,41 @@ function normalizePaymentRows(
   }
 
   return rows.map(normalizePaymentRow);
+}
+
+async function attachInvoiceReferences(
+  payments: SupplierPaymentEntry[],
+  orgId: string
+): Promise<void> {
+  if (!payments.some((payment) => payment.supplier_invoice_id)) {
+    return;
+  }
+  const documents = await getPayableInvoiceDocuments(
+    await createClient(),
+    orgId,
+    payments.flatMap((payment) =>
+      payment.supplier_invoice_id && payment.account_payable_id
+        ? [payment.account_payable_id]
+        : []
+    )
+  );
+  const byAP = new Map(
+    documents.map((document) => [document.account_payable_id, document])
+  );
+  for (const payment of payments) {
+    const document = payment.account_payable_id
+      ? byAP.get(payment.account_payable_id)
+      : null;
+    if (document) {
+      payment.invoice_reference = [
+        document.invoice_type,
+        document.point_of_sale,
+        document.invoice_number,
+      ]
+        .filter(Boolean)
+        .join("-");
+    }
+  }
 }
 
 export async function getSupplierPaymentsAction(
@@ -157,6 +199,7 @@ export async function getSupplierPaymentsAction(
         accounts_payable!inner(
           supplier_id,
           purchase_order_id,
+          supplier_invoice_id,
           currency,
           purchase_order:purchase_orders(purchase_number)
         )
@@ -174,6 +217,7 @@ export async function getSupplierPaymentsAction(
     }
 
     const payments = normalizePaymentRows(data as Record<string, unknown>[]);
+    await attachInvoiceReferences(payments, org.id);
 
     return {
       success: true,

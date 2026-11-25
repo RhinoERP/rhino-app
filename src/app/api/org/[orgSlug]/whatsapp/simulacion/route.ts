@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { getWhatsAppSandboxAccess } from "@/modules/whatsapp/server/access";
 import { executeCommercialTool } from "@/modules/whatsapp/server/commercial-tools";
+import { inboxJson, inboxResponse } from "@/modules/whatsapp/server/inbox";
+import { assertWhatsAppOrderSchema } from "@/modules/whatsapp/server/order-schema";
 import {
   createLocalSimulatorSession,
   getSimulationMessages,
@@ -21,6 +22,11 @@ import {
   runCommercialModel,
   type ToolCallAudit,
 } from "../../../../../../../services/whatsapp-agent/src/agent-core";
+import {
+  claimJob,
+  executeJob,
+  workerDatabaseReady,
+} from "../../../../../../../services/whatsapp-agent/src/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,17 +43,26 @@ const stateSchema = z
 const requestSchema = z
   .object({
     message: z.string().trim().min(1).max(2000).optional(),
+    sourceMessageId: z.string().uuid().optional(),
     resume: z.boolean().optional(),
+    expectedControlVersion: z.number().int().nonnegative().optional(),
     customerId: z.string().uuid().optional(),
     priceListId: z.string().uuid().optional(),
     state: stateSchema.optional(),
   })
   .strict()
   .refine(
-    (input) => (input.resume ? Boolean(input.state) : Boolean(input.message)),
+    (input) =>
+      input.resume
+        ? Boolean(input.state) &&
+          input.expectedControlVersion !== undefined &&
+          !input.message &&
+          !input.sourceMessageId
+        : Boolean(input.message) !== Boolean(input.sourceMessageId) &&
+          (!input.sourceMessageId || Boolean(input.state)),
     {
       message:
-        "Para reactivar elegí una sesión; para conversar escribí un mensaje",
+        "Para reactivar elegí una sesión y su versión de control; para conversar escribí un mensaje",
     }
   );
 
@@ -73,45 +88,30 @@ async function requestModel(
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    const rawError = await response.text();
-    let message = "El modelo no pudo procesar la consulta";
-    try {
-      const payload = JSON.parse(rawError) as {
-        error?: { message?: string; code?: string };
-      };
-      message = payload.error?.message?.trim() || message;
-      if (payload.error?.code) {
-        message = `${message} (${payload.error.code})`;
-      }
-    } catch {
-      // Conserva un mensaje seguro si OpenAI no devuelve JSON.
-    }
-    throw new Error(`${message} [OpenAI ${response.status}]`);
+    throw new Error("El modelo no pudo procesar la consulta");
   }
   return (await response.json()) as ModelResponse;
 }
 
-async function currentActorId(): Promise<string> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) {
-    throw new Error("Iniciá sesión para usar el simulador");
-  }
-  return data.user.id;
-}
-
-async function resumeSimulation(state: SimulationState, actorId: string) {
-  const { error } = await createWhatsAppAdminClient().rpc(
-    "set_whatsapp_automation",
+async function resumeSimulation(
+  state: SimulationState,
+  actorId: string,
+  expectedControlVersion: number | undefined
+) {
+  const { data, error } = await createWhatsAppAdminClient().rpc(
+    "control_whatsapp_conversation",
     {
       p_organization_id: state.organizationId,
       p_conversation_id: state.conversationId,
-      p_enabled: true,
       p_actor_id: actorId,
+      p_operation: "RESUME",
+      p_expected_control_version: expectedControlVersion,
     }
   );
-  if (error) {
-    throw new Error(error.message);
+  if (error || data?.success !== true) {
+    throw new Error(
+      "No se pudo reactivar: actualizá el estado y verificá que no haya envíos sin resolver."
+    );
   }
   return {
     state,
@@ -121,45 +121,23 @@ async function resumeSimulation(state: SimulationState, actorId: string) {
   };
 }
 
-async function runSimulationTurn(params: {
-  orgSlug: string;
+type SimulationTurnParams = {
+  actorId: string;
+  canManageSales: boolean;
   organization: { id: string; name: string };
   input: z.infer<typeof requestSchema>;
-}) {
-  const actorId = await currentActorId();
-  let state: SimulationState;
-  if (params.input.state) {
-    state = params.input.state;
-    if (state.organizationId !== params.organization.id) {
-      throw new Error("La sesión de simulación pertenece a otra organización");
-    }
-    await verifyLocalSimulatorSession(state, actorId);
-  } else {
-    if (!(params.input.customerId && params.input.priceListId)) {
-      throw new Error("Elegí un cliente y una lista de precios para empezar");
-    }
-    state = await createLocalSimulatorSession({
-      organizationId: params.organization.id,
-      actorId,
-      customerId: params.input.customerId,
-      priceListId: params.input.priceListId,
-    });
-  }
+};
 
-  if (params.input.resume) {
-    return resumeSimulation(state, actorId);
-  }
-  if (!params.input.message) {
-    throw new Error("Escribí un mensaje para continuar");
-  }
-  const sourceMessageId = await recordSimulationMessage({
-    state,
-    direction: "INBOUND",
-    content: params.input.message,
-  });
+async function runSimulationModel(
+  params: SimulationTurnParams,
+  state: SimulationState,
+  sourceMessageId: string,
+  leaseContext: { jobId?: string; leaseToken?: string } = {}
+) {
   const messages: ConversationMessage[] = await getSimulationMessages(state);
   const audit: ToolCallAudit[] = [];
   const context = {
+    ...leaseContext,
     organizationId: params.organization.id,
     integrationId: state.integrationId,
     conversationId: state.conversationId,
@@ -170,7 +148,7 @@ async function runSimulationTurn(params: {
   if (before.conversationStatus !== "ACTIVE") {
     return {
       response:
-        "La conversación está en atención humana. Reactivá el bot desde Rhinos para continuar.",
+        "Una persona del equipo comercial va a continuar la atención por este chat.",
       state,
       snapshot: before,
       toolCalls: audit,
@@ -185,8 +163,8 @@ async function runSimulationTurn(params: {
     requestModel,
     callTool: async (_context, call: ModelFunctionCall) => {
       try {
-        if (call.name === "create_pre_sale") {
-          await ensure("sales.manage", params.orgSlug);
+        if (call.name === "create_pre_sale" && !params.canManageSales) {
+          return { error: "Necesitás el permiso sales.manage" };
         }
         return await executeCommercialTool(
           context,
@@ -214,6 +192,7 @@ async function runSimulationTurn(params: {
   }
 
   await recordSimulationMessage({
+    ...leaseContext,
     state,
     direction: "OUTBOUND",
     content: text,
@@ -224,95 +203,161 @@ async function runSimulationTurn(params: {
     response: text,
     state,
     snapshot: await getSimulationSnapshot(state),
-    toolCalls: audit.map(({ name, arguments: args }) => ({
-      name,
-      arguments: args,
-    })),
-    usage: response.usage ?? null,
+    toolCalls: audit.map(({ name }) => ({ name })),
     simulated: true,
   };
 }
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ orgSlug: string }> }
-) {
-  const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
-  const organization = await getOrganizationBySlug(orgSlug);
-  if (!organization) {
-    return NextResponse.json(
-      { error: "Organización no encontrada" },
-      { status: 404 }
-    );
+async function resolveSimulationState(
+  params: SimulationTurnParams,
+  actorId: string
+): Promise<SimulationState> {
+  let state: SimulationState;
+  if (params.input.state) {
+    state = params.input.state;
+    if (state.organizationId !== params.organization.id) {
+      throw new Error("La sesión de simulación pertenece a otra organización");
+    }
+    await verifyLocalSimulatorSession(state, actorId);
+  } else {
+    if (!(params.input.customerId && params.input.priceListId)) {
+      throw new Error("Elegí un cliente y una lista de precios para empezar");
+    }
+    state = await createLocalSimulatorSession({
+      organizationId: params.organization.id,
+      actorId,
+      customerId: params.input.customerId,
+      priceListId: params.input.priceListId,
+    });
   }
-  try {
-    const options = await getWhatsAppSimulationOptions(organization.id);
-    return NextResponse.json(options);
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "No se pudieron cargar los datos reales de la organización",
-      },
-      { status: 422 }
-    );
-  }
+
+  return state;
 }
 
-export async function POST(
-  request: Request,
+async function runSimulationTurn(params: SimulationTurnParams) {
+  const { actorId } = params;
+  await assertWhatsAppOrderSchema();
+  const db = createWhatsAppAdminClient();
+  if (!(await workerDatabaseReady(db))) {
+    throw new Error(
+      "Falta completar la actualización de la base de datos de WhatsApp antes de iniciar la simulación."
+    );
+  }
+  const state = await resolveSimulationState(params, actorId);
+
+  if (params.input.resume) {
+    return resumeSimulation(
+      state,
+      actorId,
+      params.input.expectedControlVersion
+    );
+  }
+  const sourceMessageId =
+    params.input.sourceMessageId ||
+    (await recordSimulationMessage({
+      state,
+      direction: "INBOUND",
+      content: params.input.message || "",
+    }));
+  if (params.input.sourceMessageId) {
+    const audio = await db
+      .from("whatsapp_audio_assets")
+      .select("status")
+      .eq("message_id", sourceMessageId)
+      .eq("organization_id", state.organizationId)
+      .eq("integration_id", state.integrationId)
+      .eq("conversation_id", state.conversationId)
+      .single();
+    if (audio.error || audio.data?.status !== "SUCCEEDED") {
+      throw new Error(
+        "El audio de esta sesión todavía no tiene una transcripción válida."
+      );
+    }
+    const previous = await db
+      .from("whatsapp_messages")
+      .select("content")
+      .eq("conversation_id", state.conversationId)
+      .eq("organization_id", state.organizationId)
+      .eq("direction", "OUTBOUND")
+      .contains("payload", { sourceMessageId })
+      .limit(1)
+      .maybeSingle();
+    if (previous.error) {
+      throw new Error("No se pudo recuperar la respuesta del audio.");
+    }
+    if (previous.data?.content) {
+      return {
+        response: previous.data.content,
+        state,
+        snapshot: await getSimulationSnapshot(state),
+        toolCalls: [],
+        simulated: true,
+      };
+    }
+  }
+  const runTurn = (
+    leaseContext: { jobId?: string; leaseToken?: string } = {}
+  ) => runSimulationModel(params, state, sourceMessageId, leaseContext);
+  const pending = await db
+    .from("agent_jobs")
+    .select("id")
+    .eq("source_message_id", sourceMessageId)
+    .eq("job_type", "PROCESS_CONVERSATION")
+    .eq("execution_mode", "INLINE")
+    .single();
+  if (pending.error || !pending.data) {
+    throw new Error("Falta preparar el trabajo comercial de la conversación.");
+  }
+  const job = await claimJob(db, "PROCESS_CONVERSATION", {
+    workerId: `sandbox-commercial-${randomUUID()}`,
+    mode: "INLINE",
+    jobId: pending.data.id,
+  });
+  if (!job) {
+    throw new Error(
+      "La conversación está procesándose. Reintentá en unos segundos."
+    );
+  }
+  let result: Awaited<ReturnType<typeof runTurn>> | undefined;
+  await executeJob(db, job, async (): Promise<undefined> => {
+    result = await runTurn({ jobId: job.id, leaseToken: job.lease_token });
+  });
+  return result;
+}
+
+export function GET(
+  request: NextRequest,
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
-  const { orgSlug } = await params;
-  await ensure("whatsapp.read", orgSlug, "whatsapp_sandbox");
-  await ensure("whatsapp.manage", orgSlug, "whatsapp_sandbox");
-  const organization = await getOrganizationBySlug(orgSlug);
-  if (!organization) {
-    return NextResponse.json(
-      { error: "Organización no encontrada" },
-      { status: 404 }
-    );
-  }
-
-  let rawBody: unknown;
-  try {
-    rawBody = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "El cuerpo de la solicitud no es válido" },
-      { status: 400 }
-    );
-  }
-  const parsed = requestSchema.safeParse(rawBody);
-  if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error:
-          parsed.error.issues[0]?.message ?? "Datos de simulación no válidos",
-      },
-      { status: 400 }
-    );
-  }
-
-  try {
-    const result = await runSimulationTurn({
+  return inboxResponse(async () => {
+    const { orgSlug } = await params;
+    const { organization } = await getWhatsAppSandboxAccess(
       orgSlug,
-      organization: { id: organization.id, name: organization.name },
-      input: parsed.data,
-    });
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "No se pudo procesar la simulación",
-      },
-      { status: 422 }
+      request,
+      "whatsapp.read"
     );
-  }
+    return inboxJson(await getWhatsAppSimulationOptions(organization.id));
+  });
+}
+
+export function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ orgSlug: string }> }
+) {
+  return inboxResponse(async () => {
+    const { orgSlug } = await params;
+    const { organization, userId, hasPermission } =
+      await getWhatsAppSandboxAccess(orgSlug, request, [
+        "whatsapp.read",
+        "whatsapp.manage",
+      ]);
+    const input = requestSchema.parse(await request.json().catch(() => null));
+    const result = await runSimulationTurn({
+      actorId: userId,
+      canManageSales: hasPermission("sales.manage"),
+      organization: { id: organization.id, name: organization.name },
+      input,
+    });
+    return inboxJson(result);
+  });
 }

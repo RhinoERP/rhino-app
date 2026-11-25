@@ -31,13 +31,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { saveWhatsAppIntegrationAction } from "@/modules/whatsapp/actions/save-whatsapp-integration.action";
-import type { WhatsAppIntegrationConfigurationInput } from "@/modules/whatsapp/schemas";
+import {
+  commercialGuidanceSchema,
+  readCommercialGuidance,
+} from "@/modules/whatsapp/commercial-guidance";
+import {
+  type WhatsAppIntegrationConfigurationInput,
+  whatsappFollowUpSchema,
+} from "@/modules/whatsapp/schemas";
 import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
+  DEFAULT_WHATSAPP_FOLLOW_UP,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
   WHATSAPP_INTEGRATION_STATUSES,
+  WHATSAPP_PRICING_MODES,
   WHATSAPP_WEEKDAYS,
   type WhatsAppIntegration,
   type WhatsAppWeekday,
@@ -54,8 +64,11 @@ const formSchema = z.object({
   displayPhoneNumber: z.string().trim().max(64),
   status: z.enum(WHATSAPP_INTEGRATION_STATUSES),
   salesPriceListId: z.string(),
+  pricingMode: z.enum(WHATSAPP_PRICING_MODES),
+  allowGeneralForCustomers: z.boolean(),
   responsibleUserId: z.string(),
   handoffMessage: z.string().trim().max(1000),
+  commercialGuidance: commercialGuidanceSchema.required(),
   businessHours: z.object({
     enabled: z.boolean(),
     timezone: z.string(),
@@ -81,6 +94,7 @@ const formSchema = z.object({
   }),
   responseDelayMinMinutes: z.number().int().min(0).max(120),
   responseDelayMaxMinutes: z.number().int().min(0).max(120),
+  followUp: whatsappFollowUpSchema,
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -98,8 +112,12 @@ function toFormValues(integration: WhatsAppIntegration | null): FormValues {
     displayPhoneNumber: integration?.displayPhoneNumber ?? "",
     status: integration?.status ?? "DRAFT",
     salesPriceListId: integration?.salesPriceListId ?? NONE,
+    pricingMode: integration?.pricingMode ?? "SINGLE",
+    allowGeneralForCustomers: integration?.allowGeneralForCustomers ?? false,
     responsibleUserId: integration?.responsibleUserId ?? NONE,
     handoffMessage: integration?.handoffMessage ?? "",
+    followUp: integration?.followUp ?? DEFAULT_WHATSAPP_FOLLOW_UP,
+    commercialGuidance: readCommercialGuidance(integration?.commercialRules),
     businessHours:
       integration?.businessHours ?? DEFAULT_WHATSAPP_BUSINESS_HOURS,
     responseDelayMinMinutes:
@@ -119,14 +137,20 @@ function toIntegrationInput(
     phoneNumberId: values.phoneNumberId,
     displayPhoneNumber: values.displayPhoneNumber || null,
     status: values.status,
+    pricingMode: values.pricingMode,
+    allowGeneralForCustomers: values.allowGeneralForCustomers,
     salesPriceListId:
       values.salesPriceListId === NONE ? null : values.salesPriceListId,
     responsibleUserId:
       values.responsibleUserId === NONE ? null : values.responsibleUserId,
     businessHours: values.businessHours,
+    followUp: values.followUp,
     responseDelayMinMinutes: values.responseDelayMinMinutes,
     responseDelayMaxMinutes: values.responseDelayMaxMinutes,
-    commercialRules: integration?.commercialRules ?? {},
+    commercialRules: {
+      ...integration?.commercialRules,
+      ...values.commercialGuidance,
+    },
     handoffMessage: values.handoffMessage || null,
   };
 }
@@ -142,7 +166,9 @@ export function WhatsAppIntegrationConfigForm({
     resolver: zodResolver(formSchema),
     defaultValues: toFormValues(integration),
   });
+  const pricingMode = form.watch("pricingMode");
   const businessHoursEnabled = form.watch("businessHours.enabled");
+  const followUpEnabled = form.watch("followUp.enabled");
   const weeklySchedule = form.watch("businessHours.weeklySchedule");
 
   function onSubmit(values: FormValues) {
@@ -233,10 +259,69 @@ export function WhatsAppIntegrationConfigForm({
               />
               <FormField
                 control={form.control}
+                name="pricingMode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Precios y atención automática</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="SINGLE">Lista única</SelectItem>
+                        <SelectItem value="CUSTOMER_OR_GENERAL">
+                          Listas por cliente con lista general para contactos
+                          nuevos
+                        </SelectItem>
+                        <SelectItem value="REGISTERED_ONLY">
+                          Solo clientes registrados
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {pricingMode === "REGISTERED_ONLY" && (
+                      <FormDescription>
+                        Los números desconocidos quedan en la bandeja sin
+                        respuesta automática.
+                      </FormDescription>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {pricingMode !== "SINGLE" && (
+                <FormField
+                  control={form.control}
+                  name="allowGeneralForCustomers"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex items-center gap-2">
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormLabel>
+                          Usar lista general para clientes sin lista asignada
+                        </FormLabel>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              <FormField
+                control={form.control}
                 name="salesPriceListId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Lista de precios</FormLabel>
+                    <FormLabel>
+                      {pricingMode === "SINGLE"
+                        ? "Lista de precios"
+                        : "Lista general"}
+                    </FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -282,6 +367,87 @@ export function WhatsAppIntegrationConfigForm({
                 )}
               />
             </div>
+
+            <section className="space-y-4 rounded-lg border p-4">
+              <div>
+                <h2 className="font-medium">
+                  Información para vender y coordinar
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  El asistente usa estas condiciones para orientar al cliente.
+                  El equipo comercial reconfirma la entrega y el pedido.
+                </p>
+              </div>
+              {(
+                [
+                  {
+                    name: "deliveryPolicy",
+                    label: "Entregas",
+                    placeholder:
+                      "Zonas y días de reparto, horario límite para pedir, plazos orientativos, mínimos y costo de envío.",
+                  },
+                  {
+                    name: "pickupPolicy",
+                    label: "Retiro de mercadería",
+                    placeholder:
+                      "Dirección, días, horarios y condiciones para retirar.",
+                  },
+                  {
+                    name: "salesGuidance",
+                    label: "Criterio comercial y recomendaciones",
+                    placeholder:
+                      "Características, usos, equivalencias y complementos validados por el equipo. Indicá producto o marca. Ejemplo: Holanda y Pategrás pueden ofrecerse como alternativas entre sí.",
+                  },
+                ] as const
+              ).map((input) => (
+                <FormField
+                  control={form.control}
+                  key={input.name}
+                  name={`commercialGuidance.${input.name}`}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{input.label}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={input.placeholder}
+                          rows={3}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ))}
+            </section>
+
+            <FormField
+              control={form.control}
+              name="commercialGuidance.responseCapitalization"
+              render={({ field }) => (
+                <FormItem className="max-w-md">
+                  <FormLabel>Estilo de escritura del asistente</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="STANDARD">
+                        Mayúsculas habituales
+                      </SelectItem>
+                      <SelectItem value="LOWERCASE">Minúsculas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Define cómo escribe el asistente en WhatsApp y en el
+                    simulador.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}
@@ -416,6 +582,82 @@ export function WhatsAppIntegrationConfigForm({
                   )}
                 />
               </div>
+            </section>
+
+            <section className="space-y-4 rounded-lg border p-4">
+              <div>
+                <h2 className="font-medium">Seguimiento automático</h2>
+                <p className="text-muted-foreground text-sm">
+                  Si el cliente deja de responder, el asistente puede escribirle
+                  una sola vez para retomar la consulta. Respeta el horario de
+                  atención y la ventana de 24 horas desde el último mensaje del
+                  cliente.
+                </p>
+              </div>
+              <FormField
+                control={form.control}
+                name="followUp.enabled"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between gap-3">
+                    <FormLabel>
+                      Activar seguimiento por falta de respuesta
+                    </FormLabel>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="followUp.delayMinutes"
+                render={({ field }) => (
+                  <FormItem className="max-w-xs">
+                    <FormLabel>Tiempo de espera (minutos)</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        disabled={!followUpEnabled}
+                        max={1380}
+                        min={1}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                        type="number"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Desde la última respuesta del bot. Los cambios se aplican
+                      a nuevos seguimientos.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="followUp.instructions"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Instrucciones para el seguimiento</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        {...field}
+                        disabled={!followUpEnabled}
+                        maxLength={2000}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      La IA adapta el mensaje al contexto. No insiste después de
+                      un rechazo o despedida ni durante la atención humana.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </section>
 
             <div className="flex justify-end">

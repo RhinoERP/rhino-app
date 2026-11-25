@@ -1,7 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import type {
   DirectSaleConfig,
   Organization,
@@ -267,9 +267,10 @@ export async function getTotalUniqueUsers(): Promise<number> {
  * Gets organization by slug
  */
 export async function getOrganizationBySlug(
-  slug: string
+  slug: string,
+  client?: SupabaseServerClient
 ): Promise<Organization | null> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
 
   const { data, error } = await supabase
     .from("organizations")
@@ -555,13 +556,9 @@ export async function resolveUserRedirect(): Promise<string> {
     .eq("is_active", true);
 
   if (membershipsError) {
-    console.error("[auth.redirect] Membership lookup failed", {
-      code: membershipsError.code,
-      message: membershipsError.message,
-      details: membershipsError.details,
-      hint: membershipsError.hint,
-    });
-    return "/auth/login";
+    throw new Error(
+      `Error fetching user organizations: ${membershipsError.message}`
+    );
   }
 
   if (!memberships || memberships.length === 0) {
@@ -685,8 +682,9 @@ export async function getOrganizationLayoutData(
   ]);
 
   if (organizationsResult.error) {
-    console.error("Error fetching organizations", organizationsResult.error);
-    return null;
+    throw new Error(
+      `Error fetching user organizations: ${organizationsResult.error.message}`
+    );
   }
 
   const memberships =

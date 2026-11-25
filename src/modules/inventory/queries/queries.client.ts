@@ -6,13 +6,20 @@ import {
 
 export const productVariantsClientQueryOptions = (
   orgSlug: string,
-  productId: string
+  productId: string,
+  warehouseId?: string
 ) => ({
-  queryKey: productVariantsQueryKey(orgSlug, productId),
+  queryKey: productVariantsQueryKey(orgSlug, productId, warehouseId),
   queryFn: async (): Promise<ProductVariantWithStock[]> => {
-    const res = await fetch(`/api/org/${orgSlug}/stock/${productId}/variants`);
+    const search = warehouseId
+      ? `?warehouseId=${encodeURIComponent(warehouseId)}`
+      : "";
+    const res = await fetch(
+      `/api/org/${orgSlug}/stock/${productId}/variants${search}`
+    );
     if (!res.ok) {
-      throw new Error("Error al cargar variantes");
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error ?? "Error al cargar variantes");
     }
     return res.json();
   },
@@ -21,12 +28,12 @@ export const productVariantsClientQueryOptions = (
 export const stockMovementsByVariantClientQueryOptions = (
   orgSlug: string,
   productId: string,
-  lotId: string
+  variantId: string
 ) => ({
-  queryKey: stockMovementsByVariantQueryKey(orgSlug, productId, lotId),
+  queryKey: stockMovementsByVariantQueryKey(orgSlug, productId, variantId),
   queryFn: async (): Promise<StockMovementWithLot[]> => {
     const res = await fetch(
-      `/api/org/${orgSlug}/stock/${productId}/movements?lotId=${encodeURIComponent(lotId)}`
+      `/api/org/${orgSlug}/stock/${productId}/movements?variantId=${encodeURIComponent(variantId)}`
     );
     if (!res.ok) {
       throw new Error("Error al cargar movimientos");

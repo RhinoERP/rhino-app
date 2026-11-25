@@ -1,5 +1,6 @@
 "use server";
 
+import { isStockReentryFallbackRequired } from "@/modules/inventory/utils/stock-reentry";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateSaleReturnInput,
@@ -9,7 +10,7 @@ import {
 
 type ActionResult =
   | { success: true; data: CreateSaleReturnResult }
-  | { success: false; error: string };
+  | { success: false; error: string; requiresDefaultFallback?: boolean };
 
 export async function createSaleReturnAction(
   input: CreateSaleReturnInput
@@ -21,6 +22,7 @@ export async function createSaleReturnAction(
   } catch (error) {
     return {
       success: false,
+      requiresDefaultFallback: isStockReentryFallbackRequired(error),
       error:
         error instanceof Error
           ? error.message

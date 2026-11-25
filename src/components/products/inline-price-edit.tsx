@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { formatMarginForEdit } from "@/modules/inventory/utils/price-calculations";
 
 type InlinePriceEditProps = {
   value: number | null;
@@ -16,6 +17,7 @@ type InlinePriceEditProps = {
 
 export function InlinePriceEdit({
   value,
+  costPrice,
   onSave,
   onDelete,
   disabled = false,
@@ -25,6 +27,8 @@ export function InlinePriceEdit({
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const initialInputValueRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const formattedValue = (() => {
@@ -47,7 +51,15 @@ export function InlinePriceEdit({
     if (disabled || saving) {
       return;
     }
-    setInputValue(value != null ? String(value) : "");
+    let initialValue = "";
+    if (value != null) {
+      initialValue =
+        type === "percentage"
+          ? formatMarginForEdit(value, costPrice)
+          : String(value);
+    }
+    initialInputValueRef.current = initialValue;
+    setInputValue(initialValue);
     setEditing(true);
   };
 
@@ -56,7 +68,15 @@ export function InlinePriceEdit({
     setInputValue("");
   }, []);
 
+  const saveValue = (parsed: number) =>
+    parsed === 0 && onDelete && type !== "percentage"
+      ? onDelete()
+      : onSave(parsed);
+
   const handleSave = async () => {
+    if (savingRef.current) {
+      return;
+    }
     const normalized = inputValue.replace(",", ".");
     const parsed = Number.parseFloat(normalized);
 
@@ -65,27 +85,22 @@ export function InlinePriceEdit({
       return;
     }
 
-    if (parsed === 0 && onDelete && type !== "percentage") {
-      setSaving(true);
-      try {
-        const result = await onDelete();
-        if (!result.success) {
-          return;
-        }
-        setEditing(false);
-      } finally {
-        setSaving(false);
-      }
+    if (type === "percentage" && inputValue === initialInputValueRef.current) {
+      handleCancel();
       return;
     }
 
+    savingRef.current = true;
     setSaving(true);
     try {
-      const result = await onSave(parsed);
+      const result = await saveValue(parsed);
       if (result.success) {
         setEditing(false);
       }
+    } catch {
+      // La mutación muestra el error; conservar el input para poder corregirlo.
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

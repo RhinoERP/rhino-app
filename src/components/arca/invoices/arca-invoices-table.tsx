@@ -47,6 +47,9 @@ function buildCustomerOptions(
   const customersMap = new Map<string, string>();
 
   for (const invoice of invoices) {
+    if (!invoice.customer.id) {
+      continue;
+    }
     const name =
       invoice.customer.fantasy_name ||
       invoice.customer.business_name ||

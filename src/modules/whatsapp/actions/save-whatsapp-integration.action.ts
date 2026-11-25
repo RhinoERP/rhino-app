@@ -44,6 +44,7 @@ export async function saveWhatsAppIntegrationAction(
     );
 
     revalidatePath(`/org/${orgSlug}/whatsapp/configuracion`);
+    revalidatePath(`/org/${orgSlug}/configuracion/whatsapp`);
     revalidatePath(`/org/${orgSlug}/configuracion`);
 
     return { success: true, data };

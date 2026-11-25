@@ -4,10 +4,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { normalizeData, parseExcelFile } from "@/lib/excel-parser";
 import { createClient } from "@/lib/supabase/server";
+import { createProductForOrg } from "@/modules/inventory/service/inventory.service";
+import { setWarehouseStockBalance } from "@/modules/inventory/service/stock-maintenance.service";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import {
-  createProductForOrg,
-  createStockMovementForOrg,
-} from "@/modules/inventory/service/inventory.service";
+  resolveProductImportSupplier,
+  resolveProductImportVariants,
+} from "@/modules/inventory/utils/product-import-validation";
+import {
+  resolveImportVariant,
+  resolveImportWarehouse,
+} from "@/modules/inventory/utils/stock-import-identity";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
@@ -28,7 +35,6 @@ type Tax = { id: string; name: string };
 const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
 const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
-const WHITESPACE_REGEX = /\s+/;
 const UNIT_MAP: Record<
   string,
   Database["public"]["Enums"]["unit_of_measure_type"]
@@ -86,19 +92,6 @@ function findCategoryId(
   const normalizedName = categoryName.trim().toLowerCase();
   return categories?.find(
     (cat) => cat.name.trim().toLowerCase() === normalizedName
-  )?.id;
-}
-
-function findSupplierId(
-  supplierName: string | undefined,
-  suppliers: Supplier[] | null
-): string | undefined {
-  if (!supplierName || typeof supplierName !== "string") {
-    return;
-  }
-  const normalizedName = supplierName.trim().toLowerCase();
-  return suppliers?.find(
-    (sup) => sup.name.trim().toLowerCase() === normalizedName
   )?.id;
 }
 
@@ -210,10 +203,11 @@ async function processProductRow(
     row.category as string | undefined,
     categories
   );
-  const supplier_id = findSupplierId(
-    row.supplier as string | undefined,
-    suppliers
-  );
+  const supplier = resolveProductImportSupplier(row.supplier, suppliers ?? []);
+  if ("error" in supplier) {
+    return { success: false, error: `Fila ${index + 3}: ${supplier.error}` };
+  }
+  const supplier_id = supplier.supplierId;
 
   const skuLower = String(row.sku).toLowerCase();
   const combinationKey = `${supplier_id || "null"}:${skuLower}`;
@@ -280,46 +274,11 @@ async function processProductRow(
   const weight_per_unit = parseNumericField(row.weight_per_unit);
   const unit_of_measure = getUnitOfMeasure(row.unit);
 
-  const tallesRaw = row.talles ? String(row.talles).trim() : "";
-  const coloresRaw = row.colores ? String(row.colores).trim() : "";
-  const hasVariantInput = tallesRaw.length > 0 || coloresRaw.length > 0;
-
-  if (hasVariantInput && (tallesRaw.length === 0 || coloresRaw.length === 0)) {
-    return {
-      success: false,
-      error: `Fila ${index + 3}: Si el producto tiene variantes, debe especificar talles y colores`,
-    };
+  const variants = resolveProductImportVariants(row.talles, row.colores);
+  if ("error" in variants) {
+    return { success: false, error: `Fila ${index + 3}: ${variants.error}` };
   }
-
-  let talles: string[] = [];
-  let colores: string[] = [];
-
-  if (hasVariantInput) {
-    talles = [
-      ...new Set(
-        tallesRaw
-          .split(",")
-          .map((t) => t.trim().toUpperCase())
-          .filter(Boolean)
-      ),
-    ];
-
-    colores = [
-      ...new Set(
-        coloresRaw
-          .split(",")
-          .map((c) =>
-            c
-              .trim()
-              .split(WHITESPACE_REGEX)
-              .filter(Boolean)
-              .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-              .join(" ")
-          )
-          .filter(Boolean)
-      ),
-    ];
-  }
+  const { hasVariants: hasVariantInput, talles, colores } = variants;
 
   let tax_ids: string[] | undefined;
 
@@ -377,46 +336,81 @@ async function processProductRow(
   return { success: true };
 }
 
+async function fetchProductImportReferencePages<Row>(
+  label: string,
+  fetchPage: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: Row[] | null; error: unknown }>
+): Promise<Row[]> {
+  const rows: Row[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const result = await fetchPage(offset, offset + 999);
+    if (result.error || !result.data) {
+      throw new Error(
+        `No se pudieron consultar ${label} para validar la importación`
+      );
+    }
+    rows.push(...result.data);
+    if (result.data.length < 1000) {
+      return rows;
+    }
+  }
+}
+
 async function prepareProductImportData(orgId: string) {
   const supabase = await createClient();
 
-  const [categoriesResult, suppliersResult, productsResult, taxesResult] =
-    await Promise.all([
+  const [categories, suppliers, products, taxes] = await Promise.all([
+    fetchProductImportReferencePages("las categorías", (from, to) =>
       supabase
         .from("categories")
         .select("id, name")
-        .eq("organization_id", orgId),
+        .eq("organization_id", orgId)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchProductImportReferencePages("los proveedores", (from, to) =>
       supabase
         .from("suppliers")
         .select("id, name")
-        .eq("organization_id", orgId),
+        .eq("organization_id", orgId)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchProductImportReferencePages("los productos", (from, to) =>
       supabase
         .from("products")
         .select("sku, supplier_id, barcode")
-        .eq("organization_id", orgId),
+        .eq("organization_id", orgId)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchProductImportReferencePages("los impuestos", (from, to) =>
       supabase
         .from("taxes")
         .select("id, name")
         .eq("organization_id", orgId)
-        .eq("is_active", true),
-    ]);
+        .eq("is_active", true)
+        .order("id")
+        .range(from, to)
+    ),
+  ]);
 
   const existingCombinations = new Set(
-    productsResult.data?.map(
-      (p) => `${p.supplier_id || "null"}:${p.sku.toLowerCase()}`
-    ) || []
+    products.map((p) => `${p.supplier_id || "null"}:${p.sku.toLowerCase()}`)
   );
 
   const existingBarcodes = new Set(
-    (productsResult.data ?? [])
+    products
       .map((product) => normalizeBarcodeKey(product.barcode))
       .filter((barcode): barcode is string => Boolean(barcode))
   );
 
   return {
-    categories: categoriesResult.data,
-    suppliers: suppliersResult.data,
-    taxes: taxesResult.data ?? [],
+    categories,
+    suppliers,
+    taxes,
     existingCombinations,
     existingBarcodes,
   };
@@ -488,6 +482,7 @@ export async function importProducts(
   formData: FormData,
   orgSlug: string
 ): Promise<ImportResult> {
+  await ensure("inventory.manage", orgSlug);
   try {
     const file = formData.get("file") as File;
 
@@ -527,10 +522,13 @@ export async function importProducts(
       existingBarcodes,
     });
 
-    revalidatePath(`/org/${orgSlug}/products`);
+    if (imported > 0) {
+      revalidatePath(`/org/${orgSlug}/stock`);
+    }
+    const rejected = errors.length + skipped.length;
     return {
-      success: true,
-      message: `Se importaron ${imported} productos`,
+      success: imported > 0,
+      message: `Se importaron ${imported} de ${normalizedData.length} productos. Filas no importadas: ${rejected}.`,
       imported,
       errors: [...errors, ...skipped],
     };
@@ -549,7 +547,7 @@ type ProcessStockRowOptions = {
   suppliers: Supplier[] | null;
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgSlug: string;
-  createdBy: string;
+  warehouses: Array<{ id: string; name: string }>;
 };
 
 const parseNumberValue = (value: unknown): number | null => {
@@ -569,6 +567,7 @@ const parseNumberValue = (value: unknown): number | null => {
 
 type StockProduct = {
   id: string;
+  has_variants: boolean;
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   tracks_stock_units: boolean | null;
 };
@@ -591,12 +590,6 @@ function getStockRowRequiredError(
   if (!row.supplier) {
     return getRequiredColumnErrorMessage("Proveedor", index);
   }
-  if (!row.lot_number) {
-    return getRequiredColumnErrorMessage("Número de lote", index);
-  }
-  if (!row.expiration_date) {
-    return getRequiredColumnErrorMessage("Fecha de vencimiento", index);
-  }
   return null;
 }
 
@@ -608,11 +601,10 @@ function findSupplierByName(
     return null;
   }
   const normalizedSupplier = String(supplierValue).trim().toLowerCase();
-  return (
-    suppliers.find(
-      (supplier) => supplier.name.trim().toLowerCase() === normalizedSupplier
-    ) ?? null
+  const matches = suppliers.filter(
+    (supplier) => supplier.name.trim().toLowerCase() === normalizedSupplier
   );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 async function getProductForStockRow(options: {
@@ -625,7 +617,7 @@ async function getProductForStockRow(options: {
   const { supabase, orgId, supplierId, sku, index } = options;
   const { data: products, error } = await supabase
     .from("products")
-    .select("id, unit_of_measure, tracks_stock_units")
+    .select("id, has_variants, unit_of_measure, tracks_stock_units")
     .eq("organization_id", orgId)
     .eq("supplier_id", supplierId)
     .ilike("sku", sku);
@@ -642,7 +634,7 @@ async function getProductForStockRow(options: {
     };
   }
 
-  return { product: products[0] as StockProduct };
+  return { product: products[0] };
 }
 
 function getStockQuantityDetails(
@@ -782,123 +774,83 @@ function normalizeExpirationDate(value: unknown): string {
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: import upsert keeps stock and its audit movement in one flow
 async function upsertProductLot(options: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgId: string;
+  warehouseId: string;
   productId: string;
+  productVariantId: string | null;
+  lotId?: string;
   lotNumber: string;
   quantity: number;
-  expirationDate: string;
-  tracksUnits: boolean;
+  expirationDate: string | null;
   unitQuantity: number | null;
-  unitQuantityValue: number | null;
   orgSlug: string;
-  createdBy: string;
 }): Promise<{ imported: boolean }> {
-  const {
-    supabase,
-    orgId,
-    productId,
-    lotNumber,
-    quantity,
-    expirationDate,
-    tracksUnits,
-    unitQuantity,
-    unitQuantityValue,
-    orgSlug,
-    createdBy,
-  } = options;
-  const { data: existingLots, error: existingLotsError } = await supabase
+  let query = options.supabase
     .from("product_lots")
-    .select("id, quantity_available, unit_quantity_available")
-    .eq("organization_id", orgId)
-    .eq("product_id", productId)
-    .eq("lot_number", lotNumber);
-
-  if (existingLotsError) {
+    .select("id")
+    .eq("organization_id", options.orgId)
+    .eq("warehouse_id", options.warehouseId)
+    .eq("product_id", options.productId)
+    .eq("lot_number", options.lotNumber);
+  query = options.productVariantId
+    ? query.eq("product_variant_id", options.productVariantId)
+    : query.is("product_variant_id", null);
+  query = options.expirationDate
+    ? query.eq("expiration_date", options.expirationDate)
+    : query.is("expiration_date", null);
+  if (options.lotId) {
+    query = query.eq("id", options.lotId);
+  }
+  const { data: candidates, error } = await query.limit(2);
+  if (error) {
+    throw new Error(`No se pudo consultar el lote: ${error.message}`);
+  }
+  if (candidates.length > 1) {
     throw new Error(
-      `No se pudo consultar el lote existente: ${existingLotsError.message}`
+      "Lote ambiguo: indicá el ID de lote de la existencia a modificar"
     );
   }
+  await setWarehouseStockBalance({
+    ...options,
+    reason: "Importación de stock",
+    source: "IMPORT",
+  });
+  return { imported: candidates.length === 0 };
+}
 
-  if (existingLots && existingLots.length > 0) {
-    const existingLot = existingLots[0];
-    const resolvedUnitQuantity =
-      tracksUnits && unitQuantityValue == null
-        ? (existingLot.unit_quantity_available ?? 0)
-        : unitQuantity;
-    const quantityDelta = quantity - (existingLot.quantity_available ?? 0);
-    const unitQuantityDelta = tracksUnits
-      ? (resolvedUnitQuantity ?? 0) - (existingLot.unit_quantity_available ?? 0)
-      : null;
-
-    if (quantityDelta !== 0 || (unitQuantityDelta ?? 0) !== 0) {
-      await createStockMovementForOrg({
-        orgSlug,
-        productId,
-        lotId: existingLot.id,
-        type: "ADJUSTMENT",
-        quantity: quantityDelta,
-        unitQuantity: unitQuantityDelta,
-        reason: "Importación de stock",
-        createdBy,
-        source: "IMPORT",
-      });
+async function getImportProductVariantId(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  product: StockProduct;
+  row: Record<string, unknown>;
+}): Promise<string | null> {
+  const { supabase, orgId, product, row } = options;
+  if (!product.has_variants) {
+    if (String(row.talle ?? "").trim() || String(row.color ?? "").trim()) {
+      throw new Error(
+        "El producto no tiene variantes; quitá talle y color de esta fila"
+      );
     }
-
-    return { imported: false };
+    return null;
   }
-
-  const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
-    {
-      organization_id: orgId,
-      product_id: productId,
-      lot_number: lotNumber,
-      quantity_available: 0,
-      expiration_date: expirationDate,
-    };
-
-  if (tracksUnits) {
-    insertPayload.unit_quantity_available = 0;
+  const { data: variants, error } = await supabase
+    .from("product_variants")
+    .select("id, talle, color")
+    .eq("organization_id", orgId)
+    .eq("product_id", product.id)
+    .eq("is_active", true);
+  if (error) {
+    throw new Error(`No se pudieron consultar las variantes: ${error.message}`);
   }
-
-  const { data: insertedLot, error: insertError } = await supabase
-    .from("product_lots")
-    .insert(insertPayload)
-    .select("id")
-    .single();
-
-  if (insertError) {
-    throw new Error(`No se pudo crear el lote: ${insertError.message}`);
-  }
-
-  if (quantity > 0 || (unitQuantity ?? 0) > 0) {
-    try {
-      await createStockMovementForOrg({
-        orgSlug,
-        productId,
-        lotId: insertedLot.id,
-        type: quantity > 0 ? "INBOUND" : "ADJUSTMENT",
-        quantity,
-        unitQuantity: tracksUnits ? unitQuantity : undefined,
-        reason: "Importación de stock",
-        createdBy,
-        source: "IMPORT",
-      });
-    } catch (error) {
-      await supabase.from("product_lots").delete().eq("id", insertedLot.id);
-      throw error;
-    }
-  }
-
-  return { imported: true };
+  return resolveImportVariant(variants, row);
 }
 
 async function processStockRow(
   options: ProcessStockRowOptions
 ): Promise<{ success: boolean; imported: boolean; error?: string }> {
-  const { row, index, orgId, suppliers, supabase, orgSlug, createdBy } =
+  const { row, index, orgId, suppliers, supabase, orgSlug, warehouses } =
     options;
   const requiredError = getStockRowRequiredError(row, index);
   if (requiredError) {
@@ -910,7 +862,7 @@ async function processStockRow(
     return {
       success: false,
       imported: false,
-      error: `Fila ${index + 3}: Proveedor "${row.supplier}" no encontrado`,
+      error: `Fila ${index + 3}: Proveedor "${row.supplier}" no encontrado o ambiguo`,
     };
   }
 
@@ -947,19 +899,37 @@ async function processStockRow(
       error: `Fila ${index + 3}: Cantidad inválida`,
     };
   }
+  const warehouseId = resolveImportWarehouse(warehouses, row);
+  const productVariantId = await getImportProductVariantId({
+    supabase,
+    orgId,
+    product,
+    row,
+  });
+  const lotNumber =
+    String(row.lot_number ?? "").trim() ||
+    (product.has_variants ? "DEFAULT" : "");
+  if (!lotNumber) {
+    throw new Error("Indicá el número de lote");
+  }
 
   const upsertResult = await upsertProductLot({
     supabase,
     orgId,
     productId: product.id,
-    lotNumber: String(row.lot_number).trim(),
+    warehouseId,
+    productVariantId,
+    lotId: String(row.lot_id ?? "").trim() || undefined,
+    lotNumber,
     quantity: quantityDetails.quantity,
-    expirationDate: normalizeExpirationDate(row.expiration_date),
-    tracksUnits: quantityDetails.tracksUnits,
-    unitQuantity: quantityDetails.unitQuantity,
-    unitQuantityValue: quantityDetails.unitQuantityValue,
+    expirationDate: row.expiration_date
+      ? normalizeExpirationDate(row.expiration_date)
+      : null,
+    unitQuantity:
+      quantityDetails.tracksUnits && quantityDetails.unitQuantityValue != null
+        ? quantityDetails.unitQuantity
+        : null,
     orgSlug,
-    createdBy,
   });
 
   return { success: true, imported: upsertResult.imported };
@@ -1003,6 +973,7 @@ export async function importStock(
 
     const errors: string[] = [];
     const warnings: string[] = [];
+    const warehouses = await getAvailableWarehouses(orgSlug);
     let imported = 0;
     let updated = 0;
 
@@ -1015,7 +986,7 @@ export async function importStock(
           suppliers,
           supabase,
           orgSlug,
-          createdBy: authData.user.id,
+          warehouses,
         });
 
         if (!result.success) {

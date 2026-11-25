@@ -171,11 +171,18 @@ function StockMetaBadges({ item }: { item: StockItem }) {
 function MobileVariantList({
   orgSlug,
   productId,
+  warehouseId,
 }: {
   orgSlug: string;
   productId: string;
+  warehouseId?: string;
 }) {
-  const { data: variants, isLoading } = useProductVariants(orgSlug, productId);
+  const { data: variants, isLoading } = useProductVariants(
+    orgSlug,
+    productId,
+    true,
+    warehouseId
+  );
 
   const sortedVariants = variants
     ? [...variants].sort(
@@ -233,6 +240,7 @@ function MobileVariantList({
 }
 
 type StockMobileCardProps = {
+  warehouseId?: string;
   item: StockItem;
   orgSlug: string;
   isSelected: boolean;
@@ -240,6 +248,7 @@ type StockMobileCardProps = {
 };
 
 function StockMobileCard({
+  warehouseId,
   item,
   orgSlug,
   isSelected,
@@ -323,6 +332,7 @@ function StockMobileCard({
                   <MobileVariantList
                     orgSlug={orgSlug}
                     productId={item.product_id}
+                    warehouseId={warehouseId}
                   />
                 </CollapsibleContent>
               </Collapsible>
@@ -335,6 +345,7 @@ function StockMobileCard({
 }
 
 type StockMobileListProps = {
+  warehouseId?: string;
   items: StockItem[];
   orgSlug: string;
   selectedIds: Set<string>;
@@ -345,6 +356,7 @@ type StockMobileListProps = {
 };
 
 export function StockMobileList({
+  warehouseId,
   items,
   orgSlug,
   selectedIds,
@@ -410,6 +422,7 @@ export function StockMobileList({
             key={item.product_id}
             onToggleSelection={() => onToggleSelection(item.product_id)}
             orgSlug={orgSlug}
+            warehouseId={warehouseId}
           />
         ))}
       </div>

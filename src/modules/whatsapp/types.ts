@@ -52,6 +52,25 @@ export const DEFAULT_WHATSAPP_RESPONSE_DELAY = {
   maxMinutes: 3,
 } as const;
 
+export type WhatsAppFollowUp = {
+  enabled: boolean;
+  delayMinutes: number;
+  instructions: string;
+};
+
+export const DEFAULT_WHATSAPP_FOLLOW_UP: WhatsAppFollowUp = {
+  enabled: false,
+  delayMinutes: 30,
+  instructions:
+    "Retomá brevemente la consulta comercial y ofrecé ayuda para resolver dudas o elegir. Usá el contexto, sin presionar ni repetir ofertas rechazadas.",
+};
+
+export const WHATSAPP_PRICING_MODES = [
+  "SINGLE",
+  "CUSTOMER_OR_GENERAL",
+  "REGISTERED_ONLY",
+] as const;
+
 export type WhatsAppIntegration = {
   id: string;
   organizationId: string;
@@ -59,10 +78,13 @@ export type WhatsAppIntegration = {
   displayPhoneNumber: string | null;
   status: WhatsAppIntegrationStatus;
   salesPriceListId: string | null;
+  pricingMode: (typeof WHATSAPP_PRICING_MODES)[number];
+  allowGeneralForCustomers: boolean;
   responsibleUserId: string | null;
   businessHours: WhatsAppBusinessHours;
   responseDelayMinMinutes: number;
   responseDelayMaxMinutes: number;
+  followUp: WhatsAppFollowUp;
   commercialRules: Record<string, unknown>;
   handoffMessage: string | null;
   createdAt: string;
@@ -75,10 +97,13 @@ export type WhatsAppIntegrationConfiguration = Pick<
   | "displayPhoneNumber"
   | "status"
   | "salesPriceListId"
+  | "pricingMode"
+  | "allowGeneralForCustomers"
   | "responsibleUserId"
   | "businessHours"
   | "responseDelayMinMinutes"
   | "responseDelayMaxMinutes"
+  | "followUp"
   | "commercialRules"
   | "handoffMessage"
 >;

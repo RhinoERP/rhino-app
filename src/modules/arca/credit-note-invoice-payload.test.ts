@@ -41,6 +41,99 @@ function buildSale(
 }
 
 describe("buildArcaCreditNoteVoucherRequest", () => {
+  it.each([
+    10, 17.33, 100.01,
+  ])("concilia centavos entre bases desiguales y neto para una NC de %s", (amount) => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: { id: "fractional", amount, invoiceType: "FACTURA_A" },
+      sale: buildSale({
+        totalAmount: 342,
+        taxes: [
+          {
+            id: "vat21",
+            taxId: null,
+            name: "IVA",
+            rate: 21,
+            baseAmount: 100,
+            taxAmount: 21,
+            taxCodeSnapshot: "IVA_21",
+          },
+          {
+            id: "vat105",
+            taxId: null,
+            name: "IVA",
+            rate: 10.5,
+            baseAmount: 200,
+            taxAmount: 21,
+            taxCodeSnapshot: "IVA_10_5",
+          },
+        ],
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+    expect(request.Iva?.reduce((sum, tax) => sum + tax.BaseImp, 0)).toBeCloseTo(
+      request.ImpNeto,
+      8
+    );
+    expect(request.ImpNeto + request.ImpIVA + request.ImpTrib).toBeCloseTo(
+      amount,
+      8
+    );
+    expect(request.Iva?.every((tax) => tax.BaseImp >= 0)).toBe(true);
+    expect(request.Iva?.[0].BaseImp).toBeLessThan(
+      request.Iva?.[1].BaseImp ?? 0
+    );
+  });
+
+  it.each([
+    { amount: 2315, base: 1000, vat21: 210, vat105: 105 },
+    { amount: 1157.5, base: 500, vat21: 105, vat105: 52.5 },
+  ])("conserva la base de cada alícuota para una NC de $amount", ({
+    amount,
+    base,
+    vat21,
+    vat105,
+  }) => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: { id: "multi-rate-note", amount, invoiceType: "FACTURA_A" },
+      sale: buildSale({
+        totalAmount: 2315,
+        taxes: [
+          {
+            id: "vat21",
+            taxId: null,
+            name: "IVA 21%",
+            rate: 21,
+            baseAmount: 1000,
+            taxAmount: 210,
+            taxCodeSnapshot: "IVA_21",
+          },
+          {
+            id: "vat105",
+            taxId: null,
+            name: "IVA 10.5%",
+            rate: 10.5,
+            baseAmount: 1000,
+            taxAmount: 105,
+            taxCodeSnapshot: "IVA_10_5",
+          },
+        ],
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+    expect(request.Iva).toEqual([
+      { Id: 5, BaseImp: base, Importe: vat21 },
+      { Id: 4, BaseImp: base, Importe: vat105 },
+    ]);
+    expect(request.ImpNeto).toBe(base * 2);
+    expect(request.ImpIVA).toBe(vat21 + vat105);
+    expect(request.ImpTotal).toBe(amount);
+  });
+
   it("mapea Factura A a Nota de Crédito A y asocia el comprobante original", () => {
     const request = buildArcaCreditNoteVoucherRequest({
       creditNote: {
@@ -355,6 +448,31 @@ describe("buildArcaCreditNoteVoucherRequest", () => {
     });
 
     expect(request.CbtesAsoc[0]?.CbteFch).toBe(TEST_ASSOCIATED_CBTE_FCH);
+  });
+
+  it("informa el importe como exento cuando la venta original no tiene IVA", () => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: {
+        id: "credit-note-exempt",
+        amount: 1210,
+        invoiceType: "FACTURA_B",
+      },
+      sale: buildSale({
+        invoiceType: "FACTURA_B",
+        isVatExempt: true,
+        arcaVoucherTypeCode: 6,
+        taxes: [],
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+
+    expect(request.ImpNeto).toBe(0);
+    expect(request.ImpOpEx).toBe(1210);
+    expect(request.ImpIVA).toBe(0);
+    expect(request.ImpTrib).toBe(0);
+    expect(request.Iva).toBeUndefined();
   });
 });
 

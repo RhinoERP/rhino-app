@@ -57,7 +57,21 @@ export async function regenerateChildOrderRemitos(params: {
   };
 
   const groups = new Map<string, EventRow[]>();
-  for (const event of (events ?? []) as EventRow[]) {
+  const batches = await supabase
+    .from("order_remittance_batches")
+    .select("dispatch_group_id")
+    .eq("organization_id", orgId)
+    .eq("parent_order_id", parentOrder.id);
+  if (batches.error) {
+    throw new Error(batches.error.message);
+  }
+  const snapshotGroups = new Set(
+    batches.data.map((batch) => batch.dispatch_group_id)
+  );
+  const historicalEvents = ((events ?? []) as EventRow[]).filter(
+    (event) => !snapshotGroups.has(event.dispatch_group_id ?? "")
+  );
+  for (const event of historicalEvents) {
     const key = event.dispatch_group_id ?? event.id;
     const group = groups.get(key) ?? [];
     group.push(event);

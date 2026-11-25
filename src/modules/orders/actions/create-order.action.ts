@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { assertWholesaleWarehouseForOrganization } from "@/modules/inventory/service/warehouse-stock.service";
 import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -28,7 +29,7 @@ async function createOrder(
 ): Promise<{ orderId: string; orderNumber: string }> {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, status, organization_id")
+    .select("id, status, organization_id, warehouse_id")
     .eq("id", quoteId)
     .single();
 
@@ -45,6 +46,11 @@ async function createOrder(
   if (quote.organization_id !== orgId) {
     throw new Error("El presupuesto no pertenece a esta organización");
   }
+  await assertWholesaleWarehouseForOrganization(
+    supabase,
+    orgId,
+    quote.warehouse_id
+  );
 
   const year = new Date().getFullYear();
 
@@ -66,6 +72,7 @@ async function createOrder(
     .from("orders")
     .insert({
       organization_id: orgId,
+      warehouse_id: quote.warehouse_id,
       quote_id: quoteId,
       order_number: orderNumber,
       status: "PENDING_FINANCE",

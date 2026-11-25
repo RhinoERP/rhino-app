@@ -62,3 +62,16 @@ Los trabajos de empresas sin `whatsapp_enabled = true` o inactivas no se
 reclaman. El sandbox se ejecuta en las funciones de Vercel, sin este worker.
 
 Procedimiento completo: [docs/whatsapp-deploy.md](../../docs/whatsapp-deploy.md).
+
+## Seguimiento por falta de respuesta
+
+El rol comercial incluye un consumidor de `whatsapp_follow_ups`, habilitado sólo
+si `whatsapp_follow_up_protocol_version()` devuelve `1`. No requiere nuevas
+variables de entorno. Cada empresa debe activar el seguimiento desde la
+configuración de WhatsApp; inicialmente está apagado y espera 30 minutos.
+
+La evaluación de IA no utiliza herramientas comerciales. La cola y la outbox
+cancelan resultados obsoletos y conservan entregas inciertas para revisión. No se
+programan seguimientos en el sandbox ni se envía texto fuera de la ventana de
+24 horas. Aplicar primero la migración `20261117150000_whatsapp_follow_ups.sql` y
+luego desplegar. Procedimiento y prueba piloto en `docs/whatsapp-deploy.md`.

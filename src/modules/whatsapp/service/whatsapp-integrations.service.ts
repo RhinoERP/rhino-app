@@ -4,7 +4,10 @@ import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import type { WhatsAppIntegrationConfigurationInput } from "../schemas";
 import { assertWhatsAppEnabled } from "../server/access";
 import type { WhatsAppIntegration } from "../types";
-import { DEFAULT_WHATSAPP_BUSINESS_HOURS } from "../types";
+import {
+  DEFAULT_WHATSAPP_BUSINESS_HOURS,
+  DEFAULT_WHATSAPP_FOLLOW_UP,
+} from "../types";
 
 type WhatsAppIntegrationRow = {
   id: string;
@@ -13,10 +16,13 @@ type WhatsAppIntegrationRow = {
   display_phone_number: string | null;
   status: WhatsAppIntegration["status"];
   sales_price_list_id: string | null;
+  pricing_mode: WhatsAppIntegration["pricingMode"];
+  allow_general_for_customers: boolean;
   responsible_user_id: string | null;
   business_hours: Record<string, unknown> | null;
   response_delay_min_minutes: number | null;
   response_delay_max_minutes: number | null;
+  follow_up: WhatsAppIntegration["followUp"] | null;
   commercial_rules: Record<string, unknown> | null;
   handoff_message: string | null;
   created_at: string;
@@ -65,10 +71,13 @@ function mapIntegration(row: WhatsAppIntegrationRow): WhatsAppIntegration {
     displayPhoneNumber: row.display_phone_number,
     status: row.status,
     salesPriceListId: row.sales_price_list_id,
+    pricingMode: row.pricing_mode,
+    allowGeneralForCustomers: row.allow_general_for_customers,
     responsibleUserId: row.responsible_user_id,
     businessHours,
     responseDelayMinMinutes: row.response_delay_min_minutes ?? 1,
     responseDelayMaxMinutes: row.response_delay_max_minutes ?? 3,
+    followUp: row.follow_up ?? DEFAULT_WHATSAPP_FOLLOW_UP,
     commercialRules: row.commercial_rules ?? {},
     handoffMessage: row.handoff_message,
     createdAt: row.created_at,
@@ -96,7 +105,7 @@ export async function getWhatsAppIntegrationByOrgSlug(
   const { data, error } = await supabase
     .from("whatsapp_integrations")
     .select(
-      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, responsible_user_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, commercial_rules, handoff_message, created_at, updated_at"
+      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, pricing_mode, allow_general_for_customers, responsible_user_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, follow_up, commercial_rules, handoff_message, created_at, updated_at"
     )
     .eq("organization_id", organizationId)
     .not("phone_number_id", "like", "rhinos-local-simulator:%")
@@ -197,15 +206,32 @@ export async function saveWhatsAppIntegrationByOrgSlug(
     );
   }
 
+  if (input.salesPriceListId) {
+    const { data: priceList, error: priceListError } = await supabase
+      .from("sales_price_lists")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("id", input.salesPriceListId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (priceListError || !priceList) {
+      throw new Error("Seleccioná una lista de venta activa de la empresa");
+    }
+  }
+
   const values = {
     phone_number_id: input.phoneNumberId,
     display_phone_number: input.displayPhoneNumber || null,
     status: input.status,
     sales_price_list_id: input.salesPriceListId,
+    pricing_mode: input.pricingMode,
+    allow_general_for_customers:
+      input.pricingMode !== "SINGLE" && input.allowGeneralForCustomers,
     responsible_user_id: input.responsibleUserId,
     business_hours: input.businessHours,
     response_delay_min_minutes: input.responseDelayMinMinutes,
     response_delay_max_minutes: input.responseDelayMaxMinutes,
+    follow_up: input.followUp,
     commercial_rules: input.commercialRules,
     handoff_message: input.handoffMessage || null,
   };
@@ -224,7 +250,7 @@ export async function saveWhatsAppIntegrationByOrgSlug(
 
   const { data, error } = await query
     .select(
-      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, responsible_user_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, commercial_rules, handoff_message, created_at, updated_at"
+      "id, organization_id, phone_number_id, display_phone_number, status, sales_price_list_id, pricing_mode, allow_general_for_customers, responsible_user_id, business_hours, response_delay_min_minutes, response_delay_max_minutes, follow_up, commercial_rules, handoff_message, created_at, updated_at"
     )
     .single();
 

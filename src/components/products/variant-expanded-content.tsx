@@ -7,6 +7,7 @@ import { VariantStockMatrix } from "./variant-stock-matrix";
 type VariantExpandedContentProps = {
   productId: string;
   orgSlug: string;
+  warehouseId?: string;
 };
 
 function transformVariants(variants: ProductVariantWithStock[]): {
@@ -33,12 +34,13 @@ function transformVariants(variants: ProductVariantWithStock[]): {
 export function VariantExpandedContent({
   productId,
   orgSlug,
+  warehouseId,
 }: VariantExpandedContentProps) {
   const {
     data: variants,
     isLoading,
     error,
-  } = useProductVariants(orgSlug, productId);
+  } = useProductVariants(orgSlug, productId, true, warehouseId);
 
   const { talles, colores, stocks } = transformVariants(variants ?? []);
 

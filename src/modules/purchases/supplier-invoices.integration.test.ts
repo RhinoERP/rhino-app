@@ -15,6 +15,8 @@ const INVOICE: SupplierInvoice = {
   organization_id: "org-00000000-0000-0000-0000-000000000001",
   supplier_id: "sup-00000000-0000-0000-0000-000000000001",
   purchase_order_id: null,
+  payable_model: "INVOICE",
+  legacy_account_payable_id: null,
   invoice_type: "A",
   point_of_sale: "0001",
   invoice_number: "00000042",

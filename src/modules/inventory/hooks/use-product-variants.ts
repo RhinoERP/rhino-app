@@ -7,10 +7,11 @@ import type { ProductVariantWithStock } from "../types";
 export function useProductVariants(
   orgSlug: string,
   productId: string,
-  enabled?: boolean
+  enabled?: boolean,
+  warehouseId?: string
 ) {
   return useQuery<ProductVariantWithStock[]>({
-    ...productVariantsClientQueryOptions(orgSlug, productId),
+    ...productVariantsClientQueryOptions(orgSlug, productId, warehouseId),
     enabled: enabled !== false && !!productId,
   });
 }

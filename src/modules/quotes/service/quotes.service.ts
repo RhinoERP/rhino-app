@@ -1,6 +1,7 @@
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { requireAuth } from "@/lib/supabase/auth";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { resolveWholesaleWarehouseId } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type {
@@ -274,6 +275,10 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
   if (!organization?.id) {
     throw new Error("Organización no encontrada");
   }
+  const warehouseId = await resolveWholesaleWarehouseId(
+    input.orgSlug,
+    input.warehouseId
+  );
 
   const totals = await buildQuoteTotals({
     supabase,
@@ -281,6 +286,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     items: input.items,
     globalDiscountPercentage: input.globalDiscountPercentage ?? null,
     fallbackTaxes: input.taxes,
+    isVatExempt: input.isVatExempt ?? false,
   });
   const taxesByLine = new Map(
     groupQuoteItemTaxesByLine(totals.taxPlan).map((entry) => [
@@ -294,10 +300,11 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     .insert(
       buildQuoteInsertPayload({
         organizationId: organization.id,
+        warehouseId,
         input,
         userId,
         totals,
-      }) as unknown as Database["public"]["Tables"]["quotes"]["Insert"]
+      }) as never
     )
     .select("id")
     .maybeSingle();
@@ -328,17 +335,22 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
 
 function buildQuoteInsertPayload({
   organizationId,
+  warehouseId,
   input,
   userId,
   totals,
 }: {
   organizationId: string;
+  warehouseId: string;
   input: CreateQuoteInput;
   userId: string;
   totals: Awaited<ReturnType<typeof buildQuoteTotals>>;
-}) {
+}): Database["public"]["Tables"]["quotes"]["Insert"] & {
+  is_vat_exempt: boolean;
+} {
   return {
     organization_id: organizationId,
+    warehouse_id: warehouseId,
     customer_id: input.customerId,
     status: "DRAFT",
     total_amount: totals.totalAmount,
@@ -349,6 +361,7 @@ function buildQuoteInsertPayload({
     currency: input.currency ?? "ARS",
     exchange_rate: input.exchangeRate ?? null,
     invoice_type: input.invoiceType ?? "NOTA_DE_VENTA",
+    is_vat_exempt: input.isVatExempt ?? false,
     payment_condition: input.paymentCondition ?? null,
     observations: input.observations ?? null,
     created_by: userId,
@@ -603,6 +616,7 @@ async function createCancelledVersion(
     .from("quotes")
     .insert({
       organization_id: context.orgId,
+      warehouse_id: original.warehouse_id,
       customer_id: original.customer_id,
       created_by: context.userId,
       status: "CANCELLED",
@@ -621,6 +635,9 @@ async function createCancelledVersion(
       sales_price_list_id: original.sales_price_list_id,
       advance_payment:
         ((original as Record<string, unknown>).advance_payment as boolean) ??
+        false,
+      is_vat_exempt:
+        ((original as Record<string, unknown>).is_vat_exempt as boolean) ??
         false,
       advance_payment_percentage: (original as Record<string, unknown>)
         .advance_payment_percentage as number | null,
@@ -775,6 +792,7 @@ function buildUpdatePayload(
   existing: QuoteRow
 ): Record<string, unknown> {
   return {
+    warehouse_id: input.warehouseId ?? existing.warehouse_id,
     customer_id: input.customerId ?? undefined,
     currency: input.currency ?? undefined,
     exchange_rate:
@@ -801,6 +819,8 @@ function buildUpdatePayload(
         : undefined,
     invoice_type:
       input.invoiceType !== undefined ? input.invoiceType : undefined,
+    is_vat_exempt:
+      input.isVatExempt !== undefined ? input.isVatExempt : undefined,
     price_level_id:
       input.priceLevelId !== undefined ? input.priceLevelId : undefined,
     sales_price_list_id:
@@ -815,6 +835,7 @@ function hasMetadataChanged(
 ): boolean {
   const raw = existing as unknown as Record<string, unknown>;
   const checks: Array<{ inputVal: unknown; dbVal: unknown }> = [
+    { inputVal: input.warehouseId, dbVal: existing.warehouse_id },
     { inputVal: input.paymentCondition, dbVal: existing.payment_condition },
     { inputVal: input.observations, dbVal: existing.observations },
     {
@@ -824,6 +845,7 @@ function hasMetadataChanged(
     { inputVal: input.designFileUrl, dbVal: existing.design_file_url },
     { inputVal: input.advancePaymentEnabled, dbVal: raw.advance_payment },
     { inputVal: input.invoiceType, dbVal: raw.invoice_type },
+    { inputVal: input.isVatExempt, dbVal: raw.is_vat_exempt },
     {
       inputVal: input.advancePaymentPercentage,
       dbVal: raw.advance_payment_percentage,
@@ -934,6 +956,10 @@ export async function updateQuote(
     quoteId,
     organization.id
   );
+  await resolveWholesaleWarehouseId(
+    input.orgSlug,
+    input.warehouseId ?? existing.warehouse_id
+  );
 
   const metadataChanged = hasMetadataChanged(input, existing);
   const itemsChanged = input.items !== undefined;
@@ -945,7 +971,8 @@ export async function updateQuote(
   const totalsChanged =
     itemsChanged ||
     input.globalDiscountPercentage !== undefined ||
-    input.taxes !== undefined;
+    input.taxes !== undefined ||
+    input.isVatExempt !== undefined;
 
   if (itemsChanged || metadataChanged || taxesChanged) {
     await createCancelledVersion(supabase, quoteId, {
@@ -960,6 +987,9 @@ export async function updateQuote(
     input.globalDiscountPercentage !== undefined
       ? input.globalDiscountPercentage
       : (existing.global_discount_percentage ?? null);
+  const isVatExempt =
+    input.isVatExempt ??
+    Boolean((existing as unknown as Record<string, unknown>).is_vat_exempt);
 
   let totals: Awaited<ReturnType<typeof buildQuoteTotals>> | undefined;
 
@@ -972,6 +1002,7 @@ export async function updateQuote(
         items: newItems,
         globalDiscountPercentage,
         fallbackTaxes: input.taxes,
+        isVatExempt,
       });
     } else {
       const rows = await buildQuoteTaxLinesFromRows(supabase, quoteId);
@@ -982,6 +1013,7 @@ export async function updateQuote(
         globalDiscountPercentage,
         fallbackTaxes: input.taxes ?? existingFallbackTaxes,
         lines: rows,
+        isVatExempt,
       });
     }
 
@@ -1116,14 +1148,20 @@ export async function convertQuoteToSalesOrder(
     .from("sales_orders")
     .insert({
       organization_id: organization.id,
+      warehouse_id: await resolveWholesaleWarehouseId(
+        orgSlug,
+        quote.warehouse_id
+      ),
       customer_id: quote.customer_id,
       user_id: userId,
       sale_date: saleDate,
       invoice_type: (quote.invoice_type ??
         "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
+      is_vat_exempt: Boolean(
+        (quote as unknown as Record<string, unknown>).is_vat_exempt
+      ),
       currency: quote.currency,
-      exchange_rate:
-        quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
+      exchange_rate: null,
       commercial_exchange_rate:
         quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
       sub_total: quote.sub_total,

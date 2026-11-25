@@ -26,14 +26,12 @@ import { requireCommercialExchangeRateForUsdInvoice } from "../commercial-exchan
 import {
   ArcaConnectionError,
   ArcaValidationError,
+  isDefinitiveArcaRejection,
   sanitizeArcaErrorMessage,
 } from "../errors";
 import {
-  type ArcaCurrencyQuoteClient,
   type AuthorizedArcaFiscalCurrency,
   buildArcaCurrencyRequestFields,
-  buildInvoiceFiscalCurrency,
-  resolveArcaFiscalCurrency,
 } from "../fiscal-currency";
 import { buildArcaReceiverDocument } from "../receiver-document";
 import { mapCustomerTaxConditionToArcaReceiverVatConditionId } from "../receiver-tax-conditions";
@@ -57,6 +55,7 @@ import {
   isArcaCertificateExpired,
   resolveArcaOrganizationCredentials,
 } from "./client-factory";
+import { resolveInvoiceExchangeRate } from "./invoice-exchange-rate";
 import {
   getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
@@ -109,6 +108,7 @@ type LoadedSale = {
   commercialExchangeRate: number | null;
   totalTaxAmount: number | null;
   globalDiscountAmount: number | null;
+  isVatExempt: boolean;
   arcaStatus: string;
   arcaCae: string | null;
   arcaCaeExpiresAt: string | null;
@@ -147,6 +147,7 @@ type LoadedSaleQueryRecord = {
   commercial_exchange_rate: number | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
+  is_vat_exempt?: boolean | null;
   arca_status: string;
   arca_cae: string | null;
   arca_cae_expires_at: string | null;
@@ -216,17 +217,11 @@ type ValidatedSaleContext = {
   effectiveInvoiceType: InvoiceType;
 };
 
-type TaxClassification =
-  | {
-      kind: "iva";
-      code: ArcaTaxCode;
-      arcaId: number;
-    }
-  | {
-      kind: "tributo";
-      code: ArcaTaxCode;
-      arcaId: number;
-    };
+type TaxClassification = {
+  kind: "iva" | "tributo";
+  code: ArcaTaxCode;
+  arcaId: number;
+};
 
 type ArcaVoucherRequest = {
   Concepto: number;
@@ -482,7 +477,6 @@ function resolveEffectiveArcaInvoiceType(params: {
 
 function toTaxClassification(code: ArcaTaxCode): TaxClassification {
   const metadata = ARCA_TAX_CODE_METADATA[code];
-
   return {
     kind: metadata.kind,
     code,
@@ -700,6 +694,7 @@ function normalizeLoadedSale(data: {
   commercial_exchange_rate: number | null;
   total_tax_amount: number | null;
   global_discount_amount: number | null;
+  is_vat_exempt?: boolean | null;
   arca_status: string | null;
   arca_cae: string | null;
   arca_cae_expires_at: string | null;
@@ -771,6 +766,7 @@ function normalizeLoadedSale(data: {
     commercialExchangeRate: data.commercial_exchange_rate ?? null,
     totalTaxAmount: toNullableMoney(data.total_tax_amount),
     globalDiscountAmount: toNullableMoney(data.global_discount_amount),
+    isVatExempt: Boolean(data.is_vat_exempt),
     ...normalizeLoadedSaleArcaState(data),
     customer: normalizeLoadedSaleCustomer(data.customer),
     items: (data.items ?? []).map(normalizeLoadedSaleItem),
@@ -872,6 +868,7 @@ async function loadSaleForArcaInvoicing(params: {
         commercial_exchange_rate,
         total_tax_amount,
         global_discount_amount,
+        is_vat_exempt,
         arca_status,
         arca_cae,
         arca_cae_expires_at,
@@ -927,7 +924,7 @@ async function loadSaleForArcaInvoicing(params: {
     throw new ArcaValidationError("Venta no encontrada.");
   }
 
-  const saleData = data as LoadedSaleQueryRecord;
+  const saleData = data as unknown as LoadedSaleQueryRecord;
 
   await assertInvoiceDocumentType({
     supabase,
@@ -954,6 +951,7 @@ async function loadSaleForArcaInvoicing(params: {
       commercial_exchange_rate: saleData.commercial_exchange_rate,
       total_tax_amount: saleData.total_tax_amount,
       global_discount_amount: saleData.global_discount_amount,
+      is_vat_exempt: saleData.is_vat_exempt ?? false,
       arca_status: saleData.arca_status,
       arca_cae: saleData.arca_cae,
       arca_cae_expires_at: saleData.arca_cae_expires_at,
@@ -1252,6 +1250,141 @@ function mapArcaEmissionErrorMessage(params: {
   return message;
 }
 
+type ClassifiedSaleTax = ReturnType<
+  typeof classifySaleTaxes
+>["ivaTaxes"][number];
+
+function assertArcaVatExemptConfiguration(params: {
+  isVatExempt: boolean;
+  ivaTaxes: ClassifiedSaleTax[];
+  effectiveInvoiceType: InvoiceType;
+}): void {
+  if (!params.isVatExempt) {
+    return;
+  }
+  if (params.ivaTaxes.length > 0) {
+    throw new ArcaValidationError(
+      "La operación está marcada exenta de IVA, pero tiene impuestos IVA asociados. Quitá el IVA antes de emitir."
+    );
+  }
+  if (params.effectiveInvoiceType === "FACTURA_C") {
+    throw new ArcaValidationError(
+      "Factura C no puede informar importes exentos en ARCA."
+    );
+  }
+}
+
+function assertExplicitFiscalClassification(params: {
+  sale: LoadedSale;
+  ivaTaxes: ClassifiedSaleTax[];
+  tributeAmount: number;
+  effectiveInvoiceType: InvoiceType;
+}): void {
+  const requiresExplicitFiscalClassification =
+    isFacturaAInvoiceType(params.effectiveInvoiceType) ||
+    params.effectiveInvoiceType === "FACTURA_B";
+  if (
+    requiresExplicitFiscalClassification &&
+    params.sale.totalAmount > params.tributeAmount &&
+    params.ivaTaxes.length === 0 &&
+    !params.sale.isVatExempt
+  ) {
+    throw new ArcaValidationError(
+      "La venta debe clasificar su operación como gravada con IVA o exenta antes de emitir en ARCA."
+    );
+  }
+}
+
+function assertArcaTotalConsistency(params: {
+  sale: LoadedSale;
+  taxableBase: number;
+  exemptAmount: number;
+  ivaAmount: number;
+  tributeAmount: number;
+}): void {
+  const expectedTotal = truncateMoney(
+    params.taxableBase +
+      params.exemptAmount +
+      params.ivaAmount +
+      params.tributeAmount
+  );
+  if (Math.abs(expectedTotal - params.sale.totalAmount) > 0.01) {
+    throw new ArcaValidationError(
+      "La venta no tiene un snapshot fiscal consistente para derivar ImpNeto en ARCA."
+    );
+  }
+}
+
+function resolveArcaSaleTaxAmounts(params: {
+  sale: LoadedSale;
+  ivaTaxes: ClassifiedSaleTax[];
+  tributeTaxes: ClassifiedSaleTax[];
+  effectiveInvoiceType: InvoiceType;
+}): {
+  taxableBase: number;
+  exemptAmount: number;
+  ivaAmount: number;
+  tributeAmount: number;
+} {
+  const { sale, ivaTaxes, tributeTaxes, effectiveInvoiceType } = params;
+  const isVatExempt = sale.isVatExempt;
+  const tributeAmount = truncateMoney(
+    tributeTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
+  );
+  const ivaAmount = truncateMoney(
+    ivaTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
+  );
+
+  assertArcaVatExemptConfiguration({
+    isVatExempt,
+    ivaTaxes,
+    effectiveInvoiceType,
+  });
+
+  let taxableBase = 0;
+
+  if (!isVatExempt && ivaTaxes.length > 0) {
+    taxableBase = truncateMoney(
+      ivaTaxes.reduce((total, tax) => total + tax.baseAmount, 0)
+    );
+  } else if (!isVatExempt) {
+    taxableBase = truncateMoney(sale.totalAmount - tributeAmount);
+  }
+
+  if (!Number.isFinite(taxableBase) || taxableBase < 0) {
+    throw new ArcaValidationError(
+      "No se pudo derivar la base imponible fiscal de la venta."
+    );
+  }
+
+  assertExplicitFiscalClassification({
+    sale,
+    ivaTaxes,
+    tributeAmount,
+    effectiveInvoiceType,
+  });
+
+  const exemptAmount = isVatExempt
+    ? truncateMoney(
+        Math.max(
+          0,
+          (sale.subTotal ?? sale.totalAmount - tributeAmount) -
+            (sale.globalDiscountAmount ?? 0)
+        )
+      )
+    : 0;
+
+  assertArcaTotalConsistency({
+    sale,
+    taxableBase,
+    exemptAmount,
+    ivaAmount,
+    tributeAmount,
+  });
+
+  return { taxableBase, exemptAmount, ivaAmount, tributeAmount };
+}
+
 export function buildArcaVoucherRequestFromSale(
   context: ValidatedSaleContext,
   fiscalCurrency: AuthorizedArcaFiscalCurrency
@@ -1270,38 +1403,13 @@ export function buildArcaVoucherRequestFromSale(
     context.effectiveInvoiceType
   );
   const { ivaTaxes, tributeTaxes } = classifySaleTaxes(context.sale);
-
-  const tributeAmount = truncateMoney(
-    tributeTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
-  );
-  const ivaAmount = truncateMoney(
-    ivaTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
-  );
-
-  let taxableBase = 0;
-
-  if (ivaTaxes.length > 0) {
-    taxableBase = truncateMoney(
-      ivaTaxes.reduce((total, tax) => total + tax.baseAmount, 0)
-    );
-  } else if (tributeTaxes.length > 0) {
-    taxableBase = truncateMoney(context.sale.totalAmount - tributeAmount);
-  } else {
-    taxableBase = truncateMoney(context.sale.totalAmount);
-  }
-
-  if (!Number.isFinite(taxableBase) || taxableBase < 0) {
-    throw new ArcaValidationError(
-      "No se pudo derivar la base imponible fiscal de la venta."
-    );
-  }
-
-  const expectedTotal = truncateMoney(taxableBase + ivaAmount + tributeAmount);
-  if (Math.abs(expectedTotal - context.sale.totalAmount) > 0.01) {
-    throw new ArcaValidationError(
-      "La venta no tiene un snapshot fiscal consistente para derivar ImpNeto en ARCA."
-    );
-  }
+  const { taxableBase, exemptAmount, ivaAmount, tributeAmount } =
+    resolveArcaSaleTaxAmounts({
+      sale: context.sale,
+      ivaTaxes,
+      tributeTaxes,
+      effectiveInvoiceType: context.effectiveInvoiceType,
+    });
 
   return {
     Concepto: 1,
@@ -1312,7 +1420,7 @@ export function buildArcaVoucherRequestFromSale(
     ImpTotal: truncateMoney(context.sale.totalAmount),
     ImpTotConc: 0,
     ImpNeto: taxableBase,
-    ImpOpEx: 0,
+    ImpOpEx: exemptAmount,
     ImpIVA: ivaAmount,
     ImpTrib: tributeAmount,
     ...buildArcaCurrencyRequestFields(fiscalCurrency),
@@ -1536,6 +1644,7 @@ export async function emitSaleInvoice(params: {
   orgSlug: string;
   saleId: string;
   formalAdvanceDocument?: "ADVANCE" | "BALANCE";
+  fiscalExchangeRate?: number;
 }): Promise<ArcaSaleInvoiceResult> {
   await assertCanIssueOrganizationArca(params.orgSlug);
   const validation = await validateSaleForArcaInvoicing(params);
@@ -1555,9 +1664,9 @@ export async function emitSaleInvoice(params: {
     key: context.resolvedCredentials.key,
     environment: context.resolvedCredentials.environment,
   });
-  const fiscalCurrency = await resolveArcaFiscalCurrency(
-    client as unknown as ArcaCurrencyQuoteClient,
-    buildInvoiceFiscalCurrency(context.sale.currency)
+  const fiscalCurrency = await resolveInvoiceExchangeRate(
+    context.sale.currency,
+    params.fiscalExchangeRate
   );
   const request = buildArcaVoucherRequestFromSale(context, fiscalCurrency);
   const requestJson = toJsonValue({
@@ -1625,7 +1734,7 @@ export async function emitSaleInvoice(params: {
       effectiveInvoiceType: context.effectiveInvoiceType,
     });
 
-    if (error instanceof ArcaValidationError) {
+    if (isDefinitiveArcaRejection(error)) {
       await persistInvoiceError({
         orgId: context.organizationId,
         saleId: context.sale.id,
@@ -1681,7 +1790,9 @@ export async function emitSaleInvoice(params: {
     authorization,
     requestJson: authorizedRequestJson,
     responseJson: responseJson ?? {},
-    preventaSale: context.sale.status === "DRAFT" ? context.sale : undefined,
+    preventaSale: isEarlyBillablePreventaStatus(context.sale.status)
+      ? context.sale
+      : undefined,
   });
 
   const supabase = await createClient();

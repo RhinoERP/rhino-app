@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isStockReentryFallbackRequired } from "@/modules/inventory/utils/stock-reentry";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { cancelSaleOrder } from "../service/sales.service";
 import type { SalesOrderStatus } from "../types";
@@ -10,15 +11,17 @@ export type CancelSaleActionResult = {
   status?: SalesOrderStatus;
   wasUpdated?: boolean;
   error?: string;
+  requiresDefaultFallback?: boolean;
 };
 
 export async function cancelSaleAction(
   orgSlug: string,
-  saleId: string
+  saleId: string,
+  allowDefaultFallback = false
 ): Promise<CancelSaleActionResult> {
   await ensure("sales.manage", orgSlug);
   try {
-    const result = await cancelSaleOrder(orgSlug, saleId);
+    const result = await cancelSaleOrder(orgSlug, saleId, allowDefaultFallback);
 
     if (result.wasUpdated) {
       revalidatePath(`/org/${orgSlug}/ventas`);
@@ -35,6 +38,7 @@ export async function cancelSaleAction(
     console.error("Error cancelando la venta:", error);
     return {
       success: false,
+      requiresDefaultFallback: isStockReentryFallbackRequired(error),
       error:
         error instanceof Error
           ? error.message

@@ -23,6 +23,7 @@ export async function updateQuoteAction(
   try {
     const input = {
       orgSlug,
+      warehouseId: values.warehouseId,
       customerId: values.customerId,
       currency: values.currency,
       exchangeRate: values.exchangeRate ?? null,
@@ -37,6 +38,7 @@ export async function updateQuoteAction(
       priceLevelId: toNullablePricingId(values.priceLevelId),
       salesPriceListId: toNullablePricingId(values.salesPriceListId),
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      isVatExempt: values.isVatExempt ?? false,
       invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",
       taxes: values.taxes,
       items: mapQuoteFormItems(values.items, values.currency),

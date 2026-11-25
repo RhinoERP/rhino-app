@@ -303,7 +303,10 @@ export type PublicAccountsPayableTable = {
   id: Generated<string>;
   organization_id: string;
   supplier_id: string;
-  purchase_order_id: string;
+  currency: string;
+  exchange_rate: string | null;
+  purchase_order_id: string | null;
+  supplier_invoice_id: string | null;
   total_amount: ColumnType<string, string, string>;
   pending_balance: ColumnType<string, string, string>;
   due_date: ColumnType<Date, string, string>;
@@ -319,6 +322,7 @@ export type PublicAccountsReceivableTable = {
   id: Generated<string>;
   organization_id: string;
   customer_id: string;
+  currency: string;
   total_amount: ColumnType<string, string, string>;
   pending_balance: ColumnType<string, string, string>;
   status: string;
@@ -333,8 +337,10 @@ export type PublicReceivablePaymentsTable = {
   organization_id: string;
   account_receivable_id: string;
   amount: ColumnType<string, string, string>;
+  amount_ars: string | null;
   payment_method: string;
   currency: string;
+  exchange_rate: string | null;
   accounting_journal_entry_id: string | null;
 };
 
@@ -365,7 +371,18 @@ export type PublicPayablePaymentsTable = {
   organization_id: string;
   account_payable_id: string;
   amount: ColumnType<string, string, string>;
+  amount_ars: ColumnType<
+    string | null,
+    string | null | undefined,
+    string | null
+  >;
   payment_method: string;
+  currency: ColumnType<string, string | undefined, string>;
+  exchange_rate: ColumnType<
+    string | null,
+    string | null | undefined,
+    string | null
+  >;
   payment_date: ColumnType<Date, string, string>;
   reference_number: string | null;
   notes: string | null;
@@ -390,6 +407,7 @@ export type PublicSupplierCreditsTable = {
   id: Generated<string>;
   organization_id: string;
   supplier_id: string;
+  currency: string;
   amount: ColumnType<string, string, string>;
   remaining_amount: ColumnType<string, string, string>;
   source_payment_id: string | null;
@@ -400,6 +418,18 @@ export type PublicSupplierCreditsTable = {
 
 export type PublicSupplierCredit = Selectable<PublicSupplierCreditsTable>;
 export type UpdatePublicSupplierCredit = Updateable<PublicSupplierCreditsTable>;
+
+export type PublicSupplierInvoicesTable = {
+  id: Generated<string>;
+  organization_id: string;
+  supplier_id: string;
+  purchase_order_id: string | null;
+  exchange_rate: string | null;
+  currency: string;
+  status: string;
+  payable_model: "INVOICE" | "LEGACY_OC" | "UNRESOLVED";
+  created_at: ColumnType<Date, never, never>;
+};
 
 export type PublicSupplierCreditApplicationsTable = {
   id: Generated<string>;
@@ -507,6 +537,7 @@ export type Database = {
   "accounting.treasury_deposit_slips": TreasuryDepositSlipsTable;
   "accounting.treasury_deposit_slip_checks": TreasuryDepositSlipChecksTable;
   "public.accounts_payable": PublicAccountsPayableTable;
+  "public.supplier_invoices": PublicSupplierInvoicesTable;
   "public.payable_payments": PublicPayablePaymentsTable;
   "public.accounts_receivable": PublicAccountsReceivableTable;
   "public.receivable_payments": PublicReceivablePaymentsTable;

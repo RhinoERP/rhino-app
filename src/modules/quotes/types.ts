@@ -55,6 +55,7 @@ export type CreateQuoteItemInput = {
 
 export type CreateQuoteInput = {
   orgSlug: string;
+  warehouseId?: string;
   customerId: string;
   currency?: string;
   exchangeRate?: number | null;
@@ -65,6 +66,7 @@ export type CreateQuoteInput = {
   priceLevelId?: string | null;
   salesPriceListId?: string | null;
   globalDiscountPercentage?: number | null;
+  isVatExempt?: boolean;
   /** Tipo de comprobante de la venta que se generará al convertir. */
   invoiceType?: InvoiceType | null;
   /** Impuestos de fallback global (se aplican a ítems sin impuesto propio). */
@@ -93,6 +95,7 @@ export type QuotePaginationParams = {
 
 export type UpdateQuoteInput = {
   orgSlug: string;
+  warehouseId?: string;
   customerId?: string;
   status?: QuoteStatus;
   currency?: string;
@@ -106,6 +109,7 @@ export type UpdateQuoteInput = {
   priceLevelId?: string | null;
   salesPriceListId?: string | null;
   globalDiscountPercentage?: number | null;
+  isVatExempt?: boolean;
   /** Tipo de comprobante de la venta que se generará al convertir. */
   invoiceType?: InvoiceType | null;
   /** Impuestos de fallback global (se aplican a ítems sin impuesto propio). */
@@ -180,6 +184,7 @@ export const QUOTE_INVOICE_TYPES = [
 
 export const quoteFormSchema = z
   .object({
+    warehouseId: z.uuid("Seleccioná un depósito válido").optional(),
     customerId: z.string().min(1, "Debe seleccionar un cliente."),
 
     salesPriceListId: z.string(),
@@ -213,12 +218,23 @@ export const quoteFormSchema = z
 
     globalDiscountPercentage: z.number().min(0).max(100).default(0),
 
+    isVatExempt: z.boolean().optional().default(false),
+
     // Impuestos de fallback global (se aplican a ítems sin impuesto propio)
     taxes: z.array(quoteItemTaxSchema).optional().default([]),
 
     paymentCondition: z.string().optional(),
   })
   .superRefine((val, ctx) => {
+    if (val.isVatExempt && val.invoiceType === "FACTURA_C") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["isVatExempt"],
+        message:
+          "Factura C no permite declarar importes exentos de IVA en ARCA.",
+      });
+    }
+
     if (
       val.advancePaymentEnabled &&
       val.invoiceType !== "FACTURA_A" &&

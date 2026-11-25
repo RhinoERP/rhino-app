@@ -8,7 +8,11 @@ export function useEmitSaleInvoiceMutation() {
   const router = useRouter();
 
   const emitSaleInvoice = useMutation({
-    mutationFn: async (payload: { orgSlug: string; saleId: string }) => {
+    mutationFn: async (payload: {
+      orgSlug: string;
+      saleId: string;
+      fiscalExchangeRate?: number;
+    }) => {
       const result = await emitSaleInvoiceAction(payload);
 
       if (!result.success) {

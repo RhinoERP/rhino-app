@@ -64,6 +64,7 @@ export type ExpenseByCategoryResult = {
 };
 
 export type FinancialResults = {
+  unvaluedUsdBalanceCount?: number;
   period: FinancialPeriod;
   cashCollections: number;
   nonCashCreditApplications: number;

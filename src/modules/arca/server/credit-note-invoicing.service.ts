@@ -16,6 +16,7 @@ import {
 import {
   ArcaConnectionError,
   ArcaValidationError,
+  isDefinitiveArcaRejection,
   sanitizeArcaErrorMessage,
 } from "../errors";
 import type { ArcaCreditNoteInvoiceResult } from "../types";
@@ -429,6 +430,7 @@ function normalizeLoadedSale(data: {
   sale_date: string;
   invoice_type: InvoiceType;
   total_amount: number;
+  is_vat_exempt?: boolean | null;
   arca_status: string | null;
   arca_cae: string | null;
   arca_authorized_at: string | null;
@@ -484,6 +486,7 @@ function normalizeLoadedSale(data: {
     saleDate: data.sale_date,
     invoiceType: data.invoice_type,
     totalAmount: truncateMoney(Number(data.total_amount ?? 0)),
+    isVatExempt: Boolean(data.is_vat_exempt),
     arcaStatus: data.arca_status ?? "not_requested",
     arcaCae: data.arca_cae ?? null,
     arcaAuthorizedAt: data.arca_authorized_at ?? null,
@@ -619,6 +622,7 @@ async function loadCreditNoteForArca(params: {
         sale_date,
         invoice_type,
         total_amount,
+        is_vat_exempt,
         arca_status,
         arca_cae,
         arca_authorized_at,
@@ -653,15 +657,18 @@ async function loadCreditNoteForArca(params: {
     );
   }
 
+  const normalizedSaleData = saleData as unknown as
+    | Parameters<typeof normalizeLoadedSale>[0]
+    | null;
+
   return {
     organizationId: access.organization.id,
     organizationCuit: access.organization.cuit ?? null,
     creditNote,
-    sale: saleData
+    sale: normalizedSaleData
       ? normalizeLoadedSale({
-          ...saleData,
-          arca_request_json:
-            (saleData.arca_request_json as Json | null) ?? null,
+          ...normalizedSaleData,
+          arca_request_json: normalizedSaleData.arca_request_json ?? null,
         })
       : null,
   };
@@ -991,7 +998,7 @@ export async function emitCreditNote(params: {
   } catch (error) {
     const sanitizedError = sanitizeArcaErrorMessage(error);
 
-    if (error instanceof ArcaValidationError) {
+    if (isDefinitiveArcaRejection(error)) {
       await persistCreditNoteArcaError({
         orgId: context.organizationId,
         creditNoteId: context.creditNote.id,

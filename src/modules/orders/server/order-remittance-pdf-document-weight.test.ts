@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createClient } from "@/lib/supabase/server";
 import { generateRemittanceHTML } from "@/modules/sales/service/remittance-generator.service";
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +14,12 @@ vi.mock("@/lib/supabase/server", () => ({
 
 vi.mock("server-only", () => ({}));
 
+// This suite covers the historical renderer, without persisted documents.
+vi.mock("./order-remittance-documents.service", () => ({
+  findSavedRemittance: vi.fn().mockResolvedValue(null),
+  savedRemittanceData: vi.fn(),
+}));
+
 vi.mock(
   "@/modules/organizations/actions/get-organization-settings.action",
   () => ({
@@ -25,9 +32,25 @@ vi.mock("@/modules/organizations/service/organizations.service", () => ({
 }));
 
 import {
+  fetchOrderRemittanceRows,
   getOrderRemittanceData,
   groupOrderRemittanceItems,
 } from "./order-remittance-pdf-document.service";
+
+function queryResult(data: unknown) {
+  const result = { data, error: null };
+  const query = Object.assign(Promise.resolve(result), {
+    select: vi.fn(),
+    eq: vi.fn(),
+    in: vi.fn(),
+    is: vi.fn().mockResolvedValue({ data: [], error: null }),
+    single: vi.fn().mockResolvedValue(result),
+  });
+  query.select.mockReturnValue(query);
+  query.eq.mockReturnValue(query);
+  query.in.mockReturnValue(query);
+  return query;
+}
 
 describe("groupOrderRemittanceItems", () => {
   const line = {
@@ -103,103 +126,77 @@ describe("getOrderRemittanceData", () => {
   it("uses assigned split quantities without changing the sales item weight", async () => {
     const from = vi.fn((table: string) => {
       if (table === "orders") {
-        return {
-          select: vi.fn(() => ({
-            in: vi.fn().mockResolvedValue({
-              data: [
-                {
-                  order_number: 12,
-                  observations: null,
-                  quote_id: "quote-1",
-                  sales_order_id: null,
-                  parent_order_id: null,
-                  quotes: { customer_id: "customer-1" },
-                },
-              ],
-            }),
-          })),
-        };
+        return queryResult([
+          {
+            order_number: 12,
+            observations: null,
+            quote_id: "quote-1",
+            sales_order_id: null,
+            parent_order_id: null,
+            quotes: { customer_id: "customer-1" },
+          },
+        ]);
       }
 
       if (table === "quote_items") {
-        return {
-          select: vi.fn(() => ({
-            in: vi.fn().mockResolvedValue({
-              data: [
-                {
-                  id: "quote-item-1",
-                  description: "Carne",
-                  quantity: 3,
-                  unit_price: 100,
-                  subtotal: 300,
-                  discount_percentage: null,
-                  quote_item_extras: [],
-                  products: {
-                    name: "Carne",
-                    sku: "CAR-001",
-                    brand: null,
-                    unit_of_measure: "KG",
-                  },
-                },
-                {
-                  id: "quote-item-split",
-                  description: "Carne",
-                  quantity: 1,
-                  unit_price: 100,
-                  subtotal: 100,
-                  discount_percentage: null,
-                  quote_item_extras: [],
-                  products: {
-                    name: "Carne",
-                    sku: "CAR-001",
-                    brand: null,
-                    unit_of_measure: "KG",
-                  },
-                },
-              ],
-            }),
-          })),
-        };
+        return queryResult([
+          {
+            id: "quote-item-1",
+            description: "Carne",
+            quantity: 3,
+            unit_price: 100,
+            subtotal: 300,
+            discount_percentage: null,
+            quote_item_extras: [],
+            products: {
+              name: "Carne",
+              sku: "CAR-001",
+              brand: null,
+              unit_of_measure: "KG",
+            },
+          },
+          {
+            id: "quote-item-split",
+            description: "Carne",
+            quantity: 1,
+            unit_price: 100,
+            subtotal: 100,
+            discount_percentage: null,
+            quote_item_extras: [],
+            products: {
+              name: "Carne",
+              sku: "CAR-001",
+              brand: null,
+              unit_of_measure: "KG",
+            },
+          },
+        ]);
       }
 
       if (table === "sales_order_items") {
-        return {
-          select: vi.fn(() => ({
-            in: vi.fn().mockResolvedValue({
-              data: [
-                {
-                  quote_item_id: "quote-item-1",
-                  description: "Carne",
-                  quantity: 4,
-                  unit_quantity: 4.5,
-                  unit_price: 100,
-                  discount_percentage: null,
-                },
-              ],
-            }),
-          })),
-        };
+        return queryResult([
+          {
+            quote_item_id: "quote-item-1",
+            description: "Carne",
+            quantity: 4,
+            unit_quantity: 4.5,
+            unit_price: 100,
+            discount_percentage: null,
+          },
+        ]);
       }
 
       if (table === "customers") {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              single: vi.fn().mockResolvedValue({
-                data: {
-                  business_name: "Cliente",
-                  fantasy_name: null,
-                  cuit: null,
-                  phone: null,
-                  email: null,
-                  address: null,
-                  city: null,
-                  tax_condition: null,
-                },
-              }),
-            })),
-          })),
-        };
+        return queryResult({
+          business_name: "Cliente",
+          fantasy_name: null,
+          cuit: null,
+          phone: null,
+          email: null,
+          address: null,
+          city: null,
+          tax_condition: null,
+        });
       }
 
       throw new Error(`Unexpected table: ${table}`);
@@ -207,6 +204,7 @@ describe("getOrderRemittanceData", () => {
 
     mocks.createClient.mockResolvedValue({ from });
     mocks.getOrganizationBySlug.mockResolvedValue({
+      id: "org",
       name: "Empresa",
       cuit: "30-12345678-9",
     });
@@ -235,5 +233,48 @@ describe("getOrderRemittanceData", () => {
     expect(remittance.total).toBe(400);
     expect(remittance.finalRemittanceVisibility?.showWeight).toBe(true);
     expect(generateRemittanceHTML(remittance)).toContain("Peso</th>");
+  });
+});
+
+describe("fetchOrderRemittanceRows", () => {
+  it("loads assigned and loose items together only for the standalone quote", async () => {
+    const assignedItem = {
+      id: "assigned",
+      quote_id: "quote",
+      assigned_order_id: "root",
+      quantity: 1,
+      unit_price: 10,
+      quote_item_extras: [],
+    };
+    const looseItem = { ...assignedItem, id: "loose", assigned_order_id: null };
+    const assigned = queryResult([assignedItem]);
+    const loose = queryResult([]);
+    loose.is.mockResolvedValue({ data: [looseItem], error: null });
+    const quoteItems = vi
+      .fn()
+      .mockReturnValueOnce(assigned)
+      .mockReturnValueOnce(loose);
+    const from = vi.fn((table: string) =>
+      table === "quote_items" ? quoteItems() : queryResult([])
+    );
+    mocks.createClient.mockResolvedValue({ from });
+    const rows = await fetchOrderRemittanceRows(
+      await createClient(),
+      "org",
+      ["root"],
+      "quote"
+    );
+    expect(rows.map(({ source }) => source.id)).toEqual(["assigned", "loose"]);
+    expect(loose.eq).toHaveBeenCalledWith("quote_id", "quote");
+    expect(loose.eq).toHaveBeenCalledWith("quote.organization_id", "org");
+    expect(loose.is).toHaveBeenCalledWith("assigned_order_id", null);
+    expect(looseItem.assigned_order_id).toBeNull();
+  });
+
+  it("never loads loose quote items for a child selection", async () => {
+    const from = vi.fn(() => queryResult([]));
+    mocks.createClient.mockResolvedValue({ from });
+    await fetchOrderRemittanceRows(await createClient(), "org", ["child"]);
+    expect(from).toHaveBeenCalledTimes(1);
   });
 });

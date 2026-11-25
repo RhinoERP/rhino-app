@@ -25,6 +25,7 @@ export async function createQuoteAction(
     // Map QuoteFormValues to CreateQuoteInput
     const input: CreateQuoteInput = {
       orgSlug,
+      warehouseId: values.warehouseId,
       customerId: values.customerId,
       currency: values.currency,
       exchangeRate: values.exchangeRate ?? null,
@@ -37,6 +38,7 @@ export async function createQuoteAction(
       priceLevelId: toNullablePricingId(values.priceLevelId),
       salesPriceListId: toNullablePricingId(values.salesPriceListId),
       globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      isVatExempt: values.isVatExempt ?? false,
       invoiceType: values.invoiceType ?? "NOTA_DE_VENTA",
       taxes: values.taxes,
       items: mapQuoteFormItems(values.items, values.currency),

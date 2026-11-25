@@ -29,6 +29,7 @@ export default async function PosModuleLayout({
   ]);
   if (
     isOrganizationModuleEnabled(organization, "production") &&
+    !layoutData?.permissions.includes("organization.admin") &&
     !layoutData?.permissions.includes("mercadolibre.access")
   ) {
     redirect(`/org/${orgSlug}`);

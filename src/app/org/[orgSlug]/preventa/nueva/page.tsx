@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PreSaleForm } from "@/components/sales/forms/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
@@ -32,12 +33,12 @@ export default async function PreSalePage({
     notFound();
   }
 
-  const [organization, customers, sellers, products, taxes, priceLevels] =
+  const [organization, customers, sellers, warehouses, taxes, priceLevels] =
     await Promise.all([
       getOrganizationBySlug(orgSlug),
       getCustomersByOrgSlug(orgSlug),
       getOrganizationSalesMembersBySlug(orgSlug),
-      getSaleProducts(orgSlug),
+      getAvailableWarehouses(orgSlug, "wholesale"),
       getActiveTaxesByOrgSlug(orgSlug),
       getPriceLevelsByOrgSlug(orgSlug),
     ]);
@@ -45,6 +46,11 @@ export default async function PreSalePage({
   if (!organization) {
     notFound();
   }
+
+  const initialWarehouseId = warehouses[0]?.id;
+  const products = initialWarehouseId
+    ? await getSaleProducts(orgSlug, initialWarehouseId)
+    : [];
 
   if (isOrganizationModuleEnabled(organization, "production")) {
     notFound();
@@ -77,12 +83,18 @@ export default async function PreSalePage({
       customers={visibleCustomers}
       initialCustomerId={initialContext.customerId}
       initialSellerId={initialContext.sellerId}
+      initialWarehouseId={initialWarehouseId}
       organization={{ name: organization.name, cuit: organization.cuit }}
       orgSlug={orgSlug}
       priceLevels={priceLevels}
       products={products}
       sellers={sellers}
       taxes={taxes}
+      warehouses={warehouses.map(({ id, name, is_default }) => ({
+        id,
+        name,
+        is_default,
+      }))}
     />
   );
 }

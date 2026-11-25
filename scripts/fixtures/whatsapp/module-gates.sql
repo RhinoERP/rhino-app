@@ -34,19 +34,19 @@ END; $$;
 RESET ROLE;
 UPDATE organizations SET whatsapp_sandbox_enabled=true WHERE id='11111111-1111-4111-8111-111111111111';
 SET ROLE authenticated;
-SELECT pg_temp.assert_true((SELECT count(*) = 1 FROM whatsapp_integrations WHERE phone_number_id LIKE 'rhinos-local-simulator:%'), 'Sandbox visible independently');
+SELECT pg_temp.assert_true((SELECT count(*) = CASE WHEN to_regprocedure('public.control_whatsapp_conversation(uuid,uuid,uuid,integer,text,uuid)') IS NULL THEN 1 ELSE 0 END FROM whatsapp_integrations WHERE phone_number_id LIKE 'rhinos-local-simulator:%'), 'Sandbox visibility respects module and server-only rollout');
 SELECT pg_temp.assert_true((SELECT count(*) = 0 FROM whatsapp_integrations WHERE phone_number_id='123456'), 'Live channel stays hidden');
-SELECT pg_temp.assert_true((SELECT count(*) = 1 FROM conversation_carts), 'Sandbox carts visible through RLS');
+SELECT pg_temp.assert_true((SELECT count(*) = CASE WHEN to_regprocedure('public.control_whatsapp_conversation(uuid,uuid,uuid,integer,text,uuid)') IS NULL THEN 1 ELSE 0 END FROM conversation_carts), 'Sandbox cart visibility respects server-only rollout');
 DO $$ BEGIN
   BEGIN
     UPDATE whatsapp_integrations SET status='ACTIVE',sales_price_list_id='44444444-4444-4444-8444-444444444444',responsible_user_id='33333333-3333-4333-8333-333333333333' WHERE phone_number_id LIKE 'rhinos-local-simulator:%';
-    RAISE EXCEPTION 'FAIL: sandbox integration activated';
+    IF FOUND THEN RAISE EXCEPTION 'FAIL: sandbox integration activated'; END IF;
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END; $$;
 RESET ROLE;
 UPDATE organizations SET whatsapp_enabled=true,whatsapp_sandbox_enabled=false WHERE id='11111111-1111-4111-8111-111111111111';
 SET ROLE authenticated;
-SELECT pg_temp.assert_true((SELECT count(*) = 1 FROM whatsapp_integrations), 'Live visible, sandbox hidden');
+SELECT pg_temp.assert_true((SELECT count(*) = CASE WHEN to_regprocedure('public.control_whatsapp_conversation(uuid,uuid,uuid,integer,text,uuid)') IS NULL THEN 1 ELSE 0 END FROM whatsapp_integrations), 'Live visibility respects server-only rollout');
 SELECT pg_temp.assert_true((SELECT count(*) = 0 FROM conversation_carts), 'Disabled sandbox carts hidden again');
 RESET ROLE;
 SET ROLE service_role;

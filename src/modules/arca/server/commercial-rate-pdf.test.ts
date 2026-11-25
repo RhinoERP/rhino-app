@@ -176,6 +176,35 @@ describe("commercial rate in generated invoice PDFs", () => {
     });
     expect(ars.html).not.toContain("Tipo de cambio comercial USD → ARS");
   });
+
+  it("shows an exempt ARCA amount separately from taxable net in the invoice PDF", async () => {
+    const exemptSale = sale(null, "ARS");
+    mocks.getSalesOrderById.mockResolvedValue({
+      ...exemptSale,
+      arca_request_json: {
+        wsfeRequest: {
+          ...fiscalRequest.wsfeRequest,
+          MonId: "PES",
+          MonCotiz: 1,
+          ImpNeto: 0,
+          ImpOpEx: 300_000,
+        },
+      },
+      total_amount: 300_000,
+      sub_total: 300_000,
+      taxes: [],
+    });
+
+    const result = await generateAuthorizedSaleInvoicePdf({
+      orgSlug: "test",
+      saleId: "sale-exempt",
+    });
+
+    expect(result.html).toContain("Importe neto gravado");
+    expect(result.html).toContain("Importe exento");
+    expect(result.html).toContain("300.000,00");
+    expect(result.html).not.toContain("Operación exenta de IVA (0%)");
+  });
 });
 
 describe("payment condition in generated sale invoice PDFs", () => {

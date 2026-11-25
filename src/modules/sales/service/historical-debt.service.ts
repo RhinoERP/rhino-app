@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getDefaultWarehouseId } from "@/modules/inventory/service/default-warehouse.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { CreateHistoricalDebtInput, HistoricalDebtRow } from "../types";
@@ -69,6 +70,7 @@ async function processSingleDebt(
     .from("sales_orders")
     .insert({
       organization_id: orgId,
+      warehouse_id: await getDefaultWarehouseId(supabase, orgId),
       customer_id: row.customerId,
       supplier_id: row.supplierId,
       user_id: row.sellerId ?? userId,
@@ -100,21 +102,25 @@ async function processSingleDebt(
 
   const saleId = sale.id;
 
-  const { error: arError } = await supabase.from("accounts_receivable").insert({
-    organization_id: orgId,
-    customer_id: row.customerId,
-    sales_order_id: saleId,
-    total_amount: totalAmount,
-    pending_balance: totalAmount,
-    due_date: expirationDate,
-    status: "PENDING",
-  });
+  const { data: receivable, error: arError } = await supabase
+    .from("accounts_receivable")
+    .insert({
+      organization_id: orgId,
+      customer_id: row.customerId,
+      sales_order_id: saleId,
+      total_amount: totalAmount,
+      pending_balance: totalAmount,
+      due_date: expirationDate,
+      status: "PENDING",
+    })
+    .select("id")
+    .maybeSingle();
 
-  if (arError) {
+  if (arError || !receivable?.id) {
     await supabase.from("sales_orders").delete().eq("id", saleId);
     return {
       success: false,
-      error: `Error al crear cuenta corriente: ${arError.message}`,
+      error: `Error al crear cuenta corriente: ${arError?.message ?? "No se creó la cuenta por cobrar"}`,
     };
   }
   return { success: true };

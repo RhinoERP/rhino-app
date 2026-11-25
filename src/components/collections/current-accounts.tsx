@@ -53,6 +53,7 @@ import type {
   ReceivableAccount,
 } from "@/modules/collections/types";
 import { isCheckPaymentMethod } from "@/modules/collections/utils/check-payment-method";
+import { formatPayableReference } from "@/modules/collections/utils/payable-reference";
 import { useCustomerCreditNotes } from "@/modules/credit-notes/hooks/use-credit-notes";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
@@ -247,11 +248,7 @@ function buildSupplierGroups(payables: PayableAccount[]): SupplierGroup[] {
 
   for (const account of payables) {
     const existing = map.get(account.supplier.id);
-    const label =
-      account.purchase?.purchase_number !== undefined &&
-      account.purchase?.purchase_number !== null
-        ? `Compra ${String(account.purchase.purchase_number).padStart(6, "0")}`
-        : `Orden ${account.purchase_order_id.slice(0, 6)}`;
+    const label = formatPayableReference(account);
 
     const item = {
       id: account.id,

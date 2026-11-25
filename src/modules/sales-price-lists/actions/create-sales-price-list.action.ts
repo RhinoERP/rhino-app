@@ -1,6 +1,7 @@
 "use server";
 
-import { requireAuth } from "@/lib/supabase/auth";
+import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createSalesPriceList as createSalesPriceListService } from "../service/sales-price-lists.service";
 import type { CreateSalesPriceListInput, SalesPriceList } from "../types";
 
@@ -13,9 +14,14 @@ export type CreateSalesPriceListActionResult = {
 export async function createSalesPriceListAction(
   input: CreateSalesPriceListInput
 ): Promise<CreateSalesPriceListActionResult> {
+  await ensure("pricelists.manage", input.orgSlug);
   try {
-    await requireAuth();
     const priceList = await createSalesPriceListService(input);
+
+    revalidatePath(`/org/${input.orgSlug}/precios/listas-de-precios-venta`);
+    revalidatePath(
+      `/org/${input.orgSlug}/configuracion/listas-de-precios-venta`
+    );
 
     return {
       success: true,

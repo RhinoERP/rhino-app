@@ -14,7 +14,7 @@ vi.mock("@/lib/supabase/proxy", () => ({
 describe.each([
   ["root", rootProxy],
   ["src", srcProxy],
-])("WhatsApp server requests through %s entry point", (_name, proxy) => {
+])("Request authentication through %s entry point", (_name, proxy) => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateSessionMock.mockResolvedValue(
@@ -23,9 +23,34 @@ describe.each([
   });
 
   it.each([
+    ["GET", "/privacidad"],
+    ["HEAD", "/privacidad"],
+    ["GET", "/eliminacion-datos"],
+    ["HEAD", "/eliminacion-datos"],
+    ["GET", "/privacidad?source=meta"],
+  ])("serves public legal information for %s %s", async (method, pathname) => {
+    const response = await proxy(
+      new NextRequest(`https://rhinos.example${pathname}`, { method })
+    );
+
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.has("location")).toBe(false);
+    expect(updateSessionMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "GET",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ],
+    [
+      "POST",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ],
     ["GET", "/api/webhooks/whatsapp"],
     ["POST", "/api/webhooks/whatsapp"],
     ["POST", "/api/internal/whatsapp-agent/tools/search_catalog"],
+    ["GET", "/api/internal/whatsapp-agent/audio-cleanup"],
   ])("lets %s %s reach its own authentication", async (method, pathname) => {
     const response = await proxy(
       new NextRequest(`https://rhinos.example${pathname}`, { method })
@@ -37,6 +62,15 @@ describe.each([
   });
 
   it.each([
+    ["GET", "/remitos/recepcion/invalid"],
+    [
+      "GET",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/extra",
+    ],
+    [
+      "DELETE",
+      "/remitos/recepcion/10000000-0000-4000-8000-000000000001.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ],
     ["GET", "/org/acme/whatsapp/conversaciones"],
     ["POST", "/api/org/acme/whatsapp/simulate"],
     ["POST", "/api/webhooks/whatsapp-extra"],
@@ -45,6 +79,13 @@ describe.each([
     ["POST", "/api/internal/whatsapp-agent/tools/search_catalog/extra"],
     ["GET", "/api/internal/whatsapp-agent/tools/search_catalog"],
     ["DELETE", "/api/webhooks/whatsapp"],
+    ["POST", "/api/internal/whatsapp-agent/audio-cleanup"],
+    ["GET", "/api/internal/whatsapp-agent/audio-cleanup/extra"],
+    ["GET", "/privacidad-extra"],
+    ["GET", "/privacidad/extra"],
+    ["GET", "/eliminacion-datos/extra"],
+    ["POST", "/privacidad"],
+    ["DELETE", "/eliminacion-datos"],
   ])("keeps session authentication for %s %s", async (method, pathname) => {
     const request = new NextRequest(`https://rhinos.example${pathname}`, {
       method,

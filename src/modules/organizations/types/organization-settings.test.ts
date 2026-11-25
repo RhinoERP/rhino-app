@@ -1,8 +1,36 @@
 import { describe, expect, it } from "vitest";
+import { OrgSettingsSchema } from "../service/org-settings.service";
 import {
   ORGANIZATION_SETTINGS_DEFAULTS,
   organizationSettingsSchema,
 } from "./organization-settings";
+
+describe("invoice-backed debt setting", () => {
+  it("keeps both settings readers disabled for existing organizations", () => {
+    expect(
+      organizationSettingsSchema.parse({}).invoice_backed_debt_enabled
+    ).toBe(false);
+    expect(OrgSettingsSchema.parse({}).invoice_backed_debt_enabled).toBe(false);
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.invoice_backed_debt_enabled).toBe(
+      false
+    );
+  });
+
+  it("retains the policy through either settings writer when another setting changes", () => {
+    const current = organizationSettingsSchema.parse({
+      invoice_backed_debt_enabled: true,
+    });
+    const viaService = OrgSettingsSchema.parse({
+      ...current,
+      due_days_enabled: true,
+    });
+    const viaAction = organizationSettingsSchema.parse({
+      ...viaService,
+      invoice_print_duplicate: true,
+    });
+    expect(viaAction.invoice_backed_debt_enabled).toBe(true);
+  });
+});
 
 describe("invoice original and duplicate setting", () => {
   it("keeps a single original for companies without an explicit preference", () => {

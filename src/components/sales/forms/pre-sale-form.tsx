@@ -16,8 +16,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PreSaleCustomerAccount } from "@/components/collections/pre-sale-customer-account";
+import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,6 +81,7 @@ import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
+import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import {
@@ -89,6 +91,7 @@ import {
 import type { PriceLevel } from "@/modules/price-levels/types";
 import { getPriceListItemsBatchAction } from "@/modules/price-lists/actions/get-price-list-items-batch.action";
 import type { PriceListItemBasic } from "@/modules/price-lists/service/price-lists.service";
+import { getSaleProductsByWarehouseAction } from "@/modules/sales/actions/get-sale-products-by-warehouse.action";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import { INVOICE_TYPE_OPTIONS } from "@/modules/sales/invoice-type-utils";
 import type {
@@ -113,6 +116,7 @@ import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
+  removeVatTaxes,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
@@ -130,11 +134,13 @@ type PreSaleFormProps = {
   };
   initialSellerId?: string;
   initialCustomerId?: string;
+  initialWarehouseId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
   taxes: Tax[];
   priceLevels: PriceLevel[];
+  warehouses: WarehouseOption[];
 };
 
 type ItemState = {
@@ -285,7 +291,8 @@ const toManualItemTax = (tax: Tax): ItemTaxInput => ({
 
 const getItemTaxIndicator = (
   item: ItemState,
-  fallbackTaxes: Tax[]
+  fallbackTaxes: Tax[],
+  isVatExempt = false
 ): {
   label: string;
   summary: string;
@@ -295,26 +302,33 @@ const getItemTaxIndicator = (
     return null;
   }
 
-  if (item.taxes?.length) {
-    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+  const itemTaxes = isVatExempt
+    ? removeVatTaxes(item.taxes ?? [])
+    : (item.taxes ?? []);
+  const applicableFallbackTaxes = isVatExempt
+    ? fallbackTaxes.filter((tax) => !isIvaTax(tax))
+    : fallbackTaxes;
+
+  if (itemTaxes.length > 0) {
+    const isManualOverride = itemTaxes.some((tax) => tax.source === "manual");
 
     return {
       label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
-      summary: formatTaxSummary(item.taxes),
+      summary: formatTaxSummary(itemTaxes),
       variant: isManualOverride ? "manual" : "product",
     };
   }
 
-  if (fallbackTaxes.length > 0) {
+  if (applicableFallbackTaxes.length > 0) {
     return {
       label: "Impuesto venta",
-      summary: formatTaxSummary(fallbackTaxes),
+      summary: formatTaxSummary(applicableFallbackTaxes),
       variant: "fallback",
     };
   }
 
   return {
-    label: "Sin impuesto",
+    label: isVatExempt ? "Operación exenta de IVA" : "Sin impuesto",
     summary: "",
     variant: "none",
   };
@@ -576,14 +590,22 @@ export function PreSaleForm({
   organization,
   initialSellerId,
   initialCustomerId,
+  initialWarehouseId,
   customers,
   sellers,
-  products,
+  products: initialProducts,
   taxes,
   priceLevels,
+  warehouses,
 }: PreSaleFormProps) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>(initialCustomerId ?? "");
+  const [warehouseId, setWarehouseId] = useState<string>(
+    initialWarehouseId ?? warehouses[0]?.id ?? ""
+  );
+  const [products, setProducts] = useState<SaleProduct[]>(initialProducts);
+  const [isLoadingWarehouseStock, setIsLoadingWarehouseStock] = useState(false);
+  const warehouseRequestRef = useRef(0);
   const [sellerId, setSellerId] = useState<string>("");
   const [selectedPriceLevelId, setSelectedPriceLevelId] = useState<string>("");
   const [productPrices, setProductPrices] = useState<Map<string, number>>(
@@ -600,6 +622,7 @@ export function PreSaleForm({
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
+  const [isVatExempt, setIsVatExempt] = useState(false);
   const [hasAdvance, setHasAdvance] = useState(false);
   const [advancePercentage, setAdvancePercentage] = useState<number | null>(
     null
@@ -1019,9 +1042,12 @@ export function PreSaleForm({
   const selectedTaxes = useMemo(
     () =>
       taxes
-        .filter((tax) => selectedTaxIds.includes(tax.id))
+        .filter(
+          (tax) =>
+            selectedTaxIds.includes(tax.id) && !(isVatExempt && isIvaTax(tax))
+        )
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [selectedTaxIds, taxes]
+    [isVatExempt, selectedTaxIds, taxes]
   );
 
   useEffect(() => {
@@ -1134,12 +1160,16 @@ export function PreSaleForm({
     );
 
     const taxPlan = buildItemizedTaxPlan({
-      lines: items.map((item) => ({
-        lineId: item.id,
-        productId: item.type === "product" ? item.productId : null,
-        netAmount: calculateItemTotals(item).subtotal,
-        taxes: item.type === "product" ? item.taxes : undefined,
-      })),
+      lines: items.map((item) => {
+        const itemTaxes = item.type === "product" ? item.taxes : undefined;
+        return {
+          lineId: item.id,
+          productId: item.type === "product" ? item.productId : null,
+          netAmount: calculateItemTotals(item).subtotal,
+          taxes:
+            isVatExempt && itemTaxes ? removeVatTaxes(itemTaxes) : itemTaxes,
+        };
+      }),
       globalDiscountAmount,
       fallbackTaxes: toFallbackItemTaxes(
         selectedTaxes.map((tax) => ({
@@ -1179,7 +1209,13 @@ export function PreSaleForm({
       totalDiscountAmount,
       total,
     };
-  }, [items, selectedTaxes, globalDiscountPercent, calculateItemTotals]);
+  }, [
+    items,
+    selectedTaxes,
+    globalDiscountPercent,
+    calculateItemTotals,
+    isVatExempt,
+  ]);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const normalizedExpirationDays =
@@ -1494,7 +1530,11 @@ export function PreSaleForm({
   };
 
   const canSubmit =
-    Boolean(customerId) && Boolean(sellerId) && items.length > 0;
+    Boolean(customerId) &&
+    Boolean(sellerId) &&
+    Boolean(warehouseId) &&
+    !isLoadingWarehouseStock &&
+    items.length > 0;
   const isSaving = createPreSale.isPending;
 
   const ensureActiveSessionForSave = async () => {
@@ -1547,10 +1587,12 @@ export function PreSaleForm({
       const payload = {
         customerId,
         sellerId,
+        warehouseId,
         saleDate: saleDateString,
         expirationDate: expirationDateString || null,
         creditDays: normalizedExpirationDays,
         invoiceType,
+        isVatExempt,
         advancePaymentPercentage: resolvedAdvancePaymentPercentage,
         observations: composePaymentObservations(
           observations,
@@ -1580,6 +1622,7 @@ export function PreSaleForm({
       setSuccessMessage("Preventa creada correctamente");
       setItems([]);
       setCollapsedItemIds(new Set());
+      setIsVatExempt(false);
       setObservations("");
       router.push(`/org/${orgSlug}/ventas`);
     } catch (mutationError) {
@@ -1639,12 +1682,53 @@ export function PreSaleForm({
     }
   };
 
+  const handleWarehouseSelect = async (nextWarehouseId: string) => {
+    const requestId = warehouseRequestRef.current + 1;
+    warehouseRequestRef.current = requestId;
+    setWarehouseId(nextWarehouseId);
+    setError(null);
+    setIsLoadingWarehouseStock(true);
+
+    try {
+      const nextProducts = await getSaleProductsByWarehouseAction(
+        orgSlug,
+        nextWarehouseId
+      );
+      if (warehouseRequestRef.current !== requestId) {
+        return;
+      }
+      setProducts(nextProducts);
+    } catch (warehouseError) {
+      if (warehouseRequestRef.current !== requestId) {
+        return;
+      }
+      setProducts([]);
+      setError(
+        warehouseError instanceof Error
+          ? warehouseError.message
+          : "No se pudo cargar el stock del depósito"
+      );
+    } finally {
+      if (warehouseRequestRef.current === requestId) {
+        setIsLoadingWarehouseStock(false);
+      }
+    }
+  };
+
   const handleTaxToggle = (taxId: string) => {
+    const tax = taxes.find((entry) => entry.id === taxId);
+    if (isVatExempt && tax && isIvaTax(tax)) {
+      return;
+    }
     setSelectedTaxIds((prev) =>
       prev.includes(taxId)
         ? prev.filter((id) => id !== taxId)
         : [...prev, taxId]
     );
+  };
+
+  const handleVatExemptChange = (checked: boolean) => {
+    setIsVatExempt(checked);
   };
 
   const handleUseSaleTaxesForItem = (itemId: string) => {
@@ -1661,6 +1745,9 @@ export function PreSaleForm({
   };
 
   const handleItemTaxToggle = (itemId: string, tax: Tax) => {
+    if (isVatExempt && isIvaTax(tax)) {
+      return;
+    }
     setItems((prev) =>
       prev.map((item) => {
         if (item.id !== itemId || item.type === "adjustment") {
@@ -1972,6 +2059,20 @@ export function PreSaleForm({
                     Usamos los usuarios de la organización como vendedores.
                   </p>
                 </div>
+
+                <OperationalWarehouseField
+                  description={
+                    isLoadingWarehouseStock
+                      ? "Actualizando stock del depósito..."
+                      : "El stock mostrado corresponde a este depósito."
+                  }
+                  disabled={isSaving || isLoadingWarehouseStock}
+                  id="warehouse"
+                  onValueChange={handleWarehouseSelect}
+                  required
+                  value={warehouseId}
+                  warehouses={warehouses}
+                />
               </div>
 
               {priceLevels.length > 0 && (
@@ -2087,7 +2188,11 @@ export function PreSaleForm({
                     </SelectTrigger>
                     <SelectContent>
                       {invoiceTypeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
+                        <SelectItem
+                          disabled={isVatExempt && option.value === "FACTURA_C"}
+                          key={option.value}
+                          value={option.value}
+                        >
                           {option.label}
                         </SelectItem>
                       ))}
@@ -2173,6 +2278,28 @@ export function PreSaleForm({
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="isVatExempt">
+                    <span className="flex items-center gap-2">
+                      <input
+                        checked={isVatExempt}
+                        className="size-4 accent-primary"
+                        disabled={invoiceType === "FACTURA_C"}
+                        id="isVatExempt"
+                        onChange={(event) =>
+                          handleVatExemptChange(event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      Operación exenta de IVA
+                    </span>
+                  </Label>
+                  <p className="text-muted-foreground text-xs">
+                    ARCA la declarará como importe exento. El IVA no se aplica
+                    mientras la opción esté marcada; otros tributos se
+                    conservan.
+                  </p>
+                </div>
               </div>
 
               {/* Taxes still come from product/organization settings and remain in totals. */}
@@ -2235,6 +2362,7 @@ export function PreSaleForm({
                           <CommandGroup>
                             {taxes.map((tax) => (
                               <CommandItem
+                                disabled={isVatExempt && isIvaTax(tax)}
                                 key={tax.id}
                                 onSelect={() => handleTaxToggle(tax.id)}
                                 value={tax.name}
@@ -2254,6 +2382,9 @@ export function PreSaleForm({
                   </Popover>
                   <p className="text-muted-foreground text-xs">
                     Se aplican a los productos sin impuesto propio.
+                    {isVatExempt
+                      ? " El IVA no se aplica durante esta operación."
+                      : ""}
                   </p>
                 </div>
               </div>
@@ -2751,7 +2882,8 @@ export function PreSaleForm({
                       }
                       const taxIndicator = getItemTaxIndicator(
                         item,
-                        selectedTaxes
+                        selectedTaxes,
+                        isVatExempt
                       );
                       const currentItemTaxIds = new Set(
                         item.taxes?.map((tax) => tax.taxId) ?? []
@@ -3094,6 +3226,9 @@ export function PreSaleForm({
                                           </CommandItem>
                                           {taxes.map((tax) => (
                                             <CommandItem
+                                              disabled={
+                                                isVatExempt && isIvaTax(tax)
+                                              }
                                               key={tax.id}
                                               onSelect={() =>
                                                 handleItemTaxToggle(

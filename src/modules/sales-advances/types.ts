@@ -56,6 +56,7 @@ export type CreateSalesAdvanceInput = z.infer<typeof createSalesAdvanceSchema>;
 export const issuePreventaBalanceSchema = z.object({
   orgSlug: z.string().min(1),
   preventaId: z.string().uuid(),
+  fiscalExchangeRate: z.number().finite().positive().optional(),
 });
 export type IssuePreventaBalanceInput = z.infer<
   typeof issuePreventaBalanceSchema
@@ -64,6 +65,7 @@ export type IssuePreventaBalanceInput = z.infer<
 export const issueSalesAdvanceSchema = z.object({
   orgSlug: z.string().min(1),
   advanceId: z.string().uuid(),
+  fiscalExchangeRate: z.number().finite().positive().optional(),
 });
 
 export type IssueSalesAdvanceInput = z.infer<typeof issueSalesAdvanceSchema>;
@@ -71,6 +73,7 @@ export type IssueSalesAdvanceInput = z.infer<typeof issueSalesAdvanceSchema>;
 export const settleSalesAdvanceSchema = z.object({
   orgSlug: z.string().min(1),
   advanceId: z.string().uuid(),
+  fiscalExchangeRate: z.number().finite().positive().optional(),
 });
 
 export type SettleSalesAdvanceInput = z.infer<typeof settleSalesAdvanceSchema>;

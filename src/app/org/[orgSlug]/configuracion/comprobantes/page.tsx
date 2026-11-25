@@ -1,3 +1,4 @@
+import { CaiSettingsPanel } from "@/components/configuration/cai-settings";
 import { DispatchSettings } from "@/components/configuration/dispatch-settings";
 import { InvoicePrintSettings } from "@/components/configuration/invoice-print-settings";
 import { RemittanceSettings } from "@/components/configuration/remittance-settings";
@@ -25,6 +26,8 @@ export default async function ComprobantesPage({
       <InvoicePrintSettings orgSlug={orgSlug} />
 
       <RemittanceSettings orgSlug={orgSlug} />
+
+      <CaiSettingsPanel orgSlug={orgSlug} />
 
       <DispatchSettings orgSlug={orgSlug} />
     </div>

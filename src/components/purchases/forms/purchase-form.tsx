@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/popover";
 import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import type { Tax } from "@/modules/taxes/types";
 import { PurchaseTaxSelector } from "./purchase-tax-selector";
@@ -53,6 +54,7 @@ const purchaseFormSchema = z.object({
 export type PurchaseFormValues = z.infer<typeof purchaseFormSchema>;
 
 type PurchaseFormProps = {
+  orgSlug: string;
   suppliers: Supplier[];
   taxes: Tax[];
   onSupplierChange: (supplierId: string | null) => void;
@@ -63,6 +65,7 @@ type PurchaseFormProps = {
 };
 
 export function PurchaseForm({
+  orgSlug,
   suppliers,
   taxes,
   onSupplierChange,
@@ -72,6 +75,9 @@ export function PurchaseForm({
   onTaxesChange,
 }: PurchaseFormProps) {
   const [openSupplier, setOpenSupplier] = useState(false);
+  const { data: orgSettings, isPending: settingsPending } =
+    useOrgSettings(orgSlug);
+  const invoiceBackedDebt = orgSettings?.invoice_backed_debt_enabled === true;
 
   const form = useForm<PurchaseFormValues>({
     resolver: zodResolver(purchaseFormSchema),
@@ -180,6 +186,7 @@ export function PurchaseForm({
             <FieldContent>
               <select
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={settingsPending || invoiceBackedDebt}
                 id="payable_origin"
                 onChange={(event) => {
                   const payable_origin = event.target
@@ -187,14 +194,19 @@ export function PurchaseForm({
                   setValue("payable_origin", payable_origin);
                   onFormChange({ payable_origin });
                 }}
-                value={watch("payable_origin")}
+                value={
+                  invoiceBackedDebt
+                    ? "SUPPLIER_INVOICE"
+                    : watch("payable_origin")
+                }
               >
                 <option value="PURCHASE_NOTE">Nota de compra</option>
                 <option value="SUPPLIER_INVOICE">Factura pendiente</option>
               </select>
               <FieldDescription>
-                La nota genera deuda desde la OC. La factura pendiente la genera
-                al registrar el comprobante del proveedor.
+                {invoiceBackedDebt
+                  ? "Esta organización genera deuda únicamente al registrar la factura del proveedor."
+                  : "La nota genera deuda desde la OC. La factura pendiente la genera al registrar el comprobante del proveedor."}
               </FieldDescription>
             </FieldContent>
           </Field>

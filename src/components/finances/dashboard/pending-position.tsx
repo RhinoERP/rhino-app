@@ -79,6 +79,13 @@ export function PendingPosition({ results }: PendingPositionProps) {
             </p>
           </div>
         </div>
+        {(results.unvaluedUsdBalanceCount ?? 0) > 0 ? (
+          <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-amber-800 text-xs dark:bg-amber-900/20 dark:text-amber-400">
+            {results.unvaluedUsdBalanceCount === 1
+              ? "1 saldo en USD no tiene cotización fiscal o comercial y no se suma a la posición."
+              : `${results.unvaluedUsdBalanceCount} saldos en USD no tienen cotización fiscal o comercial y no se suman a la posición.`}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

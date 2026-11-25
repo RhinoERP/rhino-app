@@ -5,6 +5,7 @@ import type { EventoVentaPos } from "@/modules/accounting/types";
 import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import type { ArcaSaleInvoiceResult } from "@/modules/arca/types";
+import { getAvailableWarehouses } from "@/modules/inventory/service/warehouse-stock.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import {
   getDirectSaleConfigByOrgSlug,
@@ -17,6 +18,7 @@ import {
   runPosSaleAccountingFlow,
 } from "@/modules/pos/service/pos-sale-accounting.service";
 import { resolvePosAccessContext } from "@/modules/pos/service/pos-sessions.service";
+import { alignInsertedPosSaleItems } from "@/modules/pos/utils/pos-sale-item-alignment";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
@@ -64,6 +66,7 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   } | null;
   items?:
     | (Database["public"]["Tables"]["pos_sale_items"]["Row"] & {
+        variant?: { talle: string; color: string } | null;
         product?: {
           id?: string | null;
           name?: string | null;
@@ -112,6 +115,7 @@ type PostgrestLikeError = {
 type NormalizedPosSaleItem = {
   lineId: string;
   productId: string;
+  productVariantId: string | null;
   quantity: number;
   weightQuantity: number | null;
   isWholeUnit: boolean;
@@ -128,10 +132,12 @@ type ProductStockMetadata = {
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   weightPerUnit: number | null;
+  hasVariants: boolean;
 };
 
 type LotAllocation = {
   lotId: string;
+  warehouseId: string;
   consumedBase: number;
   consumedUnits: number | null;
   previousBaseStock: number;
@@ -181,9 +187,10 @@ type PosSaleStockMovementInsert = Omit<
 
 type MutableLotState = {
   id: string;
+  warehouseId: string;
   productId: string;
   lotNumber: string;
-  expirationDate: string;
+  expirationDate: string | null;
   createdAt: string | null;
   quantityAvailable: number;
   unitQuantityAvailable: number | null;
@@ -559,6 +566,7 @@ function resolveSaleTerminal(sale: PosSaleRaw): PosSale["terminal"] {
 function resolveSaleItems(sale: PosSaleRaw): PosSale["items"] {
   return (sale.items ?? []).map((item) => ({
     ...item,
+    variant: item.variant ?? null,
     product: item.product?.id
       ? {
           id: item.product.id,
@@ -842,6 +850,7 @@ function normalizePosItem(
   return {
     lineId: `${index}-${productId}`,
     productId,
+    productVariantId: item.productVariantId ?? null,
     quantity: truncateQuantity(quantity),
     weightQuantity: weightQuantity ? truncateQuantity(weightQuantity) : null,
     isWholeUnit: item.isWholeUnit ?? false,
@@ -890,8 +899,9 @@ async function getOpenSessionForTerminal(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   terminalId: string;
-}): Promise<string> {
-  const { supabase, orgId, terminalId } = params;
+  userId: string;
+}): Promise<{ id: string; warehouse_id: string | null }> {
+  const { supabase, orgId, terminalId, userId } = params;
 
   const { data: terminal, error: terminalError } = await supabase
     .from("pos_terminals")
@@ -918,9 +928,10 @@ async function getOpenSessionForTerminal(params: {
 
   const { data: openSession, error: openSessionError } = await supabase
     .from("pos_sessions")
-    .select("id")
+    .select("id, warehouse_id")
     .eq("organization_id", orgId)
     .eq("terminal_id", terminalId)
+    .eq("user_id", userId)
     .eq(
       "status",
       "OPEN" satisfies Database["public"]["Enums"]["pos_session_status"]
@@ -936,7 +947,7 @@ async function getOpenSessionForTerminal(params: {
   }
 
   if (openSession?.id) {
-    return openSession.id;
+    return openSession;
   }
 
   throw new Error(
@@ -1124,9 +1135,10 @@ function resolveWeightRequirement(params: {
 async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
+  warehouseId: string;
   items: NormalizedPosSaleItem[];
 }): Promise<StockAdjustmentContext> {
-  const { supabase, orgId, items } = params;
+  const { supabase, orgId, warehouseId, items } = params;
 
   const productIds = Array.from(new Set(items.map((item) => item.productId)));
 
@@ -1141,15 +1153,18 @@ async function buildStockAdjustmentContext(params: {
   const [productsResult, lotsResult] = await Promise.all([
     supabase
       .from("products")
-      .select("id, name, unit_of_measure, tracks_stock_units, weight_per_unit")
+      .select(
+        "id, name, unit_of_measure, tracks_stock_units, weight_per_unit, has_variants"
+      )
       .eq("organization_id", orgId)
       .in("id", productIds),
     supabase
       .from("product_lots")
       .select(
-        "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
+        "id, product_id, product_variant_id, warehouse_id, quantity_available, unit_quantity_available, lot_number, expiration_date, created_at"
       )
       .eq("organization_id", orgId)
+      .eq("warehouse_id", warehouseId)
       .in("product_id", productIds)
       .order("expiration_date", { ascending: true })
       .order("created_at", { ascending: true }),
@@ -1167,6 +1182,25 @@ async function buildStockAdjustmentContext(params: {
     );
   }
 
+  const variantIds = items
+    .map((item) => item.productVariantId)
+    .filter((id): id is string => Boolean(id));
+  const { data: variants, error: variantsError } = variantIds.length
+    ? await supabase
+        .from("product_variants")
+        .select("id, product_id, is_active")
+        .eq("organization_id", orgId)
+        .in("id", variantIds)
+    : { data: [], error: null };
+  if (variantsError) {
+    throw new Error(
+      `No se pudieron validar las variantes: ${variantsError.message}`
+    );
+  }
+  const variantsById = new Map(
+    (variants ?? []).map((variant) => [variant.id, variant])
+  );
+
   const productsById = new Map<string, ProductStockMetadata>();
 
   for (const row of productsResult.data ?? []) {
@@ -1182,6 +1216,7 @@ async function buildStockAdjustmentContext(params: {
         "UN",
       tracksStockUnits: Boolean(row.tracks_stock_units),
       weightPerUnit: row.weight_per_unit ?? null,
+      hasVariants: Boolean(row.has_variants),
     });
   }
 
@@ -1201,15 +1236,16 @@ async function buildStockAdjustmentContext(params: {
     const lotNumber = row.lot_number;
     const expirationDate = row.expiration_date;
 
-    if (!(lotId && productId && lotNumber && expirationDate)) {
+    if (!(lotId && productId && lotNumber)) {
       continue;
     }
 
     const lotState: MutableLotState = {
       id: lotId,
+      warehouseId: row.warehouse_id,
       productId,
       lotNumber,
-      expirationDate,
+      expirationDate: expirationDate ?? null,
       createdAt: row.created_at ?? null,
       quantityAvailable: Math.max(0, row.quantity_available ?? 0),
       unitQuantityAvailable:
@@ -1247,11 +1283,40 @@ async function buildStockAdjustmentContext(params: {
       throw new Error("No se pudo validar un producto del carrito.");
     }
 
+    const variant = item.productVariantId
+      ? variantsById.get(item.productVariantId)
+      : null;
+    if (
+      product.hasVariants &&
+      (!variant?.is_active || variant.product_id !== item.productId)
+    ) {
+      throw new Error(`Selecciona una variante activa para ${product.name}.`);
+    }
+    if (!product.hasVariants && item.productVariantId) {
+      throw new Error(`El producto ${product.name} no tiene variantes.`);
+    }
+    if (
+      variant &&
+      (!Number.isSafeInteger(item.quantity) ||
+        item.quantity <= 0 ||
+        item.weightQuantity !== null)
+    ) {
+      throw new Error(
+        `La cantidad de ${product.name} debe ser un entero positivo.`
+      );
+    }
+
     const availableLots = [...(lotsByProduct.get(item.productId) ?? [])];
 
-    const scopedLots = item.lotId
-      ? availableLots.filter((lot) => lot.id === item.lotId)
-      : availableLots;
+    const matchingLotIds = new Set(
+      (lotsResult.data ?? [])
+        .filter((lot) => lot.product_variant_id === (variant?.id ?? null))
+        .map((lot) => lot.id)
+    );
+    const scopedLots = availableLots.filter(
+      (lot) =>
+        matchingLotIds.has(lot.id) && (!item.lotId || lot.id === item.lotId)
+    );
 
     if (!scopedLots.length) {
       throw new Error(`No hay lotes disponibles para ${product.name}.`);
@@ -1355,6 +1420,7 @@ async function buildStockAdjustmentContext(params: {
         rollbackByLotId.set(lot.id, {
           id: lot.id,
           organization_id: orgId,
+          warehouse_id: lot.warehouseId,
           product_id: lot.productId,
           lot_number: lot.lotNumber,
           expiration_date: lot.expirationDate,
@@ -1386,6 +1452,7 @@ async function buildStockAdjustmentContext(params: {
       lotUpdatesById.set(lot.id, {
         id: lot.id,
         organization_id: orgId,
+        warehouse_id: lot.warehouseId,
         product_id: lot.productId,
         lot_number: lot.lotNumber,
         expiration_date: lot.expirationDate,
@@ -1396,6 +1463,7 @@ async function buildStockAdjustmentContext(params: {
 
       lineAllocations.push({
         lotId: lot.id,
+        warehouseId: lot.warehouseId,
         consumedBase: truncateQuantity(baseToConsume),
         consumedUnits:
           requiredUnits !== null && unitsToConsume > STOCK_EPSILON
@@ -1556,8 +1624,10 @@ function buildPosSaleItemsPayload(params: {
 
         payload.push({
           payload: {
+            id: crypto.randomUUID(),
             pos_sale_id: posSaleId,
             product_id: item.productId,
+            product_variant_id: item.productVariantId,
             lot_id: allocation.lotId,
             quantity,
             unit_price: item.unitPrice,
@@ -1578,44 +1648,6 @@ function buildPosSaleItemsPayload(params: {
   }
 
   return payload;
-}
-
-function buildInsertedPosSaleItemKey(params: {
-  productId: string | null;
-  lotId: string | null;
-}) {
-  return `${params.productId ?? ""}:${params.lotId ?? ""}`;
-}
-
-function alignInsertedPosSaleItems(params: {
-  itemPlans: PosSaleItemInsertPlan[];
-  insertedItems: InsertedPosSaleItem[];
-}): InsertedPosSaleItem[] {
-  const insertedItemsByKey = new Map<string, InsertedPosSaleItem[]>();
-
-  for (const insertedItem of params.insertedItems) {
-    const key = buildInsertedPosSaleItemKey({
-      productId: insertedItem.product_id,
-      lotId: insertedItem.lot_id,
-    });
-    const queue = insertedItemsByKey.get(key) ?? [];
-    queue.push(insertedItem);
-    insertedItemsByKey.set(key, queue);
-  }
-
-  return params.itemPlans.map((plan) => {
-    const key = buildInsertedPosSaleItemKey({
-      productId: plan.payload.product_id,
-      lotId: plan.payload.lot_id ?? null,
-    });
-    const insertedItem = insertedItemsByKey.get(key)?.shift();
-
-    if (!insertedItem?.id) {
-      throw new Error("No se pudo vincular un ítem POS insertado.");
-    }
-
-    return insertedItem;
-  });
 }
 
 async function buildPosSaleItemizedTaxPlan(params: {
@@ -1681,36 +1713,17 @@ function buildPosSaleStockMovementsPayload(params: {
     );
   }
 
-  const insertedItemsByKey = new Map<string, InsertedPosSaleItem[]>();
+  const alignedItems = alignInsertedPosSaleItems({ itemPlans, insertedItems });
 
-  for (const insertedItem of insertedItems) {
-    const key = buildInsertedPosSaleItemKey({
-      productId: insertedItem.product_id,
-      lotId: insertedItem.lot_id,
-    });
-    const queue = insertedItemsByKey.get(key) ?? [];
-    queue.push(insertedItem);
-    insertedItemsByKey.set(key, queue);
-  }
-
-  return itemPlans.map((plan) => {
-    const key = buildInsertedPosSaleItemKey({
-      productId: plan.payload.product_id,
-      lotId: plan.payload.lot_id ?? null,
-    });
-    const insertedItem = insertedItemsByKey.get(key)?.shift();
-
-    if (!insertedItem?.id) {
-      throw new Error(
-        "No se pudo vincular un ítem POS insertado con su movimiento de stock."
-      );
-    }
+  return itemPlans.map((plan, index) => {
+    const insertedItem = alignedItems[index];
 
     const consumedUnits = plan.allocation.consumedUnits ?? 0;
 
     return {
       organization_id: orgId,
       lot_id: plan.allocation.lotId,
+      warehouse_id: plan.allocation.warehouseId,
       type: "POS_SALE",
       quantity: truncateQuantity(plan.allocation.consumedBase),
       previous_stock: plan.allocation.previousBaseStock,
@@ -1920,7 +1933,8 @@ export async function getPosSalesByOrgSlug(
     ),
     items:pos_sale_items(
       *,
-      product:products(id, name, sku, unit_of_measure)
+      product:products(id, name, sku, unit_of_measure),
+      variant:product_variants!pos_sale_items_product_variant_id_fkey(talle, color)
     ),
     payments:pos_payments(*)
     ,
@@ -2010,7 +2024,8 @@ export async function getPosSaleById(
       ),
       items:pos_sale_items(
         *,
-        product:products(id, name, sku, unit_of_measure)
+        product:products(id, name, sku, unit_of_measure),
+        variant:product_variants!pos_sale_items_product_variant_id_fkey(talle, color)
       ),
       payments:pos_payments(*)
       ,
@@ -2058,6 +2073,7 @@ export async function getPosSaleById(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Product search aggregates stock totals and product metadata from multiple sources.
 export async function searchPosProductsForTerminal(params: {
   orgSlug: string;
+  terminalId?: string;
   q?: string;
   barcode?: string;
   limit?: number;
@@ -2075,6 +2091,35 @@ export async function searchPosProductsForTerminal(params: {
   }
 
   const supabase = await createClient();
+  const operatorId = await getCurrentUserId(supabase);
+  let searchSessionQuery = supabase
+    .from("pos_sessions")
+    .select("warehouse_id")
+    .eq("organization_id", org.id)
+    .eq("user_id", operatorId)
+    .eq("status", "OPEN")
+    .order("opened_at", { ascending: false })
+    .limit(1);
+  if (params.terminalId) {
+    searchSessionQuery = searchSessionQuery.eq(
+      "terminal_id",
+      params.terminalId
+    );
+  }
+  const { data: searchSession, error: searchSessionError } =
+    await searchSessionQuery.maybeSingle();
+  if (searchSessionError || !searchSession?.warehouse_id) {
+    throw new Error("Abrí una caja con depósito antes de buscar productos");
+  }
+  const availableWarehouses = await getAvailableWarehouses(
+    params.orgSlug,
+    "direct_sale"
+  );
+  if (
+    !availableWarehouses.some((row) => row.id === searchSession.warehouse_id)
+  ) {
+    throw new Error("No tenés acceso al depósito de la sesión de caja");
+  }
   const { data: userPermissions, error: permissionsError } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
     { target_org_slug: params.orgSlug }
@@ -2166,25 +2211,35 @@ export async function searchPosProductsForTerminal(params: {
     .map((product) => product.id)
     .filter((id): id is string => Boolean(id));
 
-  const [detailsResult, lotsResult, directSalePricesResult] = await Promise.all(
-    [
+  const [detailsResult, lotsResult, directSalePricesResult, variantsResult] =
+    await Promise.all([
       supabase
         .from("products")
-        .select("id, barcode, tracks_stock_units, weight_per_unit")
+        .select(
+          "id, barcode, tracks_stock_units, weight_per_unit, has_variants"
+        )
         .eq("organization_id", org.id)
         .in("id", productIds),
       supabase
         .from("product_lots")
-        .select("product_id, quantity_available, unit_quantity_available")
+        .select(
+          "product_id, product_variant_id, quantity_available, unit_quantity_available"
+        )
         .eq("organization_id", org.id)
+        .eq("warehouse_id", searchSession.warehouse_id)
         .in("product_id", productIds),
       supabase
         .from("direct_sale_prices")
         .select("product_id, price")
         .eq("organization_id", org.id)
         .in("product_id", productIds),
-    ]
-  );
+      supabase
+        .from("product_variants")
+        .select("id, product_id, talle, color")
+        .eq("organization_id", org.id)
+        .eq("is_active", true)
+        .in("product_id", productIds),
+    ]);
 
   if (detailsResult.error) {
     throw new Error(
@@ -2203,6 +2258,25 @@ export async function searchPosProductsForTerminal(params: {
       `No se pudieron obtener precios de venta directa: ${directSalePricesResult.error.message}`
     );
   }
+  if (variantsResult.error) {
+    throw new Error(
+      `No se pudieron obtener variantes POS: ${variantsResult.error.message}`
+    );
+  }
+
+  const variantsByProduct = new Map<string, PosTerminalProduct["variants"]>();
+  for (const variant of variantsResult.data ?? []) {
+    const current = variantsByProduct.get(variant.product_id) ?? [];
+    current.push({
+      id: variant.id,
+      talle: variant.talle,
+      color: variant.color,
+      stock: (lotsResult.data ?? [])
+        .filter((lot) => lot.product_variant_id === variant.id)
+        .reduce((total, lot) => total + lot.quantity_available, 0),
+    });
+    variantsByProduct.set(variant.product_id, current);
+  }
 
   const detailsByProduct = new Map<
     string,
@@ -2210,6 +2284,7 @@ export async function searchPosProductsForTerminal(params: {
       barcode: string | null;
       tracksStockUnits: boolean;
       weightPerUnit: number | null;
+      hasVariants: boolean;
     }
   >();
 
@@ -2222,6 +2297,7 @@ export async function searchPosProductsForTerminal(params: {
       barcode: row.barcode ?? null,
       tracksStockUnits: Boolean(row.tracks_stock_units),
       weightPerUnit: row.weight_per_unit ?? null,
+      hasVariants: Boolean(row.has_variants),
     });
   }
 
@@ -2264,6 +2340,7 @@ export async function searchPosProductsForTerminal(params: {
     directSalePriceByProduct.set(row.product_id, truncateMoney(row.price ?? 0));
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: maps POS price, weight and variant stock metadata in one pass
   return productRows.map((row) => {
     const productId = row.id as string;
     const details = detailsByProduct.get(productId);
@@ -2283,6 +2360,8 @@ export async function searchPosProductsForTerminal(params: {
         "UN",
       tracksStockUnits: details?.tracksStockUnits ?? false,
       weightPerUnit: details?.weightPerUnit ?? null,
+      hasVariants: details?.hasVariants ?? false,
+      variants: variantsByProduct.get(productId) ?? [],
       totalQuantity: truncateQuantity(totals?.totalQuantity ?? 0),
       totalUnitQuantity:
         totals?.totalUnitQuantity !== null &&
@@ -2777,11 +2856,27 @@ export async function createPosSale(
 
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
-  const sessionId = await getOpenSessionForTerminal({
+  const session = await getOpenSessionForTerminal({
     supabase,
     orgId: org.id,
     terminalId: payload.terminalId,
+    userId,
   });
+  const warehouses = await getAvailableWarehouses(
+    payload.orgSlug,
+    "direct_sale"
+  );
+  if (
+    !(
+      session.warehouse_id &&
+      warehouses.some((row) => row.id === session.warehouse_id)
+    )
+  ) {
+    throw new Error(
+      "No tenés acceso al depósito de esta caja. Cerrá la sesión y abrí otra caja habilitada."
+    );
+  }
+  const sessionId = session.id;
 
   const items = normalizePosItems(payload.items);
 
@@ -2881,6 +2976,7 @@ export async function createPosSale(
     stockContext = await buildStockAdjustmentContext({
       supabase,
       orgId: org.id,
+      warehouseId: session.warehouse_id,
       items,
     });
 

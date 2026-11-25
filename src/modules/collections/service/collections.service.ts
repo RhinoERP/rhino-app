@@ -24,6 +24,9 @@ import type {
   ReceivablesMetrics,
   ReceivablesPaginatedParams,
 } from "../types";
+import { parsePayableInvoiceOrders } from "../utils/payable-reference";
+import { suppliersFromSaleItems } from "../utils/receivable-suppliers";
+import { getPayableInvoiceDocuments } from "./payable-documents.service";
 
 type ReceivableRow = Database["public"]["Tables"]["accounts_receivable"]["Row"];
 
@@ -132,7 +135,10 @@ type PayableRow = {
   id: string;
   organization_id: string;
   supplier_id: string;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
+  invoice?: PayableAccount["invoice"];
+  purchaseOrders?: PayableAccount["purchaseOrders"];
   total_amount: number;
   pending_balance: number;
   currency?: string | null;
@@ -382,6 +388,9 @@ function mapPayableAccount(
     organization_id: row.organization_id,
     supplier_id: row.supplier_id,
     purchase_order_id: row.purchase_order_id,
+    supplier_invoice_id: row.supplier_invoice_id,
+    invoice: row.invoice,
+    purchaseOrders: row.purchaseOrders,
     total_amount: total,
     pending_balance: pending,
     currency: row.currency ?? "ARS",
@@ -391,7 +400,9 @@ function mapPayableAccount(
     last_payment_date: lastPaymentDate,
     supplier: normalizeSupplier(row),
     purchase,
-    payableOrigin: purchase?.payable_origin ?? "PURCHASE_NOTE",
+    payableOrigin: row.supplier_invoice_id
+      ? "SUPPLIER_INVOICE"
+      : (purchase?.payable_origin ?? "PURCHASE_NOTE"),
     items: normalizePurchaseItems(row),
     type: "payable",
     hasDiscrepancy: discrepancy.hasDiscrepancy,
@@ -852,6 +863,7 @@ function applyItemEnrichment(
 ): void {
   if (rawItems.length > 0) {
     receivable.items = rawItems.map((item) => mapItemToCollectionItem(item));
+    receivable.suppliers = suppliersFromSaleItems(receivable.items);
   }
 
   if (!receivable.supplier) {
@@ -1039,6 +1051,8 @@ function mapReceivableAccount(
     supplier = deriveSupplierFromRawSale(rawSale, supplierMap);
   }
 
+  const items = normalizeSaleItems(row);
+
   return {
     id: row.id,
     organization_id: row.organization_id,
@@ -1060,7 +1074,8 @@ function mapReceivableAccount(
     sale: normalizeSaleInfo(row),
     seller,
     supplier,
-    items: normalizeSaleItems(row),
+    suppliers: suppliersFromSaleItems(items),
+    items,
     type: "receivable",
   };
 }
@@ -1198,6 +1213,7 @@ const PAYABLES_SELECT = `
   organization_id,
   supplier_id,
   purchase_order_id,
+  supplier_invoice_id,
   total_amount,
   pending_balance,
   currency,
@@ -1251,6 +1267,27 @@ export async function getPayablesByOrgSlug(
   }
 
   const payablesData = data as unknown as PayableWithRelations[];
+  const documents = await getPayableInvoiceDocuments(
+    supabase,
+    org.id,
+    payablesData.filter((row) => row.supplier_invoice_id).map((row) => row.id)
+  );
+  const documentsByAP = new Map(
+    documents.map((document) => [document.account_payable_id, document])
+  );
+  for (const row of payablesData) {
+    const document = documentsByAP.get(row.id);
+    if (document) {
+      row.invoice = {
+        id: document.supplier_invoice_id,
+        invoice_type: document.invoice_type,
+        point_of_sale: document.point_of_sale,
+        invoice_number: document.invoice_number,
+        invoice_date: document.invoice_date,
+      };
+      row.purchaseOrders = parsePayableInvoiceOrders(document.purchase_orders);
+    }
+  }
   const payableIds = payablesData
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);
@@ -2045,6 +2082,7 @@ export async function deriveReceivableCreditSupplier(
 
 type LightReceivableRow = {
   id: string;
+  sales_order_id: string | null;
   pending_balance: number;
   total_amount: number;
   currency?: string | null;
@@ -2514,6 +2552,47 @@ async function fetchSaleIdsBySeller(
   return (matchingSales ?? []).map((s) => s.id);
 }
 
+/** Match any product supplier on a sale, including sales with mixed suppliers. */
+async function fetchSaleIdsByProductSuppliers(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  saleIds: string[],
+  supplierIds: string[]
+): Promise<Set<string>> {
+  const matched = new Set<string>();
+  const chunkSize = 100;
+  const batchSize = 500;
+
+  for (let i = 0; i < saleIds.length; i += chunkSize) {
+    const chunk = saleIds.slice(i, i + chunkSize);
+    const query = supabase
+      .from("sales_order_items")
+      .select(
+        "id, sales_order_id, product:products!inner(supplier_id, organization_id)"
+      )
+      .eq("organization_id", orgId)
+      .eq("product.organization_id", orgId)
+      .in("product.supplier_id", supplierIds)
+      .in("sales_order_id", chunk)
+      .order("id");
+
+    for (let from = 0; ; from += batchSize) {
+      const { data, error } = await query.range(from, from + batchSize - 1);
+      if (error) {
+        throw new Error(`No se pudieron filtrar proveedores: ${error.message}`);
+      }
+      for (const item of data ?? []) {
+        matched.add(item.sales_order_id);
+      }
+      if ((data?.length ?? 0) < batchSize) {
+        break;
+      }
+    }
+  }
+
+  return matched;
+}
+
 async function fetchDocumentSaleIds(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string,
@@ -2567,6 +2646,7 @@ export async function getReceivablesPaginated(
   let query = supabase.from("accounts_receivable").select(
     `
       id,
+      sales_order_id,
       pending_balance,
       total_amount,
       due_date,
@@ -2645,12 +2725,23 @@ export async function getReceivablesPaginated(
 
   query = query
     .eq("organization_id", org.id)
-    .eq("is_collection_deferred" as never, false);
+    .eq("is_collection_deferred" as never, false)
+    .order("id");
 
-  const { data: lightRows, error } = await query;
-
-  if (error) {
-    throw error;
+  const lightRows: LightReceivableRow[] = [];
+  const batchSize = 500;
+  for (let from = 0; ; from += batchSize) {
+    const { data: batch, error } = await query.range(
+      from,
+      from + batchSize - 1
+    );
+    if (error) {
+      throw error;
+    }
+    lightRows.push(...((batch ?? []) as unknown as LightReceivableRow[]));
+    if ((batch?.length ?? 0) < batchSize) {
+      break;
+    }
   }
 
   const sellersByUserId = params.sort?.some((s) => s.id === "seller")
@@ -2659,21 +2750,41 @@ export async function getReceivablesPaginated(
   const lastPaymentDatesMap = params.sort?.some((s) => s.id === "payment_date")
     ? await fetchLastReceivablePaymentDates(
         supabase,
-        (lightRows ?? []).map((r) => r.id)
+        lightRows.map((r) => r.id)
       )
     : undefined;
 
   const visible = filterAndSortLightRows(
-    (lightRows ?? []) as unknown as LightReceivableRow[],
+    lightRows,
     accessContext,
     params,
     sellersByUserId,
     lastPaymentDatesMap
   );
 
-  const totalCount = visible.length;
+  const matchedSaleIds = params.supplierIds?.length
+    ? await fetchSaleIdsByProductSuppliers(
+        supabase,
+        org.id,
+        [
+          ...new Set(
+            visible
+              .map((row) => row.sales_order_id)
+              .filter((id): id is string => Boolean(id))
+          ),
+        ],
+        params.supplierIds
+      )
+    : null;
+  const filtered = matchedSaleIds
+    ? visible.filter(
+        (row) => row.sales_order_id && matchedSaleIds.has(row.sales_order_id)
+      )
+    : visible;
+
+  const totalCount = filtered.length;
   const from = (page - 1) * pageSize;
-  const pageIds = visible.slice(from, from + pageSize).map((r) => r.id);
+  const pageIds = filtered.slice(from, from + pageSize).map((r) => r.id);
 
   const data = await enrichReceivablesByIds(
     supabase,
@@ -2683,6 +2794,36 @@ export async function getReceivablesPaginated(
   );
 
   return { data, totalCount, page, pageSize };
+}
+
+export async function getReceivableSupplierOptions(
+  orgId: string
+): Promise<Array<{ value: string; label: string }>> {
+  const supabase = await createClient();
+  const options: Array<{ value: string; label: string }> = [];
+  const batchSize = 500;
+  for (let from = 0; ; from += batchSize) {
+    const { data, error } = await supabase
+      .from("suppliers")
+      .select("id, name")
+      .eq("organization_id", orgId)
+      .order("name")
+      .order("id")
+      .range(from, from + batchSize - 1);
+    if (error) {
+      throw new Error(`No se pudieron obtener proveedores: ${error.message}`);
+    }
+    options.push(
+      ...(data ?? []).map((supplier) => ({
+        value: supplier.id,
+        label: supplier.name,
+      }))
+    );
+    if ((data?.length ?? 0) < batchSize) {
+      break;
+    }
+  }
+  return options;
 }
 
 async function applyPayableSearch(

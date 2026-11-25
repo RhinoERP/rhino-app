@@ -1,10 +1,19 @@
 import { z } from "zod";
+import { commercialGuidanceSchema } from "./commercial-guidance";
 import {
   DEFAULT_WHATSAPP_BUSINESS_HOURS,
+  DEFAULT_WHATSAPP_FOLLOW_UP,
   DEFAULT_WHATSAPP_RESPONSE_DELAY,
   WHATSAPP_INTEGRATION_STATUSES,
+  WHATSAPP_PRICING_MODES,
   WHATSAPP_WEEKDAYS,
 } from "./types";
+
+export const whatsappFollowUpSchema = z.object({
+  enabled: z.boolean(),
+  delayMinutes: z.number().int().min(1).max(1380),
+  instructions: z.string().trim().max(2000),
+});
 
 const businessHoursDaySchema = z.object({
   enabled: z.boolean(),
@@ -83,6 +92,8 @@ export const whatsappIntegrationConfigurationSchema = z
       .max(64, "El número visible es demasiado largo")
       .nullable(),
     status: z.enum(WHATSAPP_INTEGRATION_STATUSES),
+    pricingMode: z.enum(WHATSAPP_PRICING_MODES).default("SINGLE"),
+    allowGeneralForCustomers: z.boolean().default(false),
     salesPriceListId: z
       .string()
       .uuid("La lista de precios es inválida")
@@ -92,6 +103,7 @@ export const whatsappIntegrationConfigurationSchema = z
       .uuid("El vendedor responsable es inválido")
       .nullable(),
     businessHours: businessHoursSchema,
+    followUp: whatsappFollowUpSchema.default(DEFAULT_WHATSAPP_FOLLOW_UP),
     responseDelayMinMinutes: z
       .number()
       .int()
@@ -104,7 +116,12 @@ export const whatsappIntegrationConfigurationSchema = z
       .min(0)
       .max(120)
       .default(DEFAULT_WHATSAPP_RESPONSE_DELAY.maxMinutes),
-    commercialRules: z.record(z.string(), z.unknown()).default({}),
+    commercialRules: commercialGuidanceSchema.catchall(z.unknown()).default({
+      deliveryPolicy: "",
+      pickupPolicy: "",
+      salesGuidance: "",
+      responseCapitalization: "STANDARD",
+    }),
     handoffMessage: z
       .string()
       .trim()
@@ -124,7 +141,11 @@ export const whatsappIntegrationConfigurationSchema = z
       return;
     }
 
-    if (!value.salesPriceListId) {
+    if (
+      !value.salesPriceListId &&
+      (value.pricingMode !== "REGISTERED_ONLY" ||
+        value.allowGeneralForCustomers)
+    ) {
       ctx.addIssue({
         code: "custom",
         message: "Una integración activa requiere una lista de precios",

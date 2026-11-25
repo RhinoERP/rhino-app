@@ -34,6 +34,7 @@ export function getDirectSaleById(
 
 export function searchDirectSaleProducts(params: {
   orgSlug: string;
+  terminalId?: string;
   q?: string;
   barcode?: string;
   limit?: number;

@@ -390,6 +390,8 @@ export function DirectSaleDetail({
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">
                                 {item.product?.name ?? "Producto"}
+                                {item.variant &&
+                                  ` — ${item.variant.color} / ${item.variant.talle}`}
                               </p>
                             </div>
                             <p className="text-muted-foreground text-sm">

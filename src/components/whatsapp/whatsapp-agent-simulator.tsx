@@ -22,19 +22,33 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { controlWhatsAppConversationAction } from "@/modules/whatsapp/actions/control-whatsapp-conversation.action";
 import type {
   SimulationOptions,
   SimulationSnapshot,
   SimulationState,
 } from "@/modules/whatsapp/server/simulation";
+import { WhatsAppAudioComposer } from "./whatsapp-audio-composer";
 
-type Message = { direction: "INBOUND" | "OUTBOUND"; content: string };
-type ToolCall = { name: string; arguments: unknown };
+type Message = {
+  direction: "INBOUND" | "OUTBOUND";
+  content: string;
+  sourceId?: string;
+  audio?: boolean;
+};
+function messageAuthor(message: Message): string {
+  if (message.direction === "OUTBOUND") {
+    return "Agente";
+  }
+  return message.audio ? "Cliente · Audio transcripto" : "Cliente";
+}
+
+type ToolCall = { name: string };
 
 async function postSimulation(params: {
   orgSlug: string;
   message?: string;
-  resume?: boolean;
+  sourceMessageId?: string;
   customerId?: string;
   priceListId?: string;
   state: SimulationState | undefined;
@@ -46,7 +60,7 @@ async function postSimulation(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: params.message,
-        resume: params.resume,
+        sourceMessageId: params.sourceMessageId,
         customerId: params.customerId,
         priceListId: params.priceListId,
         state: params.state,
@@ -91,6 +105,51 @@ function ResumeBotButton({
   );
 }
 
+function SimulationMessageList({
+  messages,
+  busy,
+}: {
+  messages: Message[];
+  busy: boolean;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-md border bg-muted/20 p-4"
+    >
+      {messages.length ? null : (
+        <p className="m-auto max-w-sm text-center text-muted-foreground text-sm">
+          Probá con una consulta sobre productos, pedí precio y stock, agregá
+          algo al carrito y confirmá expresamente si querés registrar la
+          preventa.
+        </p>
+      )}
+      {messages.map((item, index) => (
+        <div
+          className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${item.direction === "INBOUND" ? "ml-auto bg-primary text-primary-foreground" : "mr-auto border bg-background"}`}
+          key={`${index}-${item.direction}`}
+        >
+          <p className="mb-1 text-xs opacity-70">{messageAuthor(item)}</p>
+          <p className="whitespace-pre-wrap">{item.content}</p>
+        </div>
+      ))}
+      {busy ? (
+        <p className="mr-auto rounded-lg border bg-background px-3 py-2 text-muted-foreground text-sm">
+          Procesando…
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function hasSimulationSelection(
+  state: SimulationState | undefined,
+  customerId: string,
+  priceListId: string
+) {
+  return Boolean(state || (customerId && priceListId));
+}
+
 export function WhatsAppAgentSimulator({
   orgSlug,
   options,
@@ -107,6 +166,7 @@ export function WhatsAppAgentSimulator({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [audioGeneration, setAudioGeneration] = useState(0);
 
   async function processMessage(message: string) {
     const result = await postSimulation({
@@ -133,7 +193,7 @@ export function WhatsAppAgentSimulator({
     if (!message || busy) {
       return;
     }
-    if (!(state || (customerId && priceListId))) {
+    if (!hasSimulationSelection(state, customerId, priceListId)) {
       setError("Elegí un cliente y una lista de precios para empezar.");
       return;
     }
@@ -157,25 +217,85 @@ export function WhatsAppAgentSimulator({
     }
   }
 
+  async function processAudio(
+    messageId: string,
+    transcript: string,
+    session: SimulationState
+  ) {
+    setState(session);
+    setMessages((current) =>
+      current.some(
+        (item) => item.sourceId === messageId && item.direction === "INBOUND"
+      )
+        ? current
+        : [
+            ...current,
+            {
+              direction: "INBOUND",
+              content: transcript,
+              sourceId: messageId,
+              audio: true,
+            },
+          ]
+    );
+    const result = await postSimulation({
+      orgSlug,
+      state: session,
+      sourceMessageId: messageId,
+    });
+    if (result.response) {
+      setMessages((current) =>
+        current.some(
+          (item) => item.sourceId === messageId && item.direction === "OUTBOUND"
+        )
+          ? current
+          : [
+              ...current,
+              {
+                direction: "OUTBOUND",
+                content: result.response || "",
+                sourceId: messageId,
+              },
+            ]
+      );
+    }
+    setSnapshot(result.snapshot ?? null);
+    setToolCalls(result.toolCalls ?? []);
+  }
+
   async function resumeAutomation() {
-    if (!state || busy) {
+    if (!(state && snapshot) || busy) {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const result = await postSimulation({ orgSlug, state, resume: true });
-      setSnapshot(result.snapshot ?? null);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "No se pudo reactivar el bot"
-      );
+      const result = await controlWhatsAppConversationAction({
+        orgSlug,
+        conversationId: state.conversationId,
+        expectedControlVersion: snapshot.controlVersion,
+        operation: "RESUME",
+      });
+      if (result.control) {
+        setSnapshot({
+          ...snapshot,
+          conversationStatus: result.control.status,
+          controlVersion: result.control.controlVersion,
+          handoffReason: result.success ? null : snapshot.handoffReason,
+        });
+      }
+      if (!result.success) {
+        setError(result.error ?? "No se pudo reactivar el bot");
+      }
+    } catch {
+      setError("No se pudo reactivar el bot. Volvé a intentar.");
     } finally {
       setBusy(false);
     }
   }
 
   function reset() {
+    setAudioGeneration((value) => value + 1);
     setMessages([]);
     setState(undefined);
     setSnapshot(null);
@@ -291,35 +411,23 @@ export function WhatsAppAgentSimulator({
                 lista de precios activa para iniciar una prueba.
               </p>
             )}
-            <div
-              aria-live="polite"
-              className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-md border bg-muted/20 p-4"
-            >
-              {messages.length ? null : (
-                <p className="m-auto max-w-sm text-center text-muted-foreground text-sm">
-                  Probá con una consulta sobre productos, pedí precio y stock,
-                  agregá algo al carrito y confirmá expresamente si querés
-                  registrar la preventa.
-                </p>
-              )}
-              {messages.map((item, index) => (
-                <div
-                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${item.direction === "INBOUND" ? "ml-auto bg-primary text-primary-foreground" : "mr-auto border bg-background"}`}
-                  key={`${index}-${item.direction}`}
-                >
-                  <p className="mb-1 text-xs opacity-70">
-                    {item.direction === "INBOUND" ? "Cliente" : "Agente"}
-                  </p>
-                  <p className="whitespace-pre-wrap">{item.content}</p>
-                </div>
-              ))}
-              {busy ? (
-                <p className="mr-auto rounded-lg border bg-background px-3 py-2 text-muted-foreground text-sm">
-                  Procesando…
-                </p>
-              ) : null}
-            </div>
+            <SimulationMessageList busy={busy} messages={messages} />
             <div className="space-y-2">
+              <WhatsAppAudioComposer
+                customerId={customerId}
+                disabled={
+                  !canStart ||
+                  busy ||
+                  !hasSimulationSelection(state, customerId, priceListId)
+                }
+                key={audioGeneration}
+                onBusyChange={setBusy}
+                onSessionReady={setState}
+                onTranscript={processAudio}
+                orgSlug={orgSlug}
+                priceListId={priceListId}
+                state={state}
+              />
               <Textarea
                 aria-label="Mensaje de prueba"
                 disabled={!canStart || busy}
@@ -383,9 +491,6 @@ export function WhatsAppAgentSimulator({
                       key={`${call.name}-${index}`}
                     >
                       {call.name}
-                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-muted-foreground">
-                        {JSON.stringify(call.arguments)}
-                      </pre>
                     </li>
                   ))}
                 </ul>

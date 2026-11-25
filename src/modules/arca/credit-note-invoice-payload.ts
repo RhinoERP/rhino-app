@@ -34,6 +34,7 @@ export type ArcaCreditNoteLoadedSale = {
   saleDate: string;
   invoiceType: InvoiceType;
   totalAmount: number;
+  isVatExempt?: boolean;
   arcaPointOfSale: number;
   arcaVoucherNumber: number;
   arcaVoucherTypeCode: number;
@@ -311,25 +312,36 @@ function buildCreditNoteAmounts(params: {
   sale: ArcaCreditNoteLoadedSale;
 }): Pick<
   ArcaCreditNoteVoucherRequest,
-  "ImpNeto" | "ImpIVA" | "ImpTrib" | "Iva" | "Tributos"
+  "ImpNeto" | "ImpOpEx" | "ImpIVA" | "ImpTrib" | "Iva" | "Tributos"
 > {
   const creditNoteAmount = truncateMoney(params.creditNote.amount);
   const creditNoteTaxes = params.creditNote.taxes ?? [];
+  const isVatExempt = Boolean(params.sale.isVatExempt);
 
   if (params.creditNote.useExplicitTaxes || creditNoteTaxes.length > 0) {
     const { ivaTaxes: itemizedIvaTaxes, tributeTaxes: itemizedTributeTaxes } =
       classifyTaxes(creditNoteTaxes);
+
+    if (isVatExempt && itemizedIvaTaxes.length > 0) {
+      throw new ArcaValidationError(
+        "La nota de crédito corresponde a una operación exenta de IVA y no puede informar IVA."
+      );
+    }
+
     const ivaAmount = truncateMoney(
       itemizedIvaTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
     );
     const tributeAmount = truncateMoney(
       itemizedTributeTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
     );
-    const taxableBase = truncateMoney(
-      creditNoteAmount - ivaAmount - tributeAmount
-    );
+    const exemptAmount = isVatExempt
+      ? truncateMoney(creditNoteAmount - tributeAmount)
+      : 0;
+    const taxableBase = isVatExempt
+      ? 0
+      : truncateMoney(creditNoteAmount - ivaAmount - tributeAmount);
 
-    if (!Number.isFinite(taxableBase) || taxableBase < 0) {
+    if (!Number.isFinite(taxableBase) || taxableBase < 0 || exemptAmount < 0) {
       throw new ArcaValidationError(
         "No se pudo derivar la base imponible fiscal de la nota de crédito."
       );
@@ -337,6 +349,7 @@ function buildCreditNoteAmounts(params: {
 
     return {
       ImpNeto: taxableBase,
+      ImpOpEx: exemptAmount,
       ImpIVA: ivaAmount,
       ImpTrib: tributeAmount,
       ...(itemizedIvaTaxes.length > 0
@@ -380,6 +393,12 @@ function buildCreditNoteAmounts(params: {
   const ratio = isTotalCreditNote ? 1 : creditNoteAmount / saleTotal;
   const { ivaTaxes, tributeTaxes } = classifySaleTaxes(params.sale);
 
+  if (isVatExempt && ivaTaxes.length > 0) {
+    throw new ArcaValidationError(
+      "La nota de crédito corresponde a una operación exenta de IVA y no puede informar IVA."
+    );
+  }
+
   const scaledIvaTaxes = ivaTaxes.map((tax) => ({
     ...tax,
     baseAmount: truncateMoney(tax.baseAmount * ratio),
@@ -397,25 +416,54 @@ function buildCreditNoteAmounts(params: {
   const tributeAmount = truncateMoney(
     scaledTributeTaxes.reduce((total, tax) => total + tax.taxAmount, 0)
   );
-  const taxableBase = truncateMoney(
-    creditNoteAmount - ivaAmount - tributeAmount
-  );
+  const exemptAmount = isVatExempt
+    ? truncateMoney(creditNoteAmount - tributeAmount)
+    : 0;
+  const taxableBase = isVatExempt
+    ? 0
+    : truncateMoney(creditNoteAmount - ivaAmount - tributeAmount);
 
-  if (!Number.isFinite(taxableBase) || taxableBase < 0) {
+  if (!Number.isFinite(taxableBase) || taxableBase < 0 || exemptAmount < 0) {
     throw new ArcaValidationError(
       "No se pudo derivar la base imponible fiscal de la nota de crédito."
     );
   }
 
+  // Independently truncated bases can differ from the net obtained by
+  // subtracting taxes from the total. Assign that residual to the largest
+  // base so the declared net and its VAT breakdown remain consistent.
+  if (scaledIvaTaxes.length > 1) {
+    // Inputs are already truncated to cents. Serialize those cents before
+    // subtraction to avoid losing a cent to binary floating-point cancellation.
+    const cents = (amount: number) =>
+      Number(amount.toFixed(2).replace(".", ""));
+    const baseTotalCents = scaledIvaTaxes.reduce(
+      (sum, tax) => sum + cents(tax.baseAmount),
+      0
+    );
+    const residualCents = cents(taxableBase) - baseTotalCents;
+    const largest = scaledIvaTaxes.reduce((selected, tax) =>
+      tax.baseAmount > selected.baseAmount ? tax : selected
+    );
+    const reconciledBase = (cents(largest.baseAmount) + residualCents) / 100;
+    if (reconciledBase < 0) {
+      throw new ArcaValidationError(
+        "No se pudieron conciliar las bases imponibles de la nota de crédito."
+      );
+    }
+    largest.baseAmount = reconciledBase;
+  }
+
   return {
     ImpNeto: taxableBase,
+    ImpOpEx: exemptAmount,
     ImpIVA: ivaAmount,
     ImpTrib: tributeAmount,
     ...(scaledIvaTaxes.length > 0
       ? {
           Iva: scaledIvaTaxes.map((tax) => ({
             Id: tax.classification.arcaId,
-            BaseImp: taxableBase,
+            BaseImp: scaledIvaTaxes.length === 1 ? taxableBase : tax.baseAmount,
             Importe: truncateMoney(tax.taxAmount),
           })),
         }
@@ -502,7 +550,6 @@ export function buildArcaCreditNoteVoucherRequest(
     CbteFch: context.cbteFch ?? getCurrentArcaDateNumber(),
     ImpTotal: truncateMoney(context.creditNote.amount),
     ImpTotConc: 0,
-    ImpOpEx: 0,
     MonId: fiscalCurrency.code,
     MonCotiz: fiscalCurrency.rate ?? 1,
     ...(fiscalCurrency.sameCurrencySettlement

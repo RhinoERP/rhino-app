@@ -333,3 +333,67 @@ export async function generateCommissions(
     }
   }
 }
+
+/** Correct an existing payment's commissions without repricing historical rates. */
+export async function recalculateCommissionsForPayment(
+  supabase: SupabaseClient,
+  orgId: string,
+  paymentId: string,
+  amountArs: number
+): Promise<void> {
+  const { data: commissions, error: commissionsError } = await supabase
+    .from("commissions")
+    .select(
+      "id, sales_order_id, base_commission_rate, extra_commission_rate, supplier_commission_rate"
+    )
+    .eq("organization_id", orgId)
+    .eq("receivable_payment_id", paymentId);
+
+  if (commissionsError) {
+    throw new Error(commissionsError.message);
+  }
+  if (!commissions?.length) {
+    return;
+  }
+
+  const { data: sales, error: salesError } = await supabase
+    .from("sales_orders")
+    .select("id, sub_total, total_amount")
+    .eq("organization_id", orgId)
+    .in("id", [...new Set(commissions.map((row) => row.sales_order_id))]);
+
+  if (salesError) {
+    throw new Error(salesError.message);
+  }
+  const saleMap = new Map((sales ?? []).map((sale) => [sale.id, sale]));
+  const paidAmount = truncateMoney(amountArs);
+
+  for (const row of commissions) {
+    const sale = saleMap.get(row.sales_order_id);
+    if (!sale) {
+      throw new Error("No se encontró la venta asociada a la comisión.");
+    }
+    const rate =
+      row.base_commission_rate +
+      row.extra_commission_rate +
+      row.supplier_commission_rate;
+    const base = computeProratedBase(
+      paidAmount,
+      sale.sub_total,
+      sale.total_amount
+    );
+    const { error } = await supabase
+      .from("commissions")
+      .update({
+        paid_amount: paidAmount,
+        commission_amount: truncateMoney((base * Math.max(0, rate)) / 100),
+      })
+      .eq("id", row.id)
+      .eq("organization_id", orgId)
+      .eq("receivable_payment_id", paymentId);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+}

@@ -21,6 +21,7 @@ type NavItem = {
   comingSoon?: boolean;
   disabled?: boolean;
   disabledTooltip?: string;
+  wrapLabel?: boolean;
 };
 
 type NavCategory = {
@@ -96,6 +97,11 @@ export function NavMain({ categories }: NavMainProps) {
                   <SidebarMenuItem key={item.url}>
                     <SidebarMenuButton
                       asChild
+                      className={
+                        item.wrapLabel
+                          ? "[&>span:last-child]:whitespace-normal! h-auto min-h-8"
+                          : undefined
+                      }
                       isActive={isActive}
                       tooltip={item.title}
                     >

@@ -1,12 +1,14 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
+import { getPayableInvoiceDocuments } from "@/modules/collections/service/payable-documents.service";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
 import { resolvePaymentCurrencyFields } from "@/modules/collections/utils/payment-currency";
 import {
   NO_PAYABLE_INVOICE_RATE_MESSAGE,
   resolvePayableExchangeRate,
 } from "@/modules/collections/utils/payment-rate";
+import { isInvoiceBackedDebtEnabled } from "@/modules/organizations/service/debt-policy.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
@@ -137,6 +139,9 @@ async function syncAccountsPayable(params: {
 }) {
   const { supabase, orgId, supplierId, purchaseOrderId, totalAmount, dueDate } =
     params;
+  if (await isInvoiceBackedDebtEnabled(supabase, orgId)) {
+    return;
+  }
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
   const { data: purchaseOrderData } = await supabase
@@ -446,6 +451,7 @@ export async function createPurchaseOrder(
     .maybeSingle();
 
   const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+  const invoiceBackedDebt = await isInvoiceBackedDebtEnabled(supabase, org.id);
 
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
@@ -463,7 +469,9 @@ export async function createPurchaseOrder(
       global_discount_amount,
       total_amount,
       status: "ORDERED",
-      payable_origin: input.payable_origin ?? "PURCHASE_NOTE",
+      payable_origin: invoiceBackedDebt
+        ? "SUPPLIER_INVOICE"
+        : (input.payable_origin ?? "PURCHASE_NOTE"),
       fallback_taxes: fallbackTaxes ?? [],
       tax_snapshot_initialized: true,
     })
@@ -2114,7 +2122,9 @@ export async function getPurchaseOrderWithItems(
 // Helper functions for processBulkSupplierPayment
 type PendingPayableAccount = {
   id: string;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  supplier_invoice_id?: string | null;
+  invoiceReference?: string;
   total_amount: number;
   pending_balance: number;
   due_date: string;
@@ -2126,6 +2136,37 @@ type PendingPayableAccount = {
     | null;
 };
 
+async function attachPayableInvoiceReferences(
+  accounts: PendingPayableAccount[],
+  orgId: string
+): Promise<void> {
+  if (!accounts.some((account) => account.supplier_invoice_id)) {
+    return;
+  }
+  const data = await getPayableInvoiceDocuments(
+    await createClient(),
+    orgId,
+    accounts
+      .filter((account) => account.supplier_invoice_id)
+      .map((account) => account.id)
+  );
+  const byAP = new Map(
+    data.map((document) => [document.account_payable_id, document])
+  );
+  for (const account of accounts) {
+    const document = byAP.get(account.id);
+    if (document) {
+      account.invoiceReference = [
+        document.invoice_type,
+        document.point_of_sale,
+        document.invoice_number,
+      ]
+        .filter(Boolean)
+        .join("-");
+    }
+  }
+}
+
 function calculateSupplierPaymentDistributions(
   pendingAccounts: PendingPayableAccount[],
   totalAmount: number
@@ -2134,6 +2175,7 @@ function calculateSupplierPaymentDistributions(
   const distributions: Array<{
     accountId: string;
     purchaseNumber: number | null;
+    invoiceReference?: string;
     dueDate: string;
     totalAmount: number;
     pendingBalance: number;
@@ -2173,6 +2215,7 @@ function calculateSupplierPaymentDistributions(
     distributions.push({
       accountId: account.id,
       purchaseNumber: purchase?.purchase_number ?? null,
+      invoiceReference: account.invoiceReference,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
       pendingBalance,
@@ -2391,6 +2434,7 @@ export async function processBulkSupplierPayment(input: {
     .select(`
       id,
       purchase_order_id,
+      supplier_invoice_id,
       total_amount,
       pending_balance,
       due_date,
@@ -2413,6 +2457,7 @@ export async function processBulkSupplierPayment(input: {
 
   const payableAccounts = (pendingAccounts ??
     []) as unknown as PendingPayableAccount[];
+  await attachPayableInvoiceReferences(payableAccounts, org.id);
 
   if (payableAccounts.length === 0) {
     return {
@@ -2451,6 +2496,7 @@ export async function processBulkSupplierPayment(input: {
           currency: account.currency,
           supplier_id: supplierId,
           purchase_order_id: account.purchase_order_id,
+          supplier_invoice_id: account.supplier_invoice_id,
           exchange_rate: account.exchange_rate,
         },
       });
@@ -2635,6 +2681,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     .select(`
       id,
       purchase_order_id,
+      supplier_invoice_id,
       total_amount,
       pending_balance,
       due_date,
@@ -2654,6 +2701,7 @@ export async function calculateBulkSupplierPaymentDistribution(
 
   const payableAccounts = (pendingAccounts ??
     []) as unknown as PendingPayableAccount[];
+  await attachPayableInvoiceReferences(payableAccounts, org.id);
 
   if (payableAccounts.length === 0) {
     return [];
@@ -2679,6 +2727,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     newBalance: number;
     newStatus: CollectionAccountStatus;
     exchangeRate: number | null;
+    invoiceReference?: string;
   }> = [];
 
   for (const account of batchAccounts) {
@@ -2707,6 +2756,7 @@ export async function calculateBulkSupplierPaymentDistribution(
         currency: account.currency,
         supplier_id: supplierId,
         purchase_order_id: account.purchase_order_id,
+        supplier_invoice_id: account.supplier_invoice_id,
         exchange_rate: account.exchange_rate,
       },
     });
@@ -2714,6 +2764,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     distributions.push({
       accountId: account.id,
       purchaseNumber: purchase?.purchase_number ?? null,
+      invoiceReference: account.invoiceReference,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
       pendingBalance,
@@ -2734,7 +2785,8 @@ export async function calculateBulkSupplierPaymentDistribution(
  */
 export async function getSupplierCredits(
   orgSlug: string,
-  supplierId: string
+  supplierId: string,
+  currency?: "ARS" | "USD"
 ): Promise<
   Array<{
     id: string;
@@ -2751,13 +2803,16 @@ export async function getSupplierCredits(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("supplier_credits" as never)
     .select("id, amount, remaining_amount, notes, created_at")
     .eq("organization_id", org.id)
     .eq("supplier_id", supplierId)
-    .gt("remaining_amount", 0)
-    .order("created_at", { ascending: true });
+    .gt("remaining_amount", 0);
+  if (currency) {
+    query = query.eq("currency", currency);
+  }
+  const { data, error } = await query.order("created_at", { ascending: true });
 
   if (error || !data) {
     console.error("Error fetching supplier credits:", error);
@@ -2784,9 +2839,10 @@ export async function getSupplierCredits(
  */
 export async function getSupplierCreditBalance(
   orgSlug: string,
-  supplierId: string
+  supplierId: string,
+  currency?: "ARS" | "USD"
 ): Promise<number> {
-  const credits = await getSupplierCredits(orgSlug, supplierId);
+  const credits = await getSupplierCredits(orgSlug, supplierId, currency);
   return credits.reduce(
     (sum, credit) =>
       truncateMoney(sum + truncateMoney(credit.remaining_amount)),
