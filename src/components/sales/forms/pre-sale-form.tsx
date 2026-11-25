@@ -409,6 +409,21 @@ const paymentMethodOptions: {
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
 
+const finishSectionButtonClasses =
+  "h-11 w-full border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 hover:text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900";
+
+function scrollToSectionTop(sectionId: string) {
+  // Wait for the collapsed layout before calculating the section position.
+  requestAnimationFrame(() => {
+    document.getElementById(sectionId)?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  });
+}
+
 const unitOfMeasureLabels: Record<SaleProduct["unitOfMeasure"], string> = {
   UN: "unidad",
   KG: "kg",
@@ -655,6 +670,8 @@ export function PreSaleForm({
   const [collapsedItemIds, setCollapsedItemIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [customerDetailsCollapsed, setCustomerDetailsCollapsed] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -1874,8 +1891,60 @@ export function PreSaleForm({
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
-          <Card>
-            <CardContent className="space-y-6 pt-6">
+          <Card className="scroll-mt-28" id="pre-sale-details-card">
+            <CardHeader
+              className={cn(
+                "p-5 md:hidden",
+                !customerDetailsCollapsed && "pb-0"
+              )}
+            >
+              <button
+                aria-controls="pre-sale-customer-details"
+                aria-expanded={!customerDetailsCollapsed}
+                className="flex min-h-11 w-full items-start justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() =>
+                  setCustomerDetailsCollapsed((current) => !current)
+                }
+                type="button"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold text-base">
+                    Datos de la preventa
+                  </span>
+                  {customerDetailsCollapsed && (
+                    <span className="mt-2 flex min-w-0 flex-col gap-1">
+                      <span className="truncate font-medium text-sm">
+                        {selectedCustomerLabel}
+                      </span>
+                      <span className="truncate text-muted-foreground text-xs">
+                        {selectedSeller?.label ?? "Sin vendedor"} ·{" "}
+                        {warehouses.find(
+                          (warehouse) => warehouse.id === warehouseId
+                        )?.name ?? "Sin depósito"}
+                      </span>
+                    </span>
+                  )}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted"
+                >
+                  <ChevronDown
+                    className={cn(
+                      "size-5 text-muted-foreground transition-transform",
+                      !customerDetailsCollapsed && "rotate-180"
+                    )}
+                  />
+                </span>
+              </button>
+            </CardHeader>
+            <CardContent
+              className={cn(
+                "space-y-6 pt-6",
+                customerDetailsCollapsed && "hidden md:block"
+              )}
+              id="pre-sale-customer-details"
+            >
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="customer">Cliente *</Label>
@@ -2399,6 +2468,20 @@ export function PreSaleForm({
                   value={observations}
                 />
               </div>
+              <div className="border-t pt-4 md:hidden">
+                <Button
+                  className={finishSectionButtonClasses}
+                  onClick={() => {
+                    setCustomerDetailsCollapsed(true);
+                    scrollToSectionTop("pre-sale-details-card");
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  <Check className="size-4" />
+                  Listo
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -2408,7 +2491,7 @@ export function PreSaleForm({
             orgSlug={orgSlug}
           />
 
-          <Card>
+          <Card className="scroll-mt-28" id="pre-sale-products-card">
             <CardHeader>
               <CardTitle className="text-lg">
                 Productos de la preventa
@@ -3254,16 +3337,21 @@ export function PreSaleForm({
                               </div>
                             ) : null}
                             <Button
-                              className="col-span-2 min-h-11 md:hidden"
-                              onClick={() =>
+                              className={cn(
+                                finishSectionButtonClasses,
+                                "col-span-2 md:hidden"
+                              )}
+                              onClick={() => {
                                 setCollapsedItemIds((current) =>
                                   new Set(current).add(item.id)
-                                )
-                              }
+                                );
+                                scrollToSectionTop("pre-sale-products-card");
+                              }}
                               type="button"
                               variant="outline"
                             >
-                              Ok
+                              <Check className="size-4" />
+                              Listo
                             </Button>
                           </div>
                         </div>
