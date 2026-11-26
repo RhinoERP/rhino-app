@@ -28,10 +28,7 @@ export async function MeliPaymentAccountingHistory({
     ? reviewMeliPaymentDispatches(entries, preparations)
     : null;
   return (
-    <details>
-      <summary className="cursor-pointer font-medium">
-        Asientos vinculados al cobro
-      </summary>
+    <>
       {issues && issues.length > 0 && (
         <div className="mt-2 text-destructive" role="alert">
           <p>La comparación de envíos y asientos requiere revisión:</p>
@@ -42,37 +39,40 @@ export async function MeliPaymentAccountingHistory({
           </ul>
         </div>
       )}
-      {entries.length === 0 ? (
-        <p className="mt-2 text-muted-foreground">
-          No se encontraron asientos con este cobro como origen. Los asientos
-          externos o vinculados a otro origen requieren revisión manual.
-        </p>
-      ) : (
-        <>
+      <details>
+        <summary className="cursor-pointer font-medium">
+          Asientos vinculados al cobro
+        </summary>
+        {entries.length === 0 ? (
           <p className="mt-2 text-muted-foreground">
-            Revisá cada asiento y contra-asiento antes de contabilizar o anular
-            el cobro. Esta consulta no confirma que la liquidación esté
-            completa.
+            No se encontraron asientos con este cobro como origen. Los asientos
+            externos o vinculados a otro origen requieren revisión manual.
           </p>
-          <ul className="mt-2 space-y-2">
-            {entries.map((entry) => (
-              <li className="break-all" key={entry.id}>
-                {entry.tipo_evento === "CONTRA_ASIENTO"
-                  ? "Contra-asiento"
-                  : (entry.tipo_evento ?? "Asiento sin tipo")}
-                {" · "}
-                {entry.estado} · fecha {entry.fecha} · ID {entry.id}
-                {entry.tipo_evento === "CONTRA_ASIENTO" && (
-                  <p>Asiento original: {entry.referencia_id}</p>
-                )}
-                {entry.anulado_por_id && (
-                  <p>Vinculado a reversión: {entry.anulado_por_id}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </details>
+        ) : (
+          <>
+            <p className="mt-2 text-muted-foreground">
+              Esta consulta no confirma que la liquidación esté completa.
+            </p>
+            <ul className="mt-2 space-y-2">
+              {entries.map((entry) => (
+                <li className="break-all" key={entry.id}>
+                  {entry.tipo_evento === "CONTRA_ASIENTO"
+                    ? "Contra-asiento"
+                    : (entry.tipo_evento ?? "Asiento sin tipo")}
+                  {" · "}
+                  {entry.estado} · fecha {entry.fecha} · ID {entry.id}
+                  {entry.tipo_evento === "CONTRA_ASIENTO" && (
+                    <p>Asiento original: {entry.referencia_id}</p>
+                  )}
+                  {entry.anulado_por_id && (
+                    <p>Vinculado a reversión: {entry.anulado_por_id}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </details>
+    </>
   );
 }

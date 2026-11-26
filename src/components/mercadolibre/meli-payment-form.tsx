@@ -107,7 +107,7 @@ export function MeliPaymentForm({
       </p>
       <p className="text-muted-foreground text-sm">
         Registrar el cobro no genera asientos automáticamente. Para
-        contabilizarlo, completá el desglose y publicá sus conceptos desde el
+        contabilizarlo, completá el desglose y confirmá los asientos desde el
         historial contable.
       </p>
       <form

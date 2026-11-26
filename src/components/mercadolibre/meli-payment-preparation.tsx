@@ -9,7 +9,7 @@ import {
   inspectMeliPaymentDispatchAction,
   inspectMeliPaymentReversalsAction,
   prepareMeliPaymentAction,
-  publishMeliPaymentComponentAction,
+  publishMeliPaymentPreparationAction,
 } from "@/modules/mercadolibre/actions/meli-payment-preparations.action";
 import type {
   inspectMeliPaymentReversals,
@@ -136,7 +136,7 @@ function MeliReversalLookup({
 
 function dispatchLabel(component: Preparation["components"][number]): string {
   if (component.dispatchStatus === "PUBLISHED") {
-    return `Publicado: ${component.journalEntryId}`;
+    return "Publicado";
   }
   if (component.dispatchStatus === "UNCERTAIN") {
     return "Envío pendiente de confirmación";
@@ -351,7 +351,7 @@ export function MeliPaymentPreparation({
     });
   }
 
-  function publish(preparationId: string, componentKey: string) {
+  function publish(preparationId: string) {
     if (running.current) {
       return;
     }
@@ -360,25 +360,26 @@ export function MeliPaymentPreparation({
     setMessage("");
     startTransition(async () => {
       try {
-        const result = await publishMeliPaymentComponentAction(orgSlug, {
+        const result = await publishMeliPaymentPreparationAction(orgSlug, {
           paymentId,
           preparationId,
-          componentKey,
         });
         if (!result.success) {
           setError(result.error);
+          router.refresh();
           return;
         }
         setMessage(
           result.refreshRequired
-            ? `Asiento ${result.data.journalEntryId} confirmado. Actualizá la página para consultar su estado.`
-            : `Asiento ${result.data.journalEntryId} publicado y verificado.`
+            ? "Conceptos confirmados. Actualizá la página para consultar sus estados."
+            : "Todos los conceptos de la preparación figuran publicados."
         );
         router.refresh();
       } catch {
         setError(
-          "No se confirmó la publicación. Consultá el envío y reintentá con la misma preparación."
+          "No se confirmó el resultado de la publicación. Algunos conceptos pueden haberse publicado; consultá sus estados y reintentá con la misma preparación."
         );
+        router.refresh();
       } finally {
         running.current = false;
       }
@@ -402,26 +403,14 @@ export function MeliPaymentPreparation({
       {active ? (
         <>
           <p>
-            Preparación activa: bloquea cambios del desglose y la anulación del
-            cobro. No implica que existan asientos.
+            Desglose preparado; el cobro no se puede anular. Para modificarlo,
+            cancelá la preparación si aún no hay envíos.
           </p>
           <ul>
             {active.components.map((component) => (
               <li key={component.key}>
                 {component.description}: {component.amount} ·{" "}
                 {dispatchLabel(component)}
-                {component.dispatchStatus !== "PUBLISHED" && (
-                  <Button
-                    disabled={pending}
-                    onClick={() => publish(active.id, component.key)}
-                    type="button"
-                    variant="outline"
-                  >
-                    {component.dispatchStatus === "UNCERTAIN"
-                      ? `Reintentar publicación ${component.description}`
-                      : `Publicar ${component.description}`}
-                  </Button>
-                )}
                 {component.dispatchStatus && (
                   <Button
                     disabled={pending}
@@ -435,6 +424,24 @@ export function MeliPaymentPreparation({
               </li>
             ))}
           </ul>
+          {active.components.some(
+            (component) => component.dispatchStatus !== "PUBLISHED"
+          ) && (
+            <>
+              <p>
+                Se publica un asiento por concepto; si hay un error, los
+                publicados se conservan.
+              </p>
+              <Button
+                disabled={pending}
+                onClick={() => publish(active.id)}
+                type="button"
+                variant="outline"
+              >
+                Confirmar asiento
+              </Button>
+            </>
+          )}
           <Button
             disabled={
               pending ||
@@ -446,7 +453,7 @@ export function MeliPaymentPreparation({
             type="button"
             variant="outline"
           >
-            Cancelar preparación sin envíos
+            Cancelar preparación
           </Button>
           {active.components.some((item) => item.dispatchStatus) && (
             <>
@@ -469,9 +476,6 @@ export function MeliPaymentPreparation({
             ? "Reintentar la misma preparación"
             : "Preparar conceptos sin publicar"}
         </Button>
-      )}
-      {preparations.some((item) => item.status === "CANCELLED") && (
-        <p>Hay preparaciones canceladas en el historial contable.</p>
       )}
       {error && (
         <p className="text-destructive" role="alert">

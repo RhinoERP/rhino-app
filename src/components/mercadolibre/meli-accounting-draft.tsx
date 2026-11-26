@@ -44,46 +44,11 @@ function validationMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Revisá el desglose.";
 }
 
-function DraftHistory({ history }: { history: Draft[] }) {
-  if (!history.length) {
-    return null;
-  }
-  return (
-    <details>
-      <summary className="cursor-pointer">Historial de versiones</summary>
-      <ul className="mt-2 space-y-2">
-        {history.map((draft) => (
-          <li key={draft.id}>
-            Versión {draft.version} {draft.active ? "(activa)" : ""} ·{" "}
-            {draft.created_at} · responsable {draft.created_by}
-            <p>
-              Neto {draft.request_payload.breakdown.net}; descuento{" "}
-              {draft.request_payload.breakdown.discount}; comisión{" "}
-              {draft.request_payload.breakdown.commission}; envío{" "}
-              {draft.request_payload.breakdown.shipping}.
-            </p>
-            {draft.request_payload.breakdown.manualConcepts?.map(
-              (concept, index) => (
-                <p key={`${draft.id}-${index}`}>
-                  {concept.description}: {concept.direction} {concept.amount} ·
-                  cuenta {concept.accountId}
-                </p>
-              )
-            )}
-            {draft.request_payload.evidence && (
-              <p>Evidencia: {draft.request_payload.evidence}</p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
 function ActiveDraftPreview({
   draft,
   previewAvailable,
   enabled,
+  editable,
   orgId,
   orgSlug,
   saleId,
@@ -91,6 +56,7 @@ function ActiveDraftPreview({
   draft: Draft | undefined;
   previewAvailable: boolean;
   enabled: boolean;
+  editable: boolean;
   orgId: string;
   orgSlug: string;
   saleId: string;
@@ -115,6 +81,9 @@ function ActiveDraftPreview({
           orgSlug={orgSlug}
           saleId={saleId}
         />
+      )}
+      {!editable && draft.request_payload.evidence && (
+        <p>Evidencia o referencia: {draft.request_payload.evidence}</p>
       )}
     </>
   );
@@ -233,13 +202,11 @@ export function MeliAccountingDraft({
         }
         attempt.current = null;
         setLocked(false);
-        setMessage(
-          `Borrador versión ${result.data.version} guardado. No se generaron asientos.`
-        );
+        setMessage("Desglose guardado. Aún no se publicaron asientos.");
         toast.success(
           result.refreshRequired
-            ? "Borrador guardado. Actualizá la página para consultar su estado."
-            : `Borrador versión ${result.data.version} guardado; no se generaron asientos.`
+            ? "Desglose guardado. Actualizá la página para consultar su estado."
+            : "Desglose guardado. Aún no se publicaron asientos."
         );
         router.refresh();
       } catch {
@@ -255,16 +222,15 @@ export function MeliAccountingDraft({
   return (
     <details onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-medium">
-        Desglose contable (borrador)
+        Desglose contable
       </summary>
       <div className="mt-3 space-y-3">
         <p className="text-muted-foreground">
-          Este borrador no publica asientos. El importe y la fecha corresponden
-          al cobro registrado; el cuadre se verifica al guardar.
+          El desglose debe coincidir con el importe bruto del cobro.
         </p>
-        <DraftHistory history={history} />
         <ActiveDraftPreview
           draft={active}
+          editable={editable}
           enabled={open}
           orgId={orgId}
           orgSlug={orgSlug}
@@ -450,7 +416,7 @@ export function MeliAccountingDraft({
                 type="button"
                 variant="outline"
               >
-                Actualizar historial (puede descartar cambios)
+                Actualizar (descarta cambios)
               </Button>
             )}
           </form>

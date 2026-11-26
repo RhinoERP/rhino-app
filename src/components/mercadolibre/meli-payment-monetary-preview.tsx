@@ -86,9 +86,8 @@ export function MeliPaymentMonetaryPreview({
       {proposal && (
         <>
           <p>
-            Vista preliminar sin asiento. Las cuentas, el antecedente y la
-            conciliación deben verificarse antes de publicar. Cotización fiscal
-            de la factura: {rate ?? "no disponible"}.
+            Propuesta sin publicar. Cotización fiscal de la factura:{" "}
+            {rate ?? "no disponible"}.
           </p>
           <ul className="space-y-2">
             {proposal.map((component) => (

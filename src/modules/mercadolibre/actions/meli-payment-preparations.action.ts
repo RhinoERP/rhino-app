@@ -1,15 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import {
   cancelMeliPaymentPreparation,
   getMeliPreparationActor,
   inspectMeliPaymentDispatch,
   inspectMeliPaymentReversals,
+  listMeliPaymentPreparations,
   prepareMeliPayment,
   publishMeliPaymentComponent,
 } from "../service/meli-payment-preparations.service";
+import { publishPendingPaymentComponents } from "../utils/publish-payment-components";
 
 function message(error: unknown): string {
   if (error instanceof ZodError) {
@@ -55,22 +57,55 @@ export async function inspectMeliPaymentDispatchAction(
   }
 }
 
-export async function publishMeliPaymentComponentAction(
+export async function publishMeliPaymentPreparationAction(
   orgSlug: string,
   input: unknown
 ) {
-  let data: Awaited<ReturnType<typeof publishMeliPaymentComponent>>;
+  let result: Awaited<ReturnType<typeof publishPendingPaymentComponents>>;
   try {
-    data = await publishMeliPaymentComponent(orgSlug, input);
+    const { paymentId, preparationId } = z
+      .object({ paymentId: z.uuid(), preparationId: z.uuid() })
+      .strict()
+      .parse(input);
+    const preparations = await listMeliPaymentPreparations(orgSlug, paymentId);
+    const preparation = preparations.find(
+      (item) =>
+        item.id.toLowerCase() === preparationId.toLowerCase() &&
+        item.status === "PREPARED"
+    );
+    if (!preparation || preparation.components.length === 0) {
+      throw new Error("No se encontró una preparación vigente con conceptos.");
+    }
+    result = await publishPendingPaymentComponents(
+      preparation.components,
+      (componentKey) =>
+        publishMeliPaymentComponent(orgSlug, {
+          paymentId,
+          preparationId,
+          componentKey,
+        })
+    );
   } catch (error) {
     return { success: false as const, error: message(error) };
   }
+  let refreshRequired = false;
   try {
     revalidatePath(`/org/${orgSlug}/cobranzas`, "layout");
-    return { success: true as const, data, refreshRequired: false };
   } catch {
-    return { success: true as const, data, refreshRequired: true };
+    refreshRequired = true;
   }
+  if (!result.success) {
+    return {
+      success: false as const,
+      error: `No se completó la publicación de ${result.failedComponent}. Motivo: ${message(result.error)} Se confirmaron ${result.confirmed} conceptos en este intento; revisá los estados y reintentá con la misma preparación.`,
+      refreshRequired,
+    };
+  }
+  return {
+    success: true as const,
+    confirmed: result.confirmed,
+    refreshRequired,
+  };
 }
 
 export async function prepareMeliPaymentAction(

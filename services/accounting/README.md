@@ -481,12 +481,20 @@ importes originales y equivalentes ARS; rechaza cuentas faltantes, incompatibles
 o ambiguas y diferencias de redondeo. La vista es informativa: no confirma el
 antecedente, el período ni la conciliación, y no genera ni publica asientos.
 
-La aplicación también permite preparar los conceptos de un desglose vigente,
-publicar cada componente y cancelar esa preparación si no hubo envíos. Mientras
+La aplicación también permite preparar los conceptos de un desglose vigente y
+confirmar su publicación con el botón «Confirmar asiento». Cada concepto produce
+un asiento separado; se publican secuencialmente y la operación se detiene ante
+el primer error. Los anteriores se conservan y el mismo botón reintenta los
+pendientes o inciertos sin volver a publicar los ya confirmados. Ante una
+respuesta perdida, consultar los estados y reintentar la misma preparación;
+no se garantiza una transacción atómica entre todos los conceptos.
+Se puede cancelar la preparación si no hubo envíos. Mientras
 exista una preparación activa, la base impide editar el desglose o anular el
 cobro. La consulta y la cancelación segura siguen disponibles para usuarios
 autorizados aun con el flag desactivado; si hubo un envío, la cancelación queda
 bloqueada y la anulación comercial requiere la reversión contable recuperable.
+Las versiones anteriores del desglose y los datos de auditoría se conservan en
+la base, aunque no se muestran en la pantalla de cobros.
 Preparar no crea asientos. La
 consulta agrega una llamada por cobro para usuarios contables autorizados; su
 fallo muestra un aviso y no impide cargar la página ni los controles comerciales.
@@ -502,8 +510,8 @@ demuestra que otro intento no esté en tránsito; nunca cambiar clave o payload
 por ese motivo.
 El botón de verificación consulta el servicio contable con el payload durable y
 solo muestra si se verificó un asiento; no reenvía ni confirma la publicación.
-El botón de publicación reusa la misma solicitud durable en reintentos, valida
-el recibo del servicio contable y confirma el despacho en Supabase.
+La publicación de cada componente reusa su solicitud durable en reintentos,
+valida el recibo del servicio contable y confirma el despacho en Supabase.
 La consulta rechaza un original vinculado a una reversión o contra-asiento;
 esta comprobación no bloquea cambios concurrentes ni certifica conciliación.
 La migración `20261123030000` permite cotejar previamente fecha, moneda, vigencia,

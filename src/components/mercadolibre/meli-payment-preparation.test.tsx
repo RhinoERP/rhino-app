@@ -16,6 +16,7 @@ vi.mock(
     cancelMeliPaymentPreparationAction: vi.fn(),
     inspectMeliPaymentDispatchAction: vi.fn(),
     inspectMeliPaymentReversalsAction: vi.fn(),
+    publishMeliPaymentPreparationAction: vi.fn(),
   })
 );
 
@@ -48,9 +49,9 @@ describe("Meli payment preparation controls", () => {
         preparations={[active]}
       />
     );
-    expect(markup).toContain("Cancelar preparación sin envíos");
+    expect(markup).toContain("Cancelar preparación");
     expect(markup).toContain(' disabled=""');
-    expect(markup).toContain("bloquea cambios");
+    expect(markup).toContain("Para modificarlo");
   });
 
   it("does not offer cancellation for an uncertain or published dispatch", () => {
@@ -100,6 +101,33 @@ describe("Meli payment preparation controls", () => {
       />
     );
     expect(markup).toContain("Preparar conceptos sin publicar");
+  });
+
+  it("offers one confirmation for all pending components", () => {
+    const preparation = {
+      ...active,
+      components: [
+        active.components[0],
+        {
+          ...active.components[0],
+          key: "commission",
+          description: "Comisión",
+          dispatchStatus: "UNCERTAIN" as const,
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <MeliPaymentPreparation
+        enabled
+        orgSlug="org"
+        paymentId="payment"
+        preparations={[preparation]}
+      />
+    );
+    expect(markup.match(/Confirmar asiento/g)).toHaveLength(1);
+    expect(markup).not.toContain("Publicar Neto");
+    expect(markup).not.toContain("Reintentar publicación Comisión");
+    expect(markup).toContain("Verificar envío Comisión");
   });
 
   it("distinguishes confirmed, found and missing reversal receipts", () => {

@@ -30,7 +30,7 @@ describe("Meli accounting draft interface", () => {
     const markup = renderToStaticMarkup(
       <MeliAccountingDraft {...props} editable />
     );
-    expect(markup).toContain("Este borrador no publica asientos");
+    expect(markup).toContain("El desglose debe coincidir");
     expect(markup).toContain("Neto acreditado");
     expect(markup).toContain("Descuento");
     expect(markup).toContain("Comisión");
@@ -67,12 +67,11 @@ describe("Meli accounting draft interface", () => {
     );
     expect(markup).not.toContain("Guardar borrador");
     expect(markup).not.toContain("Agregar ajuste manual");
-    expect(markup).toContain("Versión");
+    expect(markup).not.toContain("Historial de versiones");
     expect(markup).toContain("Referencia de liquidación");
     expect(markup).toContain("Vista previa de conceptos");
     expect(markup).toContain("MERCADO_PAGO");
     expect(markup).toContain("AR_DEUDORES_VENTAS");
-    expect(markup).toContain("No se generaron asientos");
     expect(markup).not.toContain("Revisar propuesta monetaria");
   });
 

@@ -33,11 +33,7 @@ export function MeliAccountingDraftPreview({
   return (
     <details>
       <summary className="cursor-pointer">Vista previa de conceptos</summary>
-      <p className="mt-2 text-muted-foreground">
-        Orientación propuesta en {currency}. Las cuentas deben validarse y, en
-        USD, debe aplicarse la cotización fiscal antes de publicar. No se
-        generaron asientos.
-      </p>
+      <p className="mt-2 text-muted-foreground">Cuentas propuestas.</p>
       <ul className="mt-2 space-y-2">
         {components.map((component) => (
           <li key={component.key}>

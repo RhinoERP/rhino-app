@@ -267,20 +267,6 @@ export default async function MeliCollectionSalePage({
             {canManage && payment.status === "RECORDED" && (
               <VoidMeliPaymentForm orgSlug={orgSlug} paymentId={payment.id} />
             )}
-            <details className="space-y-2 text-muted-foreground">
-              <summary className="cursor-pointer">Datos de auditoría</summary>
-              <p className="break-all">Registro: {payment.id}</p>
-              <p>Creado: {formatDate(payment.created_at)}</p>
-              <p className="break-all">Responsable: {payment.created_by}</p>
-              <p>
-                Comprador al registrar:{" "}
-                {payment.fiscal_receiver_snapshot.document_type}{" "}
-                {payment.fiscal_receiver_snapshot.document_number}
-              </p>
-              {payment.voided_by && (
-                <p className="break-all">Anulado por: {payment.voided_by}</p>
-              )}
-            </details>
           </article>
         ))}
         {!history.data.length && (
@@ -300,11 +286,6 @@ export default async function MeliCollectionSalePage({
           </div>
         </div>
       </section>
-      <p className="text-muted-foreground text-sm">
-        Este historial registra cobros brutos declarados. No crea cuentas por
-        cobrar ni representa el neto disponible de Mercado Pago. Notas de
-        crédito, reembolsos y transferencias son operaciones separadas.
-      </p>
     </div>
   );
 }
