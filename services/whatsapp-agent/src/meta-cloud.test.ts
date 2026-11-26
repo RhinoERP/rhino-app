@@ -24,13 +24,18 @@ const reservation = {
   lease_expires_at: new Date(Date.now() + 120_000).toISOString(),
 };
 
-function database(organizationEnabled: boolean, conversationAvailable = true) {
+function database(
+  organizationEnabled: boolean,
+  conversationAvailable = true,
+  inbound?: { external_message_id: string; sent_at: string }
+) {
   const rows: Record<string, unknown> = {
     whatsapp_integrations: { organization_id: "org", phone_number_id: "12345" },
     organizations: organizationEnabled ? { id: "org" } : null,
     whatsapp_conversations: conversationAvailable
       ? { id: "conversation" }
       : null,
+    whatsapp_messages: inbound,
   };
   return {
     from: vi.fn((table: string) => {
@@ -38,6 +43,9 @@ function database(organizationEnabled: boolean, conversationAvailable = true) {
         select: vi.fn(() => query),
         eq: vi.fn(() => query),
         in: vi.fn(() => query),
+        abortSignal: vi.fn(() => query),
+        order: vi.fn(() => query),
+        limit: vi.fn(() => query),
         maybeSingle: vi.fn(async () => ({ data: rows[table], error: null })),
       };
       return query;
@@ -55,6 +63,41 @@ function database(organizationEnabled: boolean, conversationAvailable = true) {
       })
     ),
   };
+}
+
+function inboundMessage(sentAt = Date.now()) {
+  return {
+    external_message_id: "wamid.inbound",
+    sent_at: new Date(sentAt).toISOString(),
+  };
+}
+
+function pricedDatabase(leaseMs = 60_000, inbound = inboundMessage()) {
+  const db = database(true, true, inbound);
+  const guard = vi.fn(
+    async (): Promise<{ data: true | null; error: null }> => ({
+      data: true,
+      error: null,
+    })
+  );
+  db.rpc.mockImplementation((name) => {
+    if (name === "guard_whatsapp_priced_dispatch") {
+      return guard();
+    }
+    return Promise.resolve({
+      data:
+        name === "prepare_whatsapp_priced_outbox"
+          ? {
+              ...reservation,
+              status: "SENDING",
+              text: "Respuesta guardada",
+              lease_expires_at: new Date(Date.now() + leaseMs).toISOString(),
+            }
+          : true,
+      error: null,
+    });
+  });
+  return { db, guard };
 }
 
 function humanDatabase(deadline = Date.now() + 60_000) {
@@ -140,6 +183,127 @@ describe("WhatsApp outbound authorization", () => {
       "complete_whatsapp_outbox",
       expect.objectContaining({ p_external_message_id: "wamid.test" })
     );
+  });
+
+  describe("typing before an automatic reply", () => {
+    const pricedInput = { ...input, pricingKey: null };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it.each([
+      [undefined, 10_000],
+      ["3", 3000],
+      ["60", 25_000],
+      ["-1", 10_000],
+    ])("uses config %s and waits %i ms after Meta accepts the indicator", async (config, waitMs) => {
+      vi.stubEnv("WHATSAPP_AGENT_TYPING_SECONDS", config);
+      const { db, guard } = pricedDatabase();
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true }));
+
+      const delivery = sendWhatsAppText(
+        db as unknown as SupabaseClient,
+        pricedInput
+      );
+      await vi.advanceTimersByTimeAsync(waitMs - 1);
+
+      expect(guard).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledExactlyOnceWith(
+        `https://graph.facebook.com/${process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0"}/${input.phoneNumberId}/messages`,
+        expect.objectContaining({
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            status: "read",
+            message_id: "wamid.inbound",
+            typing_indicator: { type: "text" },
+          }),
+        })
+      );
+      expect(guard.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(fetch).mock.invocationCallOrder[0]
+      );
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(delivery).resolves.toBe("wamid.test");
+      expect(guard).toHaveBeenCalledTimes(2);
+      expect(guard.mock.invocationCallOrder[1]).toBeLessThan(
+        vi.mocked(fetch).mock.invocationCallOrder[1]
+      );
+      expect(
+        JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body))
+      ).toMatchObject({
+        to: input.recipient,
+        text: { body: "Respuesta guardada" },
+      });
+    });
+
+    it("cancels the text when authorization is revoked during typing", async () => {
+      vi.stubEnv("WHATSAPP_AGENT_TYPING_SECONDS", "10");
+      const { db, guard } = pricedDatabase();
+      guard
+        .mockResolvedValueOnce({ data: true, error: null })
+        .mockResolvedValueOnce({ data: null, error: null });
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true }));
+
+      const delivery = expect(
+        sendWhatsAppText(db as unknown as SupabaseClient, pricedInput)
+      ).rejects.toMatchObject({ code: "DELIVERY_NOT_AUTHORIZED" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await delivery;
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(db.rpc.mock.calls.map(([name]) => name)).not.toContain(
+        "complete_whatsapp_outbox"
+      );
+    });
+
+    it("sends immediately when Meta rejects the typing request", async () => {
+      vi.stubEnv("WHATSAPP_AGENT_TYPING_SECONDS", "10");
+      const { db, guard } = pricedDatabase();
+      vi.mocked(fetch).mockResolvedValueOnce(
+        Response.json({}, { status: 403 })
+      );
+
+      await expect(
+        sendWhatsAppText(db as unknown as SupabaseClient, pricedInput)
+      ).resolves.toBe("wamid.test");
+
+      expect(guard).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(db.rpc).toHaveBeenCalledWith(
+        "complete_whatsapp_outbox",
+        expect.objectContaining({ p_status: "SENT" })
+      );
+    });
+
+    it.each([
+      ["0", 60_000, 0],
+      ["10", 30_000, 0],
+      ["10", 60_000, 24 * 60 * 60 * 1000 - 15_000],
+    ])("skips typing when disabled or close to a deadline (%s, %i, %i)", async (config, leaseMs, ageMs) => {
+      vi.stubEnv("WHATSAPP_AGENT_TYPING_SECONDS", config);
+      const { db, guard } = pricedDatabase(
+        leaseMs,
+        inboundMessage(Date.now() - ageMs)
+      );
+
+      await expect(
+        sendWhatsAppText(db as unknown as SupabaseClient, pricedInput)
+      ).resolves.toBe("wamid.test");
+
+      expect(guard).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
+      ).toMatchObject({
+        type: "text",
+      });
+    });
   });
 
   it("retries an Argentine test recipient without 9 after explicit allowlist rejection", async () => {
@@ -386,6 +550,7 @@ describe("WhatsApp outbound authorization", () => {
     await expect(
       sendNextWhatsAppHumanMessage(db as unknown as SupabaseClient)
     ).resolves.toBe(true);
+    expect(db.from).not.toHaveBeenCalled();
     expect(
       JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).text.body
     ).toBe("Human saved text");
@@ -601,13 +766,51 @@ describe("follow-up delivery preflight", () => {
     vi.unstubAllGlobals();
   });
 
-  function followUpDb(deadline: string | null, guardError: unknown = null) {
+  function followUpDb(
+    deadline: string | null,
+    guardError: unknown = null,
+    inbound?: ReturnType<typeof inboundMessage>
+  ) {
     const rpc = vi.fn(async (name: string, _args: Record<string, unknown>) => ({
       data: name === "guard_whatsapp_follow_up_dispatch" ? deadline : true,
       error: name === "guard_whatsapp_follow_up_dispatch" ? guardError : null,
     }));
-    return { db: { rpc } as unknown as SupabaseClient, rpc };
+    const { from } = database(true, true, inbound);
+    return { db: { rpc, from } as unknown as SupabaseClient, rpc };
   }
+
+  it("shows typing for an approved follow-up before rechecking its guard", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("WHATSAPP_AGENT_TYPING_SECONDS", "2");
+    const { db, rpc } = followUpDb(
+      new Date(Date.now() + 60_000).toISOString(),
+      null,
+      inboundMessage()
+    );
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true }));
+
+    try {
+      const delivery = sendPreparedWhatsAppFollowUp(db, command);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
+      ).toMatchObject({
+        message_id: "wamid.inbound",
+        typing_indicator: { type: "text" },
+      });
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(delivery).resolves.toBe("wamid.follow-up");
+      expect(
+        rpc.mock.calls.filter(
+          ([name]) => name === "guard_whatsapp_follow_up_dispatch"
+        )
+      ).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("checks the follow-up identity and persists the known Meta ID", async () => {
     const { db, rpc } = followUpDb(new Date(Date.now() + 60_000).toISOString());

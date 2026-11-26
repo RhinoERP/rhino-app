@@ -6,23 +6,23 @@ describe("formatAssistantReply", () => {
     "STANDARD",
     undefined,
     "unknown",
-  ])("removes opening question marks while preserving case for %s", (capitalization) => {
+  ])("removes opening punctuation while preserving case for %s", (capitalization) => {
     expect(
       formatAssistantReply(
-        "Hola, ¿qué queso buscás?\n¿Querés Cremac o Las Tres?",
+        "¡Hola! ¿Qué queso buscás?\n¿Querés Cremac o Las Tres?",
         capitalization
       )
-    ).toBe("Hola, qué queso buscás?\nQuerés Cremac o Las Tres?");
+    ).toBe("Hola! Qué queso buscás?\nQuerés Cremac o Las Tres?");
   });
 
-  it("removes opening question marks in lowercase mode without changing links, emails or codes", () => {
+  it("removes opening punctuation in lowercase mode without changing links, emails or codes", () => {
     expect(
       formatAssistantReply(
-        "¿Querés el pedido PV-123? Consultá Ventas@Ejemplo.com o https://ejemplo.com/Pedido?ref=AB",
+        "¿Querés el pedido PV-123? ¡Consultá Ventas@Ejemplo.com! https://ejemplo.com/Pedido?ref=AB",
         "LOWERCASE"
       )
     ).toBe(
-      "querés el pedido PV-123? consultá Ventas@Ejemplo.com o https://ejemplo.com/Pedido?ref=AB"
+      "querés el pedido PV-123? consultá Ventas@Ejemplo.com! https://ejemplo.com/Pedido?ref=AB"
     );
   });
 

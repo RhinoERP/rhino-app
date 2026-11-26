@@ -11,8 +11,8 @@ CREATE TABLE whatsapp_control_fixture AS SELECT
   gen_random_uuid() foreign_role, gen_random_uuid() wi, gen_random_uuid() sim_wi,
   gen_random_uuid() c, gen_random_uuid() sim_c, gen_random_uuid() race_c, gen_random_uuid() sending_race_c,
   gen_random_uuid() price_list;
-INSERT INTO organizations(id,whatsapp_enabled,whatsapp_sandbox_enabled)
-  SELECT org,true,true FROM whatsapp_control_fixture UNION ALL SELECT foreign_org,true,true FROM whatsapp_control_fixture;
+INSERT INTO organizations(id,whatsapp_enabled,whatsapp_sandbox_enabled,whatsapp_audio_enabled)
+  SELECT org,true,true,true FROM whatsapp_control_fixture UNION ALL SELECT foreign_org,true,true,false FROM whatsapp_control_fixture;
 INSERT INTO auth.users(id) SELECT unnest(ARRAY[a,b,reader,stranger,inactive,no_permission,org_admin,owner,wrong_role]) FROM whatsapp_control_fixture;
 INSERT INTO roles(id,organization_id) SELECT manage_role,org FROM whatsapp_control_fixture
   UNION ALL SELECT read_role,org FROM whatsapp_control_fixture UNION ALL SELECT admin_role,org FROM whatsapp_control_fixture
@@ -171,4 +171,68 @@ DO $$ DECLARE f whatsapp_control_fixture%ROWTYPE; actor uuid; result jsonb; src 
     EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
 END $$;
 UPDATE agent_jobs SET status='SUCCEEDED' WHERE organization_id=(SELECT org FROM whatsapp_control_fixture);
+
+-- Reproduce a pending voice note that arrived while a human owned the chat.
+-- Separate transactions mirror webhook/control calls and their timestamps.
+SELECT conversation_id AS audio_resume_chat
+FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000104','audio-resume-seed','TEXT','Hola','{}')
+\gset
+SELECT message_id AS in_flight_audio
+FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000104','audio-resume-in-flight','AUDIO',NULL,'{"audio":{"id":"455"}}')
+\gset
+SELECT id AS in_flight_job, lease_token AS in_flight_lease
+FROM claim_whatsapp_job_v2('in-flight-audio','TRANSCRIBE_AUDIO','DAEMON',
+  (SELECT id FROM agent_jobs WHERE source_message_id=:'in_flight_audio' AND job_type='TRANSCRIBE_AUDIO'))
+\gset
+SELECT pg_temp.assert_true(validate_whatsapp_audio_asset(:'in_flight_job',:'in_flight_lease','audio/ogg',128,1,repeat('a',64)),
+  'Audio is already processing when the human takes over');
+SELECT control_whatsapp_conversation(org,:'audio_resume_chat',a,0,'CLAIM') FROM whatsapp_control_fixture;
+SELECT message_id AS old_audio
+FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000104','audio-resume-old','AUDIO',NULL,'{"audio":{"id":"456"}}')
+\gset
+SELECT control_whatsapp_conversation(org,:'audio_resume_chat',a,1,'RESUME') FROM whatsapp_control_fixture;
+SELECT agent_job_id AS first_text_job
+FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000104','audio-resume-first-text','TEXT','Hola de nuevo','{}')
+\gset
+SELECT pg_temp.assert_true((SELECT a.status='PENDING' AND m.created_at<=c.automation_resumed_at
+  FROM whatsapp_audio_assets a JOIN whatsapp_messages m ON m.id=a.message_id
+  JOIN whatsapp_conversations c ON c.id=a.conversation_id WHERE a.message_id=:'old_audio'),
+  'The pending audio predates the return to automation');
+SELECT pg_temp.assert_true((SELECT count(*)=0 FROM claim_whatsapp_job_v2('old-audio','TRANSCRIBE_AUDIO','DAEMON',
+  (SELECT id FROM agent_jobs WHERE source_message_id=:'old_audio' AND job_type='TRANSCRIBE_AUDIO'))),
+  'Old audio must not be transcribed after return');
+SELECT pg_temp.assert_true((SELECT count(*)=1 FROM claim_whatsapp_job_v2('first-text','PROCESS_CONVERSATION','DAEMON',:'first_text_job')),
+  'Old pending or in-flight audio must not block new text after return');
+SELECT pg_temp.assert_true(finish_whatsapp_job_v2(id,lease_token,true),'First text job finishes')
+FROM agent_jobs WHERE id=:'first_text_job';
+
+UPDATE whatsapp_conversations SET pending_order_action='{"kind":"CONFIRM_PRE_SALE"}' WHERE id=:'audio_resume_chat';
+SELECT pg_temp.assert_true(finish_whatsapp_job_v2(:'in_flight_job',:'in_flight_lease',false,'Transcripción fallida',false),
+  'An older in-flight audio can finish with a terminal error');
+SELECT pg_temp.assert_true((SELECT pending_order_action='{"kind":"CONFIRM_PRE_SALE"}' FROM whatsapp_conversations WHERE id=:'audio_resume_chat'),
+  'A terminal error for old audio preserves the current order confirmation');
+
+SELECT message_id AS new_audio
+FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000104','audio-resume-new','AUDIO',NULL,'{"audio":{"id":"457"}}')
+\gset
+SELECT agent_job_id AS second_text_job
+FROM ingest_whatsapp_inbound_message('control-test-phone','5491100000104','audio-resume-second-text','TEXT','Te mandé un audio','{}')
+\gset
+SELECT pg_temp.assert_true((SELECT count(*)=0 FROM claim_whatsapp_job_v2('second-text','PROCESS_CONVERSATION','DAEMON',:'second_text_job')),
+  'New text still waits for audio received after return');
+SELECT id AS new_audio_job, lease_token AS new_audio_lease
+FROM claim_whatsapp_job_v2('new-audio','TRANSCRIBE_AUDIO','DAEMON',
+  (SELECT id FROM agent_jobs WHERE source_message_id=:'new_audio' AND job_type='TRANSCRIBE_AUDIO'))
+\gset
+SELECT pg_temp.assert_true(complete_whatsapp_transcription(:'new_audio_job',:'new_audio_lease','Hola','test'),'New audio transcribes');
+SELECT pg_temp.assert_true(finish_whatsapp_job_v2(:'new_audio_job',:'new_audio_lease',true),'New transcription job finishes');
+SELECT pg_temp.assert_true((SELECT count(*)=1 FROM claim_whatsapp_job_v2('second-text','PROCESS_CONVERSATION','DAEMON',:'second_text_job')),
+  'New text can run after new audio is transcribed');
+
+UPDATE whatsapp_conversations SET pending_order_action='{"kind":"CONFIRM_PRE_SALE"}' WHERE id=:'audio_resume_chat';
+UPDATE whatsapp_audio_assets SET expires_at=clock_timestamp()-interval '1 second' WHERE message_id=:'old_audio';
+SELECT pg_temp.assert_true(expire_whatsapp_audio_asset(:'old_audio'),'Old audio still expires');
+SELECT pg_temp.assert_true((SELECT pending_order_action='{"kind":"CONFIRM_PRE_SALE"}' FROM whatsapp_conversations WHERE id=:'audio_resume_chat'),
+  'Expiration of old audio preserves the current order confirmation');
+UPDATE agent_jobs SET status='SUCCEEDED',lease_expires_at=NULL WHERE conversation_id=:'audio_resume_chat' AND status='PROCESSING';
 SELECT 'Human control: RBAC, tenant/flags, acceptance, transfer, resume, audit and outbox fences passed';
