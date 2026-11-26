@@ -4,7 +4,7 @@ const caseSensitiveText =
   /(https?:\/\/\S+|www\.\S+|[\w.%+-]+@[\w.-]+\.[a-z]{2,}|\b(?=[\w-]*[a-z])(?=[\w-]*\d)[\w-]+\b)/gi;
 
 export function formatAssistantReply(text: string, capitalization: unknown) {
-  const formatted = text.replaceAll("¿", "");
+  const formatted = text.replace(/[¿¡]/g, "");
   if (capitalization !== "LOWERCASE") {
     return formatted;
   }

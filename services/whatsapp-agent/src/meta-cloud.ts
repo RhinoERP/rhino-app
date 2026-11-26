@@ -2,6 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AudioError } from "./audio/config.js";
 
 const ARGENTINE_MOBILE_WA_ID = /^549\d{10}$/;
+const META_SEND_TIMEOUT_MS = 20_000;
+const TYPING_REQUEST_TIMEOUT_MS = 2000;
+const CUSTOMER_WINDOW_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TYPING_SECONDS = 10;
+const MAX_TYPING_SECONDS = 25;
 
 export type SendWhatsAppTextInput = {
   integrationId: string;
@@ -27,6 +32,102 @@ type FinishDelivery = (
   status: DeliveryStatus,
   externalId?: string
 ) => Promise<void>;
+type DispatchGuard = () => Promise<number | undefined>;
+
+type TypingIndicator = {
+  messageId: string;
+  waitMs: number;
+  windowEndsAt: number;
+};
+
+function typingWaitMs(): number {
+  const value = process.env.WHATSAPP_AGENT_TYPING_SECONDS?.trim();
+  const seconds = value ? Number(value) : DEFAULT_TYPING_SECONDS;
+  const boundedSeconds =
+    Number.isSafeInteger(seconds) && seconds >= 0
+      ? Math.min(seconds, MAX_TYPING_SECONDS)
+      : DEFAULT_TYPING_SECONDS;
+  return boundedSeconds * 1000;
+}
+
+async function loadTypingIndicator(
+  db: SupabaseClient,
+  input: SendWhatsAppTextInput
+): Promise<TypingIndicator | null> {
+  const waitMs = typingWaitMs();
+  if (!waitMs) {
+    return null;
+  }
+  try {
+    const inbound = db
+      .from("whatsapp_messages")
+      .select("external_message_id, sent_at")
+      .eq("integration_id", input.integrationId)
+      .eq("conversation_id", input.conversationId)
+      .eq("direction", "INBOUND")
+      .abortSignal(AbortSignal.timeout(TYPING_REQUEST_TIMEOUT_MS));
+    // Follow-ups use the latest inbound. Their guard rejects the command if
+    // any newer message arrived before dispatch.
+    const query = input.sourceMessageId
+      ? inbound.eq("id", input.sourceMessageId)
+      : inbound.order("sequence_no", { ascending: false }).limit(1);
+    const { data, error } = await query.maybeSingle();
+    if (error || !data?.external_message_id?.startsWith("wamid.")) {
+      return null;
+    }
+    return {
+      messageId: data.external_message_id,
+      waitMs,
+      windowEndsAt: Date.parse(data.sent_at) + CUSTOMER_WINDOW_MS,
+    };
+  } catch {
+    // An unavailable read receipt must not prevent delivery.
+    return null;
+  }
+}
+
+function postMetaMessage(
+  endpoint: string,
+  token: string,
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<Response> {
+  return fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ messaging_product: "whatsapp", ...body }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+async function showTypingIndicator(
+  endpoint: string,
+  token: string,
+  messageId: string
+): Promise<boolean> {
+  try {
+    const response = await postMetaMessage(
+      endpoint,
+      token,
+      {
+        status: "read",
+        message_id: messageId,
+        typing_indicator: { type: "text" },
+      },
+      TYPING_REQUEST_TIMEOUT_MS
+    );
+    if (!response.ok) {
+      return false;
+    }
+    const result = (await response.json()) as { success?: unknown } | null;
+    return result?.success === true;
+  } catch {
+    return false;
+  }
+}
 
 async function authorizeDelivery(
   supabase: SupabaseClient,
@@ -143,19 +244,14 @@ function rejectionStatus(status: number): DeliveryStatus {
   return "CANCELLED";
 }
 
-async function dispatchToMeta(
+async function checkDispatch(
   input: SendWhatsAppTextInput,
-  token: string,
   finish: FinishDelivery,
-  guard?: () => Promise<number | undefined>
-): Promise<string> {
+  guard?: DispatchGuard
+): Promise<number> {
   const customerWindowEndsAt = await guard?.();
-  if (
-    !(
-      input.deliveryLeaseExpiresAt &&
-      Date.parse(input.deliveryLeaseExpiresAt) > Date.now()
-    )
-  ) {
+  const leaseEndsAt = Date.parse(input.deliveryLeaseExpiresAt ?? "");
+  if (!(leaseEndsAt > Date.now())) {
     throw new AudioError("DELIVERY_REVIEW", "La reserva de envío venció.");
   }
   if (
@@ -168,26 +264,38 @@ async function dispatchToMeta(
       "Venció la ventana de 24 horas antes de despachar el mensaje."
     );
   }
+  return Math.min(leaseEndsAt, customerWindowEndsAt ?? leaseEndsAt);
+}
+
+async function dispatchToMeta(
+  input: SendWhatsAppTextInput,
+  token: string,
+  finish: FinishDelivery,
+  { guard, typing }: { guard?: DispatchGuard; typing?: TypingIndicator | null }
+): Promise<string> {
+  const dispatchDeadline = await checkDispatch(input, finish, guard);
   const recipient = input.recipient;
   const version = process.env.WHATSAPP_META_GRAPH_VERSION ?? "v23.0";
+  const endpoint = `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`;
+  if (
+    typing &&
+    Math.min(dispatchDeadline, typing.windowEndsAt) - Date.now() >
+      typing.waitMs + TYPING_REQUEST_TIMEOUT_MS + META_SEND_TIMEOUT_MS
+  ) {
+    if (await showTypingIndicator(endpoint, token, typing.messageId)) {
+      await new Promise<void>((resolve) => setTimeout(resolve, typing.waitMs));
+    }
+    // A new inbound message, human takeover or eligibility change can supersede
+    // this response while the indicator is visible.
+    await checkDispatch(input, finish, guard);
+  }
   let response: Response;
   try {
-    response = await fetch(
-      `https://graph.facebook.com/${version}/${input.phoneNumberId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: recipient,
-          type: "text",
-          text: { body: input.text },
-        }),
-        signal: AbortSignal.timeout(20_000),
-      }
+    response = await postMetaMessage(
+      endpoint,
+      token,
+      { to: recipient, type: "text", text: { body: input.text } },
+      META_SEND_TIMEOUT_MS
     );
   } catch {
     await finish("UNKNOWN");
@@ -213,7 +321,7 @@ async function dispatchToMeta(
         { ...input, recipient: `54${recipient.slice(3)}` },
         token,
         finish,
-        guard
+        { guard }
       );
     }
     await finish(rejectionStatus(response.status));
@@ -335,7 +443,11 @@ async function deliverPreparedText(
           return commandId ? Date.parse(data) : undefined;
         }
       : undefined;
-  const id = await dispatchToMeta(input, token, finish, guard);
+  const typing =
+    guard && command?.guard !== "guard_whatsapp_human_dispatch"
+      ? await loadTypingIndicator(supabase, input)
+      : null;
+  const id = await dispatchToMeta(input, token, finish, { guard, typing });
   await finish("SENT", id);
   return id;
 }

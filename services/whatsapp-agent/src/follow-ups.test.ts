@@ -100,13 +100,19 @@ describe("follow-up evaluation", () => {
           {
             type: "message",
             content: [
-              { type: "output_text", text: JSON.stringify(sendDecision) },
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  ...sendDecision,
+                  text: `¡Hola! ${sendDecision.text}`,
+                }),
+              },
             ],
           },
         ],
       })
     );
-    expect(result.text).toBe("te quedó alguna duda sobre los quesos?");
+    expect(result.text).toBe("hola! te quedó alguna duda sobre los quesos?");
   });
 
   it.each([

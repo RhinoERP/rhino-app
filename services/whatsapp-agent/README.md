@@ -9,6 +9,7 @@ SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 WHATSAPP_AGENT_WORKER_ID=<identificador opcional>
 WHATSAPP_AGENT_POLL_INTERVAL_MS=1000
+WHATSAPP_AGENT_TYPING_SECONDS=10
 WHATSAPP_META_ACCESS_TOKEN=<token de Meta para mensajes salientes>
 WHATSAPP_META_GRAPH_VERSION=v23.0
 WHATSAPP_AGENT_RHINOS_URL=https://<tu-dominio-rhinos>
@@ -16,6 +17,12 @@ WHATSAPP_AGENT_SERVICE_TOKEN=<secreto-compartido-con-Rhinos>
 OPENAI_API_KEY=<clave-del-proveedor-de-modelo>
 WHATSAPP_AGENT_OPENAI_MODEL=gpt-5-mini
 ```
+
+`WHATSAPP_AGENT_TYPING_SECONDS` configura la espera antes de las respuestas
+automáticas y los seguimientos aprobados. El worker muestra «escribiendo…»
+cuando el texto ya está preparado y autorizado. El valor por defecto es 10
+segundos. `0` desactiva el indicador y 25 es el máximo. Meta también marca
+como leído el mensaje entrante al mostrar el indicador.
 
 ## Deploy recomendado: Vercel Daemons
 
