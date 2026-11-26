@@ -607,7 +607,7 @@ function buildItemsRows(items: CreditNotePDFItem[], currency?: string): string {
           <td class="cell-code">${displayValue(item.code)}</td>
           <td class="cell-right">${formatQuantityValue(item.quantity)}</td>
           <td class="cell-detail">${displayValue(item.detail)}</td>
-          <td class="cell-center">${displayValue(item.unitOfMeasure)}</td>
+          <td class="cell-center">${displayValue(item.unitOfMeasure === "CAJA" ? "UN" : item.unitOfMeasure)}</td>
           <td class="cell-right">${formatQuantityValue(item.weightQuantity)}</td>
           <td class="cell-right">${formatCompactCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatPercentValue(item.discountPercent)}</td>

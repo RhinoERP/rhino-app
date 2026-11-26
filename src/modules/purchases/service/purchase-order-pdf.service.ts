@@ -1,10 +1,12 @@
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import { getPurchaseUnitShortLabel } from "@/modules/purchases/utils/purchase-units";
 
 export type PurchaseOrderPDFItem = {
   productName: string;
   unitOfMeasure: string | null;
+  unitsPerBox?: number | null;
   quantity: number;
   unitQuantity: number | null;
   unitCost: number;
@@ -65,6 +67,7 @@ export type PurchaseOrderPDFSource = {
     id?: string;
     product_name?: string;
     unit_of_measure?: string | null;
+    units_per_box?: number | null;
     weight_per_unit?: number | null;
     quantity: number;
     unit_quantity: number | null;
@@ -170,6 +173,7 @@ function buildPurchaseOrderItems(
     return {
       productName: item.product_name ?? "—",
       unitOfMeasure: unitOfMeasure ?? null,
+      unitsPerBox: item.units_per_box ?? null,
       quantity: item.quantity ?? 0,
       unitQuantity,
       unitCost: item.unit_cost ?? 0,
@@ -410,29 +414,44 @@ function renderItemTaxes(
   return `<div class="item-tax-detail">${parts.join(" / ")}</div>`;
 }
 
-function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
-  const rows = items
-    .map((item) => {
-      const quantity = item.unitQuantity ?? item.quantity;
-      const unitLabel =
-        item.unitOfMeasure && item.unitQuantity
-          ? ` ${getPurchaseUnitShortLabel(item.unitOfMeasure)}`
-          : "";
-      const variantHtml = item.variantStocks
-        ? renderVariantBreakdownText(item.variantStocks)
-        : "";
-      const itemTaxesHtml = renderItemTaxes(item.itemTaxes);
+function buildPurchaseOrderPDFItemRow(item: PurchaseOrderPDFItem): string {
+  const isCaseProduct =
+    item.unitOfMeasure === "CAJA" && Boolean(item.unitsPerBox);
+  const caseQuantity = isCaseProduct
+    ? splitCaseUnitQuantity(item.quantity, item.unitsPerBox ?? 0)
+    : null;
+  const quantity = item.unitQuantity ?? item.quantity;
+  let quantityLabel = formatQuantityValue(quantity);
+  if (caseQuantity) {
+    quantityLabel = `${caseQuantity.boxes} caja(s) + ${caseQuantity.units} un.`;
+  } else if (item.unitOfMeasure && item.unitQuantity) {
+    quantityLabel += ` ${getPurchaseUnitShortLabel(item.unitOfMeasure)}`;
+  }
+  const displayedUnitCost =
+    isCaseProduct && item.unitsPerBox
+      ? item.unitCost * item.unitsPerBox
+      : item.unitCost;
+  const variantHtml = item.variantStocks
+    ? renderVariantBreakdownText(item.variantStocks)
+    : "";
+  const itemTaxesHtml = renderItemTaxes(item.itemTaxes);
+  const discountLabel =
+    item.discountPercentage > 0
+      ? `${formatQuantityValue(item.discountPercentage)}% · -${formatCompactCurrency(item.discountAmount)}`
+      : "—";
 
-      return `
+  return `
     <tr>
       <td class="c-desc">${displayValue(item.productName)}${variantHtml}${itemTaxesHtml}</td>
-      <td class="c-qty">${formatQuantityValue(quantity)}${escapeHtml(unitLabel)}</td>
-      <td class="c-right c-price">${formatCompactCurrency(item.unitCost)}</td>
-      <td class="c-right c-discount">${item.discountPercentage > 0 ? `${formatQuantityValue(item.discountPercentage)}% · -${formatCompactCurrency(item.discountAmount)}` : "—"}</td>
+      <td class="c-qty">${escapeHtml(quantityLabel)}</td>
+      <td class="c-right c-price">${formatCompactCurrency(displayedUnitCost)}</td>
+      <td class="c-right c-discount">${discountLabel}</td>
       <td class="c-right c-bold c-amount">${formatCompactCurrency(item.subtotal)}</td>
     </tr>`;
-    })
-    .join("");
+}
+
+function buildItemsTableHtml(items: PurchaseOrderPDFItem[]): string {
+  const rows = items.map(buildPurchaseOrderPDFItemRow).join("");
 
   return `
     <div class="table-wrap">

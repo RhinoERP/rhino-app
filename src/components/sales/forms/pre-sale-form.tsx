@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PreSaleCustomerAccount } from "@/components/collections/pre-sale-customer-account";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import {
   AlertDialog,
@@ -81,6 +82,11 @@ import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
+import {
+  getPricePerIndividualUnit,
+  splitCaseUnitQuantity,
+  tryNormalizeCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -158,6 +164,7 @@ type ItemState = {
   basePrice: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
+  unitsPerBox?: number | null;
   averageQuantityPerUnit: number | null;
   weightPerUnit?: number | null;
   totalWeightKg?: number | null;
@@ -373,6 +380,7 @@ const buildPreSaleItemPayload = (
     quantity: isAdjustment ? 1 : item.quantity,
     weightQuantity: resolveItemWeightQuantity(item),
     unitPrice: item.unitPrice,
+    unitOfMeasure: isAdjustment ? "UN" : item.unitOfMeasure,
     basePrice: item.basePrice,
     discountAmount: isAdjustment ? 0 : Math.max(0, discount),
     discountPercentage: isAdjustment
@@ -429,6 +437,7 @@ const unitOfMeasureLabels: Record<SaleProduct["unitOfMeasure"], string> = {
   KG: "kg",
   LT: "lt",
   MT: "m",
+  CAJA: "caja",
 };
 
 const formatPriceByMeasure = (
@@ -445,6 +454,11 @@ const formatStockQuantity = (value: number): string =>
 const formatProductStock = (product: SaleProduct): string => {
   const totalQuantity = product.totalQuantity ?? 0;
   const unitLabel = unitOfMeasureLabels[product.unitOfMeasure];
+
+  if (product.unitOfMeasure === "CAJA" && product.unitsPerBox) {
+    const quantity = splitCaseUnitQuantity(totalQuantity, product.unitsPerBox);
+    return `Stock ${quantity.boxes} caja(s) · ${quantity.units} un.`;
+  }
 
   if (product.tracksStockUnits && product.totalUnitQuantity !== null) {
     return `Stock ${formatStockQuantity(product.totalUnitQuantity)} un. · ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
@@ -634,6 +648,9 @@ export function PreSaleForm({
     Map<string, Map<string, PriceListItemBasic>>
   >(new Map());
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
+  const [selectedCaseQuantity, setSelectedCaseQuantity] = useState("");
+  const [selectedLooseUnitQuantity, setSelectedLooseUnitQuantity] =
+    useState("");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
@@ -1028,6 +1045,12 @@ export function PreSaleForm({
   );
 
   useEffect(() => {
+    if (selectedProduct?.unitOfMeasure === "CAJA") {
+      if (inputUnit !== "UNITS") {
+        setInputUnit("UNITS");
+      }
+      return;
+    }
     if (selectedProduct && !availableUnits.includes(inputUnit)) {
       setInputUnit(availableUnits[0] ?? "UNITS");
     }
@@ -1103,7 +1126,7 @@ export function PreSaleForm({
 
   useEffect(() => {
     const defaultPaymentMethod = orgSettings?.sales_default_payment_method;
-    if (defaultPaymentMethod) {
+    if (defaultPaymentMethod && defaultPaymentMethod !== "qr") {
       setPaymentMethod(defaultPaymentMethod);
     }
   }, [orgSettings?.sales_default_payment_method]);
@@ -1256,6 +1279,7 @@ export function PreSaleForm({
     [saleDateString, expirationDateString, normalizedExpirationDays]
   );
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Supports normal, measured and box-based product additions in the shared form.
   const handleAddItem = () => {
     if (!selectedProductId) {
       setError("Selecciona un producto para agregarlo");
@@ -1269,17 +1293,37 @@ export function PreSaleForm({
       return;
     }
 
-    if (!selectedQuantity || selectedQuantity <= 0) {
+    const isCaseProduct = product.unitOfMeasure === "CAJA";
+    const caseBoxes = Number(selectedCaseQuantity);
+    const looseUnits = Number(selectedLooseUnitQuantity);
+    const invalidCaseQuantity =
+      !Number.isInteger(caseBoxes) ||
+      caseBoxes < 0 ||
+      !Number.isInteger(looseUnits) ||
+      looseUnits < 0 ||
+      caseBoxes + looseUnits <= 0;
+    const invalidQuantity = isCaseProduct
+      ? invalidCaseQuantity
+      : !selectedQuantity || selectedQuantity <= 0;
+    if (invalidQuantity) {
       setError("La cantidad debe ser mayor a 0");
       return;
     }
 
-    const adjustedPrice = productPrices.get(product.id) ?? product.price;
-    const baseQuantity = convertToBaseUnits(
-      selectedQuantity,
-      inputUnit,
-      product
-    );
+    const listedPrice = productPrices.get(product.id) ?? product.price;
+    const baseQuantity = isCaseProduct
+      ? tryNormalizeCaseUnitQuantity(
+          { boxes: caseBoxes, units: looseUnits },
+          product.unitsPerBox ?? 0
+        )
+      : convertToBaseUnits(selectedQuantity, inputUnit, product);
+    if (baseQuantity === null) {
+      setError("Ingresá una cantidad válida en cajas y unidades");
+      return;
+    }
+    const adjustedPrice = isCaseProduct
+      ? getPricePerIndividualUnit(listedPrice, product.unitsPerBox ?? 0)
+      : listedPrice;
 
     const unitOfMeasure = product.unitOfMeasure;
     const measurePerUnit = getMeasurePerUnit(product);
@@ -1343,6 +1387,7 @@ export function PreSaleForm({
                 pricePerKg,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
+                unitsPerBox: product.unitsPerBox,
                 weightPerUnit: product.weightPerUnit,
                 taxes: product.taxes ?? [],
               }
@@ -1366,6 +1411,7 @@ export function PreSaleForm({
           basePrice: adjustedPrice,
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
+          unitsPerBox: product.unitsPerBox,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
           weightPerUnit: product.weightPerUnit,
           totalWeightKg: totalWeight,
@@ -1378,6 +1424,8 @@ export function PreSaleForm({
 
     setSelectedProductId("");
     setSelectedQuantity(0);
+    setSelectedCaseQuantity("");
+    setSelectedLooseUnitQuantity("");
     setInputUnit("UNITS");
     setError(null);
   };
@@ -1534,6 +1582,10 @@ export function PreSaleForm({
     let nextPrice = 0;
     if (!Number.isNaN(parsed)) {
       nextPrice = allowNegative ? parsed : Math.max(0, parsed);
+    }
+
+    if (item?.unitOfMeasure === "CAJA" && item.unitsPerBox) {
+      nextPrice /= item.unitsPerBox;
     }
 
     handleUpdateItemUnitPrice(itemId, nextPrice);
@@ -2852,51 +2904,90 @@ export function PreSaleForm({
                 </div>
 
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-                  {selectedProduct && availableUnits.length > 1 && (
+                  {selectedProduct &&
+                    selectedProduct.unitOfMeasure !== "CAJA" &&
+                    availableUnits.length > 1 && (
+                      <div className="w-full space-y-2 sm:flex-1">
+                        <Label htmlFor="inputUnit">Unidad</Label>
+                        <Select
+                          onValueChange={(value) =>
+                            setInputUnit(value as InputUnit)
+                          }
+                          value={inputUnit}
+                        >
+                          <SelectTrigger className="w-full" id="inputUnit">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableUnits.map((unit) => (
+                              <SelectItem key={unit} value={unit}>
+                                {getUnitLabel(unit)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                  {selectedProduct?.unitOfMeasure === "CAJA" ? (
+                    <div className="grid w-full grid-cols-2 gap-3 sm:w-64">
+                      <div className="space-y-2">
+                        <Label htmlFor="case-quantity">Cajas</Label>
+                        <Input
+                          id="case-quantity"
+                          inputMode="numeric"
+                          min={0}
+                          onChange={(event) =>
+                            setSelectedCaseQuantity(event.target.value)
+                          }
+                          placeholder="0"
+                          step="1"
+                          type="number"
+                          value={selectedCaseQuantity}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="loose-unit-quantity">Unidades</Label>
+                        <Input
+                          id="loose-unit-quantity"
+                          inputMode="numeric"
+                          min={0}
+                          onChange={(event) =>
+                            setSelectedLooseUnitQuantity(event.target.value)
+                          }
+                          placeholder="0"
+                          step="1"
+                          type="number"
+                          value={selectedLooseUnitQuantity}
+                        />
+                      </div>
+                    </div>
+                  ) : (
                     <div className="w-full space-y-2 sm:flex-1">
-                      <Label htmlFor="inputUnit">Unidad</Label>
-                      <Select
-                        onValueChange={(value) =>
-                          setInputUnit(value as InputUnit)
+                      <Label htmlFor="quantity">
+                        {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
+                      </Label>
+                      <Input
+                        id="quantity"
+                        inputMode="decimal"
+                        min={0}
+                        onChange={(event) => {
+                          const parsed = Number.parseFloat(event.target.value);
+                          setSelectedQuantity(
+                            Number.isNaN(parsed) ? 0 : parsed
+                          );
+                        }}
+                        placeholder="0"
+                        step="0.01"
+                        type="number"
+                        value={
+                          !selectedQuantity || Number.isNaN(selectedQuantity)
+                            ? ""
+                            : selectedQuantity
                         }
-                        value={inputUnit}
-                      >
-                        <SelectTrigger className="w-full" id="inputUnit">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableUnits.map((unit) => (
-                            <SelectItem key={unit} value={unit}>
-                              {getUnitLabel(unit)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </div>
                   )}
-
-                  <div className="w-full space-y-2 sm:flex-1">
-                    <Label htmlFor="quantity">
-                      {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
-                    </Label>
-                    <Input
-                      id="quantity"
-                      inputMode="decimal"
-                      min={0}
-                      onChange={(event) => {
-                        const parsed = Number.parseFloat(event.target.value);
-                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
-                      }}
-                      placeholder="0"
-                      step="0.01"
-                      type="number"
-                      value={
-                        !selectedQuantity || Number.isNaN(selectedQuantity)
-                          ? ""
-                          : selectedQuantity
-                      }
-                    />
-                  </div>
 
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-shrink-0">
                     <Button
@@ -2943,6 +3034,13 @@ export function PreSaleForm({
                       const itemIsWeightOrVolume = isWeightOrVolumeUnit(
                         item.unitOfMeasure
                       );
+                      const caseQuantity =
+                        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+                          ? splitCaseUnitQuantity(
+                              item.quantity,
+                              item.unitsPerBox
+                            )
+                          : null;
 
                       let measureLabel = "Medida";
                       if (itemIsWeightOrVolume) {
@@ -2971,6 +3069,14 @@ export function PreSaleForm({
                       const currentItemTaxIds = new Set(
                         item.taxes?.map((tax) => tax.taxId) ?? []
                       );
+                      const displayedUnitPrice =
+                        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+                          ? item.unitPrice * item.unitsPerBox
+                          : item.unitPrice;
+                      const unitPriceValue =
+                        displayedUnitPrice && !Number.isNaN(displayedUnitPrice)
+                          ? displayedUnitPrice
+                          : "";
 
                       if (isAdjustment) {
                         const subtotal = calculateItemTotals(item).subtotal;
@@ -3122,25 +3228,37 @@ export function PreSaleForm({
                               <span className="text-muted-foreground text-xs">
                                 Cantidad
                               </span>
-                              <Input
-                                className="h-8 w-full"
-                                inputMode="decimal"
-                                min={0}
-                                onChange={(event) =>
-                                  handleQuantityInputChange(
-                                    item.id,
-                                    event.target.value
-                                  )
-                                }
-                                placeholder="0"
-                                step="0.01"
-                                type="number"
-                                value={
-                                  !item.quantity || Number.isNaN(item.quantity)
-                                    ? ""
-                                    : item.quantity
-                                }
-                              />
+                              {caseQuantity && item.unitsPerBox ? (
+                                <CaseUnitQuantityFields
+                                  compact
+                                  onChange={(quantity) =>
+                                    handleUpdateItemQuantity(item.id, quantity)
+                                  }
+                                  totalUnits={item.quantity}
+                                  unitsPerBox={item.unitsPerBox}
+                                />
+                              ) : (
+                                <Input
+                                  className="h-8 w-full"
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleQuantityInputChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !item.quantity ||
+                                    Number.isNaN(item.quantity)
+                                      ? ""
+                                      : item.quantity
+                                  }
+                                />
+                              )}
                             </div>
 
                             <div className="flex flex-col gap-1">
@@ -3174,7 +3292,9 @@ export function PreSaleForm({
 
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Precio unitario
+                                {item.unitOfMeasure === "CAJA"
+                                  ? "Precio por caja"
+                                  : "Precio unitario"}
                               </span>
                               <Input
                                 className="h-8 w-full"
@@ -3189,12 +3309,7 @@ export function PreSaleForm({
                                 placeholder="0"
                                 step="0.01"
                                 type="number"
-                                value={
-                                  !item.unitPrice ||
-                                  Number.isNaN(item.unitPrice)
-                                    ? ""
-                                    : item.unitPrice
-                                }
+                                value={unitPriceValue}
                               />
                             </div>
 

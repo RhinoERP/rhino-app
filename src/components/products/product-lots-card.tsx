@@ -62,6 +62,7 @@ import {
 } from "@/modules/inventory/actions/stock.actions";
 import { useInventoryWarehouse } from "@/modules/inventory/hooks/use-inventory-warehouse";
 import type { Product, ProductLotWithStatus } from "@/modules/inventory/types";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import { InventoryWarehouseSelector } from "./inventory-warehouse-selector";
 import { StockTransferDialog } from "./stock-transfer-dialog";
 
@@ -280,7 +281,9 @@ export function ProductLotsCard({
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
   let quantityLabel = "Cantidad disponible";
-  if (isWeightBased) {
+  if (product.unit_of_measure === "CAJA") {
+    quantityLabel = "Cantidad disponible (unidades)";
+  } else if (isWeightBased) {
     quantityLabel =
       product.unit_of_measure === "KG"
         ? "Cantidad disponible (kg)"
@@ -288,7 +291,9 @@ export function ProductLotsCard({
   }
 
   let availabilityLabel = "Disponible";
-  if (isWeightBased) {
+  if (product.unit_of_measure === "CAJA") {
+    availabilityLabel = "Disponible (cajas + unidades)";
+  } else if (isWeightBased) {
     availabilityLabel =
       product.unit_of_measure === "KG" ? "Disponible (kg)" : "Disponible (lt)";
   }
@@ -542,7 +547,15 @@ export function ProductLotsCard({
         {lot.expiration_date ? formatDateTime(lot.expiration_date) : "—"}
       </TableCell>
       <TableCell className="text-right font-semibold tabular-nums">
-        {lot.quantity_available.toLocaleString("es-AR")}
+        {product.unit_of_measure === "CAJA" && product.units_per_box
+          ? (() => {
+              const caseBreakdown = splitCaseUnitQuantity(
+                lot.quantity_available,
+                product.units_per_box ?? 0
+              );
+              return `${caseBreakdown.boxes.toLocaleString("es-AR")} caja(s) · ${caseBreakdown.units.toLocaleString("es-AR")} un.`;
+            })()
+          : lot.quantity_available.toLocaleString("es-AR")}
       </TableCell>
       {tracksUnits && (
         <TableCell className="text-right font-semibold tabular-nums">
@@ -713,7 +726,11 @@ export function ProductLotsCard({
                         <Input
                           disabled={isCreatePending}
                           id="quantity"
-                          inputMode="decimal"
+                          inputMode={
+                            product.unit_of_measure === "CAJA"
+                              ? "numeric"
+                              : "decimal"
+                          }
                           maxLength={12}
                           min="0"
                           onChange={(event) =>
@@ -722,7 +739,9 @@ export function ProductLotsCard({
                             )
                           }
                           onFocus={(event) => event.target.select()}
-                          step="0.01"
+                          step={
+                            product.unit_of_measure === "CAJA" ? "1" : "0.01"
+                          }
                           value={quantity}
                         />
                       </div>
@@ -951,14 +970,16 @@ export function ProductLotsCard({
                 <Input
                   disabled={isEditPending}
                   id="editQuantity"
-                  inputMode="decimal"
+                  inputMode={
+                    product.unit_of_measure === "CAJA" ? "numeric" : "decimal"
+                  }
                   maxLength={12}
                   min="0"
                   onChange={(event) =>
                     setEditQuantity(normalizeNumericInput(event.target.value))
                   }
                   onFocus={(event) => event.target.select()}
-                  step="0.01"
+                  step={product.unit_of_measure === "CAJA" ? "1" : "0.01"}
                   value={editQuantity}
                 />
               </div>

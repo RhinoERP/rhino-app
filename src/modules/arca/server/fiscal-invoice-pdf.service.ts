@@ -316,7 +316,7 @@ function generateInvoiceItemsRows(
             ${item.description ? `<div class="item-secondary">${displayValue(item.description)}</div>` : ""}
           </td>
           <td class="cell-right">${quantityLabel}</td>
-          <td class="cell-center">${displayValue(item.unitOfMeasure)}</td>
+           <td class="cell-center">${displayValue(item.unitOfMeasure === "CAJA" ? "UN" : item.unitOfMeasure)}</td>
           <td class="cell-right">${weightLabel ?? "—"}</td>
           <td class="cell-right">${formatCurrency(item.unitPrice, currency)}</td>
           <td class="cell-right">${formatDiscountPercent(item.discountPercent)}</td>

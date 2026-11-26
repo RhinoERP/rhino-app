@@ -289,6 +289,47 @@ export async function applyAtomicPurchaseReceipt(params: {
     throw new Error("Organización no encontrada");
   }
   const supabase = createAdminClient();
+  const productIds = [...new Set(params.lines.map((line) => line.productId))];
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id, unit_of_measure, units_per_box")
+    .eq("organization_id", org.id)
+    .in("id", productIds);
+  if (productsError) {
+    throw new Error("No se pudieron validar las unidades de la recepción");
+  }
+  const productUnits = new Map(
+    (products ?? []).map((product) => [
+      product.id,
+      {
+        unitOfMeasure: product.unit_of_measure,
+        unitsPerBox: product.units_per_box,
+      },
+    ])
+  );
+  for (const line of params.lines) {
+    const product = productUnits.get(line.productId);
+    if (!product) {
+      throw new Error("Producto no encontrado para esta organización");
+    }
+    const hasValidCaseUnitData =
+      Number.isSafeInteger(line.quantity) &&
+      line.quantity >= 0 &&
+      line.unitQuantity === line.quantity &&
+      line.lots.every(
+        (lot) =>
+          Number.isSafeInteger(lot.quantity) &&
+          lot.quantity >= 0 &&
+          lot.unitQuantity === lot.quantity
+      ) &&
+      Number.isSafeInteger(product?.unitsPerBox) &&
+      (product?.unitsPerBox ?? 0) > 0;
+    if (product?.unitOfMeasure === "CAJA" && !hasValidCaseUnitData) {
+      throw new Error(
+        "La recepción de productos por caja debe usar unidades enteras y un factor de empaque válido"
+      );
+    }
+  }
   const args: Database["public"]["Functions"]["apply_warehouse_purchase_receipt"]["Args"] =
     {
       p_org_id: org.id,

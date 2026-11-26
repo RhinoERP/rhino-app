@@ -1,6 +1,7 @@
 "use client";
 
 import { TrashIcon } from "@phosphor-icons/react";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import type { PurchaseItem } from "@/hooks/use-purchase-form";
 import type { VariantMeta } from "@/hooks/use-variant-loader";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import {
@@ -55,6 +57,7 @@ function getUnitLabelName(unitOfMeasure: string): string {
     KG: "kg",
     LT: "lt",
     MT: "m",
+    CAJA: "caja",
   };
   return labels[unitOfMeasure] || unitOfMeasure;
 }
@@ -218,6 +221,7 @@ function VariantItemCard({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The row supports legacy, measured and case-based quantity and price controls.
 function NonVariantItemRow({
   item,
   index,
@@ -241,6 +245,11 @@ function NonVariantItemRow({
 }) {
   const unitOfMeasure = getUnitOfMeasure(item.unit_of_measure);
   const unitLabel = getUnitLabelName(unitOfMeasure);
+  const unitsPerBox = item.units_per_box ?? product?.units_per_box ?? null;
+  const isCaseProduct = unitOfMeasure === "CAJA" && Boolean(unitsPerBox);
+  const caseQuantity = isCaseProduct
+    ? splitCaseUnitQuantity(item.quantity, unitsPerBox ?? 0)
+    : null;
 
   const itemIsWeightOrVolume = isWeightOrVolumeUnit(unitOfMeasure);
 
@@ -276,6 +285,10 @@ function NonVariantItemRow({
       if (field !== "unitCost" && value < 0) {
         return;
       }
+      if (field === "unitCost" && isCaseProduct && unitsPerBox) {
+        onUpdateUnitCost(index, value / unitsPerBox);
+        return;
+      }
       const updateMap = {
         quantity: onUpdateQuantity,
         unitCost: onUpdateUnitCost,
@@ -287,6 +300,53 @@ function NonVariantItemRow({
 
   const qtyValue = getEmptyOrValue(item.quantity);
   const discountValue = getEmptyOrValue(item.discount_percent);
+  let priceControl: React.ReactNode;
+  if (isCaseProduct && unitsPerBox) {
+    priceControl = (
+      <div className="flex items-center gap-1">
+        <span className="text-sm">$</span>
+        <Input
+          className="h-8 w-20"
+          min={0}
+          onChange={handleNumericChange("unitCost")}
+          placeholder="0.00"
+          step="0.01"
+          type="number"
+          value={item.unit_cost ? item.unit_cost * unitsPerBox : ""}
+        />
+      </div>
+    );
+  } else if (itemIsWeightOrVolume && item.weight_per_unit) {
+    priceControl = (
+      <div className="flex items-center gap-1">
+        <span className="text-sm">$</span>
+        <Input
+          className="h-8 w-20"
+          min={0}
+          onChange={handleNumericChange("pricePerKg")}
+          placeholder="0.00"
+          step="0.01"
+          type="number"
+          value={item.price_per_kg || ""}
+        />
+      </div>
+    );
+  } else {
+    priceControl = (
+      <div className="flex items-center gap-1">
+        <span className="text-sm">$</span>
+        <Input
+          className="h-8 w-20"
+          min={0}
+          onChange={handleNumericChange("unitCost")}
+          placeholder="0.00"
+          step="0.01"
+          type="number"
+          value={item.unit_cost || ""}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 py-3" key={`${item.product_id}-${index}`}>
@@ -306,17 +366,31 @@ function NonVariantItemRow({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">Cantidad</span>
-          <Input
-            className="h-8 w-full"
-            inputMode="decimal"
-            min={0}
-            onChange={handleNumericChange("quantity")}
-            placeholder="0"
-            step="0.01"
-            type="number"
-            value={qtyValue}
-          />
+          {isCaseProduct && caseQuantity ? (
+            <>
+              <span className="text-muted-foreground text-xs">Cantidad</span>
+              <CaseUnitQuantityFields
+                compact
+                onChange={(quantity) => onUpdateQuantity(index, quantity)}
+                totalUnits={item.quantity}
+                unitsPerBox={unitsPerBox ?? 0}
+              />
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground text-xs">Cantidad</span>
+              <Input
+                className="h-8 w-full"
+                inputMode="decimal"
+                min={0}
+                onChange={handleNumericChange("quantity")}
+                placeholder="0"
+                step="0.01"
+                type="number"
+                value={qtyValue}
+              />
+            </>
+          )}
         </div>
 
         <div className="flex flex-col gap-1">
@@ -325,34 +399,10 @@ function NonVariantItemRow({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">Precio</span>
-          {itemIsWeightOrVolume && item.weight_per_unit ? (
-            <div className="flex items-center gap-1">
-              <span className="text-sm">$</span>
-              <Input
-                className="h-8 w-20"
-                min={0}
-                onChange={handleNumericChange("pricePerKg")}
-                placeholder="0.00"
-                step="0.01"
-                type="number"
-                value={item.price_per_kg || ""}
-              />
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              <span className="text-sm">$</span>
-              <Input
-                className="h-8 w-20"
-                min={0}
-                onChange={handleNumericChange("unitCost")}
-                placeholder="0.00"
-                step="0.01"
-                type="number"
-                value={item.unit_cost || ""}
-              />
-            </div>
-          )}
+          <span className="text-muted-foreground text-xs">
+            {isCaseProduct ? "Precio por caja" : "Precio"}
+          </span>
+          {priceControl}
         </div>
 
         <div className="flex flex-col gap-1">

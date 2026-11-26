@@ -4,6 +4,7 @@ import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { computeLineGross } from "@/lib/line-values";
 import { formatAmountInWords } from "@/lib/number-to-words";
 import type { FiscalRemittanceSnapshot } from "@/modules/arca/cai";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import type { SalesOrderDetail } from "./sales.service";
 
 export type RemittanceFinalVisibility = {
@@ -61,6 +62,7 @@ export type RemittanceData = {
     brand?: string | null;
     variantName?: string | null;
     quantity: number;
+    quantityLabel?: string;
     unitOfMeasure: string;
     weightQuantity?: number | null;
     unitPrice: number;
@@ -163,7 +165,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: renders the selected columns for each printable item row
       (item) => `
     <tr>
-      <td class="c-center ${isFinalRemittance ? "c-quantity" : ""}">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}${isFinalRemittance ? ` <span class="unit-inline">${displayValue(item.unitOfMeasure)}</span>` : ""}</td>
+      <td class="c-center ${isFinalRemittance ? "c-quantity" : ""}">${item.quantityLabel ? displayValue(item.quantityLabel) : item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}${isFinalRemittance && !item.quantityLabel ? ` <span class="unit-inline">${displayValue(item.unitOfMeasure)}</span>` : ""}</td>
       ${isFinalRemittance ? "" : `<td class="c-center">${displayValue(item.unitOfMeasure)}</td>`}
       ${showWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       ${showSku ? `<td class="c-sku">${displayValue(item.sku)}</td>` : ""}
@@ -548,11 +550,13 @@ export function buildRemittanceFromSale(
 ): RemittanceData {
   const unitOfMeasureLabels: Record<string, string> = {
     UN: "unid",
+    CAJA: "unid",
     KG: "kg",
     LT: "lt",
     MT: "m",
   };
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Builds one remittance row with fiscal totals and optional unit/box details.
   const items = sale.items.map((item) => {
     const extras = (item.extras ?? []).map((extra) => ({
       description: extra.description,
@@ -579,6 +583,16 @@ export function buildRemittanceFromSale(
       brand: item.brand ?? undefined,
       variantName: item.productVariantName ?? undefined,
       quantity: item.quantity,
+      quantityLabel:
+        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+          ? (() => {
+              const quantity = splitCaseUnitQuantity(
+                item.quantity,
+                item.unitsPerBox ?? 0
+              );
+              return `${quantity.boxes} caja(s) + ${quantity.units} un.`;
+            })()
+          : undefined,
       unitOfMeasure:
         unitOfMeasureLabels[item.unitOfMeasure] ?? item.unitOfMeasure,
       weightQuantity:

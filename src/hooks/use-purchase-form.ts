@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  getPricePerIndividualUnit,
+  tryNormalizeCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { InputUnit } from "@/modules/purchases/utils/purchase-calculations";
 import {
@@ -18,6 +22,7 @@ export type PurchaseItem = {
   unit_cost: number;
   subtotal: number;
   unit_of_measure: string;
+  units_per_box?: number | null;
   weight_per_unit?: number | null;
   total_weight_kg?: number;
   price_per_kg?: number;
@@ -37,8 +42,12 @@ function buildPurchaseItem(
   inputUnit: InputUnit = "UNITS"
 ): PurchaseItem | null {
   const baseQuantity = convertToBaseUnits(quantity, inputUnit, product);
-  const unitCost = product.cost_price ?? 0;
   const unitOfMeasure = product.unit_of_measure || "UN";
+  const listedUnitCost = product.cost_price ?? 0;
+  const unitCost =
+    unitOfMeasure === "CAJA"
+      ? getPricePerIndividualUnit(listedUnitCost, product.units_per_box ?? 0)
+      : listedUnitCost;
   const weightPerUnit = product.weight_per_unit;
   const isWeightOrVolume =
     unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
@@ -76,6 +85,7 @@ function buildPurchaseItem(
     unit_cost: unitCost,
     subtotal,
     unit_of_measure: unitOfMeasure,
+    units_per_box: product.units_per_box,
     weight_per_unit: weightPerUnit,
     total_weight_kg: totalWeight ?? undefined,
     price_per_kg: pricePerKg,
@@ -207,22 +217,20 @@ const ITEM_BUILDER_MAP: Record<
   discount: buildUpdatedDiscountItem,
 };
 
-function resetPurchaseSelection(
-  setSelectedProductId: (value: string) => void,
-  setOpenProduct: (value: boolean) => void,
-  setQuantity?: (value: number | string) => void,
-  setInputUnit?: (value: InputUnit) => void
-) {
-  setSelectedProductId("");
-  setOpenProduct(false);
-
-  if (setQuantity) {
-    setQuantity("");
-  }
-
-  if (setInputUnit) {
-    setInputUnit("UNITS");
-  }
+function resetPurchaseSelection(params: {
+  setSelectedProductId: (value: string) => void;
+  setOpenProduct: (value: boolean) => void;
+  setQuantity: (value: number | string) => void;
+  setCaseQuantity: (value: string) => void;
+  setLooseUnitQuantity: (value: string) => void;
+  setInputUnit: (value: InputUnit) => void;
+}) {
+  params.setSelectedProductId("");
+  params.setOpenProduct(false);
+  params.setQuantity("");
+  params.setCaseQuantity("");
+  params.setLooseUnitQuantity("");
+  params.setInputUnit("UNITS");
 }
 
 type ItemField = "quantity" | "unitCost" | "pricePerKg" | "discount";
@@ -234,6 +242,8 @@ export function useSelectionState(
 ) {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [quantity, setQuantity] = useState<number | string>("");
+  const [caseQuantity, setCaseQuantity] = useState("");
+  const [looseUnitQuantity, setLooseUnitQuantity] = useState("");
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [openProduct, setOpenProduct] = useState(false);
 
@@ -254,9 +264,18 @@ export function useSelectionState(
   const parsedQuantity =
     typeof quantity === "string" ? Number.parseFloat(quantity) : quantity;
 
+  const isCaseProduct = selectedProduct?.unit_of_measure === "CAJA";
+  const parsedCaseQuantity = Number(caseQuantity);
+  const parsedLooseUnitQuantity = Number(looseUnitQuantity);
+  const normalizedCaseQuantity = tryNormalizeCaseUnitQuantity(
+    { boxes: parsedCaseQuantity, units: parsedLooseUnitQuantity },
+    selectedProduct?.units_per_box
+  );
   const isNonVariantQuantityInvalid =
     !selectedProduct?.has_variants &&
-    (!quantity || Number.isNaN(parsedQuantity) || parsedQuantity <= 0);
+    (isCaseProduct
+      ? normalizedCaseQuantity === null || normalizedCaseQuantity <= 0
+      : !quantity || Number.isNaN(parsedQuantity) || parsedQuantity <= 0);
 
   const isAddDisabled = !selectedProductId || isNonVariantQuantityInvalid;
 
@@ -265,6 +284,10 @@ export function useSelectionState(
     setSelectedProductId,
     quantity,
     setQuantity,
+    caseQuantity,
+    setCaseQuantity,
+    looseUnitQuantity,
+    setLooseUnitQuantity,
     inputUnit,
     setInputUnit,
     openProduct,
@@ -275,6 +298,7 @@ export function useSelectionState(
     parsedQuantity,
     isNonVariantQuantityInvalid,
     isAddDisabled,
+    isCaseProduct,
   };
 }
 
@@ -342,27 +366,41 @@ export function useItemManagement(
 type AddItemHandlerProps = {
   selectedProduct: ProductWithPrice | undefined;
   quantity: number | string;
+  caseQuantity: string;
+  looseUnitQuantity: string;
   inputUnit: InputUnit;
   availableUnits: InputUnit[];
   onAddItem: (item: PurchaseItem) => void;
   setSelectedProductId: (value: string) => void;
   setOpenProduct: (value: boolean) => void;
   setQuantity: (value: number | string) => void;
+  setCaseQuantity: (value: string) => void;
+  setLooseUnitQuantity: (value: string) => void;
   setInputUnit: (value: InputUnit) => void;
 };
 
 export function useAddItemHandler({
   selectedProduct,
   quantity,
+  caseQuantity,
+  looseUnitQuantity,
   inputUnit,
   availableUnits,
   onAddItem,
   setSelectedProductId,
   setOpenProduct,
   setQuantity,
+  setCaseQuantity,
+  setLooseUnitQuantity,
   setInputUnit,
 }: AddItemHandlerProps) {
   useEffect(() => {
+    if (selectedProduct?.unit_of_measure === "CAJA") {
+      if (inputUnit !== "UNITS") {
+        setInputUnit("UNITS");
+      }
+      return;
+    }
     if (selectedProduct && !availableUnits.includes(inputUnit)) {
       setInputUnit(availableUnits[0] ?? "UNITS");
     }
@@ -373,19 +411,38 @@ export function useAddItemHandler({
       return;
     }
 
-    const newItem = addPurchaseItem(selectedProduct, quantity, inputUnit);
+    const isCaseProduct = selectedProduct.unit_of_measure === "CAJA";
+    const normalizedQuantity = isCaseProduct
+      ? tryNormalizeCaseUnitQuantity(
+          {
+            boxes: Number(caseQuantity),
+            units: Number(looseUnitQuantity),
+          },
+          selectedProduct.units_per_box ?? 0
+        )
+      : quantity;
+    if (normalizedQuantity === null) {
+      return;
+    }
+    const newItem = addPurchaseItem(
+      selectedProduct,
+      normalizedQuantity,
+      isCaseProduct ? "UNITS" : inputUnit
+    );
 
     if (!newItem) {
       return;
     }
 
     onAddItem(newItem);
-    resetPurchaseSelection(
+    resetPurchaseSelection({
       setSelectedProductId,
       setOpenProduct,
       setQuantity,
-      setInputUnit
-    );
+      setCaseQuantity,
+      setLooseUnitQuantity,
+      setInputUnit,
+    });
   };
 
   const handleQuantityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

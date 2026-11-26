@@ -16,6 +16,10 @@ import {
   undoStockReentries,
 } from "@/modules/inventory/service/stock-reentry.service";
 import {
+  assertCaseQuantity,
+  getTransactionProductUnits,
+} from "@/modules/inventory/service/transaction-units.service";
+import {
   assertWholesaleWarehouseForOrganization,
   resolveWholesaleWarehouseId,
 } from "@/modules/inventory/service/warehouse-stock.service";
@@ -378,6 +382,7 @@ export type SalesOrderItemDetail = {
   discountPercent: number;
   subtotal: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
+  unitsPerBox?: number | null;
   tracksStockUnits: boolean;
   accountingAccountCode?: string | null;
   averageQuantityPerUnit: number | null;
@@ -1027,7 +1032,7 @@ function deriveItemQuantities(item: SalesOrderItemRaw): {
       ? truncateMoney(Number(item.subtotal))
       : null;
 
-  if (unitOfMeasure === "UN") {
+  if (unitOfMeasure === "UN" || unitOfMeasure === "CAJA") {
     return {
       units: quantity !== null ? Number(quantity) : null,
       kilograms: null,
@@ -1042,17 +1047,77 @@ function deriveItemQuantities(item: SalesOrderItemRaw): {
   };
 }
 
+async function resolveSaleUnits<
+  T extends {
+    productId?: string | null;
+    quantity: number;
+    weightQuantity?: number | null;
+    unitOfMeasure?: SaleProduct["unitOfMeasure"] | null;
+  },
+>(supabase: SupabaseServerClient, orgId: string, items: T[]): Promise<T[]> {
+  const products = await getTransactionProductUnits(
+    supabase,
+    orgId,
+    items.flatMap((item) => (item.productId ? [item.productId] : []))
+  );
+  return items.map((item) => {
+    const product = item.productId ? products.get(item.productId) : null;
+    if (
+      product &&
+      item.unitOfMeasure &&
+      item.unitOfMeasure !== product.unit_of_measure
+    ) {
+      throw new Error("La unidad del producto cambió; actualizá el formulario");
+    }
+    if (product?.unit_of_measure === "CAJA") {
+      assertCaseQuantity(Number(item.quantity));
+      if ((item.weightQuantity ?? 0) !== 0) {
+        throw new Error(
+          "Los productos por caja no registran peso por separado"
+        );
+      }
+    }
+    return {
+      ...item,
+      unitOfMeasure: product?.unit_of_measure ?? item.unitOfMeasure,
+    };
+  });
+}
+
+function normalizeSaleUnitPrice(
+  value: number,
+  unitOfMeasure?: string | null
+): number {
+  if (!Number.isFinite(Number(value))) {
+    throw new Error("El precio del producto debe ser un importe válido");
+  }
+  return unitOfMeasure === "CAJA"
+    ? Number(value)
+    : truncateMoney(Number(value));
+}
+
+function normalizeSaleBasePrice(
+  basePrice: number | undefined,
+  unitPrice: number,
+  unitOfMeasure?: string | null
+): number {
+  const value = Number.isFinite(basePrice) ? Number(basePrice) : unitPrice;
+  return normalizeSaleUnitPrice(value, unitOfMeasure);
+}
+
 function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
-  return items
+  const normalized = items
     .map((item) => ({
       ...item,
       id: item.id ?? randomUUID(),
       type: item.type ?? "product",
       quantity: Number(item.quantity),
-      unitPrice: truncateMoney(Number(item.unitPrice)),
-      basePrice: Number.isFinite(item.basePrice)
-        ? truncateMoney(Number(item.basePrice))
-        : truncateMoney(Number(item.unitPrice)),
+      unitPrice: normalizeSaleUnitPrice(item.unitPrice, item.unitOfMeasure),
+      basePrice: normalizeSaleBasePrice(
+        item.basePrice,
+        item.unitPrice,
+        item.unitOfMeasure
+      ),
       discountPercentage: Number.isFinite(item.discountPercentage)
         ? Math.min(Math.max(Number(item.discountPercentage), 0), 100)
         : null,
@@ -1077,25 +1142,36 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
         discountPercentage: 0,
         discountAmount: 0,
       };
-    })
-    .filter((item) => {
-      if (item.type === "adjustment") {
-        return Number.isFinite(item.unitPrice ?? 0);
-      }
-      const hasQuantity = item.quantity > 0;
-      const hasWeightQuantity = (item.weightQuantity ?? 0) > 0;
-      return (
-        Boolean(item.productId) &&
-        item.unitPrice >= 0 &&
-        (hasQuantity || hasWeightQuantity)
-      );
     });
+
+  for (const item of normalized) {
+    if (
+      item.type !== "adjustment" &&
+      item.unitOfMeasure === "CAJA" &&
+      !Number.isSafeInteger(item.quantity)
+    ) {
+      throw new Error("La cantidad de productos por caja debe ser un entero");
+    }
+  }
+
+  return normalized.filter((item) => {
+    if (item.type === "adjustment") {
+      return Number.isFinite(item.unitPrice ?? 0);
+    }
+    const hasQuantity = item.quantity > 0;
+    const hasWeightQuantity = (item.weightQuantity ?? 0) > 0;
+    return (
+      Boolean(item.productId) &&
+      item.unitPrice >= 0 &&
+      (hasQuantity || hasWeightQuantity)
+    );
+  });
 }
 
 function normalizeConfirmItems(
   items: ConfirmSaleItemInput[]
 ): ConfirmSaleItemInput[] {
-  return items
+  const normalized = items
     .map((item) => ({
       ...item,
       type: item.type ?? "product",
@@ -1106,10 +1182,12 @@ function normalizeConfirmItems(
         item.weightQuantity !== undefined && item.weightQuantity !== null
           ? Math.max(0, Number(item.weightQuantity))
           : null,
-      unitPrice: truncateMoney(Number(item.unitPrice)),
-      basePrice: Number.isFinite(item.basePrice)
-        ? truncateMoney(Number(item.basePrice))
-        : truncateMoney(Number(item.unitPrice)),
+      unitPrice: normalizeSaleUnitPrice(item.unitPrice, item.unitOfMeasure),
+      basePrice: normalizeSaleBasePrice(
+        item.basePrice,
+        item.unitPrice,
+        item.unitOfMeasure
+      ),
       discountPercentage:
         item.discountPercentage !== undefined &&
         item.discountPercentage !== null
@@ -1139,14 +1217,25 @@ function normalizeConfirmItems(
         tracksStockUnits: false,
         unitOfMeasure: "UN" as const,
       };
-    })
-    .filter(
-      (item) =>
-        item.type === "adjustment" ||
-        (Boolean(item.productId) &&
-          item.unitPrice >= 0 &&
-          (item.quantity > 0 || (item.weightQuantity ?? 0) > 0))
-    );
+    });
+
+  for (const item of normalized) {
+    if (
+      item.type !== "adjustment" &&
+      item.unitOfMeasure === "CAJA" &&
+      !Number.isSafeInteger(item.quantity)
+    ) {
+      throw new Error("La cantidad de productos por caja debe ser un entero");
+    }
+  }
+
+  return normalized.filter(
+    (item) =>
+      item.type === "adjustment" ||
+      (Boolean(item.productId) &&
+        item.unitPrice >= 0 &&
+        (item.quantity > 0 || (item.weightQuantity ?? 0) > 0))
+  );
 }
 
 function resolveCustomerDisplayNameFromRecord(
@@ -1308,8 +1397,12 @@ function createProductItemPayload(
     description: item.description ?? null,
     quantity: item.quantity,
     unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-    unit_price: truncateMoney(item.unitPrice),
-    base_price: truncateMoney(item.basePrice ?? item.unitPrice),
+    unit_price: normalizeSaleUnitPrice(item.unitPrice, item.unitOfMeasure),
+    base_price: normalizeSaleBasePrice(
+      item.basePrice,
+      item.unitPrice,
+      item.unitOfMeasure
+    ),
     discount_amount: discount,
     discount_percentage: item.discountPercentage ?? 0,
     subtotal,
@@ -2539,6 +2632,7 @@ export async function getSalesOrderById(
               unit_of_measure,
               tracks_stock_units,
               weight_per_unit,
+              units_per_box,
               category_id,
               accounting_account_code
             ),
@@ -2710,11 +2804,18 @@ export async function getSalesOrderById(
       brand: isAdjustment ? null : (product.brand ?? null),
       quantity: item.quantity ?? 0,
       weightQuantity,
-      unitPrice: truncateMoney(item.unit_price ?? 0),
-      basePrice: truncateMoney(item.base_price ?? item.unit_price ?? 0),
+      unitPrice:
+        unitOfMeasure === "CAJA"
+          ? Number(item.unit_price ?? 0)
+          : truncateMoney(item.unit_price ?? 0),
+      basePrice:
+        unitOfMeasure === "CAJA"
+          ? Number(item.base_price ?? item.unit_price ?? 0)
+          : truncateMoney(item.base_price ?? item.unit_price ?? 0),
       discountPercent: item.discount_percentage ?? 0,
       subtotal: truncateMoney(item.subtotal ?? 0),
       unitOfMeasure,
+      unitsPerBox: product.units_per_box ?? null,
       tracksStockUnits,
       accountingAccountCode: isAdjustment
         ? null
@@ -2817,9 +2918,7 @@ export async function createPreSaleOrder(
     throw new Error("La fecha de venta es requerida");
   }
 
-  const items = normalizeItems(input.items);
-
-  if (!items.length) {
+  if (!input.items.length) {
     throw new Error("Agrega al menos un ítem a la preventa");
   }
 
@@ -2841,6 +2940,13 @@ export async function createPreSaleOrder(
   const userId =
     trustedExecution?.actorId ?? (await getCurrentUserId(supabase));
   const resolvedSellerId = sellerId || userId;
+
+  const items = normalizeItems(
+    await resolveSaleUnits(supabase, org.id, input.items)
+  );
+  if (!items.length) {
+    throw new Error("Agrega al menos un ítem a la preventa");
+  }
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
@@ -3343,6 +3449,14 @@ async function buildStockAdjustmentContext(params: {
 
     if (!product) {
       throw new Error("Producto no encontrado para descontar stock.");
+    }
+    if (
+      product.unitOfMeasure === "CAJA" &&
+      !Number.isSafeInteger(item.quantity)
+    ) {
+      throw new Error(
+        `La cantidad de ${product.name} debe expresarse en unidades enteras.`
+      );
     }
     if (product.hasVariants !== Boolean(item.productVariantId)) {
       throw new Error(
@@ -4174,9 +4288,7 @@ export async function confirmSaleOrder(
     throw new Error("La fecha de venta es requerida");
   }
 
-  const items = normalizeConfirmItems(input.items);
-
-  if (!items.length) {
+  if (!input.items.length) {
     throw new Error("Agrega al menos un ítem para confirmar la venta");
   }
 
@@ -4211,6 +4323,12 @@ export async function confirmSaleOrder(
   }
 
   assertCanManageSale(accessContext, existingSale.user_id ?? null);
+  const items = normalizeConfirmItems(
+    await resolveSaleUnits(supabase, org.id, input.items)
+  );
+  if (!items.length) {
+    throw new Error("Agrega al menos un ítem para confirmar la venta");
+  }
   assertSaleRateUpdate(
     {
       currency: existingSale.currency,
@@ -4498,8 +4616,12 @@ export async function confirmSaleOrder(
         product_id: item.productId,
         quantity: item.quantity,
         unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-        unit_price: truncateMoney(item.unitPrice),
-        base_price: truncateMoney(item.basePrice ?? item.unitPrice),
+        unit_price: normalizeSaleUnitPrice(item.unitPrice, item.unitOfMeasure),
+        base_price: normalizeSaleBasePrice(
+          item.basePrice,
+          item.unitPrice,
+          item.unitOfMeasure
+        ),
         discount_amount: truncateMoney(totals.discount),
         discount_percentage: item.discountPercentage ?? 0,
         subtotal: truncateMoney(totals.subtotal),
@@ -6952,12 +7074,25 @@ async function assertEditedItemsIncludeExtras(
   }
 }
 
-export async function updateSaleOrder(
+async function resolveSaleUpdateUnits(
+  supabase: SupabaseServerClient,
+  orgId: string,
   input: UpdateSaleOrderInput
+): Promise<UpdateSaleOrderInput> {
+  return {
+    ...input,
+    items: input.items
+      ? await resolveSaleUnits(supabase, orgId, input.items)
+      : undefined,
+  };
+}
+
+export async function updateSaleOrder(
+  request: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
-  const { orgSlug, saleId } = input;
-  assertExchangeRate(input.commercialExchangeRate, "comercial");
-  assertExchangeRate(input.fiscalExchangeRate, "fiscal");
+  const { orgSlug, saleId } = request;
+  assertExchangeRate(request.commercialExchangeRate, "comercial");
+  assertExchangeRate(request.fiscalExchangeRate, "fiscal");
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -6972,6 +7107,7 @@ export async function updateSaleOrder(
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
   const actorUserId = await getCurrentUserId(supabase);
+  const input = await resolveSaleUpdateUnits(supabase, org.id, request);
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);

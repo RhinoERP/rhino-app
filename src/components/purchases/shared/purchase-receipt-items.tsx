@@ -6,7 +6,13 @@ import { es } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
 import { useEffect } from "react";
 import type { Control, FieldArrayWithId, UseFormWatch } from "react-hook-form";
-import { Controller, useFieldArray, useWatch } from "react-hook-form";
+import {
+  Controller,
+  useFieldArray,
+  useFormContext,
+  useWatch,
+} from "react-hook-form";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +35,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import {
   getPurchaseUnitShortLabel,
   isMeasuredUnit,
@@ -78,6 +85,7 @@ function ItemLotRows({
     control,
     name: `items.${itemIndex}.lots`,
   });
+  const { setValue } = useFormContext<ReceiptFormValues>();
 
   // useWatch on the array level for live totals — this is safe because we are
   // NOT mixing it with setValue on individual paths anymore.
@@ -87,6 +95,8 @@ function ItemLotRows({
   });
 
   const isWeightBased = isMeasuredUnit(item.unit_of_measure);
+  const isCaseProduct =
+    item.unit_of_measure === "CAJA" && Boolean(item.units_per_box);
   const unitLabel = getPurchaseUnitShortLabel(item.unit_of_measure);
 
   const assignedQuantity =
@@ -157,7 +167,7 @@ function ItemLotRows({
           <div
             className={cn(
               "grid gap-3",
-              isWeightBased ? "sm:grid-cols-2" : "grid-cols-1"
+              isWeightBased || isCaseProduct ? "sm:grid-cols-2" : "grid-cols-1"
             )}
           >
             {isWeightBased && (
@@ -187,28 +197,56 @@ function ItemLotRows({
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor={`lot-qty-${field.id}`}>
-                Unidades
-              </Label>
+            {isCaseProduct && item.units_per_box ? (
               <Controller
                 control={control}
                 name={`items.${itemIndex}.lots.${lotIndex}.quantity`}
-                render={({ field: f }) => (
-                  <Input
-                    className="h-8"
-                    id={`lot-qty-${field.id}`}
-                    min="0"
-                    onBlur={f.onBlur}
-                    onChange={(e) =>
-                      f.onChange(Number.parseFloat(e.target.value) || 0)
-                    }
-                    type="number"
-                    value={f.value ?? ""}
-                  />
-                )}
+                render={({ field: f }) => {
+                  const updateQuantity = (nextQuantity: number) => {
+                    f.onChange(nextQuantity);
+                    setValue(
+                      `items.${itemIndex}.lots.${lotIndex}.unitQuantity`,
+                      nextQuantity
+                    );
+                  };
+
+                  return (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Cajas y unidades</Label>
+                      <CaseUnitQuantityFields
+                        compact
+                        onChange={updateQuantity}
+                        totalUnits={Number(f.value) || 0}
+                        unitsPerBox={item.units_per_box ?? 0}
+                      />
+                    </div>
+                  );
+                }}
               />
-            </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor={`lot-qty-${field.id}`}>
+                  Unidades
+                </Label>
+                <Controller
+                  control={control}
+                  name={`items.${itemIndex}.lots.${lotIndex}.quantity`}
+                  render={({ field: f }) => (
+                    <Input
+                      className="h-8"
+                      id={`lot-qty-${field.id}`}
+                      min="0"
+                      onBlur={f.onBlur}
+                      onChange={(e) =>
+                        f.onChange(Number.parseFloat(e.target.value) || 0)
+                      }
+                      type="number"
+                      value={f.value ?? ""}
+                    />
+                  )}
+                />
+              </div>
+            )}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -410,6 +448,7 @@ export function PurchaseReceiptItems({
     );
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The receipt row composes per-unit pricing, box conversion, variants and lot allocation.
   function renderItemCard(
     field: FieldArrayWithId<ReceiptFormValues, "items", "id">,
     itemIndex: number
@@ -420,6 +459,8 @@ export function PurchaseReceiptItems({
     }
 
     const isWeightBased = isMeasuredUnit(item.unit_of_measure);
+    const isCaseProduct =
+      item.unit_of_measure === "CAJA" && Boolean(item.units_per_box);
     const unitLabel = getPurchaseUnitShortLabel(item.unit_of_measure);
     const lots = item.lots ?? [];
     const unitCost = item.unitCost ?? 0;
@@ -435,19 +476,30 @@ export function PurchaseReceiptItems({
       ? totalVariantQty
       : assignedUnitQuantity;
     const subtotal = effectiveQty * unitCost;
-    const unitCostStr = `${formatCurrency(item.unitCost, currency)}/${unitLabel}`;
+    const unitCostStr = `${formatCurrency(
+      item.unit_of_measure === "CAJA" && item.units_per_box
+        ? item.unitCost * item.units_per_box
+        : item.unitCost,
+      currency
+    )}/${item.unit_of_measure === "CAJA" ? "caja" : unitLabel}`;
     const hasPendingQuantity = hasPendingPurchaseReceipt({
       newItem: item.newItem,
       quantity: item.orderedQuantity,
       unitQuantity: item.orderedUnitQuantity,
     });
-    const orderQtyDetail =
-      isWeightBased && item.orderedUnitQuantity > 0
-        ? ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })} ${unitLabel}`
-        : "";
+    let orderQtyDetail = "";
+    if (isCaseProduct && item.units_per_box) {
+      const quantity = splitCaseUnitQuantity(
+        item.orderedQuantity,
+        item.units_per_box
+      );
+      orderQtyDetail = ` · ${quantity.boxes} caja(s) + ${quantity.units} un.`;
+    } else if (isWeightBased && item.orderedUnitQuantity > 0) {
+      orderQtyDetail = ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} ${unitLabel}`;
+    }
 
     return (
       <div
@@ -487,7 +539,7 @@ export function PurchaseReceiptItems({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label className="text-xs" htmlFor={`price-${field.id}`}>
-              Precio/{unitLabel} ($)
+              Precio/{item.unit_of_measure === "CAJA" ? "caja" : unitLabel} ($)
             </Label>
             <Controller
               control={control}
@@ -498,13 +550,22 @@ export function PurchaseReceiptItems({
                   id={`price-${field.id}`}
                   min="0"
                   onBlur={f.onBlur}
-                  onChange={(e) =>
-                    f.onChange(Number.parseFloat(e.target.value) || 0)
-                  }
+                  onChange={(e) => {
+                    const value = Number.parseFloat(e.target.value) || 0;
+                    f.onChange(
+                      item.unit_of_measure === "CAJA" && item.units_per_box
+                        ? value / item.units_per_box
+                        : value
+                    );
+                  }}
                   placeholder="0.00"
                   step="0.01"
                   type="number"
-                  value={f.value || ""}
+                  value={
+                    item.unit_of_measure === "CAJA" && item.units_per_box
+                      ? f.value * item.units_per_box || ""
+                      : f.value || ""
+                  }
                 />
               )}
             />

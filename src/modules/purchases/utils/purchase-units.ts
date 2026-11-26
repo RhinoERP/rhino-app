@@ -13,6 +13,8 @@ export function getPurchaseUnitShortLabel(
       return "lt";
     case "MT":
       return "m";
+    case "CAJA":
+      return "caja";
     default:
       return "un";
   }
@@ -28,6 +30,8 @@ export function getPurchaseUnitFullLabel(unitOfMeasure: string): string {
       return "Lt";
     case "MT":
       return "Metro";
+    case "CAJA":
+      return "Caja";
     default:
       return unitOfMeasure;
   }
