@@ -25,12 +25,16 @@ const fixedComponents = [
 const EXTRA_ZERO_PRECISION = /(\.\d{2})0+$/;
 const ZERO_AMOUNT = /^0(?:\.0{1,2})?$/;
 
+export function normalizeMeliAccountingGrossAmount(amount: string): string {
+  return amount.replace(EXTRA_ZERO_PRECISION, "$1");
+}
+
 export function buildMeliAccountingComponents(
   grossAmount: string,
   rawBreakdown: unknown
 ): MeliAccountingComponent[] {
   const breakdown = validateMeliAccountingBreakdown(
-    grossAmount.replace(EXTRA_ZERO_PRECISION, "$1"),
+    normalizeMeliAccountingGrossAmount(grossAmount),
     rawBreakdown
   );
   const counterpart: Account = {

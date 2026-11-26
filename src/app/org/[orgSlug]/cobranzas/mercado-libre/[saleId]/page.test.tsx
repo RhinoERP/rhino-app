@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   history: vi.fn(),
   enabled: vi.fn(),
   drafts: vi.fn(),
+  preparations: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/link", () => ({
@@ -28,6 +29,11 @@ vi.mock("@/components/mercadolibre/meli-accounting-draft", () => ({
 vi.mock("@/components/mercadolibre/meli-payment-accounting-history", () => ({
   MeliPaymentAccountingHistory: () => <span>Asientos vinculados</span>,
 }));
+vi.mock("@/components/mercadolibre/meli-payment-preparation", () => ({
+  MeliPaymentPreparation: ({ preparations }: { preparations: unknown[] }) => (
+    <span>Preparaciones: {preparations.length}</span>
+  ),
+}));
 vi.mock("@/modules/collections/service/collections-access.service", () => ({
   getCollectionsPageAccess: mocks.access,
 }));
@@ -37,6 +43,12 @@ vi.mock("@/modules/accounting/service/accounting-integration.service", () => ({
 vi.mock("@/modules/mercadolibre/service/meli-payments.service", () => ({
   getMeliPaymentHistory: mocks.history,
 }));
+vi.mock(
+  "@/modules/mercadolibre/service/meli-payment-preparations.service",
+  () => ({
+    listMeliPaymentPreparations: mocks.preparations,
+  })
+);
 vi.mock(
   "@/modules/mercadolibre/service/meli-accounting-drafts.service",
   () => ({
@@ -64,6 +76,7 @@ describe("Meli collections accounting drafts", () => {
     });
     mocks.enabled.mockResolvedValue(false);
     mocks.drafts.mockResolvedValue([]);
+    mocks.preparations.mockResolvedValue([]);
     mocks.history.mockResolvedValue({
       sale: {
         saleNumber: 1,
@@ -109,6 +122,7 @@ describe("Meli collections accounting drafts", () => {
     expect(markup).not.toContain("Borrador editable");
     expect(markup).not.toContain("Asientos vinculados");
     expect(mocks.drafts).not.toHaveBeenCalled();
+    expect(mocks.preparations).toHaveBeenCalledWith("org", "payment");
     expect(markup).not.toContain("No se pudo consultar la configuración");
   });
 
@@ -143,6 +157,7 @@ describe("Meli collections accounting drafts", () => {
     expect(markup).not.toContain("Borrador editable");
     expect(mocks.enabled).not.toHaveBeenCalled();
     expect(mocks.drafts).not.toHaveBeenCalled();
+    expect(mocks.preparations).not.toHaveBeenCalled();
   });
 
   it("keeps collections accessible and reports a configuration lookup failure", async () => {
@@ -155,5 +170,45 @@ describe("Meli collections accounting drafts", () => {
     expect(markup).not.toContain("Borrador editable");
     expect(markup).not.toContain("Asientos vinculados");
     expect(mocks.drafts).not.toHaveBeenCalled();
+  });
+
+  it("isolates draft lookup failures without hiding collections or other drafts", async () => {
+    mocks.enabled.mockResolvedValue(true);
+    const history = await mocks.history();
+    history.data.push({ ...history.data[0], id: "second-payment" });
+    mocks.drafts.mockImplementation((_orgSlug, paymentId: string) => {
+      if (paymentId === "payment") {
+        return Promise.reject(new Error("Desglose inaccesible"));
+      }
+      return Promise.resolve([]);
+    });
+
+    const markup = renderToStaticMarkup(await MeliCollectionSalePage(params));
+
+    expect(markup).toContain("Cobros de venta Meli #1");
+    expect(markup.match(/Anular cobro/g)).toHaveLength(2);
+    expect(markup).toContain("No se pudo consultar el desglose contable");
+    expect(markup).toContain('role="alert"');
+    expect(markup.match(/Borrador editable/g)).toHaveLength(1);
+    expect(markup.match(/Asientos vinculados/g)).toHaveLength(2);
+  });
+
+  it("keeps cleanup visible with the flag disabled and blocks editing prepared drafts", async () => {
+    mocks.preparations.mockResolvedValue([{ status: "PREPARED" }]);
+    let markup = renderToStaticMarkup(await MeliCollectionSalePage(params));
+    expect(markup).toContain("Preparaciones: 1");
+    mocks.enabled.mockResolvedValue(true);
+    markup = renderToStaticMarkup(await MeliCollectionSalePage(params));
+    expect(markup).toContain("Borrador histórico");
+    expect(markup).not.toContain("Borrador editable");
+  });
+
+  it("fails closed for draft editing if preparation lookup fails", async () => {
+    mocks.enabled.mockResolvedValue(true);
+    mocks.preparations.mockRejectedValue(new Error("No disponible"));
+    const markup = renderToStaticMarkup(await MeliCollectionSalePage(params));
+    expect(markup).toContain("No se pudo consultar la preparación contable");
+    expect(markup).toContain("Borrador histórico");
+    expect(markup).toContain("Anular cobro");
   });
 });

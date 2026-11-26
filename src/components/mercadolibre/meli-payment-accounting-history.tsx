@@ -1,11 +1,15 @@
 import { listMeliPaymentJournalEntries } from "@/modules/mercadolibre/service/meli-accounting-drafts.service";
+import type { listMeliPaymentPreparations } from "@/modules/mercadolibre/service/meli-payment-preparations.service";
+import { reviewMeliPaymentDispatches } from "@/modules/mercadolibre/utils/accounting-payment-reconciliation";
 
 export async function MeliPaymentAccountingHistory({
   orgSlug,
   paymentId,
+  preparations,
 }: {
   orgSlug: string;
   paymentId: string;
+  preparations?: Awaited<ReturnType<typeof listMeliPaymentPreparations>>;
 }) {
   let entries: Awaited<ReturnType<typeof listMeliPaymentJournalEntries>>;
   try {
@@ -20,11 +24,24 @@ export async function MeliPaymentAccountingHistory({
     );
   }
 
+  const issues = preparations
+    ? reviewMeliPaymentDispatches(entries, preparations)
+    : null;
   return (
     <details>
       <summary className="cursor-pointer font-medium">
         Asientos vinculados al cobro
       </summary>
+      {issues && issues.length > 0 && (
+        <div className="mt-2 text-destructive" role="alert">
+          <p>La comparación de envíos y asientos requiere revisión:</p>
+          <ul className="list-disc pl-5">
+            {issues.map((issue) => (
+              <li key={issue.key}>{issue.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {entries.length === 0 ? (
         <p className="mt-2 text-muted-foreground">
           No se encontraron asientos con este cobro como origen. Los asientos

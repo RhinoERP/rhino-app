@@ -7,15 +7,21 @@
  */
 import "server-only";
 
+import { z } from "zod";
 import type {
   AnyEvento,
   InformalEntrySourceType,
   PreviewResponse,
 } from "@/modules/accounting/types";
 import {
+  type fiscalJournalPayloadSchema,
+  invoiceReceiptSchema,
+} from "@/modules/mercadolibre/utils/accounting-invoice-receipt";
+import {
   type MeliJournalOrigin,
   parseMeliJournalEntriesByOrigin,
 } from "@/modules/mercadolibre/utils/accounting-origin";
+import type { MeliPaymentRecoveryPayload } from "@/modules/mercadolibre/utils/accounting-payment-recovery";
 
 const TIMEOUT_MS = 10_000;
 const HTTP_NOT_FOUND = 404;
@@ -217,6 +223,178 @@ export async function listMeliJournalEntriesByOriginServer(
     `asientos/by-origin?${query.toString()}`
   );
   return parseMeliJournalEntriesByOrigin(origin, result);
+}
+
+export async function findMeliPaymentJournalRequestServer(
+  payload:
+    | MeliPaymentRecoveryPayload
+    | z.output<typeof fiscalJournalPayloadSchema>
+) {
+  const result = await servicePost<unknown>(
+    "internal/meli/journal/lookup",
+    payload
+  );
+  return z
+    .object({ journalEntryId: z.uuid().nullable() })
+    .strict()
+    .parse(result).journalEntryId;
+}
+
+export async function publishMeliJournalServer(input: {
+  saleId: string;
+  payload:
+    | MeliPaymentRecoveryPayload
+    | z.output<typeof fiscalJournalPayloadSchema>;
+}) {
+  const result = await servicePost<unknown>(
+    "internal/meli/journal/publish",
+    input
+  );
+  return z.object({ journalEntryId: z.uuid() }).strict().parse(result)
+    .journalEntryId;
+}
+
+export async function publishMeliPaymentReversalServer(input: {
+  original: MeliPaymentRecoveryPayload;
+  reversal: {
+    orgId: string;
+    originalEntryId: string;
+    requestKey: string;
+    date: string;
+    description: string;
+    actorId: string;
+  };
+}) {
+  const result = await servicePost<unknown>(
+    "internal/meli/reversal/publish",
+    input
+  );
+  return z.object({ reversalEntryId: z.uuid() }).strict().parse(result)
+    .reversalEntryId;
+}
+
+export async function findMeliPaymentReversalServer(payload: {
+  orgId: string;
+  originalEntryId: string;
+  requestKey: string;
+  date: string;
+  description: string;
+  actorId: string;
+}) {
+  const result = await servicePost<unknown>(
+    "internal/meli/reversal/lookup",
+    payload
+  );
+  return z
+    .object({ reversalEntryId: z.uuid().nullable() })
+    .strict()
+    .parse(result).reversalEntryId;
+}
+
+export async function inspectMeliPaymentReversalSourceServer(input: {
+  original: MeliPaymentRecoveryPayload;
+  reversal: {
+    orgId: string;
+    originalEntryId: string;
+    requestKey: string;
+    date: string;
+    description: string;
+    actorId: string;
+  };
+}) {
+  const result = await servicePost<unknown>(
+    "internal/meli/reversal/source/inspect",
+    input
+  );
+  return z
+    .object({
+      originalEntryId: z.uuid(),
+      reversalEntryId: z.uuid().nullable(),
+    })
+    .strict()
+    .parse(result);
+}
+
+export async function listMeliAccountReferencesServer(orgId: string) {
+  const result = await serviceGet<unknown>(
+    `cuentas?org_id=${encodeURIComponent(orgId)}`
+  );
+  return z
+    .array(z.object({ id: z.uuid(), account_code: z.string().nullable() }))
+    .parse(result);
+}
+
+export async function listMeliFiscalAccountsServer(orgId: string) {
+  const result = await serviceGet<unknown>(
+    `cuentas?org_id=${encodeURIComponent(orgId)}`
+  );
+  return z
+    .array(
+      z.object({
+        id: z.uuid(),
+        codigo: z.string(),
+        nombre: z.string(),
+        account_code: z.string().nullable(),
+        tipo: z.string(),
+        naturaleza: z.string(),
+        activa: z.boolean(),
+        permite_movimientos: z.boolean(),
+        padre_id: z.uuid().nullable(),
+        moneda: z.string(),
+      })
+    )
+    .parse(result);
+}
+
+export async function inspectMeliInvoiceReceiptServer(
+  orgId: string,
+  saleId: string
+) {
+  const result = await servicePost<unknown>(
+    "internal/meli/journal/invoice/inspect",
+    { orgId, saleId }
+  );
+  return invoiceReceiptSchema.nullable().parse(result);
+}
+
+export async function inspectMeliPostingPeriodServer(
+  orgId: string,
+  date: string
+) {
+  const result = await servicePost<unknown>(
+    "internal/meli/journal/period/inspect",
+    {
+      orgId,
+      date,
+    }
+  );
+  return z
+    .object({ status: z.enum(["OPEN", "CLOSED", "UNCONFIGURED"]) })
+    .strict()
+    .parse(result);
+}
+
+export async function changeMeliPostingPeriodServer(input: {
+  orgId: string;
+  periodStart: string;
+  expectedStatus: "UNCONFIGURED" | "OPEN" | "CLOSED";
+  newStatus: "OPEN" | "CLOSED";
+  actorId: string;
+  reason: string;
+  requestKey: string;
+}) {
+  const result = await servicePost<unknown>(
+    "internal/meli/journal/period/change",
+    input
+  );
+  const parsed = z
+    .object({ status: z.enum(["OPEN", "CLOSED"]), idempotent: z.boolean() })
+    .strict()
+    .parse(result);
+  if (parsed.status !== input.newStatus) {
+    throw new Error("La respuesta del cambio de período no coincide.");
+  }
+  return parsed;
 }
 
 // ============================================================

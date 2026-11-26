@@ -71,6 +71,34 @@ describe("accounting proxy route", () => {
     vi.unstubAllGlobals();
   });
 
+  it("never forwards internal Meli endpoints or path traversal", async () => {
+    setupAccountingManager();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("./route");
+    for (const route of [
+      ["internal", "meli", "journal", "lookup"],
+      ["INTERNAL", "meli", "journal", "lookup"],
+      ["cuentas", "..", "internal", "meli"],
+      ["cuentas", "%2e%2e", "internal"],
+      ["cuentas", "..\\internal"],
+    ]) {
+      const request = new NextRequest(
+        "http://localhost/api/contabilidad/test",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-org-slug": "acme" },
+          body: "{}",
+        }
+      );
+      const response = await POST(request, {
+        params: Promise.resolve({ route }),
+      });
+      expect(response.status).toBe(404);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("sobrescribe org_id en query y body antes de forwardear", async () => {
     const membershipQuery = createMembershipQuery({
       data: { organization_id: "org-server" },

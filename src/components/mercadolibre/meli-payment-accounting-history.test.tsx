@@ -58,4 +58,85 @@ describe("Meli payment accounting history", () => {
     expect(markup).toContain("No se pudo consultar");
     expect(markup).not.toContain("No se encontraron");
   });
+
+  it("warns when a published receipt is absent without claiming reconciliation", async () => {
+    mocks.entries.mockResolvedValueOnce([]);
+    const markup = renderToStaticMarkup(
+      await MeliPaymentAccountingHistory({
+        ...props,
+        preparations: [
+          {
+            id: "preparation",
+            draft_id: "draft",
+            status: "PREPARED",
+            created_by: "actor",
+            created_at: "2026-11-23T12:00:00Z",
+            cancelled_by: null,
+            cancelled_at: null,
+            components: [
+              {
+                key: "net",
+                description: "Neto",
+                amount: "100.00",
+                dispatchStatus: "PUBLISHED",
+                journalEntryId: "entry",
+              },
+            ],
+          },
+        ],
+      })
+    );
+    expect(markup).toContain("no aparece en la historia");
+    expect(markup).not.toContain("conciliado");
+  });
+
+  it("warns when a published receipt has an active contra-entry", async () => {
+    mocks.entries.mockResolvedValueOnce([
+      {
+        id: "original",
+        tipo_evento: "MELI_COBRO",
+        estado: "ACTIVO",
+        fecha: "2026-11-23",
+        anulado_por_id: null,
+      },
+      {
+        id: "reversal",
+        tipo_evento: "CONTRA_ASIENTO",
+        referencia_tabla: "accounting.journal_entries",
+        referencia_id: "original",
+        estado: "ACTIVO",
+        fecha: "2026-11-23",
+        anulado_por_id: null,
+      },
+    ]);
+    const markup = renderToStaticMarkup(
+      await MeliPaymentAccountingHistory({
+        ...props,
+        preparations: [
+          {
+            id: "preparation",
+            draft_id: "draft",
+            status: "PREPARED",
+            created_by: "actor",
+            created_at: "2026-11-23T12:00:00Z",
+            cancelled_by: null,
+            cancelled_at: null,
+            components: [
+              {
+                key: "net",
+                description: "Neto",
+                amount: "100.00",
+                dispatchStatus: "PUBLISHED",
+                journalEntryId: "original",
+              },
+            ],
+          },
+        ],
+      })
+    );
+    expect(markup).toContain(
+      "el asiento tiene una reversión o un contra-asiento"
+    );
+    expect(markup).toContain("requiere revisión");
+  });
 });

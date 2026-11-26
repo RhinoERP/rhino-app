@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MeliFiscalAutomaticSetup } from "@/components/mercadolibre/meli-fiscal-automatic-setup";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { listMeliSales } from "@/modules/mercadolibre/service/meli-read.service";
@@ -62,6 +63,12 @@ export default async function MeliSalesPage({
           )}
         </div>
       </div>
+      {layout?.permissions.includes("organization.admin") && (
+        <MeliFiscalAutomaticSetup
+          orgId={layout.currentOrganization.id}
+          orgSlug={orgSlug}
+        />
+      )}
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
           <thead>

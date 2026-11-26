@@ -6,6 +6,8 @@ import { createMercadoLibreSaleAction } from "./create-mercadolibre-sale.action"
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   invoice: vi.fn(),
+  sale: vi.fn(),
+  accounting: vi.fn(),
   revalidate: vi.fn(),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
@@ -14,6 +16,12 @@ vi.mock("../service/mercadolibre-sales.service", () => ({
 }));
 vi.mock("../service/meli-invoice.service", () => ({
   tryAutomaticMeliInvoice: mocks.invoice,
+}));
+vi.mock("../service/meli-read.service", () => ({
+  getMeliSale: mocks.sale,
+}));
+vi.mock("../service/meli-fiscal-automatic.service", () => ({
+  tryMeliFiscalAutomaticPublication: mocks.accounting,
 }));
 const input: CreateMeliSaleInput = {
   orgSlug: "org",
@@ -43,6 +51,29 @@ describe("Meli checkout separates commercial and fiscal outcomes", () => {
       success: true,
       data: { saleId: "sale", idempotent: false },
       fiscalWarning: "ARCA no disponible",
+      accountingWarning: null,
+    });
+    it("preserves the authorized sale when accounting cannot publish", async () => {
+      mocks.create.mockResolvedValue({ saleId: "sale", idempotent: false });
+      mocks.invoice.mockResolvedValue(null);
+      mocks.sale.mockResolvedValue({ arca_status: "authorized" });
+      mocks.accounting.mockResolvedValue("Período cerrado");
+      expect(await createMercadoLibreSaleAction(input)).toMatchObject({
+        success: true,
+        fiscalWarning: null,
+        accountingWarning: "Período cerrado",
+      });
+      expect(mocks.accounting).toHaveBeenCalledWith("org", {
+        type: "invoice",
+        saleId: "sale",
+      });
+    });
+    it("does not account for a sale without an authorized invoice", async () => {
+      mocks.create.mockResolvedValue({ saleId: "sale", idempotent: false });
+      mocks.invoice.mockResolvedValue(null);
+      mocks.sale.mockResolvedValue({ arca_status: "not_requested" });
+      await createMercadoLibreSaleAction(input);
+      expect(mocks.accounting).not.toHaveBeenCalled();
     });
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.invoice).toHaveBeenCalledWith("org", "sale");

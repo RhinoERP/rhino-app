@@ -23,6 +23,7 @@ const SERVICE_TOKEN = process.env.ACCOUNTING_SERVICE_TOKEN;
 const ORG_SLUG_HEADER = "x-org-slug";
 const INFORMAL_ENTRY_MUTATION_RE =
   /^informal-entries\/([^/]+)\/(formalizar|cancelar|asentar)$/;
+const UNSAFE_ROUTE_SEGMENT = /[\\/%]/;
 const HTTP_CONFLICT = 409;
 const HTTP_BAD_GATEWAY = 502;
 
@@ -344,6 +345,19 @@ async function proxyRequest(
   req: NextRequest,
   { route }: { route: string[] }
 ): Promise<NextResponse> {
+  if (
+    route.some((segment) => {
+      const lower = segment.toLowerCase();
+      return (
+        lower === "internal" ||
+        lower === "." ||
+        lower === ".." ||
+        UNSAFE_ROUTE_SEGMENT.test(segment)
+      );
+    })
+  ) {
+    return NextResponse.json({ error: "Ruta no disponible" }, { status: 404 });
+  }
   const auth = await requireAuth();
   if (!auth) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });

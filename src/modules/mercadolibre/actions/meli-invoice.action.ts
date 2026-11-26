@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { toArcaUserMessage } from "@/modules/arca/errors";
 import { reconcileMeliSaleInvoice } from "@/modules/arca/server/sale-invoicing.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
+import { tryMeliFiscalAutomaticPublication } from "../service/meli-fiscal-automatic.service";
 import {
   emitMercadoLibreInvoice,
   generateMeliInvoiceHtml,
@@ -13,7 +14,14 @@ export async function emitMeliInvoiceAction(orgSlug: string, saleId: string) {
   await ensure("mercadolibre.invoice", orgSlug);
   try {
     const data = await emitMercadoLibreInvoice(orgSlug, saleId);
-    return { success: true as const, data };
+    const accountingWarning =
+      data.status === "authorized"
+        ? await tryMeliFiscalAutomaticPublication(orgSlug, {
+            type: "invoice",
+            saleId,
+          })
+        : null;
+    return { success: true as const, data, accountingWarning };
   } catch (error) {
     return { success: false as const, error: toArcaUserMessage(error) };
   } finally {
@@ -42,8 +50,15 @@ export async function reconcileMeliInvoiceAction(
 ) {
   try {
     const data = await reconcileMeliSaleInvoice(orgSlug, saleId);
+    const accountingWarning =
+      data.status === "authorized"
+        ? await tryMeliFiscalAutomaticPublication(orgSlug, {
+            type: "invoice",
+            saleId,
+          })
+        : null;
     revalidatePath(`/org/${orgSlug}/venta-directa/mercado-libre/${saleId}`);
-    return { success: true as const, data };
+    return { success: true as const, data, accountingWarning };
   } catch (error) {
     return { success: false as const, error: toArcaUserMessage(error) };
   }

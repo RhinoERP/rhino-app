@@ -5,6 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ZodError } from "zod";
 import { MeliAccountingDraftPreview } from "@/components/mercadolibre/meli-accounting-draft-preview";
+import { MeliPaymentMonetaryPreview } from "@/components/mercadolibre/meli-payment-monetary-preview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,16 +80,43 @@ function DraftHistory({ history }: { history: Draft[] }) {
   );
 }
 
-function ActiveDraftPreview({ draft }: { draft: Draft | undefined }) {
+function ActiveDraftPreview({
+  draft,
+  previewAvailable,
+  enabled,
+  orgId,
+  orgSlug,
+  saleId,
+}: {
+  draft: Draft | undefined;
+  previewAvailable: boolean;
+  enabled: boolean;
+  orgId: string;
+  orgSlug: string;
+  saleId: string;
+}) {
   if (!draft) {
     return null;
   }
   return (
-    <MeliAccountingDraftPreview
-      breakdown={draft.request_payload.breakdown}
-      currency={draft.currency}
-      grossAmount={draft.gross_amount}
-    />
+    <>
+      <MeliAccountingDraftPreview
+        breakdown={draft.request_payload.breakdown}
+        currency={draft.currency}
+        grossAmount={draft.gross_amount}
+      />
+      {previewAvailable && (
+        <MeliPaymentMonetaryPreview
+          breakdown={draft.request_payload.breakdown}
+          currency={draft.currency}
+          enabled={enabled}
+          grossAmount={draft.gross_amount}
+          orgId={orgId}
+          orgSlug={orgSlug}
+          saleId={saleId}
+        />
+      )}
+    </>
   );
 }
 
@@ -96,16 +124,20 @@ export function MeliAccountingDraft({
   orgSlug,
   orgId,
   paymentId,
+  saleId,
   currency,
   history,
   editable,
+  previewAvailable = editable,
 }: {
   orgSlug: string;
   orgId: string;
   paymentId: string;
+  saleId: string;
   currency: "ARS" | "USD";
   history: Draft[];
   editable: boolean;
+  previewAvailable?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -231,7 +263,14 @@ export function MeliAccountingDraft({
           al cobro registrado; el cuadre se verifica al guardar.
         </p>
         <DraftHistory history={history} />
-        <ActiveDraftPreview draft={active} />
+        <ActiveDraftPreview
+          draft={active}
+          enabled={open}
+          orgId={orgId}
+          orgSlug={orgSlug}
+          previewAvailable={previewAvailable}
+          saleId={saleId}
+        />
         {editable && (
           <form
             className="space-y-3"

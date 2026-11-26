@@ -9,17 +9,45 @@ vi.mock(
   "@/modules/mercadolibre/actions/meli-fiscal-accounting-history.action",
   () => ({ listMeliFiscalJournalEntriesAction: vi.fn() })
 );
+vi.mock(
+  "@/modules/mercadolibre/actions/meli-fiscal-preparation.action",
+  () => ({
+    getMeliFiscalPreparationAction: vi.fn(),
+    inspectMeliFiscalDispatchAction: vi.fn(),
+    prepareMeliFiscalAction: vi.fn(),
+  })
+);
+vi.mock("@/modules/mercadolibre/actions/meli-period.action", () => ({
+  changeMeliPostingPeriodAction: vi.fn(),
+}));
 
 describe("Meli fiscal accounting history", () => {
   it("only requests history when the user chooses to consult it", () => {
     const markup = renderToStaticMarkup(
       <MeliFiscalAccountingHistory
+        orgId="org-id"
         orgSlug="org"
         origin={{ type: "invoice", saleId: "sale" }}
       />
     );
     expect(markup).toContain("Consultar asientos vinculados");
+    expect(markup).toContain("Verificar asiento fiscal Meli");
+    expect(markup).toContain("Consultar período fiscal");
+    expect(markup).toContain("Preparar fuente fiscal");
+    expect(markup).toContain("Consultar envío fiscal");
     expect(markup).not.toContain("No se encontraron asientos");
+  });
+
+  it("does not offer invoice inspection on a credit note", () => {
+    const markup = renderToStaticMarkup(
+      <MeliFiscalAccountingHistory
+        orgId="org-id"
+        orgSlug="org"
+        origin={{ type: "creditNote", saleId: "sale", creditNoteId: "note" }}
+      />
+    );
+    expect(markup).not.toContain("Verificar asiento fiscal Meli");
+    expect(markup).toContain("Consultar período fiscal");
   });
 
   it("distinguishes an empty history from a failed lookup", () => {

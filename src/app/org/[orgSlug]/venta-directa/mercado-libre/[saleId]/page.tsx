@@ -6,6 +6,7 @@ import { MeliFiscalAccountingHistory } from "@/components/mercadolibre/meli-fisc
 import { MeliInvoiceActions } from "@/components/mercadolibre/meli-invoice-actions";
 import { MeliPhysicalReturns } from "@/components/mercadolibre/meli-physical-returns";
 import { MeliReceiverCorrection } from "@/components/mercadolibre/meli-receiver-correction";
+import { MeliSaleAccountingReview } from "@/components/mercadolibre/meli-sale-accounting-review";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
@@ -109,10 +110,14 @@ export default async function MeliSalePage({
             />
             <p>Factura: {sale.invoice_number ?? "Sin emitir"}</p>
             {canReviewAccounting && (
-              <MeliFiscalAccountingHistory
-                orgSlug={orgSlug}
-                origin={{ type: "invoice", saleId: sale.id }}
-              />
+              <>
+                <MeliSaleAccountingReview orgSlug={orgSlug} saleId={sale.id} />
+                <MeliFiscalAccountingHistory
+                  orgId={sale.organizationId}
+                  orgSlug={orgSlug}
+                  origin={{ type: "invoice", saleId: sale.id }}
+                />
+              </>
             )}
             {sale.arca_last_error && (
               <p className="text-destructive">{sale.arca_last_error}</p>
@@ -194,6 +199,7 @@ export default async function MeliSalePage({
         canReviewAccounting={canReviewAccounting}
         currency={sale.currency}
         notes={creditNotes.notes}
+        orgId={sale.organizationId}
         orgSlug={orgSlug}
         remaining={creditNotes.remaining}
         saleId={sale.id}

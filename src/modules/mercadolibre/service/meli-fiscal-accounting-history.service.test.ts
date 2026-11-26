@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getMeliFiscalAccountingSnapshot,
+  getMeliInvoiceFiscalSnapshotForRecovery,
+  inspectMeliFiscalPostingPeriod,
+  inspectMeliInvoiceReceipt,
   listMeliFiscalJournalEntries,
 } from "./meli-fiscal-accounting-history.service";
 
@@ -14,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   journalEntries: vi.fn(),
   fiscalSale: vi.fn(),
   fiscalNote: vi.fn(),
+  invoiceReceipt: vi.fn(),
+  accounts: vi.fn(),
+  period: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/modules/organizations/utils/with-permission-guard", () => ({
@@ -32,6 +38,9 @@ vi.mock("@/lib/supabase/admin-client", () => ({
 }));
 vi.mock("@/lib/accounting-server", () => ({
   listMeliJournalEntriesByOriginServer: mocks.journalEntries,
+  inspectMeliInvoiceReceiptServer: mocks.invoiceReceipt,
+  inspectMeliPostingPeriodServer: mocks.period,
+  listMeliAccountReferencesServer: mocks.accounts,
 }));
 
 const orgId = "00000000-0000-4000-8000-000000000001";
@@ -173,18 +182,90 @@ describe("Meli fiscal accounting history", () => {
       }
     );
     expect(mocks.fiscalSale).toHaveBeenCalledWith("org", saleId);
+    mocks.enabled.mockResolvedValue(false);
+    mocks.fiscalSale.mockResolvedValueOnce({ sale: fiscalSale });
+    expect(
+      await getMeliInvoiceFiscalSnapshotForRecovery("org", saleId)
+    ).toMatchObject({
+      currency: "ARS",
+      exchangeRate: 1,
+    });
+
+    mocks.ensure.mockRejectedValueOnce(new Error("Sin permiso"));
+    await expect(
+      getMeliInvoiceFiscalSnapshotForRecovery("org", saleId)
+    ).rejects.toThrow("Sin permiso");
+    mocks.enabled.mockResolvedValue(true);
     mocks.fiscalNote.mockResolvedValueOnce({
       sale: fiscalSale,
       note: {
         ...fiscalSale,
         sales_order_id: saleId,
         amount: 100,
+        invoice_type: "FACTURA_A",
+        arca_voucher_type_code: 3,
+        arca_associated_voucher_type_code: 1,
+        arca_associated_point_of_sale: 1,
+        arca_associated_voucher_number: 42,
+        arca_request_json: {
+          wsfeRequest: {
+            ...request.wsfeRequest,
+            CbteTipo: 3,
+            CbtesAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 42 }],
+          },
+        },
       },
     });
     expect(await getMeliFiscalAccountingSnapshot("org", note)).toMatchObject({
       total: "100.00",
     });
     expect(mocks.fiscalNote).toHaveBeenCalledWith("org", noteId);
+  });
+
+  it("uses the authorized fiscal date and organization for period inspection", async () => {
+    mocks.fiscalSale.mockResolvedValue({
+      sale: {
+        currency: "ARS",
+        total_amount: 100,
+        arca_status: "authorized",
+        arca_cae: "123",
+        arca_point_of_sale: 1,
+        arca_voucher_type_code: 1,
+        arca_voucher_number: 42,
+        arca_request_json: {
+          wsfeRequest: {
+            CbteFch: 20_261_121,
+            PtoVta: 1,
+            CbteTipo: 1,
+            CbteDesde: 42,
+            CbteHasta: 42,
+            MonId: "PES",
+            MonCotiz: 1,
+            ImpTotal: 100,
+            ImpTotConc: 0,
+            ImpNeto: 100,
+            ImpOpEx: 0,
+            ImpIVA: 0,
+            ImpTrib: 0,
+          },
+        },
+      },
+    });
+    mocks.period.mockResolvedValueOnce({ status: "CLOSED" });
+    await expect(
+      inspectMeliFiscalPostingPeriod("org", invoice)
+    ).resolves.toEqual({ date: "2026-11-21", status: "CLOSED" });
+    expect(mocks.period).toHaveBeenCalledWith(orgId, "2026-11-21");
+    mocks.enabled.mockResolvedValueOnce(false);
+    await expect(
+      inspectMeliFiscalPostingPeriod("org", invoice)
+    ).rejects.toThrow("no está habilitada");
+    expect(mocks.period).toHaveBeenCalledTimes(1);
+    mocks.sale.mockResolvedValueOnce(null);
+    await expect(
+      inspectMeliFiscalPostingPeriod("org", invoice)
+    ).rejects.toThrow("fuera de tus depósitos");
+    expect(mocks.period).toHaveBeenCalledTimes(1);
   });
 
   it("rejects cross-sale notes and disabled snapshots", async () => {
@@ -200,5 +281,90 @@ describe("Meli fiscal accounting history", () => {
     await expect(getMeliFiscalAccountingSnapshot("org", note)).rejects.toThrow(
       "no pertenece"
     );
+  });
+
+  it("verifies the scoped fiscal source and exposes only a verified receipt identifier", async () => {
+    const request = {
+      wsfeRequest: {
+        CbteFch: 20_261_121,
+        PtoVta: 1,
+        CbteTipo: 1,
+        CbteDesde: 42,
+        CbteHasta: 42,
+        MonId: "PES",
+        MonCotiz: 1,
+        ImpTotal: 100,
+        ImpTotConc: 0,
+        ImpNeto: 100,
+        ImpOpEx: 0,
+        ImpIVA: 0,
+        ImpTrib: 0,
+      },
+    };
+    mocks.fiscalSale.mockResolvedValue({
+      scopedSale: { organizationId: orgId },
+      sale: {
+        currency: "ARS",
+        total_amount: 100,
+        arca_status: "authorized",
+        arca_cae: "123",
+        arca_point_of_sale: 1,
+        arca_voucher_type_code: 1,
+        arca_voucher_number: 42,
+        arca_request_json: request,
+      },
+    });
+    const receipt = {
+      journalEntryId: noteId,
+      payload: {
+        orgId,
+        originType: "invoice",
+        originId: saleId,
+        componentKey: "fiscal",
+        requestKey: noteId,
+        date: "2026-11-21",
+        description: "Factura",
+        actorId: noteId,
+        currency: "ARS",
+        exchangeRate: "1",
+        lines: [
+          {
+            accountId: orgId,
+            side: "DEBE",
+            originalAmount: "100",
+            pesosAmount: "100",
+          },
+          {
+            accountId: noteId,
+            side: "HABER",
+            originalAmount: "100",
+            pesosAmount: "100",
+          },
+        ],
+      },
+    };
+    mocks.invoiceReceipt
+      .mockResolvedValueOnce(receipt)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(receipt);
+    mocks.accounts
+      .mockResolvedValueOnce([
+        { id: orgId, account_code: "AR_DEUDORES_VENTAS" },
+        { id: noteId, account_code: null },
+      ])
+      .mockResolvedValueOnce([]);
+    await expect(inspectMeliInvoiceReceipt("org", saleId)).resolves.toEqual({
+      journalEntryId: noteId,
+    });
+    expect(mocks.invoiceReceipt).toHaveBeenCalledWith(orgId, saleId);
+    await expect(inspectMeliInvoiceReceipt("org", saleId)).resolves.toBeNull();
+    await expect(inspectMeliInvoiceReceipt("org", saleId)).rejects.toThrow(
+      "deudores"
+    );
+    mocks.enabled.mockResolvedValue(false);
+    await expect(inspectMeliInvoiceReceipt("org", saleId)).rejects.toThrow(
+      "no está habilitada"
+    );
+    expect(mocks.invoiceReceipt).toHaveBeenCalledTimes(3);
   });
 });

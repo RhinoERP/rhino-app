@@ -105,6 +105,11 @@ export function MeliPaymentForm({
         venta. Importe sin cobro registrado:{" "}
         {formatCurrency(sale.outstandingAmount, sale.currency)}.
       </p>
+      <p className="text-muted-foreground text-sm">
+        Registrar el cobro no genera asientos automáticamente. Para
+        contabilizarlo, completá el desglose y publicá sus conceptos desde el
+        historial contable.
+      </p>
       <form
         className="space-y-3"
         noValidate

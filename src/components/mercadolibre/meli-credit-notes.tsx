@@ -30,6 +30,7 @@ const formSchema = createMeliCreditNoteSchema.omit({
 type Values = z.infer<typeof formSchema>;
 
 export function MeliCreditNotes({
+  orgId,
   orgSlug,
   saleId,
   currency,
@@ -39,6 +40,7 @@ export function MeliCreditNotes({
   canIssue,
   canReviewAccounting,
 }: {
+  orgId: string;
   orgSlug: string;
   saleId: string;
   currency: string;
@@ -107,6 +109,7 @@ export function MeliCreditNotes({
           )}
           {canReviewAccounting && (
             <MeliFiscalAccountingHistory
+              orgId={orgId}
               orgSlug={orgSlug}
               origin={{ type: "creditNote", saleId, creditNoteId: note.id }}
             />
@@ -128,6 +131,11 @@ export function MeliCreditNotes({
                     toast.success(
                       "Autorización de la nota de crédito recuperada."
                     );
+                    if (result.accountingWarning) {
+                      toast.warning(
+                        `Contabilización pendiente: ${result.accountingWarning}`
+                      );
+                    }
                   })
                 }
                 type="button"
@@ -152,6 +160,11 @@ export function MeliCreditNotes({
                         return;
                       }
                       toast.success("Nota de crédito autorizada.");
+                      if (result.accountingWarning) {
+                        toast.warning(
+                          `Contabilización pendiente: ${result.accountingWarning}`
+                        );
+                      }
                     })
                   }
                   type="button"

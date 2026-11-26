@@ -9,14 +9,17 @@ import {
   MeliPaymentForm,
   VoidMeliPaymentForm,
 } from "@/components/mercadolibre/meli-payment-form";
+import { MeliPaymentPreparation } from "@/components/mercadolibre/meli-payment-preparation";
 import { formatCurrency, formatDate, formatDateOnly } from "@/lib/format";
 import { getCollectionsPageAccess } from "@/modules/collections/service/collections-access.service";
 import {
+  canManageMeliAccounting,
   canManageMeliPayments,
   hasMeliAccess,
 } from "@/modules/mercadolibre/permissions";
 import { listMeliAccountingDrafts } from "@/modules/mercadolibre/service/meli-accounting-drafts.service";
 import { getMeliAccountingPageAccess } from "@/modules/mercadolibre/service/meli-accounting-page-access";
+import { listMeliPaymentPreparations } from "@/modules/mercadolibre/service/meli-payment-preparations.service";
 import { getMeliPaymentHistory } from "@/modules/mercadolibre/service/meli-payments.service";
 import { getMeliFiscalStatusLabel } from "@/modules/mercadolibre/utils/fiscal-status";
 
@@ -25,6 +28,94 @@ const labels = {
   PARTIAL: "Parcialmente cobrada",
   PAID: "Cobro completo",
 };
+
+function PaymentAccountingControls({
+  payment,
+  draft,
+  preparation,
+  canReview,
+  canRecover,
+  orgSlug,
+  orgId,
+  saleId,
+}: {
+  payment: NonNullable<
+    Awaited<ReturnType<typeof getMeliPaymentHistory>>
+  >["data"][number];
+  draft:
+    | PromiseSettledResult<Awaited<ReturnType<typeof listMeliAccountingDrafts>>>
+    | undefined;
+  preparation:
+    | PromiseSettledResult<
+        Awaited<ReturnType<typeof listMeliPaymentPreparations>>
+      >
+    | undefined;
+  canReview: boolean;
+  canRecover: boolean;
+  orgSlug: string;
+  orgId: string;
+  saleId: string;
+}) {
+  return (
+    <>
+      {canReview && (
+        <>
+          {draft?.status === "fulfilled" ? (
+            <MeliAccountingDraft
+              currency={payment.currency}
+              editable={
+                payment.status === "RECORDED" &&
+                preparation?.status === "fulfilled" &&
+                !preparation.value.some((item) => item.status === "PREPARED")
+              }
+              history={draft.value}
+              key={`${payment.id}-${draft.value[0]?.version ?? 0}`}
+              orgId={orgId}
+              orgSlug={orgSlug}
+              paymentId={payment.id}
+              previewAvailable={payment.status === "RECORDED"}
+              saleId={saleId}
+            />
+          ) : (
+            <p className="text-destructive text-sm" role="alert">
+              No se pudo consultar el desglose contable de este cobro. Actualizá
+              la página para reintentar; el desglose no está disponible para
+              revisión.
+            </p>
+          )}
+          <MeliPaymentAccountingHistory
+            orgSlug={orgSlug}
+            paymentId={payment.id}
+            preparations={
+              preparation?.status === "fulfilled"
+                ? preparation.value
+                : undefined
+            }
+          />
+        </>
+      )}
+      {canRecover &&
+        (preparation?.status === "fulfilled" ? (
+          <MeliPaymentPreparation
+            draftId={
+              draft?.status === "fulfilled"
+                ? draft.value.find((item) => item.active)?.id
+                : undefined
+            }
+            enabled={canReview && payment.status === "RECORDED"}
+            orgSlug={orgSlug}
+            paymentId={payment.id}
+            preparations={preparation.value}
+          />
+        ) : (
+          <p className="text-destructive" role="alert">
+            No se pudo consultar la preparación contable de este cobro.
+            Actualizá la página antes de modificar el desglose.
+          </p>
+        ))}
+    </>
+  );
+}
 
 export default async function MeliCollectionSalePage({
   params,
@@ -57,10 +148,18 @@ export default async function MeliCollectionSalePage({
     layout.permissions
   );
   const canReviewAccounting = accountingAccess === "enabled";
+  const canRecoverAccounting = canManageMeliAccounting(layout.permissions);
   const drafts = canReviewAccounting
-    ? await Promise.all(
+    ? await Promise.allSettled(
         history.data.map((payment) =>
           listMeliAccountingDrafts(orgSlug, payment.id)
+        )
+      )
+    : [];
+  const preparations = canRecoverAccounting
+    ? await Promise.allSettled(
+        history.data.map((payment) =>
+          listMeliPaymentPreparations(orgSlug, payment.id)
         )
       )
     : [];
@@ -155,23 +254,16 @@ export default async function MeliCollectionSalePage({
                 {payment.voided_at ? ` · ${formatDate(payment.voided_at)}` : ""}
               </p>
             )}
-            {canReviewAccounting && (
-              <>
-                <MeliAccountingDraft
-                  currency={payment.currency}
-                  editable={payment.status === "RECORDED"}
-                  history={drafts[index]}
-                  key={`${payment.id}-${drafts[index][0]?.version ?? 0}`}
-                  orgId={layout.currentOrganization.id}
-                  orgSlug={orgSlug}
-                  paymentId={payment.id}
-                />
-                <MeliPaymentAccountingHistory
-                  orgSlug={orgSlug}
-                  paymentId={payment.id}
-                />
-              </>
-            )}
+            <PaymentAccountingControls
+              canRecover={canRecoverAccounting}
+              canReview={canReviewAccounting}
+              draft={drafts[index]}
+              orgId={layout.currentOrganization.id}
+              orgSlug={orgSlug}
+              payment={payment}
+              preparation={preparations[index]}
+              saleId={saleId}
+            />
             {canManage && payment.status === "RECORDED" && (
               <VoidMeliPaymentForm orgSlug={orgSlug} paymentId={payment.id} />
             )}

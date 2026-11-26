@@ -10,6 +10,7 @@ import {
 } from "../service/meli-credit-note.service";
 import { generateMeliCreditNoteHtml } from "../service/meli-credit-note-pdf.service";
 import { getMeliCreditNoteContext } from "../service/meli-credit-note-read.service";
+import { tryMeliFiscalAutomaticPublication } from "../service/meli-fiscal-automatic.service";
 
 export async function createMeliCreditNoteAction(
   orgSlug: string,
@@ -33,12 +34,20 @@ export async function emitMeliCreditNoteAction(
   creditNoteId: string
 ) {
   try {
-    const data = await emitMeliCreditNote(orgSlug, creditNoteId);
     const context = await getMeliCreditNoteContext(orgSlug, creditNoteId);
+    const data = await emitMeliCreditNote(orgSlug, creditNoteId);
+    const accountingWarning =
+      data.status === "authorized"
+        ? await tryMeliFiscalAutomaticPublication(orgSlug, {
+            type: "creditNote",
+            saleId: context.sale.id,
+            creditNoteId,
+          })
+        : null;
     revalidatePath(
       `/org/${orgSlug}/venta-directa/mercado-libre/${context.sale.id}`
     );
-    return { success: true as const, data };
+    return { success: true as const, data, accountingWarning };
   } catch (error) {
     return { success: false as const, error: toArcaUserMessage(error) };
   }
@@ -76,9 +85,18 @@ export async function reconcileMeliCreditNoteAction(
   creditNoteId: string
 ) {
   try {
+    const context = await getMeliCreditNoteContext(orgSlug, creditNoteId);
     const data = await reconcileMeliCreditNote(orgSlug, creditNoteId);
+    const accountingWarning =
+      data.status === "authorized"
+        ? await tryMeliFiscalAutomaticPublication(orgSlug, {
+            type: "creditNote",
+            saleId: context.sale.id,
+            creditNoteId,
+          })
+        : null;
     revalidatePath(`/org/${orgSlug}/venta-directa/mercado-libre`, "layout");
-    return { success: true as const, data };
+    return { success: true as const, data, accountingWarning };
   } catch (error) {
     return { success: false as const, error: toArcaUserMessage(error) };
   }

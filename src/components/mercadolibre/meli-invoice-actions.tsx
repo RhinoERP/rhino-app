@@ -36,6 +36,10 @@ export function MeliInvoiceActions({
         const result = await emitMeliInvoiceAction(orgSlug, saleId);
         if (!result.success) {
           setError(result.error);
+        } else if (result.accountingWarning) {
+          setError(
+            `Factura autorizada; contabilización pendiente: ${result.accountingWarning}`
+          );
         }
         router.refresh();
       } catch {
@@ -104,6 +108,10 @@ export function MeliInvoiceActions({
                   );
                   if (!result.success) {
                     setError(result.error);
+                  } else if (result.accountingWarning) {
+                    setError(
+                      `Factura autorizada; contabilización pendiente: ${result.accountingWarning}`
+                    );
                   }
                 } catch {
                   setError(

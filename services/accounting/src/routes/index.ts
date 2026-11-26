@@ -5,6 +5,7 @@ import cuentasRouter from "./cuentas.routes";
 import eventosRouter from "./eventos.routes";
 import informalEntriesRouter from "./informal-entries.routes";
 import librosRouter from "./libros.routes";
+import meliInternalRouter from "./meli-internal.routes";
 import tesoreriaRouter from "./tesoreria.routes";
 
 const router: ReturnType<typeof Router> = Router();
@@ -16,6 +17,8 @@ router.get("/health", (_req, res) => {
 
 // Todos los endpoints de negocio requieren autenticación
 router.use(authMiddleware);
+
+router.use("/internal/meli", meliInternalRouter);
 
 // Rutas implementadas en Semana 1
 router.use("/cuentas", cuentasRouter);

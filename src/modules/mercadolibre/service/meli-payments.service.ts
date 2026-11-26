@@ -15,6 +15,11 @@ import {
   serializeMeliPayment,
   voidMeliPaymentSchema,
 } from "../utils/payment-contract";
+import {
+  cancelMeliPaymentPreparation,
+  listMeliPaymentPreparations,
+  reverseMeliPaymentAccounting,
+} from "./meli-payment-preparations.service";
 
 const rolledBackCodes = new Set([
   "P0001",
@@ -285,19 +290,58 @@ export async function createMeliPayment(orgSlug: string, raw: unknown) {
 export async function voidMeliPayment(orgSlug: string, raw: unknown) {
   const input = voidMeliPaymentSchema.parse(raw);
   const ctx = await context(orgSlug, true);
-  const result = await Promise.resolve(
-    ctx.admin.rpc("void_mercadolibre_payment", {
-      p_org_id: ctx.orgId,
-      p_actor_id: ctx.actorId,
-      p_payment_id: input.paymentId,
-      p_reason: input.reason,
-    })
-  ).catch(() => {
-    throw new MeliConfirmationError(
-      "No se obtuvo respuesta de la anulación. Consultá el registro y reintentá la misma operación.",
-      false
+  const voidPayment = async () =>
+    await Promise.resolve(
+      ctx.admin.rpc("void_mercadolibre_payment", {
+        p_org_id: ctx.orgId,
+        p_actor_id: ctx.actorId,
+        p_payment_id: input.paymentId,
+        p_reason: input.reason,
+      })
+    ).catch(() => {
+      throw new MeliConfirmationError(
+        "No se obtuvo respuesta de la anulación. Consultá el registro y reintentá la misma operación.",
+        false
+      );
+    });
+  let result = await voidPayment();
+  if (
+    result.error?.message.includes(
+      "Cancelá la preparación contable antes de anular el cobro"
+    )
+  ) {
+    const preparations = await listMeliPaymentPreparations(
+      orgSlug,
+      input.paymentId
     );
-  });
+    const active = preparations.find((item) => item.status === "PREPARED");
+    if (!active) {
+      throw paymentError(result.error);
+    }
+    if (
+      active.components.some(
+        (component) => component.dispatchStatus === "UNCERTAIN"
+      )
+    ) {
+      throw new Error(
+        "Hay publicaciones contables pendientes de conciliación. Verificá o reintentá cada componente antes de anular."
+      );
+    }
+    if (
+      active.components.some(
+        (component) => component.dispatchStatus === "PUBLISHED"
+      )
+    ) {
+      await reverseMeliPaymentAccounting(
+        orgSlug,
+        input.paymentId,
+        input.reason
+      );
+    } else {
+      await cancelMeliPaymentPreparation(orgSlug, active.id);
+    }
+    result = await voidPayment();
+  }
   if (result.error) {
     throw paymentError(result.error);
   }

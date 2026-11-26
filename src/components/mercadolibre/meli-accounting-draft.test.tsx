@@ -11,11 +11,16 @@ vi.mock("@/modules/accounting/queries/queries.client", () => ({
 vi.mock("@/modules/mercadolibre/actions/meli-accounting-drafts.action", () => ({
   saveMeliAccountingDraftAction: vi.fn(),
 }));
+vi.mock(
+  "@/modules/mercadolibre/actions/meli-fiscal-accounting-history.action",
+  () => ({ getMeliFiscalAccountingSnapshotAction: vi.fn() })
+);
 
 const props = {
   orgSlug: "org",
   orgId: "org-id",
   paymentId: "payment-id",
+  saleId: "sale-id",
   currency: "USD" as const,
   history: [],
 };
@@ -68,5 +73,45 @@ describe("Meli accounting draft interface", () => {
     expect(markup).toContain("MERCADO_PAGO");
     expect(markup).toContain("AR_DEUDORES_VENTAS");
     expect(markup).toContain("No se generaron asientos");
+    expect(markup).not.toContain("Revisar propuesta monetaria");
+  });
+
+  it("offers a monetary review only for an active draft without publishing", () => {
+    const history = [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        version: 1,
+        active: true,
+        request_payload: {
+          breakdown: {
+            net: "80",
+            discount: "5",
+            commission: "10",
+            shipping: "5",
+          },
+          evidence: "",
+        },
+        gross_amount: "100.00",
+        currency: "USD" as const,
+        payment_date: "2026-11-21",
+        created_by: "00000000-0000-4000-8000-000000000002",
+        created_at: "2026-11-21T12:00:00Z",
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <MeliAccountingDraft {...props} editable history={history} />
+    );
+    expect(markup).toContain("Revisar propuesta monetaria");
+    expect(markup).not.toContain("Publicar");
+    const preparedMarkup = renderToStaticMarkup(
+      <MeliAccountingDraft
+        {...props}
+        editable={false}
+        history={history}
+        previewAvailable
+      />
+    );
+    expect(preparedMarkup).toContain("Revisar propuesta monetaria");
+    expect(preparedMarkup).not.toContain("Guardar borrador");
   });
 });

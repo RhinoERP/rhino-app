@@ -44,6 +44,22 @@ const selectClass =
 const NAME_SEPARATOR = /\s+/;
 const NON_DIGITS = /\D/g;
 
+function showSaleWarnings(
+  fiscalWarning: string | null,
+  accountingWarning: string | null
+) {
+  if (fiscalWarning) {
+    toast.warning(
+      `Venta registrada. No se completó la factura: ${fiscalWarning}`
+    );
+  }
+  if (accountingWarning) {
+    toast.warning(
+      `Venta registrada. Contabilización pendiente: ${accountingWarning}`
+    );
+  }
+}
+
 function BuyerFields({
   form,
   orgSlug,
@@ -617,11 +633,7 @@ export function MeliSaleForm({
           }
           return;
         }
-        if (result.fiscalWarning) {
-          toast.warning(
-            `Venta registrada. No se completó la factura: ${result.fiscalWarning}`
-          );
-        }
+        showSaleWarnings(result.fiscalWarning, result.accountingWarning);
         router.push(
           `/org/${orgSlug}/venta-directa/mercado-libre/${result.data.saleId}`
         );
