@@ -1,0 +1,15 @@
+# Progreso comercial del vendedor
+
+- Ruta: `/org/[orgSlug]/mi-progreso`. En la PWA móvil se llega desde Inicio → **Mi progreso**; en escritorio desde **Análisis → Progreso comercial**. Requiere conexión: no se guarda un snapshot sensible en el dispositivo.
+- El vendedor con permiso de ventas y membresía activa ve **solo sus datos**, aun si tiene `sales.read.all`. La vista del equipo y la edición de metas son exclusivas de `organization.admin`. El permiso `reports.manage` no da acceso al progreso de otros vendedores.
+- Los KPI reemplazan las cuatro palancas anteriores:
+  - **Facturación (ARS):** facturas emitidas vinculadas a ventas (`sales_orders.user_id`), autorizadas por ARCA o con número de factura manual y tipo `FACTURA_*`. Las ARCA se atribuyen al mes de autorización en Argentina; las manuales, a `sale_date`. Se incluyen facturas de anticipo y saldo, pero no notas de crédito ni ventas POS: es facturación bruta vinculada al vendedor mayorista.
+  - **Cantidad vendida:** ítems de ventas `STANDARD` con estado `CONFIRMED`, `DISPATCH`, `DELIVERED` o `INCOMPLETE`, agrupados por `sale_date`. Se separan unidades, kg, litros y bultos; `CAJA` se registra en unidades individuales y se muestra en cajas completas más unidades sueltas, según `units_per_box` del producto. Productos `MT` se muestran aparte como metros cuando los hay. Se excluyen ajustes y documentos de anticipo/saldo. La unidad de medida procede del catálogo actual (el ítem no guarda un snapshot histórico).
+  - **Clientes nuevos:** clientes distintos con su primera venta confirmada **del vendedor** en el mes, independientemente de quién tenga hoy asignado el cliente. **Cantidad de ventas:** comprobantes `STANDARD` confirmados del mes, sin contar anticipos ni saldos.
+  - **Visitas realizadas:** visitas del vendedor en `commercial_visits` con `checked_in_at` en la agenda del mes, sin incluir las solo planificadas. Las preventas offline se reflejan tras sincronizarse y confirmarse.
+- El administrador define metas independientes para cada KPI (y cada unidad de cantidad) en el mes actual o el siguiente. Se guardan en `seller_progress_goals.metric_targets`, sin sumar unidades incompatibles; `target_amount` refleja solo la meta de facturación. Las metas antiguas de cuatro palancas no se reinterpretan ni borran. Cada vendedor solo ve las propias.
+- La vista del administrador muestra la suma por KPI de todo el equipo. Si faltan las migraciones de objetivos, **el avance sigue disponible**, aparece un aviso y se ocultan los controles para guardar metas. Otros errores de lectura no se ocultan.
+
+## Migración pendiente
+
+Aplicar `supabase/migrations/20261127160000_seller_progress_goals.sql` (si aún falta) y luego **la migración nueva** `supabase/migrations/20261127170000_seller_progress_kpi_targets.sql` en el entorno correspondiente. Ninguna se aplicó desde esta sesión; no hacer push ni repetir migraciones ya ejecutadas. La migración de guardados de Reportes `20261127140000` ya fue aplicada por el usuario.

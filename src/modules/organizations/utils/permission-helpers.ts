@@ -71,6 +71,10 @@ function buildPermissionTooltip(
     }
   }
 
+  if (key === "reports.manage") {
+    return "Permite abrir, crear y compartir reportes. No concede acceso a los datos de ventas, cobranzas u otros módulos: esos permisos se asignan por separado.";
+  }
+
   if (resource === "pricelists") {
     if (key === "pricelists.read") {
       return "Permite ver solo las listas de precios creadas por el propio usuario.";
@@ -212,6 +216,7 @@ function humanizeResource(resource: string): string {
     treasury: "Tesorería",
     commissions: "Comisiones",
     accounting: "Contabilidad",
+    reports: "Reportes",
     quotes: "Presupuestos",
     distributor: "Distribuidores",
     mercadolibre: "MercadoLibre",
