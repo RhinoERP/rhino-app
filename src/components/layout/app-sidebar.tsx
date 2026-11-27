@@ -212,6 +212,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <ClockCounterClockwiseIcon weight="duotone" />,
           requiredPermission: ["sales.read.all", "sales.manage.all"],
         },
+        {
+          title: "Compras",
+          url: `/org/${orgSlug}/compras/historicas`,
+          icon: <ClockCounterClockwiseIcon weight="duotone" />,
+          requiredPermission: ["purchases.read.all", "purchases.manage.all"],
+        },
       ],
     },
     {
