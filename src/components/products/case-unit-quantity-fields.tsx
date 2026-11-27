@@ -1,11 +1,11 @@
 "use client";
 
-import { useId } from "react";
+import { type KeyboardEventHandler, useId, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  normalizeCaseUnitQuantity,
   splitCaseUnitQuantity,
+  tryNormalizeCaseUnitQuantity,
 } from "@/modules/inventory/utils/case-units";
 
 type CaseUnitQuantityFieldsProps = {
@@ -14,7 +14,19 @@ type CaseUnitQuantityFieldsProps = {
   onChange: (totalUnits: number) => void;
   disabled?: boolean;
   compact?: boolean;
+  onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
+  onBlur?: () => void;
 };
+
+function buildDraft(totalUnits: number, unitsPerBox: number) {
+  const quantity = splitCaseUnitQuantity(totalUnits, unitsPerBox);
+  return {
+    boxes: String(quantity.boxes),
+    units: String(quantity.units),
+    totalUnits,
+    unitsPerBox,
+  };
+}
 
 export function CaseUnitQuantityFields({
   totalUnits,
@@ -22,41 +34,38 @@ export function CaseUnitQuantityFields({
   onChange,
   disabled = false,
   compact = false,
+  onKeyDown,
+  onBlur,
 }: CaseUnitQuantityFieldsProps) {
   const id = useId();
-  const quantity = splitCaseUnitQuantity(totalUnits, unitsPerBox);
+  const [draft, setDraft] = useState(() => buildDraft(totalUnits, unitsPerBox));
+  // Follow external quantity changes without replacing a valid in-progress
+  // entry (e.g. 6 boxes + 13 units) with its normalized representation mid-type.
+  if (draft.totalUnits !== totalUnits || draft.unitsPerBox !== unitsPerBox) {
+    setDraft(buildDraft(totalUnits, unitsPerBox));
+  }
   const inputClassName = compact ? "h-8 w-full" : "w-full";
 
-  const updateBoxes = (value: string) => {
-    const boxes = Number(value || 0);
-    if (
-      !Number.isSafeInteger(boxes) ||
-      boxes < 0 ||
-      !Number.isSafeInteger(boxes * unitsPerBox + quantity.units)
-    ) {
+  const update = (field: "boxes" | "units", value: string) => {
+    const next = { ...draft, [field]: value };
+    const nextTotal = tryNormalizeCaseUnitQuantity(
+      { boxes: Number(next.boxes), units: Number(next.units) },
+      unitsPerBox
+    );
+    if (nextTotal === null) {
       return;
     }
-    onChange(
-      normalizeCaseUnitQuantity({ boxes, units: quantity.units }, unitsPerBox)
-    );
+    setDraft({ ...next, totalUnits: nextTotal });
+    onChange(nextTotal);
   };
 
-  const updateUnits = (value: string) => {
-    const units = Number(value || 0);
-    if (
-      !Number.isSafeInteger(units) ||
-      units < 0 ||
-      !Number.isSafeInteger(quantity.boxes * unitsPerBox + units)
-    ) {
-      return;
-    }
-    onChange(
-      normalizeCaseUnitQuantity({ boxes: quantity.boxes, units }, unitsPerBox)
-    );
+  const normalizeOnBlur = () => {
+    setDraft(buildDraft(draft.totalUnits, unitsPerBox));
+    onBlur?.();
   };
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid min-w-0 grid-cols-2 gap-2">
       <div className="space-y-1">
         <Label
           className={compact ? "text-xs" : undefined}
@@ -71,11 +80,13 @@ export function CaseUnitQuantityFields({
           id={`${id}-boxes`}
           inputMode="numeric"
           min={0}
-          onChange={(event) => updateBoxes(event.target.value)}
+          onBlur={normalizeOnBlur}
+          onChange={(event) => update("boxes", event.target.value)}
+          onKeyDown={onKeyDown}
           placeholder="0"
           step="1"
           type="number"
-          value={quantity.boxes || ""}
+          value={draft.boxes}
         />
       </div>
       <div className="space-y-1">
@@ -92,11 +103,13 @@ export function CaseUnitQuantityFields({
           id={`${id}-units`}
           inputMode="numeric"
           min={0}
-          onChange={(event) => updateUnits(event.target.value)}
+          onBlur={normalizeOnBlur}
+          onChange={(event) => update("units", event.target.value)}
+          onKeyDown={onKeyDown}
           placeholder="0"
           step="1"
           type="number"
-          value={quantity.units || ""}
+          value={draft.units}
         />
       </div>
     </div>

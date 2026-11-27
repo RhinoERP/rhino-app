@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
+import { CaseUnitQuantitySummary } from "@/components/products/case-unit-quantity-summary";
 import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import {
   AlertDialog,
@@ -83,7 +84,6 @@ import type { Customer } from "@/modules/customers/types";
 import {
   getPricePerIndividualUnit,
   splitCaseUnitQuantity,
-  tryNormalizeCaseUnitQuantity,
 } from "@/modules/inventory/utils/case-units";
 import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
@@ -108,6 +108,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
+import { repriceSaleItem } from "@/modules/sales/utils/reprice-sale-item";
 import {
   convertToBaseUnits,
   getAvailableUnits,
@@ -240,7 +241,10 @@ const updateItemUnitPrice = (item: ItemState, unitPrice: number): ItemState => {
   return {
     ...item,
     unitPrice,
-    basePrice: isWeightOrVolume ? unitPrice : item.basePrice,
+    basePrice:
+      isWeightOrVolume || item.unitOfMeasure === "CAJA"
+        ? unitPrice
+        : item.basePrice,
     pricePerKg: isWeightOrVolume ? unitPrice : item.pricePerKg,
   };
 };
@@ -631,9 +635,6 @@ export function PreSaleForm({
     Map<string, Map<string, PriceListItemBasic>>
   >(new Map());
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
-  const [selectedCaseQuantity, setSelectedCaseQuantity] = useState("");
-  const [selectedLooseUnitQuantity, setSelectedLooseUnitQuantity] =
-    useState("");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
@@ -919,12 +920,7 @@ export function PreSaleForm({
           return item;
         }
 
-        // Only update if price actually changed
-        if (Math.abs(item.unitPrice - adjustedPrice) > 0.01) {
-          return updateItemUnitPrice(item, adjustedPrice);
-        }
-
-        return item;
+        return repriceSaleItem(item, adjustedPrice);
       })
     );
   }, [productPrices, items.length]);
@@ -1264,17 +1260,9 @@ export function PreSaleForm({
     }
 
     const isCaseProduct = product.unitOfMeasure === "CAJA";
-    const caseBoxes = Number(selectedCaseQuantity);
-    const looseUnits = Number(selectedLooseUnitQuantity);
-    const invalidCaseQuantity =
-      !Number.isInteger(caseBoxes) ||
-      caseBoxes < 0 ||
-      !Number.isInteger(looseUnits) ||
-      looseUnits < 0 ||
-      caseBoxes + looseUnits <= 0;
-    const invalidQuantity = isCaseProduct
-      ? invalidCaseQuantity
-      : !selectedQuantity || selectedQuantity <= 0;
+    const invalidQuantity =
+      selectedQuantity <= 0 ||
+      (isCaseProduct && !Number.isSafeInteger(selectedQuantity));
     if (invalidQuantity) {
       setError("La cantidad debe ser mayor a 0");
       return;
@@ -1282,15 +1270,8 @@ export function PreSaleForm({
 
     const listedPrice = productPrices.get(product.id) ?? product.price;
     const baseQuantity = isCaseProduct
-      ? tryNormalizeCaseUnitQuantity(
-          { boxes: caseBoxes, units: looseUnits },
-          product.unitsPerBox ?? 0
-        )
+      ? selectedQuantity
       : convertToBaseUnits(selectedQuantity, inputUnit, product);
-    if (baseQuantity === null) {
-      setError("Ingresá una cantidad válida en cajas y unidades");
-      return;
-    }
     const adjustedPrice = isCaseProduct
       ? getPricePerIndividualUnit(listedPrice, product.unitsPerBox ?? 0)
       : listedPrice;
@@ -1389,8 +1370,6 @@ export function PreSaleForm({
 
     setSelectedProductId("");
     setSelectedQuantity(0);
-    setSelectedCaseQuantity("");
-    setSelectedLooseUnitQuantity("");
     setInputUnit("UNITS");
     setError(null);
   };
@@ -2745,6 +2724,7 @@ export function PreSaleForm({
                                     keywords={[product.name, product.sku]}
                                     onSelect={() => {
                                       setSelectedProductId(product.id);
+                                      setSelectedQuantity(0);
                                       setIsProductPickerOpen(false);
                                     }}
                                     value={product.id}
@@ -2820,37 +2800,17 @@ export function PreSaleForm({
                     )}
 
                   {selectedProduct?.unitOfMeasure === "CAJA" ? (
-                    <div className="grid w-full grid-cols-2 gap-3 sm:w-64">
-                      <div className="space-y-2">
-                        <Label htmlFor="case-quantity">Cajas</Label>
-                        <Input
-                          id="case-quantity"
-                          inputMode="numeric"
-                          min={0}
-                          onChange={(event) =>
-                            setSelectedCaseQuantity(event.target.value)
-                          }
-                          placeholder="0"
-                          step="1"
-                          type="number"
-                          value={selectedCaseQuantity}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="loose-unit-quantity">Unidades</Label>
-                        <Input
-                          id="loose-unit-quantity"
-                          inputMode="numeric"
-                          min={0}
-                          onChange={(event) =>
-                            setSelectedLooseUnitQuantity(event.target.value)
-                          }
-                          placeholder="0"
-                          step="1"
-                          type="number"
-                          value={selectedLooseUnitQuantity}
-                        />
-                      </div>
+                    <div className="w-full sm:w-64">
+                      <CaseUnitQuantityFields
+                        key={selectedProductId}
+                        onChange={setSelectedQuantity}
+                        totalUnits={
+                          Number.isSafeInteger(selectedQuantity)
+                            ? Math.max(0, selectedQuantity)
+                            : 0
+                        }
+                        unitsPerBox={selectedProduct.unitsPerBox ?? 0}
+                      />
                     </div>
                   ) : (
                     <div className="w-full space-y-2 sm:flex-1">
@@ -2961,7 +2921,7 @@ export function PreSaleForm({
                       );
                       const displayedUnitPrice =
                         item.unitOfMeasure === "CAJA" && item.unitsPerBox
-                          ? item.unitPrice * item.unitsPerBox
+                          ? truncateMoney(item.unitPrice * item.unitsPerBox)
                           : item.unitPrice;
                       const unitPriceValue =
                         displayedUnitPrice && !Number.isNaN(displayedUnitPrice)
@@ -3045,7 +3005,12 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid min-w-0 gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
+                          className={cn(
+                            "grid min-w-0 gap-3 px-4 py-3",
+                            caseQuantity
+                              ? "grid-cols-2 items-end sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.4fr)_minmax(110px,1fr)_minmax(80px,0.7fr)_minmax(120px,1fr)_auto]"
+                              : "sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
+                          )}
                           key={item.id}
                         >
                           {/*
@@ -3058,7 +3023,13 @@ export function PreSaleForm({
                         - Subtotal
                         - Remove action
                       */}
-                          <div className="min-w-0 overflow-hidden">
+                          <div
+                            className={cn(
+                              "min-w-0 overflow-hidden",
+                              caseQuantity &&
+                                "col-span-2 sm:col-span-3 xl:col-span-5"
+                            )}
+                          >
                             <div className="min-w-0 space-y-1">
                               <p className="break-words font-medium leading-snug">
                                 {item.name}
@@ -3071,13 +3042,23 @@ export function PreSaleForm({
                             </div>
                             <p className="break-all text-muted-foreground text-sm">
                               SKU {item.sku}
+                              {caseQuantity
+                                ? ` · ${item.unitsPerBox} unidades por caja`
+                                : ""}
                             </p>
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad
-                            </span>
+                          <div
+                            className={cn(
+                              "flex flex-col gap-1",
+                              caseQuantity && "col-span-2 sm:col-span-1"
+                            )}
+                          >
+                            {!caseQuantity && (
+                              <span className="text-muted-foreground text-xs">
+                                Cantidad
+                              </span>
+                            )}
                             {caseQuantity && item.unitsPerBox ? (
                               <CaseUnitQuantityFields
                                 compact
@@ -3110,34 +3091,36 @@ export function PreSaleForm({
                             )}
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              {measureLabel}
-                            </span>
-                            {itemIsWeightOrVolume ? (
-                              <Input
-                                className="h-8 w-full"
-                                inputMode="decimal"
-                                min={0}
-                                onChange={(event) =>
-                                  handleMeasureInputChange(
-                                    item.id,
-                                    event.target.value
-                                  )
-                                }
-                                placeholder="0"
-                                step="0.01"
-                                type="number"
-                                value={
-                                  !measureValue || Number.isNaN(measureValue)
-                                    ? ""
-                                    : measureValue
-                                }
-                              />
-                            ) : (
-                              <span className="text-sm">{unitLabel}</span>
-                            )}
-                          </div>
+                          {!caseQuantity && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                {measureLabel}
+                              </span>
+                              {itemIsWeightOrVolume ? (
+                                <Input
+                                  className="h-8 w-full"
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleMeasureInputChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !measureValue || Number.isNaN(measureValue)
+                                      ? ""
+                                      : measureValue
+                                  }
+                                />
+                              ) : (
+                                <span className="text-sm">{unitLabel}</span>
+                              )}
+                            </div>
+                          )}
 
                           <div className="flex flex-col gap-1">
                             <span className="text-muted-foreground text-xs">
@@ -3323,12 +3306,17 @@ export function PreSaleForm({
                     </span>
                     <span>{totals.totalItems}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Unidades totales
-                    </span>
-                    <span>{totals.totalUnits}</span>
-                  </div>
+                  <CaseUnitQuantitySummary
+                    items={items
+                      .filter((item) => item.type === "product")
+                      .map((item) => ({
+                        productId: item.productId ?? item.id,
+                        name: item.name,
+                        quantity: item.quantity,
+                        unitOfMeasure: item.unitOfMeasure,
+                        unitsPerBox: item.unitsPerBox,
+                      }))}
+                  />
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>

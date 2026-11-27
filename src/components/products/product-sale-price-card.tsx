@@ -222,7 +222,9 @@ export function ProductSalePriceCard({
           </div>
           <div className="text-right">
             <p className="font-semibold text-2xl">{formatMoney(salePrice)}</p>
-            <p className="text-muted-foreground text-sm">Por unidad</p>
+            <p className="text-muted-foreground text-sm">
+              {product.unit_of_measure === "CAJA" ? "Por caja" : "Por unidad"}
+            </p>
           </div>
         </CardHeader>
       </Card>
@@ -245,7 +247,11 @@ export function ProductSalePriceCard({
                 <p className="font-semibold text-2xl">
                   {formatMoney(salePrice)}
                 </p>
-                <p className="text-muted-foreground text-sm">Por unidad</p>
+                <p className="text-muted-foreground text-sm">
+                  {product.unit_of_measure === "CAJA"
+                    ? "Por caja"
+                    : "Por unidad"}
+                </p>
               </div>
             </CardHeader>
           </Card>

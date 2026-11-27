@@ -2,6 +2,7 @@
 
 import { FloppyDiskIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
+import { CaseUnitQuantitySummary } from "@/components/products/case-unit-quantity-summary";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -161,14 +162,15 @@ export function PurchaseSummary({
             <span className="text-sm">{items.length}</span>
           </div>
 
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground text-sm">
-              Unidades totales
-            </span>
-            <span className="text-sm">
-              {items.reduce((sum, item) => sum + item.quantity, 0)}
-            </span>
-          </div>
+          <CaseUnitQuantitySummary
+            items={items.map((item) => ({
+              productId: item.product_id,
+              name: item.product_name,
+              quantity: item.quantity,
+              unitOfMeasure: item.unit_of_measure,
+              unitsPerBox: item.units_per_box,
+            }))}
+          />
         </div>
 
         <Separator />

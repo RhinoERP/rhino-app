@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { FiscalExchangeRateInput } from "@/components/arca/fiscal-exchange-rate-input";
 import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
+import { CaseUnitQuantitySummary } from "@/components/products/case-unit-quantity-summary";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { SalesAdvanceCard } from "@/components/sales/detail/sales-advance-card";
 import { RemittanceMaskPrintModal } from "@/components/sales/remittance-mask-print-modal";
@@ -97,7 +98,6 @@ import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-in
 import {
   getPricePerIndividualUnit,
   splitCaseUnitQuantity,
-  tryNormalizeCaseUnitQuantity,
 } from "@/modules/inventory/utils/case-units";
 import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
@@ -1018,9 +1018,6 @@ export function SaleDetail({
   );
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
-  const [selectedCaseQuantity, setSelectedCaseQuantity] = useState("");
-  const [selectedLooseUnitQuantity, setSelectedLooseUnitQuantity] =
-    useState("");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -1726,7 +1723,6 @@ export function SaleDetail({
     );
   };
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Adds either base-unit or package quantities while preserving pricing and tax snapshots.
   const handleAddProduct = () => {
     if (!selectedProductId) {
       setError("Selecciona un producto para agregarlo");
@@ -1741,32 +1737,15 @@ export function SaleDetail({
     }
 
     const isCaseProduct = product.unitOfMeasure === "CAJA";
-    const caseBoxes = Number(selectedCaseQuantity);
-    const looseUnits = Number(selectedLooseUnitQuantity);
-    const invalidCaseQuantity =
-      !Number.isInteger(caseBoxes) ||
-      caseBoxes < 0 ||
-      !Number.isInteger(looseUnits) ||
-      looseUnits < 0 ||
-      caseBoxes + looseUnits <= 0;
-    const invalidQuantity = isCaseProduct
-      ? invalidCaseQuantity
-      : !selectedQuantity || selectedQuantity <= 0;
+    const invalidQuantity =
+      selectedQuantity <= 0 ||
+      (isCaseProduct && !Number.isSafeInteger(selectedQuantity));
     if (invalidQuantity) {
       setError("La cantidad debe ser mayor a 0");
       return;
     }
 
-    const quantity = isCaseProduct
-      ? tryNormalizeCaseUnitQuantity(
-          { boxes: caseBoxes, units: looseUnits },
-          product.unitsPerBox ?? 0
-        )
-      : selectedQuantity;
-    if (quantity === null) {
-      setError("Ingresá una cantidad válida en cajas y unidades");
-      return;
-    }
+    const quantity = selectedQuantity;
     const listedUnitPrice = resolveAppliedUnitPrice(product);
     const appliedUnitPrice = isCaseProduct
       ? getPricePerIndividualUnit(listedUnitPrice, product.unitsPerBox ?? 0)
@@ -1827,8 +1806,6 @@ export function SaleDetail({
 
     setSelectedProductId("");
     setSelectedQuantity(0);
-    setSelectedCaseQuantity("");
-    setSelectedLooseUnitQuantity("");
     setError(null);
   };
 
@@ -3671,6 +3648,7 @@ export function SaleDetail({
                                       ]}
                                       onSelect={() => {
                                         setSelectedProductId(product.id);
+                                        setSelectedQuantity(0);
                                         setIsProductPickerOpen(false);
                                       }}
                                       value={product.id}
@@ -3724,38 +3702,12 @@ export function SaleDetail({
                     </div>
 
                     {selectedProduct?.unitOfMeasure === "CAJA" ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1.5">
-                          <Label htmlFor="case-quantity">Cajas</Label>
-                          <Input
-                            id="case-quantity"
-                            inputMode="numeric"
-                            min={0}
-                            onChange={(event) =>
-                              setSelectedCaseQuantity(event.target.value)
-                            }
-                            placeholder="0"
-                            step="1"
-                            type="number"
-                            value={selectedCaseQuantity}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="loose-unit-quantity">Unidades</Label>
-                          <Input
-                            id="loose-unit-quantity"
-                            inputMode="numeric"
-                            min={0}
-                            onChange={(event) =>
-                              setSelectedLooseUnitQuantity(event.target.value)
-                            }
-                            placeholder="0"
-                            step="1"
-                            type="number"
-                            value={selectedLooseUnitQuantity}
-                          />
-                        </div>
-                      </div>
+                      <CaseUnitQuantityFields
+                        key={selectedProductId}
+                        onChange={setSelectedQuantity}
+                        totalUnits={selectedQuantity}
+                        unitsPerBox={selectedProduct.unitsPerBox ?? 0}
+                      />
                     ) : (
                       <div className="space-y-1.5">
                         <Label htmlFor="quantity">Cantidad</Label>
@@ -3837,7 +3789,7 @@ export function SaleDetail({
                       } else {
                         const displayedUnitPrice =
                           item.unitOfMeasure === "CAJA" && item.unitsPerBox
-                            ? item.unitPrice * item.unitsPerBox
+                            ? truncateMoney(item.unitPrice * item.unitsPerBox)
                             : item.unitPrice;
                         unitPriceValue =
                           !displayedUnitPrice ||
@@ -3950,13 +3902,32 @@ export function SaleDetail({
                               ) : null}
                             </div>
                             <ItemExtrasList extras={item.extras} />
+                            {caseQuantity && (
+                              <p className="text-muted-foreground text-xs">
+                                {item.unitsPerBox} unidades por caja
+                              </p>
+                            )}
                           </div>
 
-                          <div className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-[minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(148px,_max-content)_auto] sm:items-end">
-                            <div className="flex flex-col gap-1">
-                              <span className="text-muted-foreground text-xs">
-                                {caseQuantity ? "Cantidad" : "Cantidad (uds)"}
-                              </span>
+                          <div
+                            className={cn(
+                              "grid min-w-0 gap-3 sm:col-span-2",
+                              caseQuantity
+                                ? "grid-cols-2 items-end sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.4fr)_minmax(110px,1fr)_minmax(80px,0.7fr)_minmax(120px,1fr)_auto]"
+                                : "sm:grid-cols-[minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(148px,_max-content)_auto] sm:items-end"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "flex flex-col gap-1",
+                                caseQuantity && "col-span-2 sm:col-span-1"
+                              )}
+                            >
+                              {!caseQuantity && (
+                                <span className="text-muted-foreground text-xs">
+                                  Cantidad (uds)
+                                </span>
+                              )}
                               {caseQuantity && item.unitsPerBox ? (
                                 <CaseUnitQuantityFields
                                   compact
@@ -4018,46 +3989,47 @@ export function SaleDetail({
                               />
                             </div>
 
-                            {showWeightInput ? (
-                              <div className="flex flex-col gap-1">
-                                <span className="text-muted-foreground text-xs">
-                                  {`Peso (${unitOfMeasureLabels[item.unitOfMeasure]})`}
-                                </span>
-                                <Input
-                                  className="h-8 w-full min-w-[80px]"
-                                  disabled={!canEditFiscalFields}
-                                  inputMode="decimal"
-                                  min={0}
-                                  onChange={(event) =>
-                                    handleWeightChange(
-                                      item.id,
-                                      event.target.value
-                                    )
-                                  }
-                                  placeholder="0"
-                                  step="0.01"
-                                  type="number"
-                                  value={
-                                    !item.weightQuantity ||
-                                    item.weightQuantity === null ||
-                                    Number.isNaN(item.weightQuantity)
-                                      ? ""
-                                      : item.weightQuantity
-                                  }
-                                />
-                              </div>
-                            ) : (
-                              <div className="flex flex-col gap-1">
-                                <span className="text-muted-foreground text-xs">
-                                  Peso
-                                </span>
-                                <Input
-                                  className="h-8 w-full"
-                                  disabled
-                                  value="No aplica"
-                                />
-                              </div>
-                            )}
+                            {!caseQuantity &&
+                              (showWeightInput ? (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-muted-foreground text-xs">
+                                    {`Peso (${unitOfMeasureLabels[item.unitOfMeasure]})`}
+                                  </span>
+                                  <Input
+                                    className="h-8 w-full min-w-[80px]"
+                                    disabled={!canEditFiscalFields}
+                                    inputMode="decimal"
+                                    min={0}
+                                    onChange={(event) =>
+                                      handleWeightChange(
+                                        item.id,
+                                        event.target.value
+                                      )
+                                    }
+                                    placeholder="0"
+                                    step="0.01"
+                                    type="number"
+                                    value={
+                                      !item.weightQuantity ||
+                                      item.weightQuantity === null ||
+                                      Number.isNaN(item.weightQuantity)
+                                        ? ""
+                                        : item.weightQuantity
+                                    }
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-muted-foreground text-xs">
+                                    Peso
+                                  </span>
+                                  <Input
+                                    className="h-8 w-full"
+                                    disabled
+                                    value="No aplica"
+                                  />
+                                </div>
+                              ))}
 
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
@@ -4237,12 +4209,17 @@ export function SaleDetail({
                     </span>
                     <span>{items.length}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Unidades totales
-                    </span>
-                    <span>{totals.totalUnits}</span>
-                  </div>
+                  <CaseUnitQuantitySummary
+                    items={items
+                      .filter((item) => item.type === "product")
+                      .map((item) => ({
+                        productId: item.productId ?? item.id,
+                        name: item.name,
+                        quantity: item.quantity,
+                        unitOfMeasure: item.unitOfMeasure,
+                        unitsPerBox: item.unitsPerBox,
+                      }))}
+                  />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Peso estimado</span>
                     <span>

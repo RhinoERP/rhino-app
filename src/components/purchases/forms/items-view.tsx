@@ -20,6 +20,7 @@ import type { PurchaseItem } from "@/hooks/use-purchase-form";
 import type { VariantMeta } from "@/hooks/use-variant-loader";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
@@ -306,13 +307,15 @@ function NonVariantItemRow({
       <div className="flex items-center gap-1">
         <span className="text-sm">$</span>
         <Input
-          className="h-8 w-20"
+          className="h-8 w-full"
           min={0}
           onChange={handleNumericChange("unitCost")}
           placeholder="0.00"
           step="0.01"
           type="number"
-          value={item.unit_cost ? item.unit_cost * unitsPerBox : ""}
+          value={
+            item.unit_cost ? truncateMoney(item.unit_cost * unitsPerBox) : ""
+          }
         />
       </div>
     );
@@ -350,8 +353,20 @@ function NonVariantItemRow({
 
   return (
     <div className="px-4 py-3" key={`${item.product_id}-${index}`}>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center">
-        <div className="min-w-0">
+      <div
+        className={cn(
+          "grid gap-3",
+          isCaseProduct
+            ? "grid-cols-2 items-end sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.4fr)_minmax(110px,1fr)_minmax(80px,0.7fr)_minmax(120px,1fr)_auto]"
+            : "sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+        )}
+      >
+        <div
+          className={cn(
+            "min-w-0",
+            isCaseProduct && "col-span-2 sm:col-span-3 xl:col-span-5"
+          )}
+        >
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium">{item.product_name}</p>
             {product?.brand ? (
@@ -362,20 +377,23 @@ function NonVariantItemRow({
           </div>
           <p className="text-muted-foreground text-sm">
             SKU {product?.sku ?? "N/A"}
+            {isCaseProduct ? ` · ${unitsPerBox} unidades por caja` : ""}
           </p>
         </div>
 
-        <div className="flex flex-col gap-1">
+        <div
+          className={cn(
+            "flex flex-col gap-1",
+            isCaseProduct && "col-span-2 sm:col-span-1"
+          )}
+        >
           {isCaseProduct && caseQuantity ? (
-            <>
-              <span className="text-muted-foreground text-xs">Cantidad</span>
-              <CaseUnitQuantityFields
-                compact
-                onChange={(quantity) => onUpdateQuantity(index, quantity)}
-                totalUnits={item.quantity}
-                unitsPerBox={unitsPerBox ?? 0}
-              />
-            </>
+            <CaseUnitQuantityFields
+              compact
+              onChange={(quantity) => onUpdateQuantity(index, quantity)}
+              totalUnits={item.quantity}
+              unitsPerBox={unitsPerBox ?? 0}
+            />
           ) : (
             <>
               <span className="text-muted-foreground text-xs">Cantidad</span>
@@ -393,10 +411,14 @@ function NonVariantItemRow({
           )}
         </div>
 
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">{measureLabel}</span>
-          <span className="text-sm">{measureDisplay}</span>
-        </div>
+        {!isCaseProduct && (
+          <div className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-xs">
+              {measureLabel}
+            </span>
+            <span className="text-sm">{measureDisplay}</span>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <span className="text-muted-foreground text-xs">

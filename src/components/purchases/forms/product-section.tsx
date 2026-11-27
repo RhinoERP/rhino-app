@@ -2,6 +2,7 @@
 
 import { CaretUpDownIcon } from "@phosphor-icons/react";
 import { Check } from "lucide-react";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -39,8 +40,6 @@ type ProductSectionProps = {
   selectButtonLabel: string;
   inputUnit: InputUnit;
   quantity: number | string;
-  caseQuantity: string;
-  looseUnitQuantity: string;
   isAddDisabled: boolean;
   isLoadingProducts: boolean;
   isOpen: boolean;
@@ -48,8 +47,6 @@ type ProductSectionProps = {
   onSelectProduct: (productId: string) => void;
   onUnitChange: (unit: InputUnit) => void;
   onQuantityChange: (value: string) => void;
-  onCaseQuantityChange: (value: string) => void;
-  onLooseUnitQuantityChange: (value: string) => void;
   onQuantityKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   onAddItem: () => void;
 };
@@ -62,8 +59,6 @@ export function ProductSection({
   selectButtonLabel,
   inputUnit,
   quantity,
-  caseQuantity,
-  looseUnitQuantity,
   isAddDisabled,
   isLoadingProducts,
   isOpen,
@@ -71,8 +66,6 @@ export function ProductSection({
   onSelectProduct,
   onUnitChange,
   onQuantityChange,
-  onCaseQuantityChange,
-  onLooseUnitQuantityChange,
   onQuantityKeyDown,
   onAddItem,
 }: ProductSectionProps) {
@@ -197,39 +190,16 @@ export function ProductSection({
         )}
 
       {!showProductConditionals && isCaseProduct && (
-        <div className="grid w-full grid-cols-2 gap-3 sm:w-64">
-          <div className="space-y-2">
-            <Label htmlFor="case-quantity">Cajas</Label>
-            <Input
-              id="case-quantity"
-              inputMode="numeric"
-              min="0"
-              onChange={(event) => onCaseQuantityChange(event.target.value)}
-              onKeyDown={onQuantityKeyDown}
-              placeholder="0"
-              step="1"
-              type="number"
-              value={caseQuantity}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="loose-unit-quantity">Unidades</Label>
-            <Input
-              id="loose-unit-quantity"
-              inputMode="numeric"
-              min="0"
-              onChange={(event) =>
-                onLooseUnitQuantityChange(event.target.value)
-              }
-              onKeyDown={onQuantityKeyDown}
-              placeholder="0"
-              step="1"
-              type="number"
-              value={looseUnitQuantity}
-            />
-          </div>
-          <p className="col-span-2 text-muted-foreground text-xs">
-            La cantidad se normaliza según las unidades por caja del producto.
+        <div className="w-full space-y-2 sm:w-64">
+          <CaseUnitQuantityFields
+            key={selectedProductId}
+            onChange={(total) => onQuantityChange(String(total))}
+            onKeyDown={onQuantityKeyDown}
+            totalUnits={Number(quantity) || 0}
+            unitsPerBox={selectedProduct?.units_per_box ?? 0}
+          />
+          <p className="text-muted-foreground text-xs">
+            {selectedProduct?.units_per_box} unidades por caja.
           </p>
         </div>
       )}

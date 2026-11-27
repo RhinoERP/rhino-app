@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  getPricePerIndividualUnit,
-  tryNormalizeCaseUnitQuantity,
-} from "@/modules/inventory/utils/case-units";
+import { getPricePerIndividualUnit } from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { InputUnit } from "@/modules/purchases/utils/purchase-calculations";
 import {
@@ -221,15 +218,11 @@ function resetPurchaseSelection(params: {
   setSelectedProductId: (value: string) => void;
   setOpenProduct: (value: boolean) => void;
   setQuantity: (value: number | string) => void;
-  setCaseQuantity: (value: string) => void;
-  setLooseUnitQuantity: (value: string) => void;
   setInputUnit: (value: InputUnit) => void;
 }) {
   params.setSelectedProductId("");
   params.setOpenProduct(false);
   params.setQuantity("");
-  params.setCaseQuantity("");
-  params.setLooseUnitQuantity("");
   params.setInputUnit("UNITS");
 }
 
@@ -242,8 +235,6 @@ export function useSelectionState(
 ) {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [quantity, setQuantity] = useState<number | string>("");
-  const [caseQuantity, setCaseQuantity] = useState("");
-  const [looseUnitQuantity, setLooseUnitQuantity] = useState("");
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [openProduct, setOpenProduct] = useState(false);
 
@@ -265,29 +256,25 @@ export function useSelectionState(
     typeof quantity === "string" ? Number.parseFloat(quantity) : quantity;
 
   const isCaseProduct = selectedProduct?.unit_of_measure === "CAJA";
-  const parsedCaseQuantity = Number(caseQuantity);
-  const parsedLooseUnitQuantity = Number(looseUnitQuantity);
-  const normalizedCaseQuantity = tryNormalizeCaseUnitQuantity(
-    { boxes: parsedCaseQuantity, units: parsedLooseUnitQuantity },
-    selectedProduct?.units_per_box
-  );
   const isNonVariantQuantityInvalid =
     !selectedProduct?.has_variants &&
     (isCaseProduct
-      ? normalizedCaseQuantity === null || normalizedCaseQuantity <= 0
+      ? !Number.isSafeInteger(parsedQuantity) || parsedQuantity <= 0
       : !quantity || Number.isNaN(parsedQuantity) || parsedQuantity <= 0);
 
   const isAddDisabled = !selectedProductId || isNonVariantQuantityInvalid;
 
+  const selectProduct = (productId: string) => {
+    setSelectedProductId(productId);
+    setQuantity("");
+    setInputUnit("UNITS");
+  };
+
   return {
     selectedProductId,
-    setSelectedProductId,
+    setSelectedProductId: selectProduct,
     quantity,
     setQuantity,
-    caseQuantity,
-    setCaseQuantity,
-    looseUnitQuantity,
-    setLooseUnitQuantity,
     inputUnit,
     setInputUnit,
     openProduct,
@@ -366,32 +353,24 @@ export function useItemManagement(
 type AddItemHandlerProps = {
   selectedProduct: ProductWithPrice | undefined;
   quantity: number | string;
-  caseQuantity: string;
-  looseUnitQuantity: string;
   inputUnit: InputUnit;
   availableUnits: InputUnit[];
   onAddItem: (item: PurchaseItem) => void;
   setSelectedProductId: (value: string) => void;
   setOpenProduct: (value: boolean) => void;
   setQuantity: (value: number | string) => void;
-  setCaseQuantity: (value: string) => void;
-  setLooseUnitQuantity: (value: string) => void;
   setInputUnit: (value: InputUnit) => void;
 };
 
 export function useAddItemHandler({
   selectedProduct,
   quantity,
-  caseQuantity,
-  looseUnitQuantity,
   inputUnit,
   availableUnits,
   onAddItem,
   setSelectedProductId,
   setOpenProduct,
   setQuantity,
-  setCaseQuantity,
-  setLooseUnitQuantity,
   setInputUnit,
 }: AddItemHandlerProps) {
   useEffect(() => {
@@ -412,21 +391,12 @@ export function useAddItemHandler({
     }
 
     const isCaseProduct = selectedProduct.unit_of_measure === "CAJA";
-    const normalizedQuantity = isCaseProduct
-      ? tryNormalizeCaseUnitQuantity(
-          {
-            boxes: Number(caseQuantity),
-            units: Number(looseUnitQuantity),
-          },
-          selectedProduct.units_per_box ?? 0
-        )
-      : quantity;
-    if (normalizedQuantity === null) {
+    if (isCaseProduct && !Number.isSafeInteger(Number(quantity))) {
       return;
     }
     const newItem = addPurchaseItem(
       selectedProduct,
-      normalizedQuantity,
+      quantity,
       isCaseProduct ? "UNITS" : inputUnit
     );
 
@@ -439,8 +409,6 @@ export function useAddItemHandler({
       setSelectedProductId,
       setOpenProduct,
       setQuantity,
-      setCaseQuantity,
-      setLooseUnitQuantity,
       setInputUnit,
     });
   };

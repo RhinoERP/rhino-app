@@ -1,6 +1,7 @@
 "use client";
 
 import { ClipboardTextIcon } from "@phosphor-icons/react";
+import { CaseUnitQuantitySummary } from "@/components/products/case-unit-quantity-summary";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -67,7 +68,6 @@ export function PurchaseDetailSummary({
     (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
     0
   );
-  const totalUnits = items.reduce((sum, item) => sum + item.unit_quantity, 0);
   const totalWeight = items.reduce(
     (sum, item) => sum + (item.total_weight_kg ?? 0),
     0
@@ -129,10 +129,18 @@ export function PurchaseDetailSummary({
                 </span>
                 <span>{items.length}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Unidades totales</span>
-                <span>{totalUnits}</span>
-              </div>
+              <CaseUnitQuantitySummary
+                items={items.map((item) => ({
+                  productId: item.product_id,
+                  name: item.product_name,
+                  quantity:
+                    item.unit_of_measure === "CAJA"
+                      ? item.quantity
+                      : item.unit_quantity,
+                  unitOfMeasure: item.unit_of_measure,
+                  unitsPerBox: item.units_per_box,
+                }))}
+              />
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Peso total</span>
                 <span>

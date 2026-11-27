@@ -49,7 +49,6 @@ import type { Category } from "@/modules/categories/types";
 import {
   getPricePerIndividualUnit,
   splitCaseUnitQuantity,
-  tryNormalizeCaseUnitQuantity,
 } from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import {
@@ -153,9 +152,6 @@ export function PurchaseDetailItems({
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
-  const [selectedCaseQuantity, setSelectedCaseQuantity] = useState("");
-  const [selectedLooseUnitQuantity, setSelectedLooseUnitQuantity] =
-    useState("");
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -181,14 +177,9 @@ export function PurchaseDetailItems({
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const isSelectedCaseProduct = selectedProduct?.unit_of_measure === "CAJA";
-  const selectedCaseBoxes = Number(selectedCaseQuantity);
-  const selectedLooseUnits = Number(selectedLooseUnitQuantity);
   const isSelectedQuantityInvalid = isSelectedCaseProduct
-    ? !Number.isInteger(selectedCaseBoxes) ||
-      selectedCaseBoxes < 0 ||
-      !Number.isInteger(selectedLooseUnits) ||
-      selectedLooseUnits < 0 ||
-      selectedCaseBoxes + selectedLooseUnits <= 0 ||
+    ? !Number.isSafeInteger(selectedQuantity) ||
+      selectedQuantity <= 0 ||
       !selectedProduct?.units_per_box
     : !selectedQuantity || selectedQuantity <= 0;
   const availableUnits = useMemo(
@@ -422,16 +413,7 @@ export function PurchaseDetailItems({
       return "Selecciona un producto para agregarlo";
     }
     if (selectedProduct?.unit_of_measure === "CAJA") {
-      const boxes = Number(selectedCaseQuantity);
-      const units = Number(selectedLooseUnitQuantity);
-      if (
-        !Number.isInteger(boxes) ||
-        boxes < 0 ||
-        !Number.isInteger(units) ||
-        units < 0 ||
-        boxes + units <= 0 ||
-        !selectedProduct.units_per_box
-      ) {
+      if (isSelectedQuantityInvalid) {
         return "Ingresá una cantidad válida en cajas y unidades";
       }
       return null;
@@ -578,19 +560,7 @@ export function PurchaseDetailItems({
     }
 
     const isCaseProduct = product.unit_of_measure === "CAJA";
-    const quantity = isCaseProduct
-      ? tryNormalizeCaseUnitQuantity(
-          {
-            boxes: Number(selectedCaseQuantity),
-            units: Number(selectedLooseUnitQuantity),
-          },
-          product.units_per_box ?? 0
-        )
-      : selectedQuantity;
-    if (quantity === null) {
-      onError("Ingresá una cantidad válida en cajas y unidades");
-      return;
-    }
+    const quantity = selectedQuantity;
     const newItem = calculateItemData(
       product,
       quantity,
@@ -605,8 +575,6 @@ export function PurchaseDetailItems({
 
     setSelectedProductId("");
     setSelectedQuantity(0);
-    setSelectedCaseQuantity("");
-    setSelectedLooseUnitQuantity("");
     setInputUnit("UNITS");
     onError(null);
   };
@@ -843,6 +811,7 @@ export function PurchaseDetailItems({
                                   ]}
                                   onSelect={() => {
                                     setSelectedProductId(product.id ?? "");
+                                    setSelectedQuantity(0);
                                     setIsProductPickerOpen(false);
                                   }}
                                   value={product.id ?? ""}
@@ -909,47 +878,13 @@ export function PurchaseDetailItems({
                   )}
 
                 {isSelectedCaseProduct ? (
-                  <div className="grid w-full grid-cols-2 gap-2 sm:w-64">
-                    <div className="space-y-2">
-                      <Label
-                        className="font-medium text-sm"
-                        htmlFor="case-quantity"
-                      >
-                        Cajas
-                      </Label>
-                      <Input
-                        id="case-quantity"
-                        inputMode="numeric"
-                        min={0}
-                        onChange={(event) =>
-                          setSelectedCaseQuantity(event.target.value)
-                        }
-                        placeholder="0"
-                        step="1"
-                        type="number"
-                        value={selectedCaseQuantity}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label
-                        className="font-medium text-sm"
-                        htmlFor="loose-unit-quantity"
-                      >
-                        Unidades
-                      </Label>
-                      <Input
-                        id="loose-unit-quantity"
-                        inputMode="numeric"
-                        min={0}
-                        onChange={(event) =>
-                          setSelectedLooseUnitQuantity(event.target.value)
-                        }
-                        placeholder="0"
-                        step="1"
-                        type="number"
-                        value={selectedLooseUnitQuantity}
-                      />
-                    </div>
+                  <div className="w-full sm:w-64">
+                    <CaseUnitQuantityFields
+                      key={selectedProductId}
+                      onChange={setSelectedQuantity}
+                      totalUnits={selectedQuantity}
+                      unitsPerBox={selectedProduct?.units_per_box ?? 0}
+                    />
                   </div>
                 ) : (
                   <div className="w-full space-y-2 sm:w-32">
@@ -1062,10 +997,21 @@ export function PurchaseDetailItems({
 
                   return (
                     <div
-                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                      className={cn(
+                        "grid gap-3 px-4 py-3",
+                        isCaseProduct
+                          ? "grid-cols-2 items-end sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.4fr)_minmax(110px,1fr)_minmax(80px,0.7fr)_minmax(120px,1fr)_auto]"
+                          : "sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                      )}
                       key={item.id ?? item.product_id}
                     >
-                      <div className="min-w-0">
+                      <div
+                        className={cn(
+                          "min-w-0",
+                          isCaseProduct &&
+                            "col-span-2 sm:col-span-3 xl:col-span-5"
+                        )}
+                      >
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-medium">{item.product_name}</p>
                           {product?.brand ? (
@@ -1076,6 +1022,9 @@ export function PurchaseDetailItems({
                         </div>
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
+                          {isCaseProduct
+                            ? ` · ${unitsPerBox} unidades por caja`
+                            : ""}
                         </p>
                         {(receivedProgress[item.id ?? ""]?.quantity ?? 0) >
                           0 && (
@@ -1100,10 +1049,17 @@ export function PurchaseDetailItems({
                         ) : null}
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          Cantidad
-                        </span>
+                      <div
+                        className={cn(
+                          "flex flex-col gap-1",
+                          isCaseProduct && "col-span-2 sm:col-span-1"
+                        )}
+                      >
+                        {!(isCaseProduct && isEditingDetails) && (
+                          <span className="text-muted-foreground text-xs">
+                            Cantidad
+                          </span>
+                        )}
                         {isEditingDetails &&
                           !isVariantItem &&
                           isCaseProduct &&
@@ -1159,34 +1115,36 @@ export function PurchaseDetailItems({
                         )}
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          {measureLabel}
-                        </span>
-                        <span className="text-sm">
-                          {(() => {
-                            if (!itemIsWeightOrVolume) {
-                              return unitLabel;
-                            }
-                            if (
-                              measureValue !== undefined &&
-                              measureValue > 0
-                            ) {
-                              let unit = "kg";
-                              if (unitOfMeasure === "LT") {
-                                unit = "lt";
-                              } else if (unitOfMeasure === "MT") {
-                                unit = "m";
+                      {!isCaseProduct && (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-muted-foreground text-xs">
+                            {measureLabel}
+                          </span>
+                          <span className="text-sm">
+                            {(() => {
+                              if (!itemIsWeightOrVolume) {
+                                return unitLabel;
                               }
-                              return `${measureValue.toLocaleString("es-AR", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })} ${unit}`;
-                            }
-                            return unitLabel;
-                          })()}
-                        </span>
-                      </div>
+                              if (
+                                measureValue !== undefined &&
+                                measureValue > 0
+                              ) {
+                                let unit = "kg";
+                                if (unitOfMeasure === "LT") {
+                                  unit = "lt";
+                                } else if (unitOfMeasure === "MT") {
+                                  unit = "m";
+                                }
+                                return `${measureValue.toLocaleString("es-AR", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })} ${unit}`;
+                              }
+                              return unitLabel;
+                            })()}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="flex flex-col gap-1">
                         <span className="text-muted-foreground text-xs">
@@ -1247,7 +1205,9 @@ export function PurchaseDetailItems({
                                   type="number"
                                   value={
                                     isCaseProduct && unitsPerBox
-                                      ? item.unit_cost * unitsPerBox || ""
+                                      ? truncateMoney(
+                                          item.unit_cost * unitsPerBox
+                                        ) || ""
                                       : item.unit_cost || ""
                                   }
                                 />

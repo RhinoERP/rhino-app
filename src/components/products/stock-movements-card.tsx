@@ -10,6 +10,7 @@ import {
   useTransition,
 } from "react";
 import { usePermissions } from "@/components/auth/permissions-provider";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -165,6 +166,8 @@ export function StockMovementsCard({
   const [selectedLotId, setSelectedLotId] = useState<string>(lots[0]?.id ?? "");
   const [type, setType] = useState<StockMovementType>("INBOUND");
   const [quantity, setQuantity] = useState("");
+  const [caseAdjustmentDirection, setCaseAdjustmentDirection] =
+    useState("increase");
   const [unitQuantity, setUnitQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [inboundLotNumber, setInboundLotNumber] = useState("");
@@ -181,6 +184,7 @@ export function StockMovementsCard({
   const isWeightBased =
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
+  const isCaseProduct = product.unit_of_measure === "CAJA";
   let quantityLabel = "Cantidad";
   if (product.unit_of_measure === "CAJA") {
     quantityLabel = "Cantidad (unidades individuales)";
@@ -323,6 +327,12 @@ export function StockMovementsCard({
         ? normalizedUnitQuantity
         : null;
     }
+    const quantityForPayload =
+      isCaseProduct &&
+      type === "ADJUSTMENT" &&
+      caseAdjustmentDirection === "decrease"
+        ? -normalizedQuantity
+        : normalizedQuantity;
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async branching kept together
     startTransition(async () => {
@@ -348,7 +358,7 @@ export function StockMovementsCard({
           productId,
           lotId: lotResult.lotId,
           type,
-          quantity: normalizedQuantity,
+          quantity: quantityForPayload,
           unitQuantity: unitQuantityForPayload,
           reason,
         });
@@ -366,7 +376,7 @@ export function StockMovementsCard({
           productId,
           lotId: selectedLotId,
           type,
-          quantity: normalizedQuantity,
+          quantity: quantityForPayload,
           unitQuantity: unitQuantityForPayload,
           reason,
         });
@@ -379,6 +389,7 @@ export function StockMovementsCard({
 
       setOpen(false);
       setQuantity("0");
+      setCaseAdjustmentDirection("increase");
       setUnitQuantity("");
       setReason("");
       setInboundLotNumber("");
@@ -687,28 +698,67 @@ export function StockMovementsCard({
                       )}
 
                       <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                        <div className="grid gap-2">
-                          <Label>{quantityLabel}</Label>
-                          <Input
-                            disabled={isPending}
-                            inputMode={
-                              product.unit_of_measure === "CAJA"
-                                ? "numeric"
-                                : "decimal"
-                            }
-                            maxLength={12}
-                            onChange={(event) =>
-                              setQuantity(
-                                normalizeNumericInput(event.target.value)
-                              )
-                            }
-                            onFocus={(event) => event.target.select()}
-                            step={
-                              product.unit_of_measure === "CAJA" ? "1" : "0.01"
-                            }
-                            value={quantity}
-                          />
+                        <div
+                          className={
+                            isCaseProduct
+                              ? "grid gap-2 sm:col-span-2"
+                              : "grid gap-2"
+                          }
+                        >
+                          {isCaseProduct ? (
+                            <>
+                              <CaseUnitQuantityFields
+                                disabled={isPending}
+                                onChange={(total) => setQuantity(String(total))}
+                                totalUnits={Number(quantity) || 0}
+                                unitsPerBox={product.units_per_box ?? 0}
+                              />
+                              <p className="text-muted-foreground text-xs">
+                                {product.units_per_box} unidades por caja.
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <Label>{quantityLabel}</Label>
+                              <Input
+                                disabled={isPending}
+                                inputMode="decimal"
+                                maxLength={12}
+                                onChange={(event) =>
+                                  setQuantity(
+                                    normalizeNumericInput(event.target.value)
+                                  )
+                                }
+                                onFocus={(event) => event.target.select()}
+                                step="0.01"
+                                value={quantity}
+                              />
+                            </>
+                          )}
                         </div>
+
+                        {isCaseProduct && type === "ADJUSTMENT" && (
+                          <div className="grid gap-2">
+                            <Label>Sentido del ajuste</Label>
+                            <Select
+                              disabled={isPending}
+                              onValueChange={setCaseAdjustmentDirection}
+                              value={caseAdjustmentDirection}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="increase">
+                                  Agregar al stock
+                                </SelectItem>
+                                <SelectItem value="decrease">
+                                  Quitar del stock
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
 
                         {tracksUnits ? (
                           <div className="grid gap-2">

@@ -73,10 +73,6 @@ export function PurchaseItemsList({
     setSelectedProductId,
     quantity,
     setQuantity,
-    caseQuantity,
-    setCaseQuantity,
-    looseUnitQuantity,
-    setLooseUnitQuantity,
     inputUnit,
     setInputUnit,
     openProduct,
@@ -95,16 +91,12 @@ export function PurchaseItemsList({
   const { handleAddItem, handleQuantityKeyDown } = useAddItemHandler({
     selectedProduct,
     quantity,
-    caseQuantity,
-    looseUnitQuantity,
     inputUnit,
     availableUnits,
     onAddItem,
     setSelectedProductId,
     setOpenProduct,
     setQuantity,
-    setCaseQuantity,
-    setLooseUnitQuantity,
     setInputUnit,
   });
 
@@ -152,15 +144,11 @@ export function PurchaseItemsList({
             <ProductSection
               availableProducts={availableProducts}
               availableUnits={availableUnits}
-              caseQuantity={caseQuantity}
               inputUnit={inputUnit}
               isAddDisabled={isAddDisabled}
               isLoadingProducts={isLoadingProducts}
               isOpen={openProduct}
-              looseUnitQuantity={looseUnitQuantity}
               onAddItem={handleAddItem}
-              onCaseQuantityChange={setCaseQuantity}
-              onLooseUnitQuantityChange={setLooseUnitQuantity}
               onOpenChange={setOpenProduct}
               onQuantityChange={setQuantity}
               onQuantityKeyDown={handleQuantityKeyDown}

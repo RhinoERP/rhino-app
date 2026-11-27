@@ -78,3 +78,40 @@ export function getBaseUnitPrice(
     ? getPricePerIndividualUnit(price, unitsPerBox ?? 0)
     : price;
 }
+
+export function formatCaseUnitQuantity(
+  totalUnits: number,
+  unitsPerBox: number
+): string {
+  const { boxes, units } = splitCaseUnitQuantity(totalUnits, unitsPerBox);
+  return `${boxes.toLocaleString("es-AR")} ${boxes === 1 ? "caja" : "cajas"} + ${units.toLocaleString("es-AR")} ${units === 1 ? "unidad" : "unidades"}`;
+}
+
+export type QuantitySummaryItem = {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitOfMeasure?: string | null;
+  unitsPerBox?: number | null;
+};
+
+/** Loose units from different SKUs never form a box together. */
+export function summarizeCaseQuantities(items: QuantitySummaryItem[]) {
+  const cases = new Map<string, QuantitySummaryItem>();
+  let otherUnits = 0;
+  let hasOtherProducts = false;
+  for (const item of items) {
+    if (item.unitOfMeasure !== "CAJA" || !item.unitsPerBox) {
+      otherUnits += item.quantity;
+      hasOtherProducts = true;
+      continue;
+    }
+    const key = `${item.productId}:${item.unitsPerBox}`;
+    const current = cases.get(key);
+    cases.set(key, {
+      ...item,
+      quantity: (current?.quantity ?? 0) + item.quantity,
+    });
+  }
+  return { cases: [...cases.values()], otherUnits, hasOtherProducts };
+}
