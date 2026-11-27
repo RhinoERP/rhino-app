@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
@@ -67,6 +68,7 @@ export type CreateCustomerInput = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  price_level_id?: string | null;
   customer_channel?: CustomerChannel;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
@@ -299,12 +301,40 @@ export function buildCustomerInsert(
     tax_condition: taxCondition,
     client_number: sanitize(input.client_number),
     sales_price_list_id: input.sales_price_list_id || null,
+    price_level_id: input.price_level_id || null,
     customer_channel: normalizeCustomerChannel(input.customer_channel),
     assigned_seller_id: input.assigned_seller_id || null,
     preferred_carrier_id: input.preferred_carrier_id || null,
     due_days: input.due_days ?? null,
     is_active: true,
   };
+}
+
+async function validateCustomerPriceLevel(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  priceLevelId: string | null | undefined
+) {
+  if (!priceLevelId) {
+    return;
+  }
+  if (!z.uuid().safeParse(priceLevelId).success) {
+    throw new Error("El nivel de margen seleccionado no es válido.");
+  }
+  const { data, error } = await supabase
+    .from("price_levels")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("id", priceLevelId)
+    .maybeSingle();
+  if (error) {
+    throw new Error("No se pudo verificar el nivel de margen seleccionado.");
+  }
+  if (!data) {
+    throw new Error(
+      "El nivel de margen no está disponible en esta organización."
+    );
+  }
 }
 
 export async function createCustomerForOrg(
@@ -321,6 +351,8 @@ export async function createCustomerForOrg(
   }
 
   const supabase = await createClient();
+
+  await validateCustomerPriceLevel(supabase, org.id, input.price_level_id);
 
   // Check for duplicate CUIT within the same organization
   if (input.cuit?.trim()) {
@@ -429,6 +461,7 @@ function buildCustomerUpdateData(
 
   const nullableIdFields = [
     "sales_price_list_id",
+    "price_level_id",
     "assigned_seller_id",
     "preferred_carrier_id",
   ] as const;
@@ -449,6 +482,7 @@ function buildCustomerUpdateData(
  * Updates a customer by ID.
  */
 export async function updateCustomerById(
+  orgSlug: string,
   customerId: string,
   input: Partial<Omit<CreateCustomerInput, "orgSlug">>
 ): Promise<Customer> {
@@ -457,7 +491,12 @@ export async function updateCustomerById(
     throw new Error("La razón social del cliente es requerida");
   }
 
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
   const supabase = await createClient();
+  await validateCustomerPriceLevel(supabase, org.id, input.price_level_id);
   const updateData = buildCustomerUpdateData(input);
 
   // Ensure we have something to update
@@ -469,6 +508,7 @@ export async function updateCustomerById(
     .from("customers")
     .update(updateData)
     .eq("id", customerId)
+    .eq("organization_id", org.id)
     .select("*")
     .single();
 

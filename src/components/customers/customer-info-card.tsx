@@ -21,6 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
+import type { PriceLevel } from "@/modules/price-levels/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
 /**
@@ -46,7 +47,38 @@ type CustomerInfoCardProps = {
   updatedAt: string | null;
   mapsLink: string | null;
   assignedPriceList?: SalesPriceList | null;
+  assignedPriceLevel?: PriceLevel | null;
 };
+
+function CustomerPriceLevelInfo({
+  level,
+  assignedId,
+}: {
+  level?: PriceLevel | null;
+  assignedId: Customer["price_level_id"];
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
+        Nivel de margen
+      </p>
+      {level ? (
+        <div className="flex items-center gap-2 text-sm">
+          <TagIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="font-medium">
+            {level.name} · {level.margin}%
+          </span>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          {assignedId
+            ? "Nivel asignado no disponible"
+            : "Margen de cada producto"}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function CustomerInfoCard({
   customer,
@@ -55,6 +87,7 @@ export function CustomerInfoCard({
   updatedAt,
   mapsLink,
   assignedPriceList,
+  assignedPriceLevel,
 }: CustomerInfoCardProps) {
   const router = useRouter();
 
@@ -211,12 +244,16 @@ export function CustomerInfoCard({
           )}
         </div>
 
-        <Separator className="hidden lg:block" />
+        <Separator />
 
-        {/* Lista de precios de venta asignada */}
-        <div className="hidden space-y-3 lg:block">
+        <CustomerPriceLevelInfo
+          assignedId={customer.price_level_id}
+          level={assignedPriceLevel}
+        />
+
+        <div className="space-y-3">
           <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
-            Lista de precios de venta
+            Lista especial
           </p>
           {assignedPriceList ? (
             <div className="flex items-center gap-2 text-sm">
@@ -224,7 +261,9 @@ export function CustomerInfoCard({
               <span className="font-medium">{assignedPriceList.name}</span>
             </div>
           ) : (
-            <p className="text-muted-foreground text-sm">Sin lista asignada</p>
+            <p className="text-muted-foreground text-sm">
+              Sin ajuste adicional
+            </p>
           )}
         </div>
 

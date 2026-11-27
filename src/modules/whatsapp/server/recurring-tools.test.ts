@@ -765,7 +765,7 @@ describe("recurring commercial tools", () => {
     await expect(
       executeCommercialTool(simulatorContext, "render_order_response", reply)
     ).resolves.toEqual({
-      text: "¡hola, manuel! retirás el pedido PV-123 en tigre? https://ejemplo.com/Pedido?ref=AB",
+      text: "hola, manuel! retirás el pedido PV-123 en tigre? https://ejemplo.com/Pedido?ref=AB",
       orderPrompt: false,
     });
 
@@ -773,7 +773,7 @@ describe("recurring commercial tools", () => {
     await expect(
       executeCommercialTool(simulatorContext, "render_order_response", reply)
     ).resolves.toEqual({
-      text: "¡Hola, Manuel! Retirás el pedido PV-123 en Tigre? https://ejemplo.com/Pedido?ref=AB",
+      text: "Hola, Manuel! Retirás el pedido PV-123 en Tigre? https://ejemplo.com/Pedido?ref=AB",
       orderPrompt: false,
     });
   });
