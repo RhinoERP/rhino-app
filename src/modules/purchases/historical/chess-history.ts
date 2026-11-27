@@ -89,18 +89,6 @@ export type PurchaseHistoryItem = {
   category: string;
   raw_data: Record<string, string | number | null>;
 };
-export type PurchaseHistoryMetrics = {
-  document_count: number;
-  totals: { currency: string; net_purchases: number; debt_movements: number }[];
-  products: {
-    product_chess_code: string;
-    product_name: string;
-    signed_quantity: number | null;
-    signed_net_amount: number;
-    document_count: number;
-  }[];
-};
-
 export function historyDate(value: string | null) {
   return value
     ? new Date(`${value}T00:00:00Z`).toLocaleDateString("es-AR", {

@@ -4,14 +4,8 @@ import { notFound } from "next/navigation";
 import { HistoricalPurchasesDataTable } from "@/components/purchases/historical-purchases-data-table";
 import { Button } from "@/components/ui/button";
 import { parseSearchParams } from "@/lib/parse-search-params";
-import {
-  historyAmount,
-  purchaseHistoryFiltersSchema,
-} from "@/modules/purchases/historical/chess-history";
-import {
-  getPurchaseHistoryMetrics,
-  getPurchaseHistoryPage,
-} from "@/modules/purchases/historical/service/chess-purchase-history.service";
+import { purchaseHistoryFiltersSchema } from "@/modules/purchases/historical/chess-history";
+import { getPurchaseHistoryPage } from "@/modules/purchases/historical/service/chess-purchase-history.service";
 
 export const metadata: Metadata = { title: "Compras históricas CHESS" };
 
@@ -53,15 +47,12 @@ export default async function HistoricalPurchasesPage({
     );
   }
   const filters = parsed.data;
-  const [result, metrics] = await Promise.all([
-    getPurchaseHistoryPage(orgSlug, {
-      ...filters,
-      page: pagination.page,
-      pageSize: pagination.pageSize,
-    }),
-    getPurchaseHistoryMetrics(orgSlug, filters),
-  ]);
-  if (!(result && metrics)) {
+  const result = await getPurchaseHistoryPage(orgSlug, {
+    ...filters,
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+  });
+  if (!result) {
     notFound();
   }
   return (
@@ -81,73 +72,6 @@ export default async function HistoricalPurchasesPage({
           </Link>
         </Button>
       </div>
-      <section className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-lg border bg-card p-4">
-          <p className="text-muted-foreground text-sm">Comprobantes</p>
-          <p className="font-semibold text-xl">
-            {Number(metrics.document_count).toLocaleString("es-AR")}
-          </p>
-        </div>
-        {metrics.totals.map((total) => (
-          <div className="rounded-lg border bg-card p-4" key={total.currency}>
-            <p className="text-muted-foreground text-sm">
-              Compras netas · {total.currency}
-            </p>
-            <p className="font-semibold text-xl">
-              {historyAmount(total.net_purchases, total.currency)}
-            </p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              FC + ND + ME − NC. No incluye MI.
-            </p>
-          </div>
-        ))}
-      </section>
-      <section className="space-y-3 rounded-lg border bg-card p-4">
-        <h2 className="font-semibold">Productos más comprados</h2>
-        <p className="text-muted-foreground text-sm">
-          Cinco productos por neto de línea, con NC restadas y MI excluidas.
-          Cantidades convertidas con la presentación del maestro CHESS del
-          piloto.
-        </p>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px] text-left text-sm">
-            <thead>
-              <tr>
-                <th className="py-2">Artículo</th>
-                <th className="py-2 text-right">Unidades netas</th>
-                <th className="py-2 text-right">Neto de líneas</th>
-                <th className="py-2 text-right">Comprobantes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {metrics.products.map((product) => (
-                <tr className="border-t" key={product.product_chess_code}>
-                  <td className="py-2">
-                    {product.product_name}
-                    <span className="ml-2 text-muted-foreground">
-                      {product.product_chess_code}
-                    </span>
-                  </td>
-                  <td className="text-right">
-                    {product.signed_quantity == null
-                      ? "Sin presentación"
-                      : Number(product.signed_quantity).toLocaleString("es-AR")}
-                  </td>
-                  <td className="text-right">
-                    {historyAmount(product.signed_net_amount)}
-                  </td>
-                  <td className="text-right">{product.document_count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {metrics.products.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No hay artículos para estos filtros.
-          </p>
-        ) : null}
-      </section>
       <section className="space-y-3">
         <p className="text-muted-foreground text-sm">
           {result.totalCount.toLocaleString("es-AR")} comprobantes

@@ -158,8 +158,8 @@ export default async function PurchaseHistoryDetailPage({
       {document.document_code === "MI" ? (
         <p className="rounded-lg border p-3 text-sm">
           La minuta de ingreso reduce deuda y representa un ingreso o saldo a
-          favor. Se muestra en el historial, pero no se incluye en las métricas
-          de compras.
+          favor. Se muestra en el historial, pero no se incluye en las compras
+          netas del export.
         </p>
       ) : null}
       <section className="space-y-3 rounded-lg border bg-card p-4">

@@ -4,7 +4,6 @@ import {
   type PurchaseHistoryDocument,
   type PurchaseHistoryFilters,
   type PurchaseHistoryItem,
-  type PurchaseHistoryMetrics,
   purchaseHistoryFiltersSchema,
   purchaseHistorySearch,
 } from "../chess-history";
@@ -123,33 +122,6 @@ export async function getPurchaseHistoryDetail(
         items: (items ?? []) as PurchaseHistoryItem[],
       }
     : null;
-}
-
-export async function getPurchaseHistoryMetrics(
-  orgSlug: string,
-  rawFilters: PurchaseHistoryFilters
-) {
-  const filters = purchaseHistoryFiltersSchema.parse(rawFilters);
-  const context = await getContext(orgSlug);
-  if (!context) {
-    return null;
-  }
-  const { data, error } = await context.client.rpc(
-    "get_chess_historical_purchase_metrics" as never,
-    {
-      p_org: context.orgId,
-      p_search: filters.search ?? "",
-      p_type: filters.documentCode ?? "",
-      p_from: filters.dateFrom ?? null,
-      p_to: filters.dateTo ?? null,
-    } as never
-  );
-  if (error) {
-    throw new Error(
-      `No se pudieron calcular las métricas históricas: ${error.message}`
-    );
-  }
-  return data as unknown as PurchaseHistoryMetrics;
 }
 
 export async function getPurchaseHistoryExport(

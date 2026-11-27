@@ -29,9 +29,6 @@ def main():
         assert conn.execute("SELECT count(*) FROM public.historical_purchase_documents WHERE organization_id=%s AND document_code='MI' AND purchase_sign<>0", (org,)).fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM public.historical_purchase_documents WHERE organization_id=%s AND document_code IN ('NC','MI') AND debt_sign<>-1", (org,)).fetchone()[0] == 0
         before = MODULE.operational_snapshot(conn)
-        metrics = conn.execute("SELECT public.get_chess_historical_purchase_metrics(%s)", (org,)).fetchone()[0]
-        assert metrics["document_count"] == 27177
-        assert len(metrics["products"]) == 5
         summary = conn.execute("SELECT document_code,count(*),sum(total_amount),count(*) FILTER (WHERE total_amount=0) FROM public.historical_purchase_documents WHERE organization_id=%s GROUP BY document_code ORDER BY document_code", (org,)).fetchall()
         member = conn.execute("SELECT user_id FROM public.organization_members WHERE organization_id=%s AND is_active AND is_owner LIMIT 1", (org,)).fetchone()
         if not member:
@@ -41,7 +38,6 @@ def main():
         assert not conn.execute("SELECT public.can_read_chess_purchase_history(%s)", (org,)).fetchone()[0]
         assert conn.execute("SELECT count(*) FROM public.historical_purchase_documents WHERE organization_id=%s", (org,)).fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM public.historical_purchase_document_items WHERE organization_id=%s", (org,)).fetchone()[0] == 0
-        assert conn.execute("SELECT public.get_chess_historical_purchase_metrics(%s)", (org,)).fetchone()[0]["document_count"] == 0
         claims(conn, member[0])
         assert conn.execute("SELECT public.can_read_chess_purchase_history(%s)", (org,)).fetchone()[0]
         assert conn.execute("SELECT count(*) FROM public.historical_purchase_documents WHERE organization_id=%s", (org,)).fetchone()[0] == 27177
@@ -51,7 +47,7 @@ def main():
                 assert not conn.execute("SELECT has_table_privilege('authenticated',%s,%s)", (f"public.{table}", operation)).fetchone()[0]
         conn.execute("RESET ROLE")
         assert MODULE.operational_snapshot(conn) == before
-        print(json.dumps({"by_type": [(kind, count, str(total), zeros) for kind, count, total, zeros in summary], "metrics_totals": metrics["totals"], "product_ranking_count": len(metrics["products"]), "rls": "owner read, nonmember denied, foreign org denied, client mutations denied", "operational_snapshot": "unchanged"}, ensure_ascii=False, indent=2))
+        print(json.dumps({"by_type": [(kind, count, str(total), zeros) for kind, count, total, zeros in summary], "rls": "owner read, nonmember denied, foreign org denied, client mutations denied", "operational_snapshot": "unchanged"}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

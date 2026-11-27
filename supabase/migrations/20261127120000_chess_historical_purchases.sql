@@ -99,39 +99,4 @@ REVOKE ALL ON public.historical_purchase_documents,public.historical_purchase_do
 GRANT SELECT ON public.historical_purchase_documents,public.historical_purchase_document_items TO authenticated;
 GRANT ALL ON public.historical_purchase_documents,public.historical_purchase_document_items TO service_role;
 
-CREATE FUNCTION public.get_chess_historical_purchase_metrics(
-  p_org uuid, p_search text DEFAULT '', p_type text DEFAULT '', p_from date DEFAULT NULL, p_to date DEFAULT NULL
-) RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $$
-  WITH docs AS MATERIALIZED (
-    SELECT * FROM public.historical_purchase_documents d
-    WHERE d.organization_id = p_org
-      AND (p_search = '' OR d.supplier_name ILIKE '%' || p_search || '%'
-        OR d.supplier_chess_code = p_search OR d.printed_number ILIKE '%' || p_search || '%'
-        OR d.document_code ILIKE '%' || p_search || '%')
-      AND (p_type = '' OR d.document_code = p_type)
-      AND (p_from IS NULL OR d.document_date >= p_from)
-      AND (p_to IS NULL OR d.document_date <= p_to)
-  ), products AS (
-    SELECT i.product_chess_code, max(i.description) AS product_name,
-      CASE WHEN bool_and(i.base_unit_quantity IS NOT NULL)
-        THEN sum(abs(i.base_unit_quantity) * d.purchase_sign) END AS signed_quantity,
-      sum(i.net_amount * CASE WHEN d.total_amount < 0 THEN -1 ELSE 1 END * d.purchase_sign) AS signed_net_amount,
-      count(DISTINCT d.id) AS document_count
-    FROM docs d JOIN public.historical_purchase_document_items i ON i.historical_document_id = d.id AND i.organization_id = d.organization_id
-    WHERE i.row_kind = 'ARTICLE' AND d.purchase_sign <> 0
-    GROUP BY i.product_chess_code
-    ORDER BY signed_net_amount DESC, i.product_chess_code LIMIT 5
-  )
-  SELECT jsonb_build_object(
-    'document_count', (SELECT count(*) FROM docs),
-    'totals', COALESCE((SELECT jsonb_agg(x) FROM (
-      SELECT currency, sum(abs(total_amount) * purchase_sign) AS net_purchases,
-        sum(abs(total_amount) * debt_sign) AS debt_movements
-      FROM docs GROUP BY currency ORDER BY currency
-    ) x), '[]'::jsonb),
-    'products', COALESCE((SELECT jsonb_agg(p) FROM products p), '[]'::jsonb)
-  );
-$$;
-REVOKE ALL ON FUNCTION public.get_chess_historical_purchase_metrics(uuid,text,text,date,date) FROM PUBLIC,anon;
-GRANT EXECUTE ON FUNCTION public.get_chess_historical_purchase_metrics(uuid,text,text,date,date) TO authenticated,service_role;
 COMMENT ON TABLE public.historical_purchase_documents IS 'Excel CHESS: archival vouchers, no operational side effects. MI excluded from net purchases.';
