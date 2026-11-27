@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  ChartBarIcon,
   ChartLineUpIcon,
   ClipboardTextIcon,
   CurrencyDollarSimpleIcon,
@@ -120,6 +121,29 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/finanzas`,
           icon: <ChartLineUpIcon weight="duotone" />,
           requiredPermission: ["finances.read", "finances.read.all"],
+        },
+      ],
+    },
+    {
+      title: "Análisis",
+      items: [
+        {
+          title: "Reportes",
+          url: `/org/${orgSlug}/reportes`,
+          icon: <ChartBarIcon weight="duotone" />,
+          requiredPermission: ["organization.admin", "reports.manage"],
+        },
+        {
+          title: "Progreso comercial",
+          url: `/org/${orgSlug}/mi-progreso`,
+          icon: <ChartLineUpIcon weight="duotone" />,
+          requiredPermission: [
+            "sales.read",
+            "sales.read.all",
+            "sales.manage",
+            "sales.manage.all",
+            "organization.admin",
+          ],
         },
       ],
     },

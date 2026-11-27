@@ -15,7 +15,8 @@ describe("seller mobile home", () => {
     );
     expect(html).toContain('href="/org/acme/ventas"');
     expect(html).toContain('href="/org/acme/visitas"');
+    expect(html).toContain('href="/org/acme/mi-progreso"');
     expect(html).not.toContain("<button");
-    expect(html.match(/<a /g)).toHaveLength(5);
+    expect(html.match(/<a /g)).toHaveLength(6);
   });
 });

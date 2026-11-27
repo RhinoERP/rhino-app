@@ -78,6 +78,19 @@ export function SellerMobileHome({
     ...(canManageSales
       ? [
           {
+            icon: ChartLine,
+            label: "Mi progreso",
+            href: `/org/${orgSlug}/mi-progreso`,
+            description: "Avance, metas, cotizaciones y visitas",
+            requiresWholesale: false,
+            requiresPos: false,
+            requiresNoProduction: false,
+          },
+        ]
+      : []),
+    ...(canManageSales
+      ? [
+          {
             icon: MapPin,
             label: "Mis visitas",
             href: `/org/${orgSlug}/visitas`,
