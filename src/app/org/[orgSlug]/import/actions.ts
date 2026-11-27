@@ -57,6 +57,9 @@ const UNIT_MAP: Record<
   L: "LT",
   LITRO: "LT",
   LITROS: "LT",
+  // Presentation by case
+  CAJA: "CAJA",
+  CAJAS: "CAJA",
 };
 
 function toIsoDateString(date: Date): string | null {
@@ -643,7 +646,7 @@ function getStockQuantityDetails(
   index: number
 ): StockQuantityDetails {
   const unitOfMeasure = product.unit_of_measure ?? "UN";
-  const isUnitProduct = unitOfMeasure === "UN";
+  const isUnitProduct = ["UN", "CAJA"].includes(unitOfMeasure);
   const isWeightBased =
     unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
   const tracksUnits =
@@ -659,6 +662,21 @@ function getStockQuantityDetails(
     isUnitProduct && unitQuantityValue != null
       ? unitQuantityValue
       : quantityValue;
+
+  const boxQuantityError = getBoxStockQuantityError(
+    unitOfMeasure,
+    quantity,
+    index
+  );
+  if (boxQuantityError) {
+    return {
+      quantity,
+      unitQuantity: null,
+      unitQuantityValue,
+      tracksUnits,
+      error: boxQuantityError,
+    };
+  }
 
   if (isUnitProduct) {
     if (quantity == null) {
@@ -686,6 +704,21 @@ function getStockQuantityDetails(
     unitQuantityValue,
     tracksUnits,
   };
+}
+
+function getBoxStockQuantityError(
+  unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"],
+  quantity: number | null,
+  index: number
+): string | null {
+  if (
+    unitOfMeasure !== "CAJA" ||
+    quantity === null ||
+    Number.isSafeInteger(quantity)
+  ) {
+    return null;
+  }
+  return `Fila ${index + 3}: El stock de un producto por caja debe expresarse en unidades enteras`;
 }
 
 function normalizeSaleDate(value: unknown): string {

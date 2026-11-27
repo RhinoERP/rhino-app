@@ -47,6 +47,7 @@ export type SaleReturnItemInput = {
   itemCondition?: ReturnedItemCondition;
   unitQuantity?: number;
   productVariantId?: string | null;
+  unitOfMeasure?: string | null;
 };
 
 export type CreateSaleReturnInput = {
@@ -80,7 +81,7 @@ export type SaleReturnSourceItem = {
   base_price: number | null;
   discount_amount: number | null;
   subtotal: number | null;
-  product?: { name?: string | null } | null;
+  product?: { name?: string | null; unit_of_measure?: string | null } | null;
   item_taxes?: Array<{
     id: string;
     tax_id: string | null;
@@ -283,6 +284,15 @@ export function resolveReturnLines(params: {
       soldUnitQuantity - alreadyReturnedUnits
     );
     const requestedQuantity = Number(input.quantity ?? 0);
+    if (
+      saleItem.product?.unit_of_measure === "CAJA" &&
+      (!Number.isSafeInteger(requestedQuantity) ||
+        (input.unitQuantity ?? 0) !== 0)
+    ) {
+      throw new Error(
+        "Los productos por caja deben devolverse en unidades enteras, sin peso separado."
+      );
+    }
 
     if (
       hasFractionalVariantReturn({
@@ -341,13 +351,15 @@ export function resolveReturnLines(params: {
       );
     }
 
-    const unitPrice = truncateMoney(
-      Number(
-        usesWeightQuantity
-          ? (saleItem.base_price ?? saleItem.unit_price ?? 0)
-          : (saleItem.unit_price ?? 0)
-      )
+    const sourceUnitPrice = Number(
+      usesWeightQuantity
+        ? (saleItem.base_price ?? saleItem.unit_price ?? 0)
+        : (saleItem.unit_price ?? 0)
     );
+    const unitPrice =
+      saleItem.product?.unit_of_measure === "CAJA"
+        ? sourceUnitPrice
+        : truncateMoney(sourceUnitPrice);
     const grossAmount = truncateMoney(requestedQuantity * unitPrice);
     const lineDiscountPerUnit =
       soldQuantity > 0
@@ -801,6 +813,14 @@ export function planSaleReturnStockForItem(params: {
   returnId: string;
 }): StockReentryEntry[] {
   const { lotsById, outbounds, item, restockReason, returnId } = params;
+  const integerQuantity =
+    item.unitOfMeasure === "CAJA" || Boolean(item.productVariantId);
+
+  if (integerQuantity && !Number.isSafeInteger(item.quantity)) {
+    throw new Error(
+      "La cantidad a reingresar debe expresarse en unidades enteras"
+    );
+  }
 
   const matching = outbounds.filter(
     (m) =>
@@ -885,7 +905,7 @@ export function planSaleReturnStockForItem(params: {
           totalToReturn: item.quantity,
           remaining,
           isLast,
-          integer: Boolean(item.productVariantId),
+          integer: integerQuantity,
         });
 
     if (lotShare <= 0) {
@@ -1169,7 +1189,7 @@ export async function createSaleReturn(
         base_price,
         discount_amount,
         subtotal,
-        product:products(name),
+        product:products(name, unit_of_measure),
         item_taxes:sales_order_item_taxes(
           id,
           tax_id,
@@ -1311,6 +1331,7 @@ export async function createSaleReturn(
         restock: true,
         unitQuantity: line.unitQuantity,
         productVariantId: line.saleItem.product_variant_id,
+        unitOfMeasure: line.saleItem.product?.unit_of_measure,
       }));
     if (itemsToRestock.length > 0) {
       restockRollbacks = await restockReturnedItems({

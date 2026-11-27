@@ -1,9 +1,11 @@
+import { CaseUnitsSettings } from "@/components/configuration/case-units-settings";
 import { ConfigurationMetrics } from "@/components/configuration/configuration-metrics";
 import { ConfigurationQuickLinks } from "@/components/configuration/configuration-quick-links";
 import { OrganizationInfo } from "@/components/configuration/organization-info";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import { getActiveInvitationsBySlug } from "@/modules/organizations/service/invitations.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getOrganizationRolesBySlug } from "@/modules/organizations/service/roles.service";
 
@@ -19,13 +21,14 @@ export default async function ConfigurationPage({
   const { orgSlug } = await params;
 
   // Fetch all data in parallel
-  const [organization, members, roles, categories, invitations] =
+  const [organization, members, roles, categories, invitations, orgSettings] =
     await Promise.all([
       getOrganizationBySlug(orgSlug),
       getOrganizationMembersBySlug(orgSlug),
       getOrganizationRolesBySlug(orgSlug),
       getCategoriesByOrgSlug(orgSlug),
       getActiveInvitationsBySlug(orgSlug),
+      getOrgSettings(orgSlug),
     ]);
 
   if (!organization) {
@@ -55,6 +58,11 @@ export default async function ConfigurationPage({
       </div>
 
       <OrganizationInfo organization={organization} />
+
+      <CaseUnitsSettings
+        caseUnitsEnabled={orgSettings.case_units_enabled}
+        orgSlug={orgSlug}
+      />
 
       <ConfigurationMetrics metrics={metrics} orgSlug={orgSlug} />
 

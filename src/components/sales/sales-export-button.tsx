@@ -186,6 +186,7 @@ function getExtraColumns(): ExportColumn[] {
         if (
           !item ||
           (item.unitOfMeasure !== "UN" &&
+            item.unitOfMeasure !== "CAJA" &&
             !(
               (item.unitOfMeasure === "KG" || item.unitOfMeasure === "LT") &&
               item.tracksStockUnits
@@ -197,7 +198,26 @@ function getExtraColumns(): ExportColumn[] {
         ) {
           return "";
         }
-        return Math.ceil(item.units / item.unitsPerBox);
+        return item.unitOfMeasure === "CAJA"
+          ? Math.floor(item.units / item.unitsPerBox)
+          : Math.ceil(item.units / item.unitsPerBox);
+      },
+    },
+    {
+      id: "loose_units",
+      label: "Unidades sueltas",
+      valueGetter: (_sale, item) => {
+        if (
+          !item ||
+          item.unitOfMeasure !== "CAJA" ||
+          item.units === null ||
+          item.units === undefined ||
+          !item.unitsPerBox ||
+          item.unitsPerBox <= 0
+        ) {
+          return "";
+        }
+        return item.units % item.unitsPerBox;
       },
     },
     {

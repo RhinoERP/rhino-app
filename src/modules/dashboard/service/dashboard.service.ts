@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { getBaseUnitPrice } from "@/modules/inventory/utils/case-units";
 import {
   formatPosPaymentMethodLabel,
   isPosCashPaymentMethod,
@@ -1617,7 +1618,7 @@ async function fetchProfitabilityCostPrices(
 
   const { data, error } = await supabase
     .from("products_with_price")
-    .select("id, cost_price")
+    .select("id, cost_price, unit_of_measure, units_per_box")
     .eq("organization_id", organizationId)
     .in("id", uniqueProductIds);
 
@@ -1627,13 +1628,23 @@ async function fetchProfitabilityCostPrices(
     );
   }
 
-  return new Map(
-    (data ?? [])
-      .filter((row): row is { id: string; cost_price: number | null } =>
-        Boolean(row.id)
-      )
-      .map((row) => [row.id, row.cost_price])
-  );
+  const costs = new Map<string, number | null>();
+  for (const row of data ?? []) {
+    if (!row.id) {
+      continue;
+    }
+    costs.set(
+      row.id,
+      row.cost_price == null
+        ? null
+        : getBaseUnitPrice(
+            row.cost_price,
+            row.unit_of_measure,
+            row.units_per_box
+          )
+    );
+  }
+  return costs;
 }
 
 function getCostPrice(params: {

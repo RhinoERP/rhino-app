@@ -89,6 +89,52 @@ describe("plan físico de devolución mayorista", () => {
     expect(entries.every((row) => row.quantity > 0)).toBe(true);
   });
 
+  it("reparte devoluciones CAJA entre lotes usando unidades enteras", () => {
+    const entries = planSaleReturnStockForItem({
+      lotsById: new Map([
+        ["a", lot("a", null)],
+        ["b", lot("b", null)],
+      ]),
+      outbounds: [
+        { lot_id: "a", quantity: 30, unit_quantity: null },
+        { lot_id: "b", quantity: 47, unit_quantity: null },
+      ],
+      returnId: "return",
+      restockReason: "Devolución",
+      item: {
+        salesOrderItemId: "line-case",
+        productId: "product",
+        quantity: 12,
+        unitPrice: 16_900,
+        unitOfMeasure: "CAJA",
+      },
+    });
+
+    expect(entries.map((row) => row.quantity)).toEqual([5, 7]);
+    expect(entries.every((row) => Number.isSafeInteger(row.quantity))).toBe(
+      true
+    );
+    expect(entries.reduce((sum, row) => sum + row.quantity, 0)).toBe(12);
+  });
+
+  it("rechaza fracciones al planificar el reingreso de una CAJA", () => {
+    expect(() =>
+      planSaleReturnStockForItem({
+        lotsById: new Map([["a", lot("a", null)]]),
+        outbounds: [{ lot_id: "a", quantity: 77, unit_quantity: null }],
+        returnId: "return",
+        restockReason: "Devolución",
+        item: {
+          salesOrderItemId: "line-case",
+          productId: "product",
+          quantity: 1.5,
+          unitPrice: 16_900,
+          unitOfMeasure: "CAJA",
+        },
+      })
+    ).toThrow("unidades enteras");
+  });
+
   it("no usa lotes de otro talle/color aunque tengan más stock de salida", () => {
     const entries = planSaleReturnStockForItem({
       lotsById: new Map([

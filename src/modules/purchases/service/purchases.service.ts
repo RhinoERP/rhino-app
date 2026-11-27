@@ -8,6 +8,10 @@ import {
   NO_PAYABLE_INVOICE_RATE_MESSAGE,
   resolvePayableExchangeRate,
 } from "@/modules/collections/utils/payment-rate";
+import {
+  assertCaseQuantity,
+  getTransactionProductUnits,
+} from "@/modules/inventory/service/transaction-units.service";
 import { isInvoiceBackedDebtEnabled } from "@/modules/organizations/service/debt-policy.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
@@ -251,6 +255,7 @@ export type CreatePurchaseOrderInput = {
     subtotal: number;
     discount_percentage?: number;
     unit_of_measure?: string | null;
+    units_per_box?: number | null;
     variant_stocks?: Record<string, Record<string, number>>;
     taxes?: ItemTaxInput[];
   }[];
@@ -379,24 +384,86 @@ async function rollbackPurchaseOrder(
     .eq("organization_id", orgId);
 }
 
+function assertCasePurchaseLine(
+  item: { unit_cost: number; quantity: number; units_per_box?: number | null },
+  unitsPerBox: number | null
+) {
+  if (!Number.isFinite(item.unit_cost) || item.unit_cost < 0) {
+    throw new Error("El costo del producto debe ser un importe válido");
+  }
+  if (item.units_per_box != null && item.units_per_box !== unitsPerBox) {
+    throw new Error("El factor de empaque cambió; actualizá el formulario");
+  }
+  assertCaseQuantity(item.quantity);
+  if (item.quantity === 0) {
+    throw new Error("La cantidad por caja debe ser mayor a cero");
+  }
+}
+
+async function resolvePurchaseUnits<
+  T extends {
+    product_id: string;
+    quantity: number;
+    unit_cost: number;
+    unit_quantity?: number | null;
+    unit_of_measure?: string | null;
+    units_per_box?: number | null;
+  },
+>(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  items: T[]
+): Promise<T[]> {
+  const products = await getTransactionProductUnits(
+    supabase,
+    orgId,
+    items.map((item) => item.product_id)
+  );
+  return items.map((item) => {
+    const product = products.get(item.product_id);
+    if (
+      item.unit_of_measure &&
+      item.unit_of_measure !== product?.unit_of_measure
+    ) {
+      throw new Error("La unidad del producto cambió; actualizá el formulario");
+    }
+    if (product?.unit_of_measure === "CAJA") {
+      assertCasePurchaseLine(item, product.units_per_box);
+    }
+    return {
+      ...item,
+      unit_of_measure: product?.unit_of_measure,
+      units_per_box: product?.units_per_box,
+      unit_quantity:
+        product?.unit_of_measure === "CAJA"
+          ? item.quantity
+          : item.unit_quantity,
+    };
+  });
+}
+
 /**
  * Creates a new purchase order with its items
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: resolves fiscal selections and persists the order before syncing its payable.
 export async function createPurchaseOrder(
-  input: CreatePurchaseOrderInput
+  request: CreatePurchaseOrderInput
 ): Promise<PurchaseOrder> {
-  const org = await getOrganizationBySlug(input.orgSlug);
+  const org = await getOrganizationBySlug(request.orgSlug);
 
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
 
-  if (!input.items || input.items.length === 0) {
+  if (!request.items || request.items.length === 0) {
     throw new Error("La orden de compra debe tener al menos un producto");
   }
 
   const supabase = await createClient();
+  const input = {
+    ...request,
+    items: await resolvePurchaseUnits(supabase, org.id, request.items),
+  };
 
   const subtotal_amount = input.items.reduce(
     (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal)),
@@ -491,7 +558,10 @@ export async function createPurchaseOrder(
         item.quantity
       ),
       unit_quantity: item.unit_quantity,
-      unit_cost: truncateMoney(item.unit_cost),
+      unit_cost:
+        item.unit_of_measure === "CAJA"
+          ? item.unit_cost
+          : truncateMoney(item.unit_cost),
       subtotal: truncateMoney(item.subtotal),
       discount_percentage: item.discount_percentage ?? 0,
       variant_stocks: item.variant_stocks ?? null,
@@ -786,6 +856,7 @@ export type PurchaseExportItem = {
   units: number | null;
   unitQuantity: number | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  unitsPerBox: number | null;
   subtotal: number | null;
 };
 
@@ -798,6 +869,7 @@ type PurchaseOrderItemRaw = Partial<
     unit_of_measure?:
       | Database["public"]["Enums"]["unit_of_measure_type"]
       | null;
+    units_per_box?: number | null;
   } | null;
 };
 
@@ -835,6 +907,7 @@ function normalizePurchaseExportItem(
         ? Number(item.unit_quantity)
         : null,
     unitOfMeasure: item.product?.unit_of_measure ?? null,
+    unitsPerBox: item.product?.units_per_box ?? null,
     subtotal:
       item.subtotal !== null && item.subtotal !== undefined
         ? Number(item.subtotal)
@@ -868,7 +941,7 @@ export async function getPurchaseOrdersByOrgSlug(
         unit_quantity,
         subtotal,
         product_id,
-        product:products(id, name, unit_of_measure)
+        product:products(id, name, unit_of_measure, units_per_box)
       )
     `)
     .eq("organization_id", org.id);
@@ -1668,6 +1741,7 @@ export type UpdatePurchaseOrderInput = {
     subtotal: number;
     discount_percentage?: number;
     unit_of_measure?: string | null;
+    units_per_box?: number | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
     taxes?: ItemTaxInput[];
   }[];
@@ -1837,7 +1911,10 @@ export async function updatePurchaseOrder(
     savedFallbackTaxes,
   });
   const fallbackTaxes = selections.fallbackTaxes;
-  const resolvedItems = input.items?.map((item, index) => ({
+  const unitResolvedItems = input.items
+    ? await resolvePurchaseUnits(supabase, org.id, input.items)
+    : undefined;
+  const resolvedItems = unitResolvedItems?.map((item, index) => ({
     ...item,
     taxes: selections.lineTaxes[index],
   }));
@@ -1876,7 +1953,10 @@ export async function updatePurchaseOrder(
         item.quantity
       ),
       unit_quantity: item.unit_quantity,
-      unit_cost: truncateMoney(item.unit_cost),
+      unit_cost:
+        item.unit_of_measure === "CAJA"
+          ? item.unit_cost
+          : truncateMoney(item.unit_cost),
       subtotal: truncateMoney(item.subtotal),
       discount_percentage: item.discount_percentage ?? 0,
       variant_stocks: item.variant_stocks ?? null,
@@ -1972,6 +2052,7 @@ export async function getPurchaseOrderWithItems(
       product_sku?: string | null;
       discount_percentage?: number | null;
       unit_of_measure?: string | null;
+      units_per_box?: number | null;
       weight_per_unit?: number | null;
       has_variants?: boolean;
       tax_override?: ItemTaxInput[] | null;
@@ -2013,7 +2094,7 @@ export async function getPurchaseOrderWithItems(
     .from("purchase_order_items")
     .select(`
       *,
-      product:products(id, name, sku, category_id, accounting_account_code, weight_per_unit, unit_of_measure, has_variants)
+      product:products(id, name, sku, category_id, accounting_account_code, weight_per_unit, unit_of_measure, units_per_box, has_variants)
     `)
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
@@ -2076,6 +2157,7 @@ export async function getPurchaseOrderWithItems(
           accounting_account_code?: string | null;
           weight_per_unit?: number | null;
           unit_of_measure?: string | null;
+          units_per_box?: number | null;
           has_variants?: boolean | null;
         } | null;
       }
@@ -2101,6 +2183,7 @@ export async function getPurchaseOrderWithItems(
             .discount_percentage ?? 0,
         weight_per_unit: item.product?.weight_per_unit ?? null,
         unit_of_measure: item.product?.unit_of_measure ?? null,
+        units_per_box: item.product?.units_per_box ?? null,
         has_variants: item.product?.has_variants ?? false,
         tax_override: parsedOverride,
         item_taxes: itemTaxRows.filter(

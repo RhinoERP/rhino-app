@@ -19,8 +19,20 @@ import { processPosSaleReturnSchema } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
+type PosReturnSourceItem =
+  Database["public"]["Tables"]["pos_sale_items"]["Row"] & {
+    product?: { unit_of_measure?: string | null } | null;
+  };
+
+function getReturnUnitPrice(item: PosReturnSourceItem): number {
+  const price = Math.max(0, Number(item.unit_price ?? 0));
+  return item.product?.unit_of_measure === "CAJA"
+    ? price
+    : truncateMoney(price);
+}
+
 type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
-  items?: Database["public"]["Tables"]["pos_sale_items"]["Row"][] | null;
+  items?: PosReturnSourceItem[] | null;
   payments?: Database["public"]["Tables"]["pos_payments"]["Row"][] | null;
 };
 
@@ -591,9 +603,7 @@ export async function getPosSaleReturnableItems(params: {
       const availableToReturn = truncateQuantity(
         Math.max(0, soldQuantity - returnedQuantity)
       );
-      const unitPrice = truncateMoney(
-        Math.max(0, Number(item.unit_price ?? 0))
-      );
+      const unitPrice = getReturnUnitPrice(item);
       const soldSubtotalBeforeGlobalDiscount = truncateMoney(
         Math.max(0, Number(item.subtotal ?? 0))
       );
@@ -662,7 +672,7 @@ export async function getPosSaleReturnableItems(params: {
 
 function resolveReturnLines(params: {
   requestedItems: NormalizedReturnLineInput[];
-  saleItems: Database["public"]["Tables"]["pos_sale_items"]["Row"][];
+  saleItems: PosReturnSourceItem[];
   returnedByItemId: Map<string, number>;
   saleDiscountAmount: number;
 }): ResolvedReturnLine[] {
@@ -670,10 +680,7 @@ function resolveReturnLines(params: {
     truncateMoney(Math.max(0, params.saleDiscountAmount)),
     params.saleItems
   );
-  const saleItemsById = new Map<
-    string,
-    Database["public"]["Tables"]["pos_sale_items"]["Row"]
-  >();
+  const saleItemsById = new Map<string, PosReturnSourceItem>();
 
   for (const item of params.saleItems) {
     if (item.id) {
@@ -683,6 +690,15 @@ function resolveReturnLines(params: {
 
   for (const requestedLine of params.requestedItems) {
     const soldItem = saleItemsById.get(requestedLine.posSaleItemId);
+    if (
+      soldItem?.product?.unit_of_measure === "CAJA" &&
+      (!Number.isSafeInteger(requestedLine.quantity) ||
+        (requestedLine.unitQuantity ?? 0) !== 0)
+    ) {
+      throw new Error(
+        "Los productos por caja deben devolverse en unidades enteras, sin peso separado."
+      );
+    }
     if (
       soldItem &&
       hasFractionalVariantReturn({
@@ -726,9 +742,7 @@ function resolveReturnLines(params: {
       );
     }
 
-    const unitPrice = truncateMoney(
-      Math.max(0, Number(saleItem.unit_price ?? 0))
-    );
+    const unitPrice = getReturnUnitPrice(saleItem);
     const grossAmount = truncateMoney(requestedLine.quantity * unitPrice);
     const soldSubtotalBeforeGlobalDiscount = truncateMoney(
       Math.max(0, Number(saleItem.subtotal ?? 0))
@@ -1321,11 +1335,13 @@ export async function processPosSaleReturn(
         id,
         pos_sale_id,
         product_id,
+        product_variant_id,
         lot_id,
         quantity,
         unit_price,
         subtotal,
-        discount_amount
+        discount_amount,
+        product:products(unit_of_measure)
       ),
       payments:pos_payments(
         id,

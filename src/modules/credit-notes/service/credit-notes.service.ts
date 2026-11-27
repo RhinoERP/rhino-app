@@ -173,7 +173,7 @@ async function insertCreditNoteDetails(params: {
         product_id: item.productId ?? null,
         description: item.description,
         quantity: item.quantity,
-        unit_price: truncateMoney(item.unitPrice),
+        unit_price: Number(item.unitPrice),
         discount_amount: truncateMoney(item.discountAmount ?? 0),
         net_amount: truncateMoney(item.netAmount),
         tax_amount: truncateMoney(item.taxAmount ?? 0),

@@ -38,6 +38,21 @@ export async function setWarehouseStockBalance(input: {
     throw new Error("Organización no encontrada");
   }
   const supabase = await createClient();
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("unit_of_measure")
+    .eq("organization_id", org.id)
+    .eq("id", input.productId)
+    .maybeSingle();
+  if (productError || !product) {
+    throw new Error("Producto no encontrado para esta organización");
+  }
+  if (
+    product.unit_of_measure === "CAJA" &&
+    !Number.isSafeInteger(input.quantity)
+  ) {
+    throw new Error("El stock por caja debe expresarse en unidades enteras");
+  }
   const { data, error } = await supabase.rpc("set_warehouse_stock_balance", {
     p_org_id: org.id,
     p_warehouse_id: input.warehouseId,
@@ -135,6 +150,21 @@ export async function applyWarehouseStockMovement(input: {
   }
   if (input.warehouseId && input.warehouseId !== lot.warehouse_id) {
     throw new Error("El lote no pertenece al depósito seleccionado");
+  }
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("unit_of_measure")
+    .eq("organization_id", org.id)
+    .eq("id", input.productId)
+    .maybeSingle();
+  if (productError || !product) {
+    throw new Error("Producto no encontrado para esta organización");
+  }
+  if (
+    product.unit_of_measure === "CAJA" &&
+    !Number.isSafeInteger(input.quantity)
+  ) {
+    throw new Error("El stock por caja debe expresarse en unidades enteras");
   }
   const { data, error } = await supabase.rpc("apply_warehouse_stock_movement", {
     p_org_id: org.id,

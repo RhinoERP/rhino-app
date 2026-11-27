@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getBaseUnitPrice } from "@/modules/inventory/utils/case-units";
 import { prepareWhatsAppPreSaleOrder } from "@/modules/sales/service/sales.service";
 import { computeAverageQuantityPerUnit } from "@/modules/sales/utils/quantity-per-unit";
 import { formatAssistantReply } from "../../../../services/whatsapp-agent/src/response-capitalization";
@@ -885,6 +886,20 @@ async function getOffer(context: VerifiedContext, productId: string) {
   return {
     ...offer,
     ...presentation,
+    // Cart and stock quantities always use individual units. Expose the
+    // commercial presentation separately so the assistant can quote a box.
+    unitPrice: getBaseUnitPrice(
+      offer.unitPrice,
+      presentation.unitOfMeasure,
+      presentation.unitsPerBox
+    ),
+    ...(presentation.unitOfMeasure === "CAJA"
+      ? {
+          unitOfMeasure: "UN",
+          commercialUnitOfMeasure: "CAJA",
+          pricePerBox: offer.unitPrice,
+        }
+      : {}),
     stockAvailable: stockResult.data?.total_stock ?? null,
   };
 }
@@ -994,6 +1009,14 @@ async function upsertCartItem(
 ) {
   await expectedCart(context, args);
   const offer = await getOffer(context, args.product_id);
+  if (
+    offer.commercialUnitOfMeasure === "CAJA" &&
+    !Number.isSafeInteger(args.quantity)
+  ) {
+    throw new Error(
+      "Indicá una cantidad entera de unidades para el producto por caja"
+    );
+  }
   const pieceRequest =
     args.quantity_kind === "PIECE" && offer.unitOfMeasure !== "UN";
   if (args.quantity_kind === "PIECE" && !Number.isInteger(args.quantity)) {
@@ -1125,6 +1148,10 @@ async function prepareQuote(context: VerifiedContext, expected: CartVersion) {
             : null,
         unitPrice: offers[index].unitPrice,
         basePrice: offers[index].unitPrice,
+        unitOfMeasure:
+          offers[index].commercialUnitOfMeasure === "CAJA"
+            ? ("CAJA" as const)
+            : undefined,
         tracksStockUnits: offers[index].tracksStockUnits,
       })),
     },

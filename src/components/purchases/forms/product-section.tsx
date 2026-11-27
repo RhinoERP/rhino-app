@@ -2,6 +2,7 @@
 
 import { CaretUpDownIcon } from "@phosphor-icons/react";
 import { Check } from "lucide-react";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -69,6 +70,7 @@ export function ProductSection({
   onAddItem,
 }: ProductSectionProps) {
   const showProductConditionals = selectedProduct?.has_variants;
+  const isCaseProduct = selectedProduct?.unit_of_measure === "CAJA";
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
@@ -94,6 +96,9 @@ export function ProductSection({
                       selectedProduct.cost_price ?? 0,
                       selectedProduct.currency ?? "ARS"
                     )}
+                    {selectedProduct.unit_of_measure === "CAJA"
+                      ? " / caja"
+                      : ""}
                   </span>
                 </div>
               ) : (
@@ -137,6 +142,9 @@ export function ProductSection({
                                 product.cost_price ?? 0,
                                 product.currency ?? "ARS"
                               )}
+                              {product.unit_of_measure === "CAJA"
+                                ? " / caja"
+                                : ""}
                             </p>
                           </div>
                           <Check
@@ -157,30 +165,46 @@ export function ProductSection({
         </Popover>
       </div>
 
-      {!showProductConditionals && availableUnits.length > 1 && (
-        <div className="w-full space-y-2 sm:w-32">
-          <Label className="font-medium text-sm" htmlFor="inputUnit">
-            Unidad
-          </Label>
-          <Select
-            onValueChange={(value) => onUnitChange(value as InputUnit)}
-            value={inputUnit}
-          >
-            <SelectTrigger id="inputUnit">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableUnits.map((unit) => (
-                <SelectItem key={unit} value={unit}>
-                  {getUnitLabel(unit)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {!(showProductConditionals || isCaseProduct) &&
+        availableUnits.length > 1 && (
+          <div className="w-full space-y-2 sm:w-32">
+            <Label className="font-medium text-sm" htmlFor="inputUnit">
+              Unidad
+            </Label>
+            <Select
+              onValueChange={(value) => onUnitChange(value as InputUnit)}
+              value={inputUnit}
+            >
+              <SelectTrigger id="inputUnit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableUnits.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {getUnitLabel(unit)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+      {!showProductConditionals && isCaseProduct && (
+        <div className="w-full space-y-2 sm:w-64">
+          <CaseUnitQuantityFields
+            key={selectedProductId}
+            onChange={(total) => onQuantityChange(String(total))}
+            onKeyDown={onQuantityKeyDown}
+            totalUnits={Number(quantity) || 0}
+            unitsPerBox={selectedProduct?.units_per_box ?? 0}
+          />
+          <p className="text-muted-foreground text-xs">
+            {selectedProduct?.units_per_box} unidades por caja.
+          </p>
         </div>
       )}
 
-      {!showProductConditionals && (
+      {!(showProductConditionals || isCaseProduct) && (
         <div className="w-full space-y-2 sm:w-32">
           <Label className="font-medium text-sm" htmlFor="quantity">
             {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}

@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle } from "lucide-react";
+import { CaseUnitQuantitySummary } from "@/components/products/case-unit-quantity-summary";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,7 +14,10 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
-import { getPurchaseUnitShortLabel } from "@/modules/purchases/utils/purchase-units";
+import {
+  getPurchaseUnitShortLabel,
+  isMeasuredUnit,
+} from "@/modules/purchases/utils/purchase-units";
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
@@ -139,10 +143,6 @@ export function PurchaseReceiptSummary({
   const unitLabel = getPurchaseUnitShortLabel(primaryUnitOfMeasure);
 
   // Aggregated across lots and variant stocks
-  const totalUnits = receivedItems.reduce(
-    (sum, item) => sum + getItemEffectiveQty(item),
-    0
-  );
   const totalUnitQuantity = receivedItems.reduce(
     (sum, item) => sum + getItemEffectiveUnitQty(item),
     0
@@ -177,12 +177,19 @@ export function PurchaseReceiptSummary({
                 <span>{receivedItems.length}</span>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Unidades totales</span>
-                <span>{totalUnits}</span>
-              </div>
+              <CaseUnitQuantitySummary
+                items={receivedItems.map((item) => ({
+                  productId: item.productId,
+                  name: item.product_name ?? item.productId,
+                  quantity: getItemEffectiveQty(item),
+                  unitOfMeasure: item.unit_of_measure,
+                  unitsPerBox: item.units_per_box,
+                }))}
+              />
 
-              {receivedItems.some((item) => item.unit_of_measure) && (
+              {receivedItems.some((item) =>
+                isMeasuredUnit(item.unit_of_measure)
+              ) && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
                     Cantidad total ({unitLabel})

@@ -134,6 +134,54 @@ const snapshot = {
 } satisfies SellerOfflineSnapshotV1;
 
 describe("executeOfflineCommand", () => {
+  it("compares proportional box prices without accepting a one-cent change per box", () => {
+    const caseSnapshot: SellerOfflineSnapshotV1 = {
+      ...snapshot,
+      products: [
+        {
+          ...snapshot.products[0],
+          unitOfMeasure: "CAJA",
+          unitsPerBox: 6,
+          price: 600,
+        },
+      ],
+    };
+    expect(findOfflinePreSaleCommercialChanges(command, caseSnapshot)).toEqual(
+      []
+    );
+    caseSnapshot.products[0].price = 600.01;
+    expect(findOfflinePreSaleCommercialChanges(command, caseSnapshot)).toEqual([
+      expect.objectContaining({
+        path: "payload.items.0.unitPrice",
+        currentValue: 600.01 / 6,
+      }),
+    ]);
+  });
+
+  it("rejects fractional offline case quantities before replay", () => {
+    const caseSnapshot: SellerOfflineSnapshotV1 = {
+      ...snapshot,
+      products: [
+        {
+          ...snapshot.products[0],
+          unitOfMeasure: "CAJA",
+          unitsPerBox: 6,
+          price: 600,
+        },
+      ],
+    };
+    const fractional = {
+      ...command,
+      payload: {
+        ...command.payload,
+        items: [{ ...command.payload.items[0], quantity: 1.5 }],
+      },
+    };
+    expect(() =>
+      findOfflinePreSaleCommercialChanges(fractional, caseSnapshot)
+    ).toThrow("unidades enteras");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     createClientMock.mockResolvedValue({ rpc: rpcMock });

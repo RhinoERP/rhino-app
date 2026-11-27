@@ -87,6 +87,7 @@
     "esbuild": "^0.28.1",
     "fake-indexeddb": "^6.2.5",
     "husky": "^9.1.7",
+    "jsdom": "^26.1.0",
     "postcss": "^8",
     "serwist": "9.5.12",
     "shadcn": "^3.5.1",

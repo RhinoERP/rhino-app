@@ -222,7 +222,9 @@ export function ProductSalePriceCard({
           </div>
           <div className="text-right">
             <p className="font-semibold text-2xl">{formatMoney(salePrice)}</p>
-            <p className="text-muted-foreground text-sm">Por unidad</p>
+            <p className="text-muted-foreground text-sm">
+              {product.unit_of_measure === "CAJA" ? "Por caja" : "Por unidad"}
+            </p>
           </div>
         </CardHeader>
       </Card>
@@ -245,7 +247,11 @@ export function ProductSalePriceCard({
                 <p className="font-semibold text-2xl">
                   {formatMoney(salePrice)}
                 </p>
-                <p className="text-muted-foreground text-sm">Por unidad</p>
+                <p className="text-muted-foreground text-sm">
+                  {product.unit_of_measure === "CAJA"
+                    ? "Por caja"
+                    : "Por unidad"}
+                </p>
               </div>
             </CardHeader>
           </Card>
@@ -275,7 +281,11 @@ export function ProductSalePriceCard({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="sale-price-input">Precio de venta</Label>
+            <Label htmlFor="sale-price-input">
+              {product.unit_of_measure === "CAJA"
+                ? "Precio de venta por caja"
+                : "Precio de venta"}
+            </Label>
             <Input
               disabled={isPending}
               id="sale-price-input"
@@ -288,7 +298,11 @@ export function ProductSalePriceCard({
 
           <div className="rounded-md border bg-muted/30 p-3 text-sm">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Costo</span>
+              <span className="text-muted-foreground">
+                {product.unit_of_measure === "CAJA"
+                  ? "Costo por caja"
+                  : "Costo"}
+              </span>
               <span className="font-medium">{formatMoney(costPrice)}</span>
             </div>
             <div className="mt-2 flex items-center justify-between gap-3">
@@ -298,7 +312,11 @@ export function ProductSalePriceCard({
               </span>
             </div>
             <div className="mt-2 flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Precio de venta</span>
+              <span className="text-muted-foreground">
+                {product.unit_of_measure === "CAJA"
+                  ? "Precio de venta por caja"
+                  : "Precio de venta"}
+              </span>
               <span className="font-semibold">
                 {formatMoney(previewSalePrice)}
               </span>

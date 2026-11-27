@@ -15,6 +15,7 @@ export type RemittanceMaskData = {
   carrierName?: string | null;
   items: Array<{
     quantity: number;
+    quantityLabel?: string;
     description: string;
     variantName?: string | null;
   }>;
@@ -105,6 +106,7 @@ export function buildRemittanceMaskData(
     carrierName: options?.carrierName,
     items: remittance.items.map((item) => ({
       quantity: item.quantity,
+      quantityLabel: item.quantityLabel,
       description: formatItemDescription(
         item,
         remittance.showProductBrand === true
@@ -144,7 +146,7 @@ export function generateRemittanceMaskHTML(
         .map(
           (item, itemIndex) => `
             <div class="line-item" style="top:${99.6 + itemIndex * 5.15}mm">
-              <span class="item-quantity">${escapeHtml(formatQuantity(item.quantity))}</span>
+              <span class="item-quantity">${escapeHtml(item.quantityLabel ?? formatQuantity(item.quantity))}</span>
               <span class="item-description${item.variantName ? " has-variant" : ""}">${escapeHtml(item.description)}</span>
               ${
                 item.variantName

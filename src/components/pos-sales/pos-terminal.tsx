@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +46,10 @@ import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import {
+  getPricePerIndividualUnit,
+  splitCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import type { DirectSaleConfig } from "@/modules/organizations/types";
 import { useBarcodeScannerInput } from "@/modules/pos/hooks/use-barcode-scanner-input";
 import type { CreateDirectSaleActionResult } from "@/modules/sales/actions/create-direct-sale.action";
@@ -142,6 +147,13 @@ function getCustomerLabel(customer: Customer) {
 }
 
 function getProductStockLabel(product: DirectSaleProduct) {
+  if (product.unitOfMeasure === "CAJA" && product.unitsPerBox) {
+    const quantity = splitCaseUnitQuantity(
+      product.totalQuantity,
+      product.unitsPerBox
+    );
+    return `${quantity.boxes} caja(s) · ${quantity.units} un.`;
+  }
   if (product.totalUnitQuantity !== null) {
     return `${product.totalQuantity.toFixed(2)} ${product.unitOfMeasure} · ${product.totalUnitQuantity.toFixed(2)} un`;
   }
@@ -197,18 +209,16 @@ function resolveDirectSaleUnitPrice(
   markupPercentage: number,
   isConsumerFinal: boolean
 ): number {
-  if (
-    product.directSalePrice !== null &&
-    Number.isFinite(product.directSalePrice)
-  ) {
-    return toMoney(product.directSalePrice);
+  const pricePerBox =
+    product.directSalePrice !== null && Number.isFinite(product.directSalePrice)
+      ? toMoney(product.directSalePrice)
+      : applyDirectSaleMarkup(product.price, markupPercentage, isConsumerFinal);
+
+  if (product.unitOfMeasure === "CAJA" && product.unitsPerBox) {
+    return getPricePerIndividualUnit(pricePerBox, product.unitsPerBox);
   }
 
-  return applyDirectSaleMarkup(
-    product.price,
-    markupPercentage,
-    isConsumerFinal
-  );
+  return pricePerBox;
 }
 
 function getSaleSubmissionError(
@@ -1239,6 +1249,7 @@ export function PosTerminal({
           weightQuantity: item.weightQuantity,
           isWholeUnit: item.isWholeWheel,
           unitPrice: item.unitPrice,
+          unitOfMeasure: item.product.unitOfMeasure,
           discountPercentage: item.discountPercentage,
         })),
         taxes: taxesPayload.length ? taxesPayload : undefined,
@@ -1408,6 +1419,97 @@ export function PosTerminal({
                         Math.max(0, gross)
                       );
                       const subtotal = Math.max(0, gross - discount);
+                      const caseQuantity =
+                        item.product.unitOfMeasure === "CAJA" &&
+                        item.product.unitsPerBox
+                          ? splitCaseUnitQuantity(
+                              item.quantity,
+                              item.product.unitsPerBox
+                            )
+                          : null;
+                      let quantityEditor: React.ReactNode;
+                      if (
+                        isWeightOrVolumeProduct(item.product) &&
+                        item.product.tracksStockUnits
+                      ) {
+                        quantityEditor = (
+                          <div>
+                            <p className="mb-1 text-muted-foreground text-xs">
+                              Peso (gramos)
+                            </p>
+                            <Input
+                              inputMode={item.variant ? "numeric" : "decimal"}
+                              max={item.variant?.stock}
+                              min={item.variant ? 1 : 0}
+                              onChange={(event) => {
+                                const kg = Number(event.target.value) / 1000;
+                                const weightPerUnit =
+                                  item.product.weightPerUnit ?? 0;
+                                setCartItems((previous) =>
+                                  previous.map((entry) =>
+                                    entry.lineId === item.lineId
+                                      ? {
+                                          ...entry,
+                                          quantity:
+                                            weightPerUnit > 0
+                                              ? kg / weightPerUnit
+                                              : kg,
+                                          weightQuantity: kg,
+                                        }
+                                      : entry
+                                  )
+                                );
+                              }}
+                              placeholder="Ej: 300"
+                              step="1"
+                              type="number"
+                              value={
+                                item.weightQuantity
+                                  ? Math.round(item.weightQuantity * 1000)
+                                  : ""
+                              }
+                            />
+                          </div>
+                        );
+                      } else if (caseQuantity && item.product.unitsPerBox) {
+                        quantityEditor = (
+                          <CaseUnitQuantityFields
+                            compact
+                            onChange={(quantity) =>
+                              updateCartQuantity(item.lineId, quantity)
+                            }
+                            totalUnits={item.quantity}
+                            unitsPerBox={item.product.unitsPerBox}
+                          />
+                        );
+                      } else {
+                        quantityEditor = (
+                          <div>
+                            <p className="mb-1 text-muted-foreground text-xs">
+                              Cantidad
+                            </p>
+                            <Input
+                              inputMode={item.variant ? "numeric" : "decimal"}
+                              min={0}
+                              onChange={(event) =>
+                                updateCartQuantity(
+                                  item.lineId,
+                                  Number(event.target.value)
+                                )
+                              }
+                              step={item.variant ? "1" : "0.01"}
+                              type="number"
+                              value={item.quantity}
+                            />
+                          </div>
+                        );
+                      }
+                      let unitPriceLabel = "Precio unitario";
+                      if (item.product.unitOfMeasure === "CAJA") {
+                        unitPriceLabel = "Precio por caja";
+                      } else if (isWeightOrVolumeProduct(item.product)) {
+                        unitPriceLabel = "Precio por kilo";
+                      }
 
                       return (
                         <div
@@ -1474,81 +1576,37 @@ export function PosTerminal({
                             </Button>
                           </div>
                           <div className="grid gap-3 md:grid-cols-4">
-                            {isWeightOrVolumeProduct(item.product) &&
-                            item.product.tracksStockUnits ? (
-                              <div>
-                                <p className="mb-1 text-muted-foreground text-xs">
-                                  Peso (gramos)
-                                </p>
-                                <Input
-                                  inputMode={
-                                    item.variant ? "numeric" : "decimal"
-                                  }
-                                  max={item.variant?.stock}
-                                  min={item.variant ? 1 : 0}
-                                  onChange={(e) => {
-                                    const grams = Number(e.target.value);
-                                    const kg = grams / 1000;
-                                    const wpu = item.product.weightPerUnit ?? 0;
-                                    setCartItems((prev) =>
-                                      prev.map((i) => {
-                                        if (i.lineId !== item.lineId) {
-                                          return i;
-                                        }
-                                        return {
-                                          ...i,
-                                          quantity: wpu > 0 ? kg / wpu : kg,
-                                          weightQuantity: kg,
-                                        };
-                                      })
-                                    );
-                                  }}
-                                  placeholder="Ej: 300"
-                                  step="1"
-                                  type="number"
-                                  value={
-                                    item.weightQuantity
-                                      ? Math.round(item.weightQuantity * 1000)
-                                      : ""
-                                  }
-                                />
-                              </div>
-                            ) : (
-                              <div>
-                                <p className="mb-1 text-muted-foreground text-xs">
-                                  Cantidad
-                                </p>
-                                <Input
-                                  inputMode="decimal"
-                                  min={0}
-                                  onChange={(e) =>
-                                    updateCartQuantity(
-                                      item.lineId,
-                                      Number(e.target.value)
-                                    )
-                                  }
-                                  step={item.variant ? "1" : "0.01"}
-                                  type="number"
-                                  value={item.quantity}
-                                />
-                              </div>
-                            )}
+                            {quantityEditor}
                             <div>
                               <p className="mb-1 text-muted-foreground text-xs">
-                                Precio por kilo
+                                {unitPriceLabel}
                               </p>
                               <Input
                                 inputMode="decimal"
                                 min={0}
-                                onChange={(event) =>
-                                  updateCartUnitPrice(
-                                    item.lineId,
+                                onChange={(event) => {
+                                  const enteredPrice = Math.max(
+                                    0,
                                     Number(event.target.value)
-                                  )
-                                }
+                                  );
+                                  const unitPrice =
+                                    item.product.unitOfMeasure === "CAJA" &&
+                                    item.product.unitsPerBox
+                                      ? getPricePerIndividualUnit(
+                                          enteredPrice,
+                                          item.product.unitsPerBox
+                                        )
+                                      : enteredPrice;
+                                  updateCartUnitPrice(item.lineId, unitPrice);
+                                }}
                                 step="0.01"
                                 type="number"
-                                value={item.unitPrice}
+                                value={
+                                  item.product.unitOfMeasure === "CAJA" &&
+                                  item.product.unitsPerBox
+                                    ? item.unitPrice * item.product.unitsPerBox
+                                    : item.unitPrice
+                                }
                               />
                             </div>
                             <div>

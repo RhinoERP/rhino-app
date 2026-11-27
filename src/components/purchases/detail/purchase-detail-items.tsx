@@ -3,6 +3,7 @@
 import { CaretUpDownIcon } from "@phosphor-icons/react";
 import { Check, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +46,10 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
+import {
+  getPricePerIndividualUnit,
+  splitCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import {
   convertToBaseUnits,
@@ -75,6 +80,7 @@ export type PurchaseDetailItem = {
   unit_cost: number;
   subtotal: number;
   unit_of_measure?: string;
+  units_per_box?: number | null;
   weight_per_unit?: number | null;
   total_weight_kg?: number | null;
   price_per_kg?: number;
@@ -84,6 +90,29 @@ export type PurchaseDetailItem = {
   taxes?: ItemTaxInput[];
   persistedTaxes?: ItemTaxSnapshot[];
 };
+
+function withUpdatedPurchaseUnitCost(
+  item: PurchaseDetailItem,
+  unitCost: number
+): PurchaseDetailItem {
+  const pricePerKg =
+    item.unit_of_measure === "KG" ? unitCost : item.price_per_kg;
+  const gross =
+    item.total_weight_kg && pricePerKg
+      ? item.total_weight_kg * pricePerKg
+      : item.unit_quantity * unitCost;
+  const discount = Math.min(
+    Math.max(0, ((item.discount_percent ?? 0) / 100) * gross),
+    Math.max(0, gross)
+  );
+
+  return {
+    ...item,
+    unit_cost: unitCost,
+    price_per_kg: pricePerKg,
+    subtotal: Math.max(0, gross - discount),
+  };
+}
 
 type PurchaseDetailItemsProps = {
   items: PurchaseDetailItem[];
@@ -147,12 +176,24 @@ export function PurchaseDetailItems({
   });
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const isSelectedCaseProduct = selectedProduct?.unit_of_measure === "CAJA";
+  const isSelectedQuantityInvalid = isSelectedCaseProduct
+    ? !Number.isSafeInteger(selectedQuantity) ||
+      selectedQuantity <= 0 ||
+      !selectedProduct?.units_per_box
+    : !selectedQuantity || selectedQuantity <= 0;
   const availableUnits = useMemo(
     () => getAvailableUnits(selectedProduct),
     [selectedProduct]
   );
 
   useEffect(() => {
+    if (selectedProduct?.unit_of_measure === "CAJA") {
+      if (inputUnit !== "UNITS") {
+        setInputUnit("UNITS");
+      }
+      return;
+    }
     if (selectedProduct && !availableUnits.includes(inputUnit)) {
       setInputUnit(availableUnits[0] ?? "UNITS");
     }
@@ -316,33 +357,19 @@ export function PurchaseDetailItems({
       return;
     }
     const parsed = Number.parseFloat(value);
-    const unitCost = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    const enteredPrice = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    const currentItem = items.find((item) => item.id === id);
+    if (!currentItem) {
+      return;
+    }
+    const unitCost =
+      currentItem.unit_of_measure === "CAJA" && currentItem.units_per_box
+        ? enteredPrice / currentItem.units_per_box
+        : enteredPrice;
     onItemsChange(
-      items.map((item) => {
-        if (item.id === id) {
-          const pricePerKg =
-            item.unit_of_measure === "KG" ? unitCost : item.price_per_kg;
-          let gross: number;
-          if (item.total_weight_kg && pricePerKg) {
-            gross = item.total_weight_kg * pricePerKg;
-          } else {
-            gross = item.unit_quantity * unitCost;
-          }
-          const discountPercent = item.discount_percent ?? 0;
-          const discount = Math.min(
-            Math.max(0, (discountPercent / 100) * gross),
-            Math.max(0, gross)
-          );
-          const subtotal = Math.max(0, gross - discount);
-          return {
-            ...item,
-            unit_cost: unitCost,
-            price_per_kg: pricePerKg,
-            subtotal,
-          };
-        }
-        return item;
-      })
+      items.map((item) =>
+        item.id === id ? withUpdatedPurchaseUnitCost(item, unitCost) : item
+      )
     );
   };
 
@@ -384,6 +411,12 @@ export function PurchaseDetailItems({
   const validateProductSelection = (): string | null => {
     if (!selectedProductId) {
       return "Selecciona un producto para agregarlo";
+    }
+    if (selectedProduct?.unit_of_measure === "CAJA") {
+      if (isSelectedQuantityInvalid) {
+        return "Ingresá una cantidad válida en cajas y unidades";
+      }
+      return null;
     }
     if (!selectedQuantity || selectedQuantity <= 0) {
       return "La cantidad debe ser mayor a 0";
@@ -432,8 +465,12 @@ export function PurchaseDetailItems({
       product
     );
 
-    const unitCost = product.cost_price ?? 0;
     const unitOfMeasure = product.unit_of_measure || "UN";
+    const listedUnitCost = product.cost_price ?? 0;
+    const unitCost =
+      unitOfMeasure === "CAJA"
+        ? getPricePerIndividualUnit(listedUnitCost, product.units_per_box ?? 0)
+        : listedUnitCost;
     const weightPerUnit = product.weight_per_unit;
 
     const { itemQuantity, itemUnitQuantity, itemTotalWeight } =
@@ -461,6 +498,7 @@ export function PurchaseDetailItems({
       unit_cost: unitCost,
       subtotal,
       unit_of_measure: unitOfMeasure,
+      units_per_box: product.units_per_box,
       weight_per_unit: weightPerUnit,
       total_weight_kg: itemTotalWeight ?? undefined,
       price_per_kg: pricePerKg,
@@ -521,7 +559,13 @@ export function PurchaseDetailItems({
       return;
     }
 
-    const newItem = calculateItemData(product, selectedQuantity, inputUnit);
+    const isCaseProduct = product.unit_of_measure === "CAJA";
+    const quantity = selectedQuantity;
+    const newItem = calculateItemData(
+      product,
+      quantity,
+      isCaseProduct ? "UNITS" : inputUnit
+    );
     if (!newItem) {
       onError("Error al crear el item del producto");
       return;
@@ -767,6 +811,7 @@ export function PurchaseDetailItems({
                                   ]}
                                   onSelect={() => {
                                     setSelectedProductId(product.id ?? "");
+                                    setSelectedQuantity(0);
                                     setIsProductPickerOpen(false);
                                   }}
                                   value={product.id ?? ""}
@@ -802,58 +847,76 @@ export function PurchaseDetailItems({
                   </Popover>
                 </div>
 
-                {selectedProduct && availableUnits.length > 1 && (
+                {selectedProduct &&
+                  !isSelectedCaseProduct &&
+                  availableUnits.length > 1 && (
+                    <div className="w-full space-y-2 sm:w-32">
+                      <Label
+                        className="font-medium text-sm"
+                        htmlFor="inputUnit"
+                      >
+                        Unidad
+                      </Label>
+                      <Select
+                        onValueChange={(value) =>
+                          setInputUnit(value as InputUnit)
+                        }
+                        value={inputUnit}
+                      >
+                        <SelectTrigger id="inputUnit">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableUnits.map((unit) => (
+                            <SelectItem key={unit} value={unit}>
+                              {getUnitLabel(unit)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                {isSelectedCaseProduct ? (
+                  <div className="w-full sm:w-64">
+                    <CaseUnitQuantityFields
+                      key={selectedProductId}
+                      onChange={setSelectedQuantity}
+                      totalUnits={selectedQuantity}
+                      unitsPerBox={selectedProduct?.units_per_box ?? 0}
+                    />
+                  </div>
+                ) : (
                   <div className="w-full space-y-2 sm:w-32">
-                    <Label className="font-medium text-sm" htmlFor="inputUnit">
-                      Unidad
+                    <Label className="font-medium text-sm" htmlFor="quantity">
+                      {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
                     </Label>
-                    <Select
-                      onValueChange={(value) =>
-                        setInputUnit(value as InputUnit)
-                      }
-                      value={inputUnit}
-                    >
-                      <SelectTrigger id="inputUnit">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableUnits.map((unit) => (
-                          <SelectItem key={unit} value={unit}>
-                            {getUnitLabel(unit)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-1">
+                      <Input
+                        id="quantity"
+                        min="0.01"
+                        onChange={(e) => {
+                          const parsed = Number.parseFloat(e.target.value);
+                          setSelectedQuantity(
+                            Number.isNaN(parsed) ? 0 : parsed
+                          );
+                        }}
+                        placeholder="0"
+                        step="0.01"
+                        type="number"
+                        value={
+                          !selectedQuantity || Number.isNaN(selectedQuantity)
+                            ? ""
+                            : selectedQuantity
+                        }
+                      />
+                    </div>
                   </div>
                 )}
 
-                <div className="w-full space-y-2 sm:w-32">
-                  <Label className="font-medium text-sm" htmlFor="quantity">
-                    {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
-                  </Label>
-                  <div className="space-y-1">
-                    <Input
-                      id="quantity"
-                      min="0.01"
-                      onChange={(e) => {
-                        const parsed = Number.parseFloat(e.target.value);
-                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
-                      }}
-                      placeholder="0"
-                      step="0.01"
-                      type="number"
-                      value={
-                        !selectedQuantity || Number.isNaN(selectedQuantity)
-                          ? ""
-                          : selectedQuantity
-                      }
-                    />
-                  </div>
-                </div>
-
                 <Button
                   className="sm:mb-0"
-                  disabled={!selectedProductId || selectedQuantity <= 0}
+                  disabled={!selectedProductId || isSelectedQuantityInvalid}
                   onClick={handleAddProduct}
                 >
                   <Plus className="mr-2 h-4 w-4" />
@@ -890,11 +953,19 @@ export function PurchaseDetailItems({
                     ? sumPurchaseVariantStocks(item.variant_stocks)
                     : 0;
                   const unitOfMeasure = item.unit_of_measure || "UN";
+                  const unitsPerBox =
+                    item.units_per_box ?? product?.units_per_box ?? null;
+                  const isCaseProduct =
+                    unitOfMeasure === "CAJA" && Boolean(unitsPerBox);
+                  const caseQuantity = isCaseProduct
+                    ? splitCaseUnitQuantity(item.quantity, unitsPerBox ?? 0)
+                    : null;
                   const unitOfMeasureLabels: Record<string, string> = {
                     UN: "unidad",
                     KG: "kg",
                     LT: "lt",
                     MT: "m",
+                    CAJA: "caja",
                   };
                   const unitLabel =
                     unitOfMeasureLabels[unitOfMeasure] || unitOfMeasure;
@@ -926,10 +997,21 @@ export function PurchaseDetailItems({
 
                   return (
                     <div
-                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                      className={cn(
+                        "grid gap-3 px-4 py-3",
+                        isCaseProduct
+                          ? "grid-cols-2 items-end sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.4fr)_minmax(110px,1fr)_minmax(80px,0.7fr)_minmax(120px,1fr)_auto]"
+                          : "sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                      )}
                       key={item.id ?? item.product_id}
                     >
-                      <div className="min-w-0">
+                      <div
+                        className={cn(
+                          "min-w-0",
+                          isCaseProduct &&
+                            "col-span-2 sm:col-span-3 xl:col-span-5"
+                        )}
+                      >
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-medium">{item.product_name}</p>
                           {product?.brand ? (
@@ -940,6 +1022,9 @@ export function PurchaseDetailItems({
                         </div>
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
+                          {isCaseProduct
+                            ? ` · ${unitsPerBox} unidades por caja`
+                            : ""}
                         </p>
                         {(receivedProgress[item.id ?? ""]?.quantity ?? 0) >
                           0 && (
@@ -964,77 +1049,108 @@ export function PurchaseDetailItems({
                         ) : null}
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          Cantidad
-                        </span>
-                        {isEditingDetails && !isVariantItem ? (
-                          <Input
-                            className="h-8 w-full"
-                            inputMode={
-                              itemIsWeightOrVolume ? "decimal" : "numeric"
-                            }
-                            min={itemIsWeightOrVolume ? 0.01 : 1}
-                            onChange={(event) => {
-                              const value = Number.parseFloat(
-                                event.target.value
-                              );
-                              if (!Number.isNaN(value) && value >= 0) {
-                                handleQuantityChange(
-                                  item.id,
+                      <div
+                        className={cn(
+                          "flex flex-col gap-1",
+                          isCaseProduct && "col-span-2 sm:col-span-1"
+                        )}
+                      >
+                        {!(isCaseProduct && isEditingDetails) && (
+                          <span className="text-muted-foreground text-xs">
+                            Cantidad
+                          </span>
+                        )}
+                        {isEditingDetails &&
+                          !isVariantItem &&
+                          isCaseProduct &&
+                          caseQuantity &&
+                          unitsPerBox && (
+                            <CaseUnitQuantityFields
+                              compact
+                              onChange={(quantity) =>
+                                handleQuantityChange(item.id, String(quantity))
+                              }
+                              totalUnits={item.quantity}
+                              unitsPerBox={unitsPerBox}
+                            />
+                          )}
+                        {isEditingDetails &&
+                          !isVariantItem &&
+                          !(isCaseProduct && caseQuantity) && (
+                            <Input
+                              className="h-8 w-full"
+                              inputMode={
+                                itemIsWeightOrVolume ? "decimal" : "numeric"
+                              }
+                              min={itemIsWeightOrVolume ? 0.01 : 1}
+                              onChange={(event) => {
+                                const value = Number.parseFloat(
                                   event.target.value
                                 );
-                              } else if (event.target.value === "") {
-                                handleQuantityChange(item.id, "0");
+                                if (!Number.isNaN(value) && value >= 0) {
+                                  handleQuantityChange(
+                                    item.id,
+                                    event.target.value
+                                  );
+                                } else if (event.target.value === "") {
+                                  handleQuantityChange(item.id, "0");
+                                }
+                              }}
+                              placeholder={itemIsWeightOrVolume ? "0" : "1"}
+                              step={itemIsWeightOrVolume ? "0.01" : "1"}
+                              type="number"
+                              value={
+                                !item.quantity || Number.isNaN(item.quantity)
+                                  ? ""
+                                  : item.quantity
                               }
-                            }}
-                            placeholder={itemIsWeightOrVolume ? "0" : "1"}
-                            step={itemIsWeightOrVolume ? "0.01" : "1"}
-                            type="number"
-                            value={
-                              !item.quantity || Number.isNaN(item.quantity)
-                                ? ""
-                                : item.quantity
-                            }
-                          />
-                        ) : (
-                          <p className="text-sm">{item.quantity}</p>
+                            />
+                          )}
+                        {(!isEditingDetails || isVariantItem) && (
+                          <p className="text-sm">
+                            {isCaseProduct && caseQuantity
+                              ? `${caseQuantity.boxes} caja(s) · ${caseQuantity.units} un.`
+                              : item.quantity}
+                          </p>
                         )}
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          {measureLabel}
-                        </span>
-                        <span className="text-sm">
-                          {(() => {
-                            if (!itemIsWeightOrVolume) {
-                              return unitLabel;
-                            }
-                            if (
-                              measureValue !== undefined &&
-                              measureValue > 0
-                            ) {
-                              let unit = "kg";
-                              if (unitOfMeasure === "LT") {
-                                unit = "lt";
-                              } else if (unitOfMeasure === "MT") {
-                                unit = "m";
+                      {!isCaseProduct && (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-muted-foreground text-xs">
+                            {measureLabel}
+                          </span>
+                          <span className="text-sm">
+                            {(() => {
+                              if (!itemIsWeightOrVolume) {
+                                return unitLabel;
                               }
-                              return `${measureValue.toLocaleString("es-AR", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })} ${unit}`;
-                            }
-                            return unitLabel;
-                          })()}
-                        </span>
-                      </div>
+                              if (
+                                measureValue !== undefined &&
+                                measureValue > 0
+                              ) {
+                                let unit = "kg";
+                                if (unitOfMeasure === "LT") {
+                                  unit = "lt";
+                                } else if (unitOfMeasure === "MT") {
+                                  unit = "m";
+                                }
+                                return `${measureValue.toLocaleString("es-AR", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })} ${unit}`;
+                              }
+                              return unitLabel;
+                            })()}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="flex flex-col gap-1">
                         <span className="text-muted-foreground text-xs">
-                          Precio
+                          {isCaseProduct ? "Precio por caja" : "Precio"}
                         </span>
+                        {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The price editor handles box, weight and standard unit prices in one row. */}
                         {(() => {
                           if (isEditingDetails) {
                             if (itemIsWeightOrVolume && item.weight_per_unit) {
@@ -1087,7 +1203,13 @@ export function PurchaseDetailItems({
                                   placeholder="0.00"
                                   step="0.01"
                                   type="number"
-                                  value={item.unit_cost || ""}
+                                  value={
+                                    isCaseProduct && unitsPerBox
+                                      ? truncateMoney(
+                                          item.unit_cost * unitsPerBox
+                                        ) || ""
+                                      : item.unit_cost || ""
+                                  }
                                 />
                               </div>
                             );
@@ -1104,7 +1226,12 @@ export function PurchaseDetailItems({
                                     currency
                                   );
                                 }
-                                return formatCurrency(item.unit_cost, currency);
+                                return formatCurrency(
+                                  isCaseProduct && unitsPerBox
+                                    ? item.unit_cost * unitsPerBox
+                                    : item.unit_cost,
+                                  currency
+                                );
                               })()}
                             </p>
                           );

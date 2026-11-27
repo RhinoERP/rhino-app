@@ -16,6 +16,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
+import { CaseUnitQuantitySummary } from "@/components/products/case-unit-quantity-summary";
 import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import {
   AlertDialog,
@@ -79,6 +81,10 @@ import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
+import {
+  getPricePerIndividualUnit,
+  splitCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -102,6 +108,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
+import { repriceSaleItem } from "@/modules/sales/utils/reprice-sale-item";
 import {
   convertToBaseUnits,
   getAvailableUnits,
@@ -150,6 +157,7 @@ type ItemState = {
   basePrice: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
+  unitsPerBox?: number | null;
   averageQuantityPerUnit: number | null;
   weightPerUnit?: number | null;
   totalWeightKg?: number | null;
@@ -233,7 +241,10 @@ const updateItemUnitPrice = (item: ItemState, unitPrice: number): ItemState => {
   return {
     ...item,
     unitPrice,
-    basePrice: isWeightOrVolume ? unitPrice : item.basePrice,
+    basePrice:
+      isWeightOrVolume || item.unitOfMeasure === "CAJA"
+        ? unitPrice
+        : item.basePrice,
     pricePerKg: isWeightOrVolume ? unitPrice : item.pricePerKg,
   };
 };
@@ -365,6 +376,7 @@ const buildPreSaleItemPayload = (
     quantity: isAdjustment ? 1 : item.quantity,
     weightQuantity: resolveItemWeightQuantity(item),
     unitPrice: item.unitPrice,
+    unitOfMeasure: isAdjustment ? "UN" : item.unitOfMeasure,
     basePrice: item.basePrice,
     discountAmount: isAdjustment ? 0 : Math.max(0, discount),
     discountPercentage: isAdjustment
@@ -406,12 +418,20 @@ const unitOfMeasureLabels: Record<SaleProduct["unitOfMeasure"], string> = {
   KG: "kg",
   LT: "lt",
   MT: "m",
+  CAJA: "caja",
 };
 
 const formatPriceByMeasure = (
   price: number,
-  unitOfMeasure: SaleProduct["unitOfMeasure"]
-): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+  unitOfMeasure: SaleProduct["unitOfMeasure"],
+  unitsPerBox: number | null = null
+): string => {
+  if (unitOfMeasure === "CAJA" && unitsPerBox && unitsPerBox > 0) {
+    return `${formatCurrency(getPricePerIndividualUnit(price, unitsPerBox))} x unidad`;
+  }
+
+  return `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+};
 
 const formatStockQuantity = (value: number): string =>
   value.toLocaleString("es-AR", {
@@ -422,6 +442,11 @@ const formatStockQuantity = (value: number): string =>
 const formatProductStock = (product: SaleProduct): string => {
   const totalQuantity = product.totalQuantity ?? 0;
   const unitLabel = unitOfMeasureLabels[product.unitOfMeasure];
+
+  if (product.unitOfMeasure === "CAJA" && product.unitsPerBox) {
+    const quantity = splitCaseUnitQuantity(totalQuantity, product.unitsPerBox);
+    return `Stock ${quantity.boxes} caja(s) · ${quantity.units} un.`;
+  }
 
   if (product.tracksStockUnits && product.totalUnitQuantity !== null) {
     return `Stock ${formatStockQuantity(product.totalUnitQuantity)} un. · ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
@@ -902,12 +927,7 @@ export function PreSaleForm({
           return item;
         }
 
-        // Only update if price actually changed
-        if (Math.abs(item.unitPrice - adjustedPrice) > 0.01) {
-          return updateItemUnitPrice(item, adjustedPrice);
-        }
-
-        return item;
+        return repriceSaleItem(item, adjustedPrice);
       })
     );
   }, [productPrices, items.length]);
@@ -998,6 +1018,12 @@ export function PreSaleForm({
   );
 
   useEffect(() => {
+    if (selectedProduct?.unitOfMeasure === "CAJA") {
+      if (inputUnit !== "UNITS") {
+        setInputUnit("UNITS");
+      }
+      return;
+    }
     if (selectedProduct && !availableUnits.includes(inputUnit)) {
       setInputUnit(availableUnits[0] ?? "UNITS");
     }
@@ -1073,7 +1099,7 @@ export function PreSaleForm({
 
   useEffect(() => {
     const defaultPaymentMethod = orgSettings?.sales_default_payment_method;
-    if (defaultPaymentMethod) {
+    if (defaultPaymentMethod && defaultPaymentMethod !== "qr") {
       setPaymentMethod(defaultPaymentMethod);
     }
   }, [orgSettings?.sales_default_payment_method]);
@@ -1226,6 +1252,7 @@ export function PreSaleForm({
     [saleDateString, expirationDateString, normalizedExpirationDays]
   );
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Supports normal, measured and box-based product additions in the shared form.
   const handleAddItem = () => {
     if (!selectedProductId) {
       setError("Selecciona un producto para agregarlo");
@@ -1239,17 +1266,22 @@ export function PreSaleForm({
       return;
     }
 
-    if (!selectedQuantity || selectedQuantity <= 0) {
+    const isCaseProduct = product.unitOfMeasure === "CAJA";
+    const invalidQuantity =
+      selectedQuantity <= 0 ||
+      (isCaseProduct && !Number.isSafeInteger(selectedQuantity));
+    if (invalidQuantity) {
       setError("La cantidad debe ser mayor a 0");
       return;
     }
 
-    const adjustedPrice = productPrices.get(product.id) ?? product.price;
-    const baseQuantity = convertToBaseUnits(
-      selectedQuantity,
-      inputUnit,
-      product
-    );
+    const listedPrice = productPrices.get(product.id) ?? product.price;
+    const baseQuantity = isCaseProduct
+      ? selectedQuantity
+      : convertToBaseUnits(selectedQuantity, inputUnit, product);
+    const adjustedPrice = isCaseProduct
+      ? getPricePerIndividualUnit(listedPrice, product.unitsPerBox ?? 0)
+      : listedPrice;
 
     const unitOfMeasure = product.unitOfMeasure;
     const measurePerUnit = getMeasurePerUnit(product);
@@ -1308,6 +1340,7 @@ export function PreSaleForm({
                 pricePerKg,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
+                unitsPerBox: product.unitsPerBox,
                 weightPerUnit: product.weightPerUnit,
                 taxes: product.taxes ?? [],
               }
@@ -1331,6 +1364,7 @@ export function PreSaleForm({
           basePrice: adjustedPrice,
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
+          unitsPerBox: product.unitsPerBox,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
           weightPerUnit: product.weightPerUnit,
           totalWeightKg: totalWeight,
@@ -1494,6 +1528,10 @@ export function PreSaleForm({
     let nextPrice = 0;
     if (!Number.isNaN(parsed)) {
       nextPrice = allowNegative ? parsed : Math.max(0, parsed);
+    }
+
+    if (item?.unitOfMeasure === "CAJA" && item.unitsPerBox) {
+      nextPrice /= item.unitsPerBox;
     }
 
     handleUpdateItemUnitPrice(itemId, nextPrice);
@@ -2649,7 +2687,8 @@ export function PreSaleForm({
                               {formatPriceByMeasure(
                                 productPrices.get(selectedProduct.id) ??
                                   selectedProduct.price,
-                                selectedProduct.unitOfMeasure
+                                selectedProduct.unitOfMeasure,
+                                selectedProduct.unitsPerBox
                               )}
                             </span>
                             <span className="truncate text-muted-foreground text-xs">
@@ -2693,6 +2732,7 @@ export function PreSaleForm({
                                     keywords={[product.name, product.sku]}
                                     onSelect={() => {
                                       setSelectedProductId(product.id);
+                                      setSelectedQuantity(0);
                                       setIsProductPickerOpen(false);
                                     }}
                                     value={product.id}
@@ -2714,7 +2754,8 @@ export function PreSaleForm({
                                           SKU {product.sku} ·{" "}
                                           {formatPriceByMeasure(
                                             adjustedPrice,
-                                            product.unitOfMeasure
+                                            product.unitOfMeasure,
+                                            product.unitsPerBox
                                           )}
                                         </p>
                                         <p className="text-muted-foreground text-xs">
@@ -2742,51 +2783,70 @@ export function PreSaleForm({
                 </div>
 
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-                  {selectedProduct && availableUnits.length > 1 && (
-                    <div className="w-full space-y-2 sm:flex-1">
-                      <Label htmlFor="inputUnit">Unidad</Label>
-                      <Select
-                        onValueChange={(value) =>
-                          setInputUnit(value as InputUnit)
+                  {selectedProduct &&
+                    selectedProduct.unitOfMeasure !== "CAJA" &&
+                    availableUnits.length > 1 && (
+                      <div className="w-full space-y-2 sm:flex-1">
+                        <Label htmlFor="inputUnit">Unidad</Label>
+                        <Select
+                          onValueChange={(value) =>
+                            setInputUnit(value as InputUnit)
+                          }
+                          value={inputUnit}
+                        >
+                          <SelectTrigger className="w-full" id="inputUnit">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableUnits.map((unit) => (
+                              <SelectItem key={unit} value={unit}>
+                                {getUnitLabel(unit)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                  {selectedProduct?.unitOfMeasure === "CAJA" ? (
+                    <div className="w-full sm:w-64">
+                      <CaseUnitQuantityFields
+                        key={selectedProductId}
+                        onChange={setSelectedQuantity}
+                        totalUnits={
+                          Number.isSafeInteger(selectedQuantity)
+                            ? Math.max(0, selectedQuantity)
+                            : 0
                         }
-                        value={inputUnit}
-                      >
-                        <SelectTrigger className="w-full" id="inputUnit">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableUnits.map((unit) => (
-                            <SelectItem key={unit} value={unit}>
-                              {getUnitLabel(unit)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        unitsPerBox={selectedProduct.unitsPerBox ?? 0}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full space-y-2 sm:flex-1">
+                      <Label htmlFor="quantity">
+                        {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
+                      </Label>
+                      <Input
+                        id="quantity"
+                        inputMode="decimal"
+                        min={0}
+                        onChange={(event) => {
+                          const parsed = Number.parseFloat(event.target.value);
+                          setSelectedQuantity(
+                            Number.isNaN(parsed) ? 0 : parsed
+                          );
+                        }}
+                        placeholder="0"
+                        step="0.01"
+                        type="number"
+                        value={
+                          !selectedQuantity || Number.isNaN(selectedQuantity)
+                            ? ""
+                            : selectedQuantity
+                        }
+                      />
                     </div>
                   )}
-
-                  <div className="w-full space-y-2 sm:flex-1">
-                    <Label htmlFor="quantity">
-                      {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
-                    </Label>
-                    <Input
-                      id="quantity"
-                      inputMode="decimal"
-                      min={0}
-                      onChange={(event) => {
-                        const parsed = Number.parseFloat(event.target.value);
-                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
-                      }}
-                      placeholder="0"
-                      step="0.01"
-                      type="number"
-                      value={
-                        !selectedQuantity || Number.isNaN(selectedQuantity)
-                          ? ""
-                          : selectedQuantity
-                      }
-                    />
-                  </div>
 
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-shrink-0">
                     <Button
@@ -2833,6 +2893,13 @@ export function PreSaleForm({
                       const itemIsWeightOrVolume = isWeightOrVolumeUnit(
                         item.unitOfMeasure
                       );
+                      const caseQuantity =
+                        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+                          ? splitCaseUnitQuantity(
+                              item.quantity,
+                              item.unitsPerBox
+                            )
+                          : null;
 
                       let measureLabel = "Medida";
                       if (itemIsWeightOrVolume) {
@@ -2861,6 +2928,14 @@ export function PreSaleForm({
                       const currentItemTaxIds = new Set(
                         item.taxes?.map((tax) => tax.taxId) ?? []
                       );
+                      const displayedUnitPrice =
+                        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+                          ? truncateMoney(item.unitPrice * item.unitsPerBox)
+                          : item.unitPrice;
+                      const unitPriceValue =
+                        displayedUnitPrice && !Number.isNaN(displayedUnitPrice)
+                          ? displayedUnitPrice
+                          : "";
 
                       if (isAdjustment) {
                         const subtotal = calculateItemTotals(item).subtotal;
@@ -2939,7 +3014,12 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid min-w-0 gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
+                          className={cn(
+                            "grid min-w-0 gap-3 px-4 py-3",
+                            caseQuantity
+                              ? "grid-cols-2 items-end sm:grid-cols-3 xl:grid-cols-[minmax(160px,1.4fr)_minmax(110px,1fr)_minmax(80px,0.7fr)_minmax(120px,1fr)_auto]"
+                              : "sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
+                          )}
                           key={item.id}
                         >
                           {/*
@@ -2952,7 +3032,13 @@ export function PreSaleForm({
                         - Subtotal
                         - Remove action
                       */}
-                          <div className="min-w-0 overflow-hidden">
+                          <div
+                            className={cn(
+                              "min-w-0 overflow-hidden",
+                              caseQuantity &&
+                                "col-span-2 sm:col-span-3 xl:col-span-5"
+                            )}
+                          >
                             <div className="min-w-0 space-y-1">
                               <p className="break-words font-medium leading-snug">
                                 {item.name}
@@ -2965,45 +3051,39 @@ export function PreSaleForm({
                             </div>
                             <p className="break-all text-muted-foreground text-sm">
                               SKU {item.sku}
+                              {caseQuantity
+                                ? ` · ${item.unitsPerBox} unidades por caja`
+                                : ""}
                             </p>
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.quantity || Number.isNaN(item.quantity)
-                                  ? ""
-                                  : item.quantity
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              {measureLabel}
-                            </span>
-                            {itemIsWeightOrVolume ? (
+                          <div
+                            className={cn(
+                              "flex flex-col gap-1",
+                              caseQuantity && "col-span-2 sm:col-span-1"
+                            )}
+                          >
+                            {!caseQuantity && (
+                              <span className="text-muted-foreground text-xs">
+                                Cantidad
+                              </span>
+                            )}
+                            {caseQuantity && item.unitsPerBox ? (
+                              <CaseUnitQuantityFields
+                                compact
+                                onChange={(quantity) =>
+                                  handleUpdateItemQuantity(item.id, quantity)
+                                }
+                                totalUnits={item.quantity}
+                                unitsPerBox={item.unitsPerBox}
+                              />
+                            ) : (
                               <Input
                                 className="h-8 w-full"
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleMeasureInputChange(
+                                  handleQuantityInputChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -3012,19 +3092,50 @@ export function PreSaleForm({
                                 step="0.01"
                                 type="number"
                                 value={
-                                  !measureValue || Number.isNaN(measureValue)
+                                  !item.quantity || Number.isNaN(item.quantity)
                                     ? ""
-                                    : measureValue
+                                    : item.quantity
                                 }
                               />
-                            ) : (
-                              <span className="text-sm">{unitLabel}</span>
                             )}
                           </div>
 
+                          {!caseQuantity && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                {measureLabel}
+                              </span>
+                              {itemIsWeightOrVolume ? (
+                                <Input
+                                  className="h-8 w-full"
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleMeasureInputChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !measureValue || Number.isNaN(measureValue)
+                                      ? ""
+                                      : measureValue
+                                  }
+                                />
+                              ) : (
+                                <span className="text-sm">{unitLabel}</span>
+                              )}
+                            </div>
+                          )}
+
                           <div className="flex flex-col gap-1">
                             <span className="text-muted-foreground text-xs">
-                              Precio unitario
+                              {item.unitOfMeasure === "CAJA"
+                                ? "Precio por caja"
+                                : "Precio unitario"}
                             </span>
                             <Input
                               className="h-8 w-full"
@@ -3039,11 +3150,7 @@ export function PreSaleForm({
                               placeholder="0"
                               step="0.01"
                               type="number"
-                              value={
-                                !item.unitPrice || Number.isNaN(item.unitPrice)
-                                  ? ""
-                                  : item.unitPrice
-                              }
+                              value={unitPriceValue}
                             />
                           </div>
 
@@ -3208,12 +3315,17 @@ export function PreSaleForm({
                     </span>
                     <span>{totals.totalItems}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Unidades totales
-                    </span>
-                    <span>{totals.totalUnits}</span>
-                  </div>
+                  <CaseUnitQuantitySummary
+                    items={items
+                      .filter((item) => item.type === "product")
+                      .map((item) => ({
+                        productId: item.productId ?? item.id,
+                        name: item.name,
+                        quantity: item.quantity,
+                        unitOfMeasure: item.unitOfMeasure,
+                        unitsPerBox: item.unitsPerBox,
+                      }))}
+                  />
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>

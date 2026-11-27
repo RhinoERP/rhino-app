@@ -609,7 +609,7 @@ function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
     discountPercentage
   );
 
-  if (unitOfMeasure === "UN") {
+  if (unitOfMeasure === "UN" || unitOfMeasure === "CAJA") {
     return {
       units,
       kilograms: null,

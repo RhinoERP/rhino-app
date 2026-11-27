@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { computeLineGross } from "@/lib/line-values";
+import { getBaseUnitPrice } from "@/modules/inventory/utils/case-units";
 import {
   calculateSalePrice,
   type SalePriceAdjustment,
@@ -49,11 +50,16 @@ export function getAdjustedQuoteUnitPrice(
     level: pricing.level,
     adjustments,
   });
-  return convertPriceToQuoteCurrency(
+  const commercialPrice = convertPriceToQuoteCurrency(
     price,
     product.currency ?? "ARS",
     currency,
     exchangeRate
+  );
+  return getBaseUnitPrice(
+    commercialPrice,
+    product.unitOfMeasure,
+    product.unitsPerBox
   );
 }
 

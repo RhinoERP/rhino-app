@@ -60,7 +60,7 @@ export const offlineProductSchema = z.object({
   supplierName: z.string().nullable(),
   categoryId: z.string().uuid().nullable(),
   categoryName: z.string().nullable(),
-  unitOfMeasure: z.enum(["UN", "KG", "LT", "MT"]),
+  unitOfMeasure: z.enum(["UN", "KG", "LT", "MT", "CAJA"]),
   tracksStockUnits: z.boolean(),
   totalQuantity: z.number().finite().nullable(),
   totalUnitQuantity: z.number().finite().nullable(),
