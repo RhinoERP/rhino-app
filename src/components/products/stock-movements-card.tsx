@@ -182,12 +182,16 @@ export function StockMovementsCard({
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
   let quantityLabel = "Cantidad";
-  if (isWeightBased) {
+  if (product.unit_of_measure === "CAJA") {
+    quantityLabel = "Cantidad (unidades individuales)";
+  } else if (isWeightBased) {
     quantityLabel =
       product.unit_of_measure === "KG" ? "Cantidad (kg)" : "Cantidad (lt)";
   }
   let stockDetailLabel = "Stock";
-  if (isWeightBased) {
+  if (product.unit_of_measure === "CAJA") {
+    stockDetailLabel = "Stock (unidades individuales)";
+  } else if (isWeightBased) {
     stockDetailLabel =
       product.unit_of_measure === "KG" ? "Stock (kg)" : "Stock (lt)";
   }
@@ -687,7 +691,11 @@ export function StockMovementsCard({
                           <Label>{quantityLabel}</Label>
                           <Input
                             disabled={isPending}
-                            inputMode="decimal"
+                            inputMode={
+                              product.unit_of_measure === "CAJA"
+                                ? "numeric"
+                                : "decimal"
+                            }
                             maxLength={12}
                             onChange={(event) =>
                               setQuantity(
@@ -695,7 +703,9 @@ export function StockMovementsCard({
                               )
                             }
                             onFocus={(event) => event.target.select()}
-                            step="0.01"
+                            step={
+                              product.unit_of_measure === "CAJA" ? "1" : "0.01"
+                            }
                             value={quantity}
                           />
                         </div>

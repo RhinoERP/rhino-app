@@ -34,11 +34,17 @@ vi.mock("./sales.service", () => ({
     canManage: true,
     canViewAll: true,
     userId: "seller",
+    permissions: [],
+    isOrganizationAdmin: false,
+    canManageAll: false,
   }),
 }));
 
 const renderPage = () =>
-  PreSalePage({ params: Promise.resolve({ orgSlug: "org" }) });
+  PreSalePage({
+    params: Promise.resolve({ orgSlug: "org" }),
+    searchParams: Promise.resolve({}),
+  });
 
 describe("single-warehouse pre-sale initialization", () => {
   beforeEach(() => {

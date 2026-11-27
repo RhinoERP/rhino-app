@@ -308,7 +308,7 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Unidades",
       description:
-        "Cantidad en unidades (completar para productos en unidades o para kg/lt si se rastrean unidades).",
+        "Cantidad total en unidades individuales (también para productos CAJA; no ingresar cantidad de cajas). Para kg/lt, completar si se rastrean unidades.",
       required: false,
     },
     {

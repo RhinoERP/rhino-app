@@ -16,6 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  OFFLINE_PRODUCT_SEARCH_LIMIT,
+  searchOfflineProducts,
+} from "@/modules/offline/search/offline-product-search";
+import {
   getActiveSellerSnapshot,
   isSellerSnapshotExpired,
   type StoredSellerSnapshot,
@@ -57,17 +61,11 @@ export default function OfflineDataPage() {
       ),
     [normalizedQuery, record]
   );
-  const products = useMemo(
-    () =>
-      (record?.snapshot.products ?? []).filter((product) =>
-        normalize(
-          [product.name, product.sku, product.brand, product.supplierName].join(
-            " "
-          )
-        ).includes(normalizedQuery)
-      ),
-    [normalizedQuery, record]
+  const matchingProducts = useMemo(
+    () => searchOfflineProducts(record?.snapshot.products ?? [], query),
+    [query, record]
   );
+  const products = matchingProducts.slice(0, OFFLINE_PRODUCT_SEARCH_LIMIT);
 
   if (loading) {
     return (
@@ -174,6 +172,15 @@ export default function OfflineDataPage() {
         </div>
 
         <div className="space-y-2">
+          {view === "products" && query.trim() && (
+            <p aria-live="polite" className="text-muted-foreground text-xs">
+              {matchingProducts.length}{" "}
+              {matchingProducts.length === 1 ? "coincidencia" : "coincidencias"}
+              {matchingProducts.length > products.length
+                ? ` · mostrando ${products.length}`
+                : ""}
+            </p>
+          )}
           {view === "customers"
             ? customers.map((customer) => (
                 <Card key={customer.id}>
@@ -200,7 +207,12 @@ export default function OfflineDataPage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium">{product.name}</p>
                       <p className="text-muted-foreground text-xs">
-                        {[product.sku, product.brand, product.supplierName]
+                        {[
+                          product.sku,
+                          product.brand,
+                          product.categoryName,
+                          product.supplierName,
+                        ]
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
@@ -218,6 +230,11 @@ export default function OfflineDataPage() {
                   </CardContent>
                 </Card>
               ))}
+          {view === "products" && products.length === 0 && (
+            <p className="rounded-lg border border-dashed p-6 text-center text-muted-foreground text-sm">
+              No encontramos productos con esa búsqueda.
+            </p>
+          )}
         </div>
 
         <Button asChild className="w-full" variant="outline">

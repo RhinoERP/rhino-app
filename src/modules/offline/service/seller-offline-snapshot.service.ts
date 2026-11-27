@@ -3,6 +3,8 @@ import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/servi
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { organizationSettingsSchema } from "@/modules/organizations/types/organization-settings";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { calculateSalePrice } from "@/modules/price-levels/service/price-calculator";
+import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import {
   getSaleProducts,
   getSalesAccessContext,
@@ -14,6 +16,7 @@ import {
   type SellerOfflineSnapshotV1,
   sellerOfflineSnapshotV1Schema,
 } from "../contracts/seller-offline-snapshot";
+import { encryptOfflineCostSnapshot } from "../server/seller-offline-cost-snapshot";
 
 export type SellerOfflineSnapshotErrorCode =
   | "AUTH_REQUIRED"
@@ -64,7 +67,7 @@ async function getVisibleCustomers(params: {
   let query = supabase
     .from("customers")
     .select(
-      "id,business_name,fantasy_name,client_number,cuit,city,assigned_seller_id,sales_price_list_id,due_days,tax_condition"
+      "id,business_name,fantasy_name,client_number,cuit,city,assigned_seller_id,price_level_id,sales_price_list_id,due_days,tax_condition"
     )
     .eq("organization_id", params.organizationId)
     .eq("is_active", true)
@@ -89,6 +92,7 @@ async function getVisibleCustomers(params: {
     cuit: customer.cuit,
     city: customer.city,
     assignedSellerId: customer.assigned_seller_id,
+    priceLevelId: customer.price_level_id,
     salesPriceListId: customer.sales_price_list_id,
     dueDays: customer.due_days,
     taxCondition: customer.tax_condition,
@@ -205,6 +209,7 @@ export async function createSellerOfflineSnapshot(
       403
     );
   }
+  const snapshotOwnerUserId = access.userId;
 
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization?.id || organization.is_active === false) {
@@ -238,7 +243,7 @@ export async function createSellerOfflineSnapshot(
     );
   }
 
-  const [customers, products, taxes, sellers, salesPriceLists] =
+  const [customers, products, taxes, sellers, salesPriceLists, priceLevels] =
     await Promise.all([
       getVisibleCustomers({
         organizationId: organization.id,
@@ -249,6 +254,7 @@ export async function createSellerOfflineSnapshot(
       getActiveTaxesByOrgSlug(orgSlug),
       getOrganizationSalesMembersBySlug(orgSlug),
       getSalesPriceListsByOrgSlug(orgSlug),
+      getPriceLevelsByOrgSlug(orgSlug),
     ]);
   const customerPriceAssignments = await getCustomerPriceAssignments({
     organizationId: organization.id,
@@ -266,13 +272,14 @@ export async function createSellerOfflineSnapshot(
     generatedAt.getTime() +
       settings.seller_offline_snapshot_ttl_hours * 3_600_000
   );
+  const snapshotId = crypto.randomUUID();
 
   return sellerOfflineSnapshotV1Schema.parse({
     schemaVersion: SELLER_OFFLINE_SNAPSHOT_SCHEMA_VERSION,
-    snapshotId: crypto.randomUUID(),
+    snapshotId,
     generatedAt: generatedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
-    ownerUserId: access.userId,
+    ownerUserId: snapshotOwnerUserId,
     organizationId: organization.id,
     organization: {
       id: organization.id,
@@ -287,6 +294,20 @@ export async function createSellerOfflineSnapshot(
       sku: product.sku,
       brand: product.brand ?? null,
       price: product.price,
+      costSnapshotCiphertext: encryptOfflineCostSnapshot(product.costPrice, {
+        organizationId: organization.id,
+        ownerUserId: snapshotOwnerUserId,
+        productId: product.id,
+        snapshotId,
+      }),
+      priceByLevel: priceLevels.map((level) => ({
+        priceLevelId: level.id,
+        price: calculateSalePrice({
+          basePrice: product.price,
+          costPrice: product.costPrice,
+          level,
+        }).price,
+      })),
       currency: product.currency,
       supplierId: product.supplierId ?? null,
       supplierName: product.supplierName ?? null,
@@ -331,6 +352,15 @@ export async function createSellerOfflineSnapshot(
       type: priceList.type,
       value: priceList.value,
       validFrom: priceList.valid_from,
+    })),
+    priceLevels: priceLevels.map((level) => ({
+      id: level.id,
+      name: level.name,
+      margin: level.margin,
+      validFrom: level.valid_from,
+      isActive: level.is_active,
+      extraCommissionRate: level.extra_commission_rate,
+      status: level.status ?? "Active",
     })),
     customerPriceAssignments,
     purchasePriceListItems,

@@ -18,6 +18,7 @@ import {
   isSellerSnapshotExpired,
   type StoredSellerSnapshot,
 } from "@/modules/offline/storage/offline-db";
+import { syncOfflineSalesQuotes } from "@/modules/offline/sync/offline-sales-quote-sync";
 import {
   OFFLINE_SNAPSHOT_REFRESH_INTERVAL_MS,
   refreshSellerOfflineSnapshot,
@@ -28,6 +29,10 @@ type OfflineDataManagerProps = {
   organizationId: string;
   ownerUserId: string;
   wholesaleEnabled: boolean;
+};
+
+const reportQuoteSyncError = (error: unknown) => {
+  console.error("No se pudieron sincronizar cotizaciones offline", error);
 };
 
 function formatBytes(bytes: number) {
@@ -173,6 +178,14 @@ export function OfflineDataManager({
   ownerUserId,
   wholesaleEnabled,
 }: OfflineDataManagerProps) {
+  useEffect(() => {
+    const syncQuotes = () => {
+      syncOfflineSalesQuotes(ownerUserId).catch(reportQuoteSyncError);
+    };
+    window.addEventListener("online", syncQuotes);
+    syncQuotes();
+    return () => window.removeEventListener("online", syncQuotes);
+  }, [ownerUserId]);
   const { can } = usePermissions();
   const [record, setRecord] = useState<StoredSellerSnapshot | null>(null);
   const [loading, setLoading] = useState(true);

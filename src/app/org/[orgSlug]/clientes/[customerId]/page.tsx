@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
 import { CustomerMetricsCards } from "@/components/customers/customer-metrics-cards";
+import { CustomerSitesCard } from "@/components/customers/customer-sites-card";
 import { RecentQuotesCard } from "@/components/customers/recent-quotes-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
 import { SupplierAssignmentsCard } from "@/components/customers/supplier-assignments-card";
@@ -26,13 +27,17 @@ import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignment
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import type { Customer } from "@/modules/customers/types";
 import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-notes.service";
+import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
+import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
+import { resolvePreSaleCustomerContext } from "@/modules/sales/utils/pre-sale-customer-context";
 import {
   getSalesPriceListById,
   getSalesPriceListsByOrgSlug,
@@ -73,6 +78,7 @@ async function getAssignedCustomerPricing(
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes independent customer detail cards
 export default async function CustomerDetailsPage({
   params,
 }: CustomerDetailsPageProps) {
@@ -124,6 +130,33 @@ export default async function CustomerDetailsPage({
     await getAssignedCustomerPricing(orgSlug, customer);
 
   const displayName = customer.fantasy_name || customer.business_name;
+  const siteAccess = await getSalesAccessContext(orgSlug);
+  const canReadCollections =
+    siteAccess.isOrganizationAdmin ||
+    READ_PERMISSIONS.collections.some((permission) =>
+      siteAccess.permissions.includes(permission)
+    );
+  const hasPreSaleAccess =
+    customer.is_active &&
+    isOrganizationModuleEnabled(organization, "wholesale") &&
+    !productionEnabled &&
+    siteAccess.canManage;
+  const customerVisibleInPreSale =
+    siteAccess.canViewAll ||
+    customer.assigned_seller_id === siteAccess.userId ||
+    !customer.assigned_seller_id;
+  const preSaleContext =
+    hasPreSaleAccess && customerVisibleInPreSale
+      ? resolvePreSaleCustomerContext({
+          requestedCustomerId: customerId,
+          visibleCustomers: [customer],
+          sellers: await getOrganizationSalesMembersBySlug(orgSlug),
+          userId: siteAccess.userId,
+          canAssignAnySeller:
+            siteAccess.isOrganizationAdmin || siteAccess.canManageAll,
+        })
+      : null;
+  const canStartPreSale = preSaleContext?.customerId === customerId;
   const createdAt = customer.created_at
     ? dateFormatter.format(new Date(customer.created_at))
     : "-";
@@ -160,6 +193,15 @@ export default async function CustomerDetailsPage({
                 {customer.cuit ? `CUIT ${customer.cuit}` : "CUIT no informado"}
               </p>
             </div>
+            {canStartPreSale && (
+              <Button asChild className="w-full sm:w-auto">
+                <Link
+                  href={`/org/${orgSlug}/preventa/nueva?customerId=${encodeURIComponent(customerId)}`}
+                >
+                  Empezar preventa
+                </Link>
+              </Button>
+            )}
           </div>
 
           {/* Mobile: Info Card appears here (first) */}
@@ -167,6 +209,7 @@ export default async function CustomerDetailsPage({
             <CustomerInfoCard
               assignedPriceLevel={assignedPriceLevel}
               assignedPriceList={assignedPriceList}
+              canReadCollections={canReadCollections}
               createdAt={createdAt}
               customer={customer}
               mapsLink={mapsLink}
@@ -195,7 +238,16 @@ export default async function CustomerDetailsPage({
           )}
 
           {/* Recent Sales */}
-          <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
+          {(siteAccess.canManage || siteAccess.isOrganizationAdmin) && (
+            <CustomerSitesCard
+              canManage={siteAccess.isOrganizationAdmin}
+              customerId={customerId}
+              orgSlug={orgSlug}
+            />
+          )}
+          {siteAccess.canRead && (
+            <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
+          )}
 
           <DebitNotesCard debitNotes={debitNotes} orgSlug={orgSlug} />
 
@@ -217,6 +269,7 @@ export default async function CustomerDetailsPage({
           <CustomerInfoCard
             assignedPriceLevel={assignedPriceLevel}
             assignedPriceList={assignedPriceList}
+            canReadCollections={canReadCollections}
             createdAt={createdAt}
             customer={customer}
             mapsLink={mapsLink}

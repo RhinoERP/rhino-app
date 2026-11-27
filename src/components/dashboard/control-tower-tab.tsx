@@ -601,9 +601,11 @@ function ExpiringLotsTable({
               lot.is_expired
             );
             const totalStock =
-              lot.unit_of_measure === "UN"
+              lot.unit_of_measure === "UN" || lot.unit_of_measure === "CAJA"
                 ? lot.quantity_available
                 : lot.unit_quantity_available;
+            const stockUnitLabel =
+              lot.unit_of_measure === "CAJA" ? "un" : lot.unit_of_measure;
 
             return (
               <tr className="border-b last:border-0" key={lot.lot_id}>
@@ -619,7 +621,7 @@ function ExpiringLotsTable({
                   {lot.lot_number}
                 </td>
                 <td className="px-4 py-3 text-right font-medium text-sm">
-                  {totalStock} {lot.unit_of_measure}
+                  {totalStock} {stockUnitLabel}
                 </td>
                 <td className="px-4 py-3 text-right text-sm">
                   {formatDate(lot.expiration_date)}

@@ -32,6 +32,7 @@ export const posSaleItemSchema = z.object({
   productId: idSchema,
   productVariantId: optionalIdSchema,
   quantity: z.coerce.number().finite().min(0),
+  unitOfMeasure: z.enum(["UN", "KG", "LT", "MT", "CAJA"]).optional(),
   weightQuantity: z.coerce.number().finite().positive().optional().nullable(),
   isWholeUnit: z.boolean().optional(),
   unitPrice: nonNegativeNumberSchema,
@@ -206,6 +207,7 @@ export type PosTerminalProduct = {
   price: number;
   directSalePrice: number | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
+  unitsPerBox?: number | null;
   tracksStockUnits: boolean;
   weightPerUnit: number | null;
   hasVariants: boolean;

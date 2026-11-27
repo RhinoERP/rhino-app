@@ -4,7 +4,8 @@ import { CaretDownIcon } from "@phosphor-icons/react";
 import { SignOutIcon } from "@phosphor-icons/react/ssr";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,19 +13,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { createClient } from "@/lib/supabase/client";
+import { secureLogout } from "@/lib/auth/secure-logout";
 
 type AdminNavbarProps = {
   userEmail?: string;
 };
 
 export function AdminNavbar({ userEmail }: AdminNavbarProps) {
-  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  const logout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/auth/login");
+  const logout = () => {
+    setLoggingOut(true);
+    secureLogout().catch((error: unknown) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No se pudo cerrar sesión. Intentá de nuevo."
+      );
+      setLoggingOut(false);
+    });
   };
 
   return (
@@ -65,12 +72,13 @@ export function AdminNavbar({ userEmail }: AdminNavbarProps) {
             </div>
             <DropdownMenuSeparator />
             <button
-              className="relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-destructive text-sm outline-none hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive"
+              className="relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-destructive text-sm outline-none hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive disabled:opacity-50"
+              disabled={loggingOut}
               onClick={logout}
               type="button"
             >
               <SignOutIcon className="h-4 w-4" weight="duotone" />
-              <span>Cerrar sesión</span>
+              <span>{loggingOut ? "Cerrando sesión…" : "Cerrar sesión"}</span>
             </button>
           </DropdownMenuContent>
         </DropdownMenu>

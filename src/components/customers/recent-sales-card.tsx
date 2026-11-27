@@ -49,7 +49,7 @@ export function RecentSalesCard({ orgSlug, sales }: RecentSalesCardProps) {
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <FileText className="h-6 w-6" />
           </div>
-          <p className="text-sm">Este cliente no tiene ventas registradas</p>
+          <p className="text-sm">No hay ventas recientes disponibles</p>
         </CardContent>
       </Card>
     );

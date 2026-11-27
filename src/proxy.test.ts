@@ -102,3 +102,25 @@ describe.each([
 it("keeps the statically declared matchers identical in both Next entry points", () => {
   expect(rootConfig).toEqual(srcConfig);
 });
+
+it.each([
+  rootConfig,
+  srcConfig,
+])("keeps the offline shell public and organization pages protected", (config) => {
+  const matchesProxy = (url: string) =>
+    config.matcher.some((pattern) =>
+      new RegExp(`^${pattern}$`).test(
+        new URL(url, "https://rhinos.example").pathname
+      )
+    );
+  for (const url of [
+    "/offline.html",
+    "/offline.html?__WB_REVISION__=build",
+    "/~offline/cotizaciones",
+    "/serwist/sw.js",
+    "/manifest.webmanifest",
+  ]) {
+    expect(matchesProxy(url)).toBe(false);
+  }
+  expect(matchesProxy("/org/test/ventas")).toBe(true);
+});

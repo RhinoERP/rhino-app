@@ -20,7 +20,7 @@
 | Caso | Estado |
 |---|---|
 | Migracion `20260921120000` aplicada y replay basico en Supabase real | Confirmados en entorno piloto |
-| Grants directos de ambas RPC | Pendiente de prueba explicita |
+| Grants de las RPC de replay y creación atómica | Metadatos SQL y acceso anónimo/vendedor verificados en ensayo (19/11); no se invocó la RPC de creación para forzar errores |
 | Commit exitoso con respuesta perdida, sin duplicado | Pendiente |
 | Rollback atomico por error de item/impuesto | Pendiente |
 | Revocacion de membresia o permiso antes del replay | Pendiente |
@@ -29,6 +29,9 @@
 | ETag `304` en navegador real y renovacion de expiracion local | Pendiente |
 | Dos pestanas/ventanas con el mismo propietario | Pendiente en navegador real |
 | Cuenta A logout, cuenta B login, sin datos cruzados | Pendiente en dispositivos |
+| Aviso manual de cotización sincronizada: WhatsApp permite elegir destinatario y editar texto; enlace lleva a la bandeja del administrador | Pendiente de aceptación en iOS, Android y escritorio; no se envía automáticamente |
+| Barra móvil: Inicio, Ventas, Visitas, Cotizaciones y Clientes; cuenta/cierre fuera de la barra | Pendiente de aceptación en dispositivos pequeños y con área segura iOS |
+| Búsqueda de clientes, productos y variantes en el cotizador; stock al seleccionar | Filtrado, catálogos grandes, selección caducada y etiquetas de stock cubiertos por pruebas automatizadas; validar en dispositivos teclado virtual, Enter/flecha abajo/escape, apertura/cierre, área segura y diferencia entre stock cargado online y snapshot offline |
 | Snapshot reemplazado y migracion/revision del draft | Pendiente en dispositivos |
 | Storage lleno o eliminado por el sistema | Pendiente |
 

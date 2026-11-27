@@ -524,14 +524,21 @@ export async function getUserOrganizations(): Promise<Organization[]> {
  * - 0 orgs -> /no-org
  * - no user -> /auth/login (or public landing page)
  */
+
 export async function resolveUserRedirect(): Promise<string> {
   const supabase = await createClient();
 
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
 
   if (!user) {
+    console.error("[auth.redirect] getUser failed", {
+      code: authError?.code,
+      message: authError?.message,
+      status: authError?.status,
+    });
     return "/auth/login";
   }
 
@@ -576,12 +583,21 @@ export async function resolveUserRedirect(): Promise<string> {
     return "/no-org";
   }
 
-  const { data: permissions } = await supabase.rpc(
+  const { data: permissions, error: permissionsError } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
     {
       target_org_slug: firstOrgSlug,
     }
   );
+
+  if (permissionsError) {
+    console.error("[auth.redirect] Permission lookup failed", {
+      code: permissionsError.code,
+      message: permissionsError.message,
+      details: permissionsError.details,
+      hint: permissionsError.hint,
+    });
+  }
 
   const userPermissions = (permissions ?? []) as string[];
 

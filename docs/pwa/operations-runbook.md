@@ -10,6 +10,73 @@
 
 ## Diagnostico
 
+### Ejecucion local y Cloudflare
+
+Para probar instalacion, inicio en frio y navegacion offline, usar una compilacion
+de produccion. `@serwist/turbopack` 9.5.12 elimina el manifiesto de precache y las
+entradas adicionales bajo `next dev`. Descargar el snapshot no alcanza para
+preparar las pantallas. El registro del worker queda deshabilitado en desarrollo
+para no reemplazar una instalacion valida con un worker sin precache.
+
+```sh
+# Terminal 1 (.env.local se carga tambien durante el build)
+pnpm pwa:serve
+```
+
+```sh
+# Terminal 2: mantener este proceso durante toda la prueba
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+Abrir el HTTPS que informa el tunel. Esperar **Acceso offline preparado**, iniciar
+sesion y preparar los datos de la organizacion. Si hay una version anterior del
+worker, aceptar **Actualizar**. Cada Quick Tunnel nuevo tiene otro origen y sus
+propios datos/instalacion; no es necesario mantener el servidor accesible para
+usar una instalacion que ya completo la preparacion offline.
+
+Prueba automatizada (Chrome instalado; `CHROME_PATH` permite otra ubicacion):
+
+```sh
+pnpm pwa:test
+```
+
+El test usa un perfil temporal, verifica el precache y su HTML, cierra el navegador,
+corta las conexiones al origen y lo reabre sin cache HTTP. Comprueba fallback en
+`/` y rutas protegidas, hidratacion de todas las pantallas offline, precio firmado,
+persistencia de cotizaciones y replay al reconectar contra una API simulada. No
+crea operaciones comerciales en el backend. `PWA_TEST_URL` permite apuntar el
+relay de prueba a otro servidor, incluido el tunel HTTPS.
+
+### Incidente de arranque offline (2026-11-11)
+
+Se reprodujeron tres fallos:
+
+1. `pnpm dev` servia `precacheEntries: undefined`: el worker controlaba paginas,
+   pero su cache de documentos estaba vacia.
+2. `/offline.html` estaba incluido automaticamente desde `public/` y tambien como
+   entrada adicional con otra revision. Produccion fallaba al instalar con
+   `add-to-cache-list-conflicting-entries`. Ahora se incluye solo automaticamente.
+3. Se habia excluido el HTML del proxy raiz, pero el entrypoint activo
+   `src/proxy.ts` seguia redirigiendo a login. El precache terminaba guardando el
+   login bajo la URL del fallback. Ambos matchers ahora coinciden y el test verifica
+   que se descargue el documento correcto, sin depender de una sesion.
+
+Las paginas React offline reciben una revision nueva por build, incluso sin un
+commit nuevo, para no conservar HTML que referencia chunks de una compilacion
+anterior. El formulario publico siempre envia su snapshot firmado por la cola,
+incluso si el dispositivo informa conectividad, y sincroniza al montar, recuperar
+red o volver a primer plano.
+
+Verificado: build de produccion, tests de proxy/contratos/cola, Chrome con reinicio
+real y corte de red; tambien instalacion directa sobre HTTPS de Cloudflare y
+reapertura bloqueando toda la red del navegador. La aceptacion en iPhone fisico
+sigue siendo una comprobacion separada.
+
+Actualizacion 2026-11-12: el usuario confirmo el funcionamiento offline en iPhone.
+Se unifico el hub en `/~offline`: `/offline.html` conserva la URL de inicio de
+las instalaciones existentes y redirige a ese hub. El logo usa el PNG precargado
+directamente, sin depender del optimizador de imagenes de Next para cargar offline.
+
 | Sintoma | Revisar |
 |---|---|
 | Permanece `queued` | Sesion, conectividad real, `nextAttemptAt`, eventos de visibilidad y reapertura |
@@ -20,6 +87,7 @@
 | Fecha aparece como el dia anterior en iOS | Confirmar que la lista movil usa `formatDateOnly`; desplegar un build nuevo y actualizar el Service Worker |
 | Duplicado sospechado | Buscar por organizacion y `command_id`; no reenviar con un payload distinto |
 | Datos offline no se actualizan | Confirmar modo standalone, app visible, conectividad, feature flag, permisos y headers `ETag`/`If-None-Match` |
+| No se puede cerrar sesion por falla al borrar datos offline | El cierre voluntario se bloquea para no dejar datos de la cuenta anterior. Revisar almacenamiento del dispositivo y reintentar; antes de compartirlo, borrar los datos del sitio/PWA desde el navegador (esto elimina borradores y comandos pendientes). Un cierre remoto muestra una advertencia persistente si falla la purga |
 | La organizacion no puede preparar snapshot | Confirmar modulo `wholesale`, produccion deshabilitada, usuario miembro activo con permiso de ventas y flag de offline habilitado en ajustes de preventa |
 | No aparece tutorial de instalacion | Verificar navegador soportado (Safari iOS o Chrome Android/iOS), viewport mobile, permiso de ventas, modulo wholesale y que no esté instalada/descartada por siete días |
 

@@ -2,10 +2,19 @@
 
 Esta carpeta centraliza decisiones, investigacion, implementacion y resultados del proyecto PWA orientado a vendedores.
 
+La comparación funcional con VendoApp, el estado preliminar de Rhinos y el
+proceso iterativo de investigación/definición/implementación están en
+[`rhinos-vs-vendoapp.md`](./rhinos-vs-vendoapp.md). Ese documento incluye el
+cotizador competitivo como área explícita de auditoría.
+
 ## Documento principal
 
 - [Plan PWA v2](./plan-pwa-v2.md): arquitectura vigente, alcance, estado, seguridad y rollout.
 - [Plan original](./plan-pwa.md): antecedente historico y obsoleto. No debe utilizarse como guia de implementacion.
+
+Para probar offline localmente: `pnpm pwa:serve` y un tunel HTTPS hacia el puerto
+3000. **`pnpm dev` no precarga las pantallas offline.** Diagnostico y prueba de
+arranque en frio (`pnpm pwa:test`) en el [runbook](./operations-runbook.md).
 
 ## Decision vigente
 

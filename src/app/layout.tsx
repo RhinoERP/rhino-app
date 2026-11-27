@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
+import { ScrollToTopOnNavigation } from "@/components/layout/scroll-to-top-on-navigation";
 import { PwaProvider } from "@/components/pwa/pwa-provider";
 import { SerwistProvider } from "@/components/serwist/serwist-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
@@ -23,6 +24,11 @@ export const metadata: Metadata = {
 };
 
 function isPwaEnabled() {
+  // Serwist deliberately omits its precache manifest in development. Registering
+  // that worker would replace a working offline installation with an empty one.
+  if (process.env.NODE_ENV !== "production") {
+    return false;
+  }
   const configured = process.env.NEXT_PUBLIC_PWA_ENABLED;
   if (configured) {
     return configured === "true";
@@ -62,7 +68,10 @@ export default function RootLayout({
           >
             <SerwistProvider enabled={isPwaEnabled()}>
               <PwaProvider>
-                <Providers>{children}</Providers>
+                <Providers>
+                  <ScrollToTopOnNavigation />
+                  {children}
+                </Providers>
                 <Toaster />
               </PwaProvider>
             </SerwistProvider>

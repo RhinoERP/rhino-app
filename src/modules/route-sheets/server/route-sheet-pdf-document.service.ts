@@ -197,6 +197,8 @@ export async function generateRouteSheetPdfDocument(params: {
       date: sale.sale_date,
       document: sale.remittance_number || `#${sale.sale_number ?? ""}`,
       customer: sale.customer_name,
+      siteName: sale.delivery_site_name,
+      address: sale.delivery_site_address,
       city: sale.customer_delivery_city,
       amount: sale.total_amount,
       bultos: quantities?.bultos ?? null,

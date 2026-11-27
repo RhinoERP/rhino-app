@@ -1,82 +1,12 @@
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import {
+  type OrganizationSettingsData,
+  organizationSettingsSchema,
+} from "../types/organization-settings";
 import { getOrganizationBySlug } from "./organizations.service";
 
-export const OrgSettingsSchema = z.object({
-  invoice_backed_debt_enabled: z.boolean().default(false),
-  accounting_integration_enabled: z.boolean().default(false),
-  automatic_accounting_enabled: z.boolean().default(false),
-  credit_note_accounting_modal_enabled: z.boolean().default(false),
-  remittance_single_page_duplicate: z.boolean().default(false),
-  remittance_final_show_sku: z.boolean().default(false),
-  remittance_final_show_weight: z.boolean().default(false),
-  remittance_final_show_unit_price: z.boolean().default(false),
-  remittance_final_show_discount: z.boolean().default(false),
-  remittance_final_show_line_total: z.boolean().default(false),
-  remittance_final_show_total: z.boolean().default(false),
-  remittance_mask_printing_enabled: z.boolean().default(false),
-  remittance_fiscal_enabled: z.boolean().default(false),
-  remittance_fiscal_mode: z
-    .enum(["self_printed", "preprinted"])
-    .default("self_printed"),
-  invoice_email_from_name: z.string().trim().max(80).default(""),
-  invoice_email_subject_template: z.string().trim().max(160).default(""),
-  invoice_email_body_template: z.string().trim().max(2000).default(""),
-  invoice_email_attach_pdf: z.boolean().default(true),
-  invoice_print_duplicate: z.boolean().default(false),
-  require_carrier_on_dispatch: z.boolean().default(false),
-  due_days_enabled: z.boolean().default(false),
-  due_days_default: z.number().int().min(1).default(30),
-  configurable_price_lists_enabled: z.boolean().default(false),
-  seller_offline_snapshot_enabled: z.boolean().default(false),
-  seller_offline_snapshot_ttl_hours: z.number().int().min(1).default(12),
-  seller_offline_purge_after_hours: z.number().int().min(1).default(72),
-  initial_balances_enabled: z.boolean().default(false),
-  allow_preventa_arca_invoicing: z.boolean().default(false),
-  sales_default_tax_ids: z.array(z.string().uuid()).default([]),
-  sales_enabled_payment_methods: z
-    .array(
-      z.enum([
-        "efectivo",
-        "tarjeta_de_credito",
-        "tarjeta_de_debito",
-        "transferencia",
-        "cheque",
-        "deposito",
-        "e-cheq",
-      ])
-    )
-    .default([]),
-  sales_default_payment_method: z
-    .enum([
-      "efectivo",
-      "tarjeta_de_credito",
-      "tarjeta_de_debito",
-      "transferencia",
-      "cheque",
-      "deposito",
-      "e-cheq",
-    ])
-    .default("efectivo"),
-  sales_default_invoice_type: z
-    .enum([
-      "NOTA_DE_VENTA",
-      "FACTURA_A",
-      "FACTURA_A_RETENCION",
-      "FACTURA_B",
-      "FACTURA_C",
-      "FACTURA_E",
-    ])
-    .default("NOTA_DE_VENTA"),
-  distributor_catalog_margin: z.number().min(0).max(100).default(30),
-  pos_default_customer_id: z.string().uuid().nullable().default(null),
-  pos_cash_account_code: z.string().trim().nullable().default(null),
-  pos_card_account_code: z.string().trim().nullable().default(null),
-  pos_transfer_account_code: z.string().trim().nullable().default(null),
-  pos_electronic_account_code: z.string().trim().nullable().default(null),
-});
-
-export type OrgSettings = z.infer<typeof OrgSettingsSchema>;
+export const OrgSettingsSchema = organizationSettingsSchema;
+export type OrgSettings = OrganizationSettingsData;
 
 export async function getOrgSettings(orgSlug: string): Promise<OrgSettings> {
   const org = await getOrganizationBySlug(orgSlug);

@@ -63,7 +63,8 @@ export function useRouteSheetMutations(orgSlug: string) {
       }
       return result;
     },
-    onSuccess: invalidate,
+    // An RPC may have assigned earlier sales before a later sale/dispatch fails.
+    onSettled: invalidate,
   });
 
   const removeSale = useMutation({

@@ -14,6 +14,10 @@ import {
   offlinePreSaleDraftSchema,
 } from "../contracts/offline-pre-sale-draft";
 import {
+  type StoredOfflineSalesQuoteCommand,
+  storedOfflineSalesQuoteCommandSchema,
+} from "../contracts/offline-sales-quote-command";
+import {
   SELLER_OFFLINE_SNAPSHOT_SCHEMA_VERSION,
   type SellerOfflineSnapshotV1,
   sellerOfflineSnapshotV1Schema,
@@ -21,7 +25,7 @@ import {
 import { publishOfflineOrganizationPurged } from "../sync/offline-data-events";
 
 const DATABASE_NAME = "rhinos-offline";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const ACTIVE_SNAPSHOT_KEY = "active-seller-snapshot";
 const ACTIVE_DRAFT_KEY = "active-pre-sale-draft";
 const SYNCED_COMMAND_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -37,6 +41,7 @@ export type StoredSellerSnapshot = {
   lastActiveAt: string;
   byteSize: number;
   etag: string | null;
+  signature?: string | null;
   snapshot: SellerOfflineSnapshotV1;
 };
 
@@ -91,6 +96,11 @@ interface RhinoOfflineDatabase extends DBSchema {
       byUpdatedAt: string;
     };
   };
+  quoteCommands: {
+    key: string;
+    value: StoredOfflineSalesQuoteCommand;
+    indexes: { byOwner: string; byOrganization: string; byStatus: string };
+  };
 }
 
 let databasePromise: Promise<IDBPDatabase<RhinoOfflineDatabase>> | null = null;
@@ -128,6 +138,17 @@ function getDatabase() {
             commands.createIndex("byStatus", "status");
             commands.createIndex("byUpdatedAt", "updatedAt");
           }
+          if (oldVersion < 4) {
+            const quoteCommands = database.createObjectStore("quoteCommands", {
+              keyPath: "command.commandId",
+            });
+            quoteCommands.createIndex("byOwner", "command.ownerUserId");
+            quoteCommands.createIndex(
+              "byOrganization",
+              "command.organizationId"
+            );
+            quoteCommands.createIndex("byStatus", "status");
+          }
         },
       }
     );
@@ -150,12 +171,20 @@ export function isSellerSnapshotExpired(
   return Date.parse(snapshot.expiresAt) <= now;
 }
 
-export async function saveSellerSnapshot(
-  value: unknown,
-  byteSize: number,
-  etag: string | null = null,
-  checkedAt = new Date().toISOString()
-): Promise<StoredSellerSnapshot> {
+export async function saveSellerSnapshot(params: {
+  value: unknown;
+  byteSize: number;
+  etag?: string | null;
+  checkedAt?: string;
+  signature?: string | null;
+}): Promise<StoredSellerSnapshot> {
+  const {
+    value,
+    byteSize,
+    etag = null,
+    checkedAt = new Date().toISOString(),
+    signature = null,
+  } = params;
   const snapshot = sellerOfflineSnapshotV1Schema.parse(value);
   const now = checkedAt;
   const key = getSellerSnapshotKey(
@@ -173,6 +202,7 @@ export async function saveSellerSnapshot(
     lastActiveAt: now,
     byteSize,
     etag,
+    signature,
     snapshot,
   };
   const database = await getDatabase();
@@ -216,6 +246,7 @@ export async function markSellerSnapshotChecked(params: {
   ownerUserId: string;
   organizationId: string;
   etag: string | null;
+  signature?: string | null;
   generatedAt: string;
   expiresAt: string;
   checkedAt?: string;
@@ -237,6 +268,7 @@ export async function markSellerSnapshotChecked(params: {
   const updated: StoredSellerSnapshot = {
     ...current,
     etag: params.etag,
+    signature: params.signature ?? current.signature ?? null,
     lastCheckedAt: params.checkedAt ?? new Date().toISOString(),
     snapshot,
   };
@@ -253,13 +285,14 @@ export async function getSellerSnapshot(
   return readAndValidateSnapshot(await database.get("snapshots", key));
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: purges every offline store atomically for a revoked partition.
 export async function purgeOfflineDataForOrganization(
   ownerUserId: string,
   organizationId: string
 ): Promise<void> {
   const database = await getDatabase();
   const transaction = database.transaction(
-    ["snapshots", "state", "drafts", "commands"],
+    ["snapshots", "state", "drafts", "commands", "quoteCommands"],
     "readwrite"
   );
 
@@ -302,6 +335,17 @@ export async function purgeOfflineDataForOrganization(
       await transaction.objectStore("commands").delete(command.commandId);
     }
   }
+  const quoteCommands = await transaction
+    .objectStore("quoteCommands")
+    .index("byOrganization")
+    .getAll(organizationId);
+  for (const record of quoteCommands) {
+    if (record.command.ownerUserId === ownerUserId) {
+      await transaction
+        .objectStore("quoteCommands")
+        .delete(record.command.commandId);
+    }
+  }
 
   await transaction.done;
   publishOfflineOrganizationPurged({ ownerUserId, organizationId });
@@ -326,14 +370,24 @@ export async function getActiveSellerSnapshot(): Promise<StoredSellerSnapshot | 
 export async function purgeOfflineDataForOwner(ownerUserId: string) {
   const database = await getDatabase();
   const transaction = database.transaction(
-    ["snapshots", "state", "drafts", "commands"],
+    ["snapshots", "state", "drafts", "commands", "quoteCommands"],
     "readwrite"
   );
   const purgedOrganizations = new Set<string>();
   const snapshots = await transaction.objectStore("snapshots").getAll();
   const drafts = await transaction.objectStore("drafts").getAll();
   const commands = await transaction.objectStore("commands").getAll();
-  for (const record of [...snapshots, ...drafts, ...commands]) {
+  const quoteCommands = await transaction.objectStore("quoteCommands").getAll();
+  const quotePartitions = quoteCommands.map((quoteRecord) => ({
+    ownerUserId: quoteRecord.command.ownerUserId,
+    organizationId: quoteRecord.command.organizationId,
+  }));
+  for (const record of [
+    ...snapshots,
+    ...drafts,
+    ...commands,
+    ...quotePartitions,
+  ]) {
     if (record.ownerUserId === ownerUserId) {
       purgedOrganizations.add(record.organizationId);
     }
@@ -371,6 +425,14 @@ export async function purgeOfflineDataForOwner(ownerUserId: string) {
   for (const key of commandKeys) {
     await transaction.objectStore("commands").delete(key);
   }
+  for (const record of await transaction
+    .objectStore("quoteCommands")
+    .index("byOwner")
+    .getAll(ownerUserId)) {
+    await transaction
+      .objectStore("quoteCommands")
+      .delete(record.command.commandId);
+  }
   await transaction.done;
   for (const organizationId of purgedOrganizations) {
     publishOfflineOrganizationPurged({ ownerUserId, organizationId });
@@ -380,16 +442,26 @@ export async function purgeOfflineDataForOwner(ownerUserId: string) {
 export async function purgeAllOfflineData() {
   const database = await getDatabase();
   const transaction = database.transaction(
-    ["snapshots", "state", "drafts", "commands"],
+    ["snapshots", "state", "drafts", "commands", "quoteCommands"],
     "readwrite"
   );
   const purgedPartitions = new Map<string, Set<string>>();
-  const [snapshots, drafts, commands] = await Promise.all([
+  const [snapshots, drafts, commands, quoteCommands] = await Promise.all([
     transaction.objectStore("snapshots").getAll(),
     transaction.objectStore("drafts").getAll(),
     transaction.objectStore("commands").getAll(),
+    transaction.objectStore("quoteCommands").getAll(),
   ]);
-  for (const record of [...snapshots, ...drafts, ...commands]) {
+  const quotePartitions = quoteCommands.map((quoteRecord) => ({
+    ownerUserId: quoteRecord.command.ownerUserId,
+    organizationId: quoteRecord.command.organizationId,
+  }));
+  for (const record of [
+    ...snapshots,
+    ...drafts,
+    ...commands,
+    ...quotePartitions,
+  ]) {
     const organizations = purgedPartitions.get(record.ownerUserId) ?? new Set();
     organizations.add(record.organizationId);
     purgedPartitions.set(record.ownerUserId, organizations);
@@ -398,6 +470,7 @@ export async function purgeAllOfflineData() {
   await transaction.objectStore("state").clear();
   await transaction.objectStore("drafts").clear();
   await transaction.objectStore("commands").clear();
+  await transaction.objectStore("quoteCommands").clear();
   await transaction.done;
   for (const [ownerUserId, organizations] of purgedPartitions) {
     for (const organizationId of organizations) {
@@ -413,7 +486,7 @@ export async function maintainOfflineDataForOwner(
 ) {
   const database = await getDatabase();
   const transaction = database.transaction(
-    ["snapshots", "state", "drafts", "commands"],
+    ["snapshots", "state", "drafts", "commands", "quoteCommands"],
     "readwrite"
   );
   const snapshots = await transaction.objectStore("snapshots").getAll();
@@ -451,6 +524,22 @@ export async function maintainOfflineDataForOwner(
       await transaction.objectStore("commands").delete(command.commandId);
     } else if (command.status !== "synced") {
       retainedDraftIds.add(command.draftId);
+    }
+  }
+
+  const quoteCommands = await transaction.objectStore("quoteCommands").getAll();
+  for (const quoteCommand of quoteCommands) {
+    if (quoteCommand.command.ownerUserId !== ownerUserId) {
+      await transaction
+        .objectStore("quoteCommands")
+        .delete(quoteCommand.command.commandId);
+    } else if (
+      quoteCommand.status === "synced" &&
+      now - Date.parse(quoteCommand.updatedAt) >= SYNCED_COMMAND_RETENTION_MS
+    ) {
+      await transaction
+        .objectStore("quoteCommands")
+        .delete(quoteCommand.command.commandId);
     }
   }
 
@@ -849,4 +938,55 @@ export async function deleteOfflineCommandForDraft(
   await store.delete(command.commandId);
   await transaction.done;
   return true;
+}
+
+export async function enqueueOfflineSalesQuoteCommand(
+  command: StoredOfflineSalesQuoteCommand["command"]
+) {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  const record = storedOfflineSalesQuoteCommandSchema.parse({
+    command,
+    status: "queued",
+    createdAt: now,
+    updatedAt: now,
+    attempts: 0,
+    requestId: null,
+    snapshotExpired: false,
+    historicalCostMissing: false,
+    lastError: null,
+  });
+  await database.add("quoteCommands", record);
+  return record;
+}
+
+export async function listOfflineSalesQuoteCommands(ownerUserId: string) {
+  const database = await getDatabase();
+  return (
+    await database.getAllFromIndex("quoteCommands", "byOwner", ownerUserId)
+  )
+    .map((record) => storedOfflineSalesQuoteCommandSchema.safeParse(record))
+    .flatMap((result) => (result.success ? [result.data] : []))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+export async function updateOfflineSalesQuoteCommand(
+  commandId: string,
+  update: (
+    record: StoredOfflineSalesQuoteCommand
+  ) => StoredOfflineSalesQuoteCommand
+) {
+  const database = await getDatabase();
+  const transaction = database.transaction("quoteCommands", "readwrite");
+  const store = transaction.objectStore("quoteCommands");
+  const current = await store.get(commandId);
+  const parsed = storedOfflineSalesQuoteCommandSchema.safeParse(current);
+  if (!parsed.success) {
+    await transaction.done;
+    return null;
+  }
+  const next = storedOfflineSalesQuoteCommandSchema.parse(update(parsed.data));
+  await store.put(next);
+  await transaction.done;
+  return next;
 }

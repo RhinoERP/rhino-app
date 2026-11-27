@@ -263,7 +263,7 @@ function normalizeLoadedPosSaleItem(item: {
     id: item.id ?? "",
     productId: item.product_id ?? "",
     quantity: Number(item.quantity ?? 0),
-    unitPrice: normalizeMoney(item.unit_price),
+    unitPrice: Number(item.unit_price ?? 0),
     discountAmount: normalizeNullableMoney(item.discount_amount),
     subtotal: normalizeMoney(item.subtotal),
     taxRate:

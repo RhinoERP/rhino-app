@@ -11,9 +11,11 @@ import {
   ShoppingCartIcon,
   TrashIcon,
   WarningCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,8 +32,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableCatalogPicker } from "@/components/ui/searchable-catalog-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { truncateMoney } from "@/lib/decimal";
+import {
+  getPricePerIndividualUnit,
+  splitCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import { createOfflinePreSaleCommand } from "@/modules/offline/contracts/offline-command";
 import {
   OFFLINE_PRE_SALE_DRAFT_SCHEMA_VERSION,
@@ -42,6 +49,12 @@ import {
   buildOfflineProductPriceMap,
   revalidateOfflinePreSaleDraft,
 } from "@/modules/offline/pricing/offline-pre-sale-pricing";
+import {
+  normalizeOfflineProductQuery,
+  OFFLINE_PRODUCT_SEARCH_DEFAULT_LIMIT,
+  OFFLINE_PRODUCT_SEARCH_LIMIT,
+  searchOfflineProducts,
+} from "@/modules/offline/search/offline-product-search";
 import {
   deleteOfflineCommandForDraft,
   deleteOfflinePreSaleDraft,
@@ -56,12 +69,6 @@ type OfflinePreSaleFormProps = {
   snapshot: SellerOfflineSnapshotV1;
   initialDraft: OfflinePreSaleDraft | null;
 };
-
-const normalize = (value: string | null | undefined) =>
-  (value ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
 
 function formatMoney(value: number, currency = "ARS") {
   return new Intl.NumberFormat("es-AR", {
@@ -129,19 +136,16 @@ export function OfflinePreSaleForm({
     () => new Map(snapshot.products.map((product) => [product.id, product])),
     [snapshot.products]
   );
-  const filteredProducts = useMemo(() => {
-    const query = normalize(productSearch);
-    if (!query) {
-      return snapshot.products.slice(0, 12);
-    }
-    return snapshot.products
-      .filter((product) =>
-        normalize(
-          [product.name, product.sku, product.brand].join(" ")
-        ).includes(query)
-      )
-      .slice(0, 20);
-  }, [productSearch, snapshot.products]);
+  const matchingProducts = useMemo(
+    () => searchOfflineProducts(snapshot.products, productSearch),
+    [productSearch, snapshot.products]
+  );
+  const filteredProducts = matchingProducts.slice(
+    0,
+    normalizeOfflineProductQuery(productSearch).length > 0
+      ? OFFLINE_PRODUCT_SEARCH_LIMIT
+      : OFFLINE_PRODUCT_SEARCH_DEFAULT_LIMIT
+  );
   const subtotal = truncateMoney(
     draft.payload.items.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
@@ -242,10 +246,20 @@ export function OfflinePreSaleForm({
       payload: {
         ...current.payload,
         customerId,
-        items: current.payload.items.map((item) => ({
-          ...item,
-          unitPrice: nextPrices.get(item.productId) ?? item.unitPrice,
-        })),
+        items: current.payload.items.map((item) => {
+          const product = productsById.get(item.productId);
+          const price = nextPrices.get(item.productId);
+          if (price === undefined) {
+            return item;
+          }
+          return {
+            ...item,
+            unitPrice:
+              product?.unitOfMeasure === "CAJA" && product.unitsPerBox
+                ? getPricePerIndividualUnit(price, product.unitsPerBox)
+                : price,
+          };
+        }),
       },
     }));
   };
@@ -284,7 +298,13 @@ export function OfflinePreSaleForm({
               lineId: crypto.randomUUID(),
               productId,
               quantity: 1,
-              unitPrice: priceMap.get(productId) ?? product.price,
+              unitPrice:
+                product.unitOfMeasure === "CAJA" && product.unitsPerBox
+                  ? getPricePerIndividualUnit(
+                      priceMap.get(productId) ?? product.price,
+                      product.unitsPerBox
+                    )
+                  : (priceMap.get(productId) ?? product.price),
               taxes: product.taxes,
             },
           ];
@@ -524,26 +544,25 @@ export function OfflinePreSaleForm({
             <CardTitle className="text-base">Cliente</CardTitle>
           </CardHeader>
           <CardContent>
-            <select
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              onChange={(event) =>
-                updateItemsForCustomer(event.target.value || null)
+            <SearchableCatalogPicker
+              label="Cliente"
+              onChange={(value) => updateItemsForCustomer(value)}
+              options={snapshot.customers.map((customer) => ({
+                value: customer.id,
+                label: customer.fantasyName || customer.businessName,
+                description: [customer.clientNumber, customer.city]
+                  .filter(Boolean)
+                  .join(" · "),
+                searchText: `${customer.businessName} ${customer.cuit ?? ""}`,
+              }))}
+              placeholder={
+                migration.issues.some((issue) => issue.kind === "customer")
+                  ? "Cliente no disponible: elegí otro"
+                  : "Buscar cliente"
               }
+              searchPlaceholder="Buscar por nombre, número o CUIT"
               value={draft.payload.customerId ?? ""}
-            >
-              <option value="">Seleccionar cliente</option>
-              {migration.issues.some((issue) => issue.kind === "customer") &&
-                draft.payload.customerId && (
-                  <option disabled value={draft.payload.customerId}>
-                    Cliente no disponible
-                  </option>
-                )}
-              {snapshot.customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.fantasyName || customer.businessName}
-                </option>
-              ))}
-            </select>
+            />
           </CardContent>
         </Card>
 
@@ -551,30 +570,37 @@ export function OfflinePreSaleForm({
           <CardHeader>
             <CardTitle className="text-base">Condiciones</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              onChange={(event) =>
+          <CardContent className="grid gap-3">
+            <SearchableCatalogPicker
+              label="Vendedor"
+              onChange={(value) =>
                 setDraft((current) => ({
                   ...current,
-                  payload: { ...current.payload, sellerId: event.target.value },
+                  payload: { ...current.payload, sellerId: value },
                 }))
               }
+              options={snapshot.sellers.map((seller) => ({
+                value: seller.id,
+                label: seller.name,
+              }))}
+              placeholder={
+                migration.issues.some((issue) => issue.kind === "seller")
+                  ? "Vendedor no disponible: elegí otro"
+                  : "Buscar vendedor"
+              }
+              searchPlaceholder="Buscar vendedor por nombre"
               value={draft.payload.sellerId}
-            >
-              {migration.issues.some((issue) => issue.kind === "seller") && (
-                <option disabled value={draft.payload.sellerId}>
-                  Vendedor no disponible
-                </option>
-              )}
-              {snapshot.sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.name}
-                </option>
-              ))}
-            </select>
+            />
+            {/* Only expose this editor if an older draft must fix a disabled method to migrate. */}
             <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+              aria-label="Elegir método de pago válido"
+              className={
+                migration.issues.some(
+                  (issue) => issue.kind === "payment-method"
+                )
+                  ? "h-11 rounded-md border border-input bg-background px-3 text-base md:h-10 md:text-sm"
+                  : "hidden"
+              }
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
@@ -611,16 +637,36 @@ export function OfflinePreSaleForm({
             <div className="relative">
               <MagnifyingGlassIcon className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
               <Input
-                className="pl-9"
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="pr-10 pl-9"
                 onChange={(event) => setProductSearch(event.target.value)}
-                placeholder="Buscar por nombre o SKU"
+                placeholder="Nombre, SKU, marca o proveedor"
+                spellCheck={false}
                 value={productSearch}
               />
+              {productSearch && (
+                <Button
+                  aria-label="Limpiar búsqueda de productos"
+                  className="-translate-y-1/2 absolute top-1/2 right-1"
+                  onClick={() => setProductSearch("")}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <XIcon />
+                </Button>
+              )}
             </div>
-            <div className="max-h-64 space-y-2 overflow-y-auto">
+            <p aria-live="polite" className="text-muted-foreground text-xs">
+              {productSearch.trim()
+                ? `${matchingProducts.length} ${matchingProducts.length === 1 ? "coincidencia" : "coincidencias"}${matchingProducts.length > filteredProducts.length ? ` · mostrando ${filteredProducts.length}` : ""}`
+                : `Mostrando ${filteredProducts.length} de ${snapshot.products.length} productos · escribí para buscar en todo el catálogo`}
+            </p>
+            <div className="max-h-80 space-y-2 overflow-y-auto overscroll-contain">
               {filteredProducts.map((product) => (
                 <button
-                  className="flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left hover:bg-muted/50"
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   key={product.id}
                   onClick={() => addProduct(product.id)}
                   type="button"
@@ -629,8 +675,22 @@ export function OfflinePreSaleForm({
                     <span className="block truncate font-medium text-sm">
                       {product.name}
                     </span>
+                    <span className="block truncate text-muted-foreground text-xs">
+                      {[product.sku, product.brand, product.supplierName]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
                     <span className="block text-muted-foreground text-xs">
-                      {product.sku} · Stock {product.totalQuantity ?? 0}
+                      Stock de referencia:{" "}
+                      {product.unitOfMeasure === "CAJA" && product.unitsPerBox
+                        ? (() => {
+                            const stock = splitCaseUnitQuantity(
+                              product.totalQuantity ?? 0,
+                              product.unitsPerBox
+                            );
+                            return `${stock.boxes} caja(s) · ${stock.units} un.`;
+                          })()
+                        : `${product.totalQuantity ?? 0} ${product.unitOfMeasure}`}
                     </span>
                   </span>
                   <span className="shrink-0 font-medium text-sm">
@@ -641,6 +701,12 @@ export function OfflinePreSaleForm({
                   </span>
                 </button>
               ))}
+              {filteredProducts.length === 0 && (
+                <p className="rounded-lg border border-dashed p-6 text-center text-muted-foreground text-sm">
+                  No encontramos productos. Probá con otro nombre, SKU, marca o
+                  proveedor.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -686,6 +752,10 @@ export function OfflinePreSaleForm({
                   </div>
                 );
               }
+              const caseQuantity =
+                product.unitOfMeasure === "CAJA" && product.unitsPerBox
+                  ? splitCaseUnitQuantity(item.quantity, product.unitsPerBox)
+                  : null;
               return (
                 <div className="rounded-lg border p-3" key={item.lineId}>
                   <div className="flex items-start justify-between gap-3">
@@ -694,8 +764,13 @@ export function OfflinePreSaleForm({
                         {product.name}
                       </p>
                       <p className="text-muted-foreground text-xs">
-                        {formatMoney(item.unitPrice, product.currency)} por{" "}
-                        {product.unitOfMeasure}
+                        {formatMoney(
+                          caseQuantity && product.unitsPerBox
+                            ? item.unitPrice * product.unitsPerBox
+                            : item.unitPrice,
+                          product.currency
+                        )}{" "}
+                        por {caseQuantity ? "caja" : product.unitOfMeasure}
                       </p>
                     </div>
                     <Button
@@ -708,42 +783,53 @@ export function OfflinePreSaleForm({
                     </Button>
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-1">
-                      <Button
-                        aria-label="Restar cantidad"
-                        disabled={item.quantity <= 1}
-                        onClick={() =>
-                          updateQuantity(item.lineId, item.quantity - 1)
+                    {caseQuantity && product.unitsPerBox ? (
+                      <CaseUnitQuantityFields
+                        compact
+                        onChange={(quantity) =>
+                          updateQuantity(item.lineId, quantity)
                         }
-                        size="icon-sm"
-                        variant="outline"
-                      >
-                        <MinusIcon />
-                      </Button>
-                      <Input
-                        className="w-20 text-center"
-                        min="0.01"
-                        onChange={(event) =>
-                          updateQuantity(
-                            item.lineId,
-                            event.target.valueAsNumber
-                          )
-                        }
-                        step="0.01"
-                        type="number"
-                        value={item.quantity}
+                        totalUnits={item.quantity}
+                        unitsPerBox={product.unitsPerBox}
                       />
-                      <Button
-                        aria-label="Sumar cantidad"
-                        onClick={() =>
-                          updateQuantity(item.lineId, item.quantity + 1)
-                        }
-                        size="icon-sm"
-                        variant="outline"
-                      >
-                        <PlusIcon />
-                      </Button>
-                    </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          aria-label="Restar cantidad"
+                          disabled={item.quantity <= 1}
+                          onClick={() =>
+                            updateQuantity(item.lineId, item.quantity - 1)
+                          }
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          <MinusIcon />
+                        </Button>
+                        <Input
+                          className="w-20 text-center"
+                          min="0.01"
+                          onChange={(event) =>
+                            updateQuantity(
+                              item.lineId,
+                              event.target.valueAsNumber
+                            )
+                          }
+                          step="0.01"
+                          type="number"
+                          value={item.quantity}
+                        />
+                        <Button
+                          aria-label="Sumar cantidad"
+                          onClick={() =>
+                            updateQuantity(item.lineId, item.quantity + 1)
+                          }
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          <PlusIcon />
+                        </Button>
+                      </div>
+                    )}
                     <p className="font-semibold">
                       {formatMoney(
                         item.quantity * item.unitPrice,

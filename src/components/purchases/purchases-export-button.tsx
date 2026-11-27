@@ -151,6 +151,36 @@ function buildContentFromPurchases(
         item?.units !== null && item?.units !== undefined ? item.units : "",
     },
     {
+      id: "boxes",
+      label: "Cajas",
+      valueGetter: (_purchase, item) => {
+        if (
+          item?.unitOfMeasure !== "CAJA" ||
+          item.units === null ||
+          item.units === undefined ||
+          !item.unitsPerBox
+        ) {
+          return "";
+        }
+        return Math.floor(item.units / item.unitsPerBox);
+      },
+    },
+    {
+      id: "loose_units",
+      label: "Unidades sueltas",
+      valueGetter: (_purchase, item) => {
+        if (
+          item?.unitOfMeasure !== "CAJA" ||
+          item.units === null ||
+          item.units === undefined ||
+          !item.unitsPerBox
+        ) {
+          return "";
+        }
+        return item.units % item.unitsPerBox;
+      },
+    },
+    {
       id: "unit_quantity",
       label: "Cantidad U.M.",
       valueGetter: (_purchase, item) =>

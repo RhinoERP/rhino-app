@@ -8,10 +8,7 @@ import { jsPDF } from "jspdf";
  * @param html - The HTML string to convert to PDF
  * @param filename - The filename for the downloaded PDF
  */
-export async function generatePDFFromHTML(
-  html: string,
-  filename: string
-): Promise<void> {
+async function renderPDF(html: string): Promise<jsPDF> {
   const imgWidth = 210; // A4 width in mm
   const pageHeight = 297; // A4 height in mm
 
@@ -116,8 +113,7 @@ export async function generatePDFFromHTML(
       addCanvasToPdf(pdf, canvas);
     }
 
-    // Trigger download
-    pdf.save(filename);
+    return pdf;
   } catch (error) {
     throw new Error(
       `Error al generar el PDF: ${error instanceof Error ? error.message : "Error desconocido"}`
@@ -126,4 +122,15 @@ export async function generatePDFFromHTML(
     // Clean up
     document.body.removeChild(iframe);
   }
+}
+
+export async function generatePDFBlobFromHTML(html: string): Promise<Blob> {
+  return (await renderPDF(html)).output("blob");
+}
+
+export async function generatePDFFromHTML(
+  html: string,
+  filename: string
+): Promise<void> {
+  (await renderPDF(html)).save(filename);
 }

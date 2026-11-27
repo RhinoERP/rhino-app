@@ -66,6 +66,7 @@ export type PreSaleItemInput = {
    */
   weightQuantity?: number | null;
   unitPrice: number;
+  unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   basePrice?: number;
   discountAmount?: number | null;
   discountPercentage?: number | null;

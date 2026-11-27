@@ -6,6 +6,7 @@ import { es } from "date-fns/locale";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   ChevronsUpDown,
   FileText,
   MoreHorizontal,
@@ -16,6 +17,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PreSaleCustomerAccount } from "@/components/collections/pre-sale-customer-account";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { OperationalWarehouseField } from "@/components/stock/operational-warehouse-field";
 import {
   AlertDialog,
@@ -79,6 +82,11 @@ import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
+import {
+  formatCaseUnitQuantity,
+  getPricePerIndividualUnit,
+  splitCaseUnitQuantity,
+} from "@/modules/inventory/utils/case-units";
 import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -118,14 +126,20 @@ import {
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
+import {
+  normalizePreSaleSearch,
+  searchPreSaleCustomers,
+} from "./pre-sale-customer-search";
 
 type PreSaleFormProps = {
   orgSlug: string;
+  canReadCollections?: boolean;
   organization: {
     name: string;
     cuit: string | null;
   };
   initialSellerId?: string;
+  initialCustomerId?: string;
   initialWarehouseId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
@@ -150,6 +164,7 @@ type ItemState = {
   basePrice: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
+  unitsPerBox?: number | null;
   averageQuantityPerUnit: number | null;
   weightPerUnit?: number | null;
   totalWeightKg?: number | null;
@@ -365,6 +380,7 @@ const buildPreSaleItemPayload = (
     quantity: isAdjustment ? 1 : item.quantity,
     weightQuantity: resolveItemWeightQuantity(item),
     unitPrice: item.unitPrice,
+    unitOfMeasure: isAdjustment ? "UN" : item.unitOfMeasure,
     basePrice: item.basePrice,
     discountAmount: isAdjustment ? 0 : Math.max(0, discount),
     discountPercentage: isAdjustment
@@ -401,11 +417,27 @@ const paymentMethodOptions: {
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
 
+const finishSectionButtonClasses =
+  "h-11 w-full border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 hover:text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900";
+
+function scrollToSectionTop(sectionId: string) {
+  // Wait for the collapsed layout before calculating the section position.
+  requestAnimationFrame(() => {
+    document.getElementById(sectionId)?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  });
+}
+
 const unitOfMeasureLabels: Record<SaleProduct["unitOfMeasure"], string> = {
   UN: "unidad",
   KG: "kg",
   LT: "lt",
   MT: "m",
+  CAJA: "caja",
 };
 
 const formatPriceByMeasure = (
@@ -422,6 +454,11 @@ const formatStockQuantity = (value: number): string =>
 const formatProductStock = (product: SaleProduct): string => {
   const totalQuantity = product.totalQuantity ?? 0;
   const unitLabel = unitOfMeasureLabels[product.unitOfMeasure];
+
+  if (product.unitOfMeasure === "CAJA" && product.unitsPerBox) {
+    const quantity = splitCaseUnitQuantity(totalQuantity, product.unitsPerBox);
+    return `Stock ${quantity.boxes} caja(s) · ${quantity.units} un.`;
+  }
 
   if (product.tracksStockUnits && product.totalUnitQuantity !== null) {
     return `Stock ${formatStockQuantity(product.totalUnitQuantity)} un. · ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
@@ -536,14 +573,6 @@ function buildSellerLabel(member: OrganizationMember): string {
   return "Usuario sin nombre";
 }
 
-const normalizeSearchValue = (value: string) =>
-  value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
 function composePaymentObservations(
   observations: string,
   options: Array<{ value: string; label: string }>,
@@ -560,7 +589,7 @@ function composePaymentObservations(
 }
 
 const toSearchTokens = (value: string) => {
-  const normalized = normalizeSearchValue(value);
+  const normalized = normalizePreSaleSearch(value);
   if (!normalized) {
     return [];
   }
@@ -573,7 +602,7 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
   }
 
   const nameTokens = toSearchTokens(product.name);
-  const sku = normalizeSearchValue(product.sku);
+  const sku = normalizePreSaleSearch(product.sku);
 
   return searchTokens.every((token) => {
     if (sku.includes(token)) {
@@ -586,8 +615,10 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several hooks and handlers
 export function PreSaleForm({
   orgSlug,
+  canReadCollections = false,
   organization,
   initialSellerId,
+  initialCustomerId,
   initialWarehouseId,
   customers,
   sellers,
@@ -597,7 +628,7 @@ export function PreSaleForm({
   warehouses,
 }: PreSaleFormProps) {
   const router = useRouter();
-  const [customerId, setCustomerId] = useState<string>("");
+  const [customerId, setCustomerId] = useState<string>(initialCustomerId ?? "");
   const [warehouseId, setWarehouseId] = useState<string>(
     initialWarehouseId ?? warehouses[0]?.id ?? ""
   );
@@ -617,6 +648,7 @@ export function PreSaleForm({
     Map<string, Map<string, PriceListItemBasic>>
   >(new Map());
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
+  const [selectedCaseTotalUnits, setSelectedCaseTotalUnits] = useState(0);
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
@@ -650,6 +682,11 @@ export function PreSaleForm({
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const [items, setItems] = useState<ItemState[]>([]);
+  const [collapsedItemIds, setCollapsedItemIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [customerDetailsCollapsed, setCustomerDetailsCollapsed] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -663,7 +700,10 @@ export function PreSaleForm({
   const sellerOptions = useMemo(
     () =>
       sellers
-        .filter((member) => Boolean(member.user_id))
+        .filter(
+          (member) =>
+            Boolean(member.user_id) && member.is_active && !member.disabled_at
+        )
         .map((member) => ({
           id: member.user_id,
           label: buildSellerLabel(member),
@@ -689,6 +729,11 @@ export function PreSaleForm({
       return false;
     });
   }, [customers, sellerId]);
+
+  const customerSearchResults = useMemo(
+    () => searchPreSaleCustomers(filteredCustomers, customerSearch),
+    [customerSearch, filteredCustomers]
+  );
 
   useEffect(() => {
     if (sellerId || sellerOptions.length === 0) {
@@ -998,6 +1043,12 @@ export function PreSaleForm({
   );
 
   useEffect(() => {
+    if (selectedProduct?.unitOfMeasure === "CAJA") {
+      if (inputUnit !== "UNITS") {
+        setInputUnit("UNITS");
+      }
+      return;
+    }
     if (selectedProduct && !availableUnits.includes(inputUnit)) {
       setInputUnit(availableUnits[0] ?? "UNITS");
     }
@@ -1073,7 +1124,7 @@ export function PreSaleForm({
 
   useEffect(() => {
     const defaultPaymentMethod = orgSettings?.sales_default_payment_method;
-    if (defaultPaymentMethod) {
+    if (defaultPaymentMethod && defaultPaymentMethod !== "qr") {
       setPaymentMethod(defaultPaymentMethod);
     }
   }, [orgSettings?.sales_default_payment_method]);
@@ -1226,6 +1277,7 @@ export function PreSaleForm({
     [saleDateString, expirationDateString, normalizedExpirationDays]
   );
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Supports normal, measured and box-based product additions in the shared form.
   const handleAddItem = () => {
     if (!selectedProductId) {
       setError("Selecciona un producto para agregarlo");
@@ -1239,17 +1291,31 @@ export function PreSaleForm({
       return;
     }
 
-    if (!selectedQuantity || selectedQuantity <= 0) {
+    const isCaseProduct = product.unitOfMeasure === "CAJA";
+    const invalidCaseQuantity =
+      !Number.isSafeInteger(selectedCaseTotalUnits) ||
+      selectedCaseTotalUnits <= 0 ||
+      !Number.isSafeInteger(product.unitsPerBox) ||
+      (product.unitsPerBox ?? 0) <= 0;
+    const invalidQuantity = isCaseProduct
+      ? invalidCaseQuantity
+      : !selectedQuantity || selectedQuantity <= 0;
+    if (invalidQuantity) {
       setError("La cantidad debe ser mayor a 0");
       return;
     }
 
-    const adjustedPrice = productPrices.get(product.id) ?? product.price;
-    const baseQuantity = convertToBaseUnits(
-      selectedQuantity,
-      inputUnit,
-      product
-    );
+    const listedPrice = productPrices.get(product.id) ?? product.price;
+    const baseQuantity = isCaseProduct
+      ? selectedCaseTotalUnits
+      : convertToBaseUnits(selectedQuantity, inputUnit, product);
+    if (baseQuantity === null) {
+      setError("Ingresá una cantidad válida en cajas y unidades");
+      return;
+    }
+    const adjustedPrice = isCaseProduct
+      ? getPricePerIndividualUnit(listedPrice, product.unitsPerBox ?? 0)
+      : listedPrice;
 
     const unitOfMeasure = product.unitOfMeasure;
     const measurePerUnit = getMeasurePerUnit(product);
@@ -1268,6 +1334,11 @@ export function PreSaleForm({
     const pricePerKg = getPricePerKg(unitOfMeasure, adjustedPrice);
     const unitPrice = adjustedPrice;
 
+    setCollapsedItemIds((current) => {
+      const next = new Set(current);
+      next.delete(product.id);
+      return next;
+    });
     setItems((prev) => {
       const exists = prev.find(
         (item) => item.type === "product" && item.productId === product.id
@@ -1308,6 +1379,7 @@ export function PreSaleForm({
                 pricePerKg,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
+                unitsPerBox: product.unitsPerBox,
                 weightPerUnit: product.weightPerUnit,
                 taxes: product.taxes ?? [],
               }
@@ -1331,6 +1403,7 @@ export function PreSaleForm({
           basePrice: adjustedPrice,
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
+          unitsPerBox: product.unitsPerBox,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
           weightPerUnit: product.weightPerUnit,
           totalWeightKg: totalWeight,
@@ -1343,6 +1416,7 @@ export function PreSaleForm({
 
     setSelectedProductId("");
     setSelectedQuantity(0);
+    setSelectedCaseTotalUnits(0);
     setInputUnit("UNITS");
     setError(null);
   };
@@ -1394,6 +1468,11 @@ export function PreSaleForm({
 
   const handleRemoveItem = (itemId: string) => {
     setItems((prev) => prev.filter((item) => item.id !== itemId));
+    setCollapsedItemIds((current) => {
+      const next = new Set(current);
+      next.delete(itemId);
+      return next;
+    });
   };
 
   const handleUpdateItemQuantity = (itemId: string, quantity: number) => {
@@ -1494,6 +1573,10 @@ export function PreSaleForm({
     let nextPrice = 0;
     if (!Number.isNaN(parsed)) {
       nextPrice = allowNegative ? parsed : Math.max(0, parsed);
+    }
+
+    if (item?.unitOfMeasure === "CAJA" && item.unitsPerBox) {
+      nextPrice /= item.unitsPerBox;
     }
 
     handleUpdateItemUnitPrice(itemId, nextPrice);
@@ -1598,6 +1681,7 @@ export function PreSaleForm({
 
       setSuccessMessage("Preventa creada correctamente");
       setItems([]);
+      setCollapsedItemIds(new Set());
       setIsVatExempt(false);
       setObservations("");
       router.push(`/org/${orgSlug}/ventas`);
@@ -1850,8 +1934,60 @@ export function PreSaleForm({
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
-          <Card>
-            <CardContent className="space-y-6 pt-6">
+          <Card className="scroll-mt-28" id="pre-sale-details-card">
+            <CardHeader
+              className={cn(
+                "p-5 md:hidden",
+                !customerDetailsCollapsed && "pb-0"
+              )}
+            >
+              <button
+                aria-controls="pre-sale-customer-details"
+                aria-expanded={!customerDetailsCollapsed}
+                className="flex min-h-11 w-full items-start justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() =>
+                  setCustomerDetailsCollapsed((current) => !current)
+                }
+                type="button"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold text-base">
+                    Datos de la preventa
+                  </span>
+                  {customerDetailsCollapsed && (
+                    <span className="mt-2 flex min-w-0 flex-col gap-1">
+                      <span className="truncate font-medium text-sm">
+                        {selectedCustomerLabel}
+                      </span>
+                      <span className="truncate text-muted-foreground text-xs">
+                        {selectedSeller?.label ?? "Sin vendedor"} ·{" "}
+                        {warehouses.find(
+                          (warehouse) => warehouse.id === warehouseId
+                        )?.name ?? "Sin depósito"}
+                      </span>
+                    </span>
+                  )}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted"
+                >
+                  <ChevronDown
+                    className={cn(
+                      "size-5 text-muted-foreground transition-transform",
+                      !customerDetailsCollapsed && "rotate-180"
+                    )}
+                  />
+                </span>
+              </button>
+            </CardHeader>
+            <CardContent
+              className={cn(
+                "space-y-6 pt-6",
+                customerDetailsCollapsed && "hidden md:block"
+              )}
+              id="pre-sale-customer-details"
+            >
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="customer">Cliente *</Label>
@@ -1886,16 +2022,21 @@ export function PreSaleForm({
                       className="w-[320px] max-w-[90vw] p-0"
                       sideOffset={8}
                     >
-                      <Command>
+                      <Command disablePointerSelection shouldFilter={false}>
                         <CommandInput
                           onValueChange={setCustomerSearch}
                           placeholder="Buscar cliente..."
                           value={customerSearch}
                         />
-                        <CommandList>
-                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                        {/* Remount the scroll container for each query: cmdk can otherwise retain its previous scroll position. */}
+                        <CommandList key={customerSearch}>
+                          {customerSearchResults.length === 0 && (
+                            <p className="py-6 text-center text-sm">
+                              Sin resultados.
+                            </p>
+                          )}
                           <CommandGroup>
-                            {filteredCustomers.map((customer) => {
+                            {customerSearchResults.map((customer) => {
                               const primaryLabel =
                                 customer.fantasy_name ||
                                 customer.business_name ||
@@ -1915,16 +2056,6 @@ export function PreSaleForm({
                               ].filter(Boolean);
                               const metadataLabel =
                                 metadataParts.join(" · ") || "Sin ubicación";
-                              const searchTerms = normalizeSearchValue(
-                                [
-                                  primaryLabel,
-                                  customer.fantasy_name ?? "",
-                                  customer.business_name ?? "",
-                                  customer.city ?? "",
-                                  customer.address ?? "",
-                                ].join(" ")
-                              );
-
                               return (
                                 <CommandItem
                                   className="items-start"
@@ -1932,7 +2063,7 @@ export function PreSaleForm({
                                   onSelect={() =>
                                     handleCustomerSelect(customer.id)
                                   }
-                                  value={searchTerms}
+                                  value={customer.id}
                                 >
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium">
@@ -2238,7 +2369,8 @@ export function PreSaleForm({
                   </div>
                 ) : null}
 
-                <div className="space-y-2">
+                {/* Keep the configured payment method in the submitted payload, without exposing an editor. */}
+                <div className="hidden">
                   <Label htmlFor="paymentMethod">Método de pago</Label>
                   <Select
                     onValueChange={(value) =>
@@ -2282,8 +2414,9 @@ export function PreSaleForm({
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
+              {/* Taxes still come from product/organization settings and remain in totals. */}
+              <div className="hidden">
+                <div>
                   <Label htmlFor="taxes">Impuestos</Label>
                   <Popover
                     onOpenChange={setIsTaxesPickerOpen}
@@ -2378,10 +2511,30 @@ export function PreSaleForm({
                   value={observations}
                 />
               </div>
+              <div className="border-t pt-4 md:hidden">
+                <Button
+                  className={finishSectionButtonClasses}
+                  onClick={() => {
+                    setCustomerDetailsCollapsed(true);
+                    scrollToSectionTop("pre-sale-details-card");
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  <Check className="size-4" />
+                  Listo
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <PreSaleCustomerAccount
+            canReadCollections={canReadCollections}
+            customerId={customerId}
+            orgSlug={orgSlug}
+          />
+
+          <Card className="scroll-mt-28" id="pre-sale-products-card">
             <CardHeader>
               <CardTitle className="text-lg">
                 Productos de la preventa
@@ -2391,7 +2544,7 @@ export function PreSaleForm({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <div className="grid gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="supplierFilter">Proveedor</Label>
                   <Popover
@@ -2467,7 +2620,7 @@ export function PreSaleForm({
                   </Popover>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="hidden">
                   <Label htmlFor="brandFilter">Marca</Label>
                   <Popover
                     onOpenChange={setIsBrandFilterOpen}
@@ -2540,7 +2693,7 @@ export function PreSaleForm({
                   </Popover>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="hidden">
                   <Label htmlFor="categoryFilter">Categoría</Label>
                   <Popover
                     onOpenChange={setIsCategoryFilterOpen}
@@ -2693,6 +2846,7 @@ export function PreSaleForm({
                                     keywords={[product.name, product.sku]}
                                     onSelect={() => {
                                       setSelectedProductId(product.id);
+                                      setSelectedCaseTotalUnits(0);
                                       setIsProductPickerOpen(false);
                                     }}
                                     value={product.id}
@@ -2742,51 +2896,80 @@ export function PreSaleForm({
                 </div>
 
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-                  {selectedProduct && availableUnits.length > 1 && (
+                  {selectedProduct &&
+                    selectedProduct.unitOfMeasure !== "CAJA" &&
+                    availableUnits.length > 1 && (
+                      <div className="w-full space-y-2 sm:flex-1">
+                        <Label htmlFor="inputUnit">Unidad</Label>
+                        <Select
+                          onValueChange={(value) =>
+                            setInputUnit(value as InputUnit)
+                          }
+                          value={inputUnit}
+                        >
+                          <SelectTrigger className="w-full" id="inputUnit">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableUnits.map((unit) => (
+                              <SelectItem key={unit} value={unit}>
+                                {getUnitLabel(unit)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                  {selectedProduct?.unitOfMeasure === "CAJA" ? (
+                    <div className="w-full space-y-2 sm:w-64">
+                      {selectedProduct.unitsPerBox ? (
+                        <>
+                          <CaseUnitQuantityFields
+                            onChange={setSelectedCaseTotalUnits}
+                            showTotalUnitsInput
+                            totalUnits={selectedCaseTotalUnits}
+                            unitsPerBox={selectedProduct.unitsPerBox}
+                          />
+                          <p className="text-muted-foreground text-xs">
+                            {formatCaseUnitQuantity(
+                              selectedCaseTotalUnits,
+                              selectedProduct.unitsPerBox
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-destructive text-sm">
+                          Este producto no tiene unidades por caja válidas.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
                     <div className="w-full space-y-2 sm:flex-1">
-                      <Label htmlFor="inputUnit">Unidad</Label>
-                      <Select
-                        onValueChange={(value) =>
-                          setInputUnit(value as InputUnit)
+                      <Label htmlFor="quantity">
+                        {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
+                      </Label>
+                      <Input
+                        id="quantity"
+                        inputMode="decimal"
+                        min={0}
+                        onChange={(event) => {
+                          const parsed = Number.parseFloat(event.target.value);
+                          setSelectedQuantity(
+                            Number.isNaN(parsed) ? 0 : parsed
+                          );
+                        }}
+                        placeholder="0"
+                        step="0.01"
+                        type="number"
+                        value={
+                          !selectedQuantity || Number.isNaN(selectedQuantity)
+                            ? ""
+                            : selectedQuantity
                         }
-                        value={inputUnit}
-                      >
-                        <SelectTrigger className="w-full" id="inputUnit">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableUnits.map((unit) => (
-                            <SelectItem key={unit} value={unit}>
-                              {getUnitLabel(unit)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </div>
                   )}
-
-                  <div className="w-full space-y-2 sm:flex-1">
-                    <Label htmlFor="quantity">
-                      {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
-                    </Label>
-                    <Input
-                      id="quantity"
-                      inputMode="decimal"
-                      min={0}
-                      onChange={(event) => {
-                        const parsed = Number.parseFloat(event.target.value);
-                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
-                      }}
-                      placeholder="0"
-                      step="0.01"
-                      type="number"
-                      value={
-                        !selectedQuantity || Number.isNaN(selectedQuantity)
-                          ? ""
-                          : selectedQuantity
-                      }
-                    />
-                  </div>
 
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-shrink-0">
                     <Button
@@ -2833,6 +3016,13 @@ export function PreSaleForm({
                       const itemIsWeightOrVolume = isWeightOrVolumeUnit(
                         item.unitOfMeasure
                       );
+                      const caseQuantity =
+                        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+                          ? splitCaseUnitQuantity(
+                              item.quantity,
+                              item.unitsPerBox
+                            )
+                          : null;
 
                       let measureLabel = "Medida";
                       if (itemIsWeightOrVolume) {
@@ -2861,6 +3051,14 @@ export function PreSaleForm({
                       const currentItemTaxIds = new Set(
                         item.taxes?.map((tax) => tax.taxId) ?? []
                       );
+                      const displayedUnitPrice =
+                        item.unitOfMeasure === "CAJA" && item.unitsPerBox
+                          ? item.unitPrice * item.unitsPerBox
+                          : item.unitPrice;
+                      const unitPriceValue =
+                        displayedUnitPrice && !Number.isNaN(displayedUnitPrice)
+                          ? displayedUnitPrice
+                          : "";
 
                       if (isAdjustment) {
                         const subtotal = calculateItemTotals(item).subtotal;
@@ -2937,12 +3135,61 @@ export function PreSaleForm({
                         );
                       }
 
+                      const isCollapsed = collapsedItemIds.has(item.id);
+                      const itemSubtotal = calculateItemTotals(item).subtotal;
                       return (
-                        <div
-                          className="grid min-w-0 gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
-                          key={item.id}
-                        >
-                          {/*
+                        <div key={item.id}>
+                          {isCollapsed && (
+                            <button
+                              aria-controls={`pre-sale-item-${item.id}`}
+                              aria-expanded={false}
+                              aria-label={`Editar ${item.name}`}
+                              className="flex min-h-16 w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+                              onClick={() =>
+                                setCollapsedItemIds((current) => {
+                                  const next = new Set(current);
+                                  next.delete(item.id);
+                                  return next;
+                                })
+                              }
+                              type="button"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium">
+                                  {item.name}
+                                </span>
+                                <span className="block truncate text-muted-foreground text-xs">
+                                  SKU {item.sku}
+                                </span>
+                                {item.unitOfMeasure === "CAJA" &&
+                                  item.unitsPerBox && (
+                                    <span className="block text-muted-foreground text-xs">
+                                      {formatCaseUnitQuantity(
+                                        item.quantity,
+                                        item.unitsPerBox
+                                      )}
+                                    </span>
+                                  )}
+                              </span>
+                              <span className="flex shrink-0 items-center gap-1 font-semibold text-sm">
+                                {formatCurrency(itemSubtotal)}
+                                <ChevronDown
+                                  aria-hidden="true"
+                                  className="size-4 text-muted-foreground"
+                                />
+                              </span>
+                            </button>
+                          )}
+                          <div
+                            className={cn(
+                              "min-w-0 gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_80px_110px_100px_80px_120px_auto] md:items-center",
+                              isCollapsed
+                                ? "hidden md:grid"
+                                : "grid grid-cols-2"
+                            )}
+                            id={`pre-sale-item-${item.id}`}
+                          >
+                            {/*
                         Layout:
                         - Product info
                         - Quantity input
@@ -2952,58 +3199,109 @@ export function PreSaleForm({
                         - Subtotal
                         - Remove action
                       */}
-                          <div className="min-w-0 overflow-hidden">
-                            <div className="min-w-0 space-y-1">
-                              <p className="break-words font-medium leading-snug">
-                                {item.name}
-                              </p>
-                              {item.brand ? (
-                                <p className="break-words text-muted-foreground text-xs">
-                                  {item.brand}
+                            <div className="col-span-2 min-w-0 overflow-hidden md:col-span-1">
+                              <div className="min-w-0 space-y-1">
+                                <p className="break-words font-medium leading-snug">
+                                  {item.name}
                                 </p>
-                              ) : null}
+                                {item.brand ? (
+                                  <p className="break-words text-muted-foreground text-xs">
+                                    {item.brand}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <p className="break-all text-muted-foreground text-sm">
+                                SKU {item.sku}
+                              </p>
                             </div>
-                            <p className="break-all text-muted-foreground text-sm">
-                              SKU {item.sku}
-                            </p>
-                          </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.quantity || Number.isNaN(item.quantity)
-                                  ? ""
-                                  : item.quantity
-                              }
-                            />
-                          </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Cantidad
+                              </span>
+                              {caseQuantity && item.unitsPerBox ? (
+                                <CaseUnitQuantityFields
+                                  compact
+                                  onChange={(quantity) =>
+                                    handleUpdateItemQuantity(item.id, quantity)
+                                  }
+                                  showTotalUnitsInput
+                                  totalUnits={item.quantity}
+                                  unitsPerBox={item.unitsPerBox}
+                                />
+                              ) : (
+                                <Input
+                                  className="h-8 w-full"
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleQuantityInputChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !item.quantity ||
+                                    Number.isNaN(item.quantity)
+                                      ? ""
+                                      : item.quantity
+                                  }
+                                />
+                              )}
+                              {caseQuantity && item.unitsPerBox && (
+                                <span className="text-muted-foreground text-xs">
+                                  {formatCaseUnitQuantity(
+                                    item.quantity,
+                                    item.unitsPerBox
+                                  )}
+                                </span>
+                              )}
+                            </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              {measureLabel}
-                            </span>
-                            {itemIsWeightOrVolume ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                {measureLabel}
+                              </span>
+                              {itemIsWeightOrVolume ? (
+                                <Input
+                                  className="h-8 w-full"
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleMeasureInputChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !measureValue || Number.isNaN(measureValue)
+                                      ? ""
+                                      : measureValue
+                                  }
+                                />
+                              ) : (
+                                <span className="text-sm">{unitLabel}</span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                {item.unitOfMeasure === "CAJA"
+                                  ? "Precio por caja"
+                                  : "Precio unitario"}
+                              </span>
                               <Input
                                 className="h-8 w-full"
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleMeasureInputChange(
+                                  handleUnitPriceInputChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -3011,176 +3309,166 @@ export function PreSaleForm({
                                 placeholder="0"
                                 step="0.01"
                                 type="number"
+                                value={unitPriceValue}
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Descuento %
+                              </span>
+                              <Input
+                                className="h-8 w-full"
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  handleDiscountInputChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
                                 value={
-                                  !measureValue || Number.isNaN(measureValue)
+                                  Number.isNaN(item.discountPercent) ||
+                                  item.discountPercent === 0
                                     ? ""
-                                    : measureValue
+                                    : item.discountPercent
                                 }
                               />
-                            ) : (
-                              <span className="text-sm">{unitLabel}</span>
-                            )}
-                          </div>
+                            </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Precio unitario
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleUnitPriceInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.unitPrice || Number.isNaN(item.unitPrice)
-                                  ? ""
-                                  : item.unitPrice
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Descuento %
-                            </span>
-                            <Input
-                              className="h-8 w-full"
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                handleDiscountInputChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
-                                  ? ""
-                                  : item.discountPercent
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col items-start gap-1 sm:items-end">
-                            <span className="text-muted-foreground text-xs">
-                              Subtotal
-                            </span>
-                            <p className="font-medium">
-                              {formatCurrency(
-                                calculateItemTotals(item).subtotal
-                              )}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center justify-start sm:justify-end">
-                            <Button
-                              onClick={() => handleRemoveItem(item.id)}
-                              size="icon"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-
-                          {taxIndicator ? (
-                            <div className="flex w-full items-start justify-between gap-3 border-t pt-2 sm:col-span-7">
-                              <p
-                                className={cn(
-                                  "min-w-0 flex-1 text-xs leading-relaxed",
-                                  taxIndicator.variant === "product" ||
-                                    taxIndicator.variant === "manual"
-                                    ? "text-primary"
-                                    : "text-muted-foreground"
-                                )}
-                              >
-                                <span className="font-medium">
-                                  {taxIndicator.label}
-                                </span>
-                                {taxIndicator.summary
-                                  ? `: ${taxIndicator.summary}`
-                                  : null}
+                            <div className="flex flex-col items-start gap-1 md:items-end">
+                              <span className="text-muted-foreground text-xs">
+                                Subtotal
+                              </span>
+                              <p className="font-medium">
+                                {formatCurrency(itemSubtotal)}
                               </p>
-                              <Popover
-                                onOpenChange={(open) =>
-                                  setOpenItemTaxPickerId(open ? item.id : null)
-                                }
-                                open={openItemTaxPickerId === item.id}
+                            </div>
+
+                            <div className="flex items-center justify-end">
+                              <Button
+                                aria-label={`Quitar ${item.name}`}
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
                               >
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    aria-label={`Cambiar impuestos de ${item.name}`}
-                                    className="h-7 w-7 shrink-0 text-muted-foreground"
-                                    size="icon"
-                                    type="button"
-                                    variant="ghost"
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent
-                                  align="end"
-                                  className="w-80 p-0"
-                                  sideOffset={6}
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            {taxIndicator ? (
+                              <div className="col-span-2 flex w-full items-start justify-between gap-3 border-t pt-2 md:col-span-7">
+                                <p
+                                  className={cn(
+                                    "min-w-0 flex-1 text-xs leading-relaxed",
+                                    taxIndicator.variant === "product" ||
+                                      taxIndicator.variant === "manual"
+                                      ? "text-primary"
+                                      : "text-muted-foreground"
+                                  )}
                                 >
-                                  <Command>
-                                    <CommandInput placeholder="Buscar impuesto..." />
-                                    <CommandList>
-                                      <CommandEmpty>
-                                        No se encontraron impuestos.
-                                      </CommandEmpty>
-                                      <CommandGroup>
-                                        <CommandItem
-                                          onSelect={() =>
-                                            handleUseSaleTaxesForItem(item.id)
-                                          }
-                                          value={`default-${item.id}`}
-                                        >
-                                          <span className="flex-1 truncate">
-                                            Usar impuesto de venta
-                                          </span>
-                                          {currentItemTaxIds.size === 0 ? (
-                                            <Check className="h-4 w-4 shrink-0 text-primary" />
-                                          ) : null}
-                                        </CommandItem>
-                                        {taxes.map((tax) => (
+                                  <span className="font-medium">
+                                    {taxIndicator.label}
+                                  </span>
+                                  {taxIndicator.summary
+                                    ? `: ${taxIndicator.summary}`
+                                    : null}
+                                </p>
+                                <Popover
+                                  onOpenChange={(open) =>
+                                    setOpenItemTaxPickerId(
+                                      open ? item.id : null
+                                    )
+                                  }
+                                  open={openItemTaxPickerId === item.id}
+                                >
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      aria-label={`Cambiar impuestos de ${item.name}`}
+                                      className="hidden"
+                                      size="icon"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent
+                                    align="end"
+                                    className="w-80 p-0"
+                                    sideOffset={6}
+                                  >
+                                    <Command>
+                                      <CommandInput placeholder="Buscar impuesto..." />
+                                      <CommandList>
+                                        <CommandEmpty>
+                                          No se encontraron impuestos.
+                                        </CommandEmpty>
+                                        <CommandGroup>
                                           <CommandItem
-                                            disabled={
-                                              isVatExempt && isIvaTax(tax)
-                                            }
-                                            key={tax.id}
                                             onSelect={() =>
-                                              handleItemTaxToggle(item.id, tax)
+                                              handleUseSaleTaxesForItem(item.id)
                                             }
-                                            value={`${tax.name} ${tax.rate}`}
+                                            value={`default-${item.id}`}
                                           >
                                             <span className="flex-1 truncate">
-                                              {tax.name} ({tax.rate}%)
+                                              Usar impuesto de venta
                                             </span>
-                                            {currentItemTaxIds.has(tax.id) ? (
+                                            {currentItemTaxIds.size === 0 ? (
                                               <Check className="h-4 w-4 shrink-0 text-primary" />
                                             ) : null}
                                           </CommandItem>
-                                        ))}
-                                      </CommandGroup>
-                                    </CommandList>
-                                  </Command>
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          ) : null}
+                                          {taxes.map((tax) => (
+                                            <CommandItem
+                                              disabled={
+                                                isVatExempt && isIvaTax(tax)
+                                              }
+                                              key={tax.id}
+                                              onSelect={() =>
+                                                handleItemTaxToggle(
+                                                  item.id,
+                                                  tax
+                                                )
+                                              }
+                                              value={`${tax.name} ${tax.rate}`}
+                                            >
+                                              <span className="flex-1 truncate">
+                                                {tax.name} ({tax.rate}%)
+                                              </span>
+                                              {currentItemTaxIds.has(tax.id) ? (
+                                                <Check className="h-4 w-4 shrink-0 text-primary" />
+                                              ) : null}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            ) : null}
+                            <Button
+                              className={cn(
+                                finishSectionButtonClasses,
+                                "col-span-2 md:hidden"
+                              )}
+                              onClick={() => {
+                                setCollapsedItemIds((current) =>
+                                  new Set(current).add(item.id)
+                                );
+                                scrollToSectionTop("pre-sale-products-card");
+                              }}
+                              type="button"
+                              variant="outline"
+                            >
+                              <Check className="size-4" />
+                              Listo
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}

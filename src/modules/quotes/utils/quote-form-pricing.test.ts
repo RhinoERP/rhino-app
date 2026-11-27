@@ -6,6 +6,7 @@ import { mapQuoteFormItems } from "./quote-form-items";
 import {
   computeQuoteItemSubtotal,
   convertQuoteItemsCurrency,
+  getAdjustedQuoteUnitPrice,
   repriceQuoteItems,
 } from "./quote-form-pricing";
 import { buildQuoteTaxLines, computeQuoteTotals } from "./quote-line-calcs";
@@ -50,6 +51,20 @@ function makeItem(
 }
 
 describe("precios y extras del presupuesto", () => {
+  it("applies commercial box pricing before converting to individual-unit quote prices", () => {
+    const product = {
+      ...campera,
+      unitOfMeasure: "CAJA" as const,
+      unitsPerBox: 6,
+    };
+    expect(getAdjustedQuoteUnitPrice(product, noPricing, "ARS", null)).toBe(
+      100 / 6
+    );
+    expect(getAdjustedQuoteUnitPrice(product, noPricing, "USD", 1000)).toBe(
+      0.1 / 6
+    );
+  });
+
   it("convierte los extras existentes una sola vez al pasar de ARS a USD", () => {
     const [item] = convertQuoteItemsCurrency({
       items: [

@@ -127,9 +127,27 @@ export default async function OrganizationPage({
   }
 
   const { user, permissions, currentOrganization } = layoutData;
+  const isMobileDevice = await isMobileRequest();
+  const canManageSales =
+    permissions.includes("sales.manage") ||
+    permissions.includes("sales.manage.all") ||
+    permissions.includes("organization.admin");
+  const mobileHome = (
+    <SellerMobileHome
+      canManageSales={canManageSales}
+      orgSlug={orgSlug}
+      posEnabled={currentOrganization.pos_enabled ?? true}
+      productionEnabled={currentOrganization.production_enabled ?? false}
+      userName={user?.user_metadata?.full_name as string | undefined}
+      wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
+    />
+  );
 
   // Check if user has permission to view dashboard
   if (!permissions.includes("dashboard.read")) {
+    if (isMobileDevice && canManageSales) {
+      return mobileHome;
+    }
     const routes: AccessibleRoute[] = [
       {
         path: `/org/${orgSlug}/ventas`,
@@ -206,19 +224,9 @@ export default async function OrganizationPage({
   // Validate tab parameter
   const activeTab = resolveActiveTab(tab);
 
-  const isMobileDevice = await isMobileRequest();
-
   // On mobile, show the seller home page instead of redirecting
   if (isMobileDevice) {
-    return (
-      <SellerMobileHome
-        orgSlug={orgSlug}
-        posEnabled={currentOrganization.pos_enabled ?? true}
-        productionEnabled={currentOrganization.production_enabled ?? false}
-        userName={user?.user_metadata?.full_name as string | undefined}
-        wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
-      />
-    );
+    return mobileHome;
   }
 
   return (

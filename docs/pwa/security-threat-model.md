@@ -12,5 +12,6 @@
 | Cache autenticada expuesta | API, HTML protegido y RSC son `NetworkOnly`; endpoints usan `private, no-store` | Revisar reglas al cambiar Service Worker |
 | Borrado local interpretado como cancelacion | Confirmaciones explicitas; bloqueo durante `syncing` | Una respuesta perdida puede significar que el servidor ya acepto el trabajo |
 | Evento de refresh de otra cuenta | Clave y payload particionados por usuario/organizacion, schema estricto y 24 h maximo | `localStorage` no contiene payload comercial, pero revela IDs tecnicos locales |
+| Falla de IndexedDB al cerrar sesion | El cierre voluntario se detiene si no se confirma la purga; se avisa al usuario. Un `SIGNED_OUT` externo muestra un aviso persistente si la purga falla | Una revocacion externa no puede forzar el borrado de un dispositivo cuyo almacenamiento falla; no compartirlo y borrar datos del sitio manualmente |
 
 No se almacenan tokens en el snapshot ni se registran payloads comerciales completos. El cifrado local no esta implementado; equipos compartidos o comprometidos requieren controles del dispositivo y una decision de producto adicional.

@@ -128,3 +128,30 @@ describe("organization POS accounting defaults", () => {
     expect(parsed.pos_transfer_account_code).toBe("BANCO_PESOS");
   });
 });
+
+describe("organization case units setting", () => {
+  it("keeps case-based inventory disabled for existing organizations", () => {
+    expect(organizationSettingsSchema.parse({}).case_units_enabled).toBe(false);
+    expect(OrgSettingsSchema.parse({}).case_units_enabled).toBe(false);
+    expect(ORGANIZATION_SETTINGS_DEFAULTS.case_units_enabled).toBe(false);
+  });
+
+  it("preserves opt-in when other organization settings are saved", () => {
+    const current = organizationSettingsSchema.parse({
+      case_units_enabled: true,
+      dispatch_declared_value_percentage: 35,
+      non_invoiced_payment_methods: ["qr"],
+      sales_default_payment_method: "qr",
+    });
+    const updated = OrgSettingsSchema.parse({
+      ...current,
+      due_days_enabled: true,
+    });
+
+    expect(updated.case_units_enabled).toBe(true);
+    expect(updated.due_days_enabled).toBe(true);
+    expect(updated.dispatch_declared_value_percentage).toBe(35);
+    expect(updated.non_invoiced_payment_methods).toEqual(["qr"]);
+    expect(updated.sales_default_payment_method).toBe("qr");
+  });
+});

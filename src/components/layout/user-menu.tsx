@@ -7,6 +7,8 @@ import {
   SignOutIcon,
   SunIcon,
 } from "@phosphor-icons/react/ssr";
+import { useState } from "react";
+import { toast } from "sonner";
 import { useTheme } from "@/components/theme/use-theme";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -39,6 +41,19 @@ type UserMenuProps = {
 export function UserMenu({ user }: UserMenuProps) {
   const { isMobile } = useSidebar();
   const { theme, setTheme, mounted } = useTheme();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = () => {
+    setLoggingOut(true);
+    secureLogout().catch((error: unknown) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "No se pudo cerrar sesión. Intentá de nuevo."
+      );
+      setLoggingOut(false);
+    });
+  };
 
   const getThemeIcon = () => {
     if (!mounted) {
@@ -147,10 +162,11 @@ export function UserMenu({ user }: UserMenuProps) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive"
-              onClick={secureLogout}
+              disabled={loggingOut}
+              onClick={handleLogout}
             >
               <SignOutIcon className="mr-2 h-4 w-4" weight="duotone" />
-              <span>Cerrar sesión</span>
+              <span>{loggingOut ? "Cerrando sesión…" : "Cerrar sesión"}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

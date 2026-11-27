@@ -11,6 +11,8 @@ import type {
   CustomerWithStats,
   PaginatedResult,
 } from "../types";
+import { customerSellerScopeFilter } from "./customer-visibility";
+import { canOpenCustomerSale } from "./recent-sales-visibility";
 
 export type CustomerChannel = "DISTRIBUIDORA" | "POS" | "MIXTO";
 
@@ -38,7 +40,10 @@ function canReadCustomers(permissions: string[]): boolean {
   return (
     permissions.includes("organization.admin") ||
     permissions.includes("clients.read") ||
-    permissions.includes("customers.read")
+    permissions.includes("clients.read.all") ||
+    permissions.includes("customers.read") ||
+    permissions.includes("customers.read.all") ||
+    permissions.includes("customers.manage")
   );
 }
 
@@ -180,9 +185,7 @@ export async function getVisibleCustomersByOrgSlug(
       return [];
     }
 
-    query = query.or(
-      `assigned_seller_id.eq.${accessContext.userId},assigned_seller_id.is.null`
-    );
+    query = query.or(customerSellerScopeFilter(accessContext.userId));
   }
 
   const { data, error } = await query;
@@ -576,7 +579,7 @@ export async function getCustomerWithStats(
   const { data: sales, error: salesError } = await supabase
     .from("sales_orders")
     .select(
-      "id, sale_number, status, sale_date, total_amount, invoice_type, invoice_number"
+      "id, user_id, sale_number, status, sale_date, total_amount, invoice_type, invoice_number"
     )
     .eq("customer_id", customerId)
     .eq("organization_id", org.id)
@@ -596,15 +599,18 @@ export async function getCustomerWithStats(
     0;
 
   // Get recent sales (last 10)
-  const recentSales: CustomerSale[] = (sales?.slice(0, 10) ?? []).map((s) => ({
-    id: s.id,
-    sale_number: s.sale_number,
-    status: s.status,
-    sale_date: s.sale_date,
-    total_amount: Number(s.total_amount) || 0,
-    invoice_type: s.invoice_type,
-    invoice_number: s.invoice_number,
-  }));
+  const recentSales: CustomerSale[] = (sales ?? [])
+    .filter((sale) => canOpenCustomerSale(sale, accessContext))
+    .slice(0, 10)
+    .map((s) => ({
+      id: s.id,
+      sale_number: s.sale_number,
+      status: s.status,
+      sale_date: s.sale_date,
+      total_amount: Number(s.total_amount) || 0,
+      invoice_type: s.invoice_type,
+      invoice_number: s.invoice_number,
+    }));
 
   return {
     ...customer,
@@ -775,7 +781,7 @@ function buildCustomerQuery(
       return null;
     }
 
-    query = query.eq("assigned_seller_id", accessContext.userId);
+    query = query.or(customerSellerScopeFilter(accessContext.userId));
   }
 
   if (sort && sort.length > 0) {
@@ -837,17 +843,13 @@ export async function getCustomersPaginated(
 
   const { data, error, count } = await query;
 
-  if (error || !data) {
-    return {
-      data: [],
-      totalCount: count ?? 0,
-      page,
-      pageSize,
-    };
+  if (error) {
+    console.error("No se pudieron consultar los clientes", error);
+    throw new Error("No se pudieron cargar los clientes. Intentá de nuevo.");
   }
 
   return {
-    data,
+    data: data ?? [],
     totalCount: count ?? 0,
     page,
     pageSize,

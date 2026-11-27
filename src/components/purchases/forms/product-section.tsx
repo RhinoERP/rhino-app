@@ -39,6 +39,8 @@ type ProductSectionProps = {
   selectButtonLabel: string;
   inputUnit: InputUnit;
   quantity: number | string;
+  caseQuantity: string;
+  looseUnitQuantity: string;
   isAddDisabled: boolean;
   isLoadingProducts: boolean;
   isOpen: boolean;
@@ -46,6 +48,8 @@ type ProductSectionProps = {
   onSelectProduct: (productId: string) => void;
   onUnitChange: (unit: InputUnit) => void;
   onQuantityChange: (value: string) => void;
+  onCaseQuantityChange: (value: string) => void;
+  onLooseUnitQuantityChange: (value: string) => void;
   onQuantityKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   onAddItem: () => void;
 };
@@ -58,6 +62,8 @@ export function ProductSection({
   selectButtonLabel,
   inputUnit,
   quantity,
+  caseQuantity,
+  looseUnitQuantity,
   isAddDisabled,
   isLoadingProducts,
   isOpen,
@@ -65,10 +71,13 @@ export function ProductSection({
   onSelectProduct,
   onUnitChange,
   onQuantityChange,
+  onCaseQuantityChange,
+  onLooseUnitQuantityChange,
   onQuantityKeyDown,
   onAddItem,
 }: ProductSectionProps) {
   const showProductConditionals = selectedProduct?.has_variants;
+  const isCaseProduct = selectedProduct?.unit_of_measure === "CAJA";
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
@@ -94,6 +103,9 @@ export function ProductSection({
                       selectedProduct.cost_price ?? 0,
                       selectedProduct.currency ?? "ARS"
                     )}
+                    {selectedProduct.unit_of_measure === "CAJA"
+                      ? " / caja"
+                      : ""}
                   </span>
                 </div>
               ) : (
@@ -137,6 +149,9 @@ export function ProductSection({
                                 product.cost_price ?? 0,
                                 product.currency ?? "ARS"
                               )}
+                              {product.unit_of_measure === "CAJA"
+                                ? " / caja"
+                                : ""}
                             </p>
                           </div>
                           <Check
@@ -157,30 +172,69 @@ export function ProductSection({
         </Popover>
       </div>
 
-      {!showProductConditionals && availableUnits.length > 1 && (
-        <div className="w-full space-y-2 sm:w-32">
-          <Label className="font-medium text-sm" htmlFor="inputUnit">
-            Unidad
-          </Label>
-          <Select
-            onValueChange={(value) => onUnitChange(value as InputUnit)}
-            value={inputUnit}
-          >
-            <SelectTrigger id="inputUnit">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableUnits.map((unit) => (
-                <SelectItem key={unit} value={unit}>
-                  {getUnitLabel(unit)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {!(showProductConditionals || isCaseProduct) &&
+        availableUnits.length > 1 && (
+          <div className="w-full space-y-2 sm:w-32">
+            <Label className="font-medium text-sm" htmlFor="inputUnit">
+              Unidad
+            </Label>
+            <Select
+              onValueChange={(value) => onUnitChange(value as InputUnit)}
+              value={inputUnit}
+            >
+              <SelectTrigger id="inputUnit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableUnits.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {getUnitLabel(unit)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+      {!showProductConditionals && isCaseProduct && (
+        <div className="grid w-full grid-cols-2 gap-3 sm:w-64">
+          <div className="space-y-2">
+            <Label htmlFor="case-quantity">Cajas</Label>
+            <Input
+              id="case-quantity"
+              inputMode="numeric"
+              min="0"
+              onChange={(event) => onCaseQuantityChange(event.target.value)}
+              onKeyDown={onQuantityKeyDown}
+              placeholder="0"
+              step="1"
+              type="number"
+              value={caseQuantity}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="loose-unit-quantity">Unidades</Label>
+            <Input
+              id="loose-unit-quantity"
+              inputMode="numeric"
+              min="0"
+              onChange={(event) =>
+                onLooseUnitQuantityChange(event.target.value)
+              }
+              onKeyDown={onQuantityKeyDown}
+              placeholder="0"
+              step="1"
+              type="number"
+              value={looseUnitQuantity}
+            />
+          </div>
+          <p className="col-span-2 text-muted-foreground text-xs">
+            La cantidad se normaliza según las unidades por caja del producto.
+          </p>
         </div>
       )}
 
-      {!showProductConditionals && (
+      {!(showProductConditionals || isCaseProduct) && (
         <div className="w-full space-y-2 sm:w-32">
           <Label className="font-medium text-sm" htmlFor="quantity">
             {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}

@@ -183,10 +183,24 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           module: "route_sheets",
         },
         {
+          title: "Visitas",
+          url: `/org/${orgSlug}/visitas`,
+          icon: <MapPinIcon weight="duotone" />,
+          requiredPermission: [
+            "sales.manage",
+            "sales.manage.all",
+            "organization.admin",
+          ],
+        },
+        {
           title: "Clientes",
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
-          requiredPermission: ["customers.read", "customers.read.all"],
+          requiredPermission: [
+            "customers.read",
+            "customers.read.all",
+            "customers.manage",
+          ],
         },
         {
           title: "Notas de Crédito",
@@ -223,6 +237,23 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ],
     },
     {
+      title: "Cotizaciones",
+      items: [
+        {
+          title: "Mis cotizaciones",
+          url: `/org/${orgSlug}/solicitudes-venta`,
+          icon: <ClipboardTextIcon weight="duotone" />,
+          requiredPermission: ["sales.manage", "sales.manage.all"],
+        },
+        {
+          title: "Aprobación de cotizaciones",
+          url: `/org/${orgSlug}/solicitudes-venta/aprobacion`,
+          icon: <ClipboardTextIcon weight="duotone" />,
+          requiredPermission: "organization.admin",
+        },
+      ],
+    },
+    {
       title: "Venta directa",
       items: [
         {
@@ -232,6 +263,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: [
             "pos.read",
             "pos.read.all",
+            "pos.manage",
             "mercadolibre.access",
           ],
           module: "pos",
@@ -318,6 +350,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: [
             "inventory.read",
             "inventory.read.all",
+            "inventory.manage",
             "mercadolibre.access",
           ],
         },

@@ -37,6 +37,7 @@ export const offlineCustomerSchema = z.object({
   cuit: z.string().nullable(),
   city: z.string().nullable(),
   assignedSellerId: z.string().uuid().nullable(),
+  priceLevelId: z.string().uuid().nullable().optional(),
   salesPriceListId: z.string().uuid().nullable(),
   dueDays: z.number().int().nonnegative().nullable(),
   taxCondition: z.string().nullable(),
@@ -55,12 +56,21 @@ export const offlineProductSchema = z.object({
   sku: z.string(),
   brand: z.string().nullable(),
   price: z.number().finite().nonnegative(),
+  costSnapshotCiphertext: z.string().max(500).nullable().optional(),
+  priceByLevel: z
+    .array(
+      z.object({
+        priceLevelId: z.string().uuid(),
+        price: z.number().finite().nonnegative(),
+      })
+    )
+    .optional(),
   currency: z.string().min(1),
   supplierId: z.string().uuid().nullable(),
   supplierName: z.string().nullable(),
   categoryId: z.string().uuid().nullable(),
   categoryName: z.string().nullable(),
-  unitOfMeasure: z.enum(["UN", "KG", "LT", "MT"]),
+  unitOfMeasure: z.enum(["UN", "KG", "LT", "MT", "CAJA"]),
   tracksStockUnits: z.boolean(),
   totalQuantity: z.number().finite().nullable(),
   totalUnitQuantity: z.number().finite().nullable(),
@@ -90,6 +100,16 @@ export const offlinePriceListSchema = z.object({
   type: z.enum(["PERCENTAGE", "PRICE"]),
   value: z.number().finite(),
   validFrom: z.string(),
+});
+
+export const offlinePriceLevelSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  margin: z.number().finite().nonnegative(),
+  validFrom: z.string().nullable(),
+  isActive: z.boolean(),
+  extraCommissionRate: z.number().finite().nullable(),
+  status: z.enum(["Active", "Scheduled", "Archived"]),
 });
 
 export const offlineAssignmentSchema = z.object({
@@ -131,6 +151,7 @@ export const sellerOfflineSnapshotV1Schema = z
     taxes: z.array(offlineTaxSchema),
     sellers: z.array(offlineSellerSchema),
     salesPriceLists: z.array(offlinePriceListSchema),
+    priceLevels: z.array(offlinePriceLevelSchema).optional(),
     customerPriceAssignments: z.array(offlineAssignmentSchema),
     purchasePriceListItems: z.array(offlinePurchasePriceListItemSchema),
     settings: offlineSalesSettingsSchema,

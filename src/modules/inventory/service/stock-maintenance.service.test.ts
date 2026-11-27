@@ -27,6 +27,7 @@ function query(data: unknown) {
   return {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
     single: vi.fn().mockResolvedValue({ data, error: null }),
     limit: vi.fn().mockResolvedValue({ data, error: null }),
   };
@@ -109,7 +110,43 @@ describe("mantenimiento de stock por depósito", () => {
         p_expiration_date: undefined,
       })
     );
-    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechaza cantidades fraccionarias en movimientos de productos por caja", async () => {
+    mocks.from
+      .mockReturnValueOnce(query({ warehouse_id: warehouseId }))
+      .mockReturnValueOnce(query({ unit_of_measure: "CAJA" }));
+
+    await expect(
+      applyWarehouseStockMovement({
+        orgSlug: "org-a",
+        warehouseId,
+        productId: "product-a",
+        lotId: "lot-a",
+        type: "INBOUND",
+        quantity: 1.5,
+      })
+    ).rejects.toThrow("unidades enteras");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("rechaza saldos fraccionarios al ajustar productos por caja", async () => {
+    mocks.from.mockReturnValueOnce(query({ unit_of_measure: "CAJA" }));
+
+    await expect(
+      setWarehouseStockBalance({
+        orgSlug: "org-a",
+        warehouseId,
+        productId: "product-a",
+        lotNumber: "LOT-1",
+        expirationDate: null,
+        quantity: 2.5,
+        reason: "Ajuste",
+        source: "MANUAL",
+      })
+    ).rejects.toThrow("unidades enteras");
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("rechaza saldos de variante con varios lotes en vez de modificar uno arbitrario", async () => {
@@ -148,7 +185,8 @@ describe("mantenimiento de stock por depósito", () => {
     const balances = query([]);
     mocks.from
       .mockReturnValueOnce(query({ product_id: "product-a" }))
-      .mockReturnValueOnce(balances);
+      .mockReturnValueOnce(balances)
+      .mockReturnValueOnce(query({ unit_of_measure: "UN" }));
     await setVariantWarehouseStock({
       orgSlug: "org-a",
       warehouseId: otherWarehouseId,

@@ -5,6 +5,8 @@ export type RouteSheetPdfRow = {
   date: string | null;
   document: string;
   customer: string;
+  siteName?: string | null;
+  address?: string | null;
   city: string | null;
   amount: number;
   bultos: number | null;
@@ -78,7 +80,7 @@ export function generateRouteSheetHTML(
         <tr>
           <td class="c-date">${escapeHtml(date)}</td>
           <td class="c-document">${escapeHtml(row.document)}</td>
-          <td class="c-customer">${escapeHtml(row.customer)}</td>
+          <td class="c-customer">${escapeHtml(row.customer)}${row.siteName ? `<div>${escapeHtml(row.siteName)}</div>` : ""}${row.address ? `<div>${escapeHtml(row.address)}</div>` : ""}</td>
           <td class="c-city">${escapeHtml(row.city ?? "—")}</td>
           <td class="c-qty">${escapeHtml(formatQuantity(row.bultos))}</td>
           <td class="c-qty">${escapeHtml(formatQuantity(row.unidades))}</td>

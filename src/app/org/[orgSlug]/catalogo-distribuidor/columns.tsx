@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DistributorCatalogItem } from "@/modules/inventory/service/inventory.service";
+import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 
 function getUnitLabel(unitOfMeasure: string | null): string {
   if (unitOfMeasure === "KG") {
@@ -105,9 +106,15 @@ export function createDistributorCatalogColumns(): ColumnDef<DistributorCatalogI
       cell: ({ row }) => {
         const value = row.getValue("total_stock") as number;
         const unit = getUnitLabel(row.original.unit_of_measure);
+        const caseQuantity =
+          row.original.unit_of_measure === "CAJA" && row.original.units_per_box
+            ? splitCaseUnitQuantity(value, row.original.units_per_box)
+            : null;
         return (
           <span className="tabular-nums">
-            {value.toLocaleString("es-AR")} {unit}
+            {caseQuantity
+              ? `${caseQuantity.boxes.toLocaleString("es-AR")} caja(s) · ${caseQuantity.units.toLocaleString("es-AR")} un.`
+              : `${value.toLocaleString("es-AR")} ${unit}`}
           </span>
         );
       },
@@ -124,6 +131,7 @@ export function createDistributorCatalogColumns(): ColumnDef<DistributorCatalogI
         return price != null ? (
           <span className="font-medium tabular-nums">
             {formatCurrency(price)}
+            {row.original.unit_of_measure === "CAJA" ? " / caja" : ""}
           </span>
         ) : (
           <span className="text-muted-foreground text-sm">-</span>

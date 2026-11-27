@@ -60,6 +60,46 @@ function buildSale(): SaleReturnSourceSale {
 }
 
 describe("sale return credit-note helpers", () => {
+  it("preserves sub-cent case prices and rejects fractional individual-unit returns", () => {
+    const sale = buildSale();
+    const item = sale.items?.[0];
+    if (!item) {
+      throw new Error("Falta el ítem de prueba");
+    }
+    item.product = { name: "Caja", unit_of_measure: "CAJA" };
+    item.quantity = 3;
+    item.unit_price = 1 / 3;
+    item.base_price = 1 / 3;
+    item.discount_amount = 0;
+    item.subtotal = 1;
+    sale.sub_total = 1;
+    sale.global_discount_amount = 0;
+    sale.taxes = [];
+    const request = {
+      salesOrderItemId: item.id,
+      productId: "product-1",
+      quantity: 3,
+      unitPrice: 1 / 3,
+    };
+    const lines = resolveReturnLines({
+      sale,
+      returnItems: [request],
+      previouslyReturnedByItemId: new Map(),
+    });
+    expect(lines[0]).toMatchObject({
+      unitPrice: 1 / 3,
+      netAmount: 1,
+      totalAmount: 1,
+    });
+    expect(() =>
+      resolveReturnLines({
+        sale,
+        returnItems: [{ ...request, quantity: 0.5 }],
+        previouslyReturnedByItemId: new Map(),
+      })
+    ).toThrow("unidades enteras");
+  });
+
   it("permite fracciones para productos simples y solo enteros para variantes", () => {
     const sale = buildSale();
     const request = {

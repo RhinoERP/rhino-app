@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
+import { assertCaseQuantity } from "@/modules/inventory/service/transaction-units.service";
+import { getBaseUnitPrice } from "@/modules/inventory/utils/case-units";
 import type {
   CommercialChange,
   OfflineCommandResult,
@@ -53,6 +55,38 @@ const normalizeTaxes = (
       taxId: tax.taxId,
     }))
     .sort((left, right) => left.taxId.localeCompare(right.taxId));
+
+function compareOfflinePrice(
+  product: SellerOfflineSnapshotV1["products"][number],
+  item: OfflineCommandV1["payload"]["items"][number],
+  currentPrice: number
+) {
+  if (product.unitOfMeasure === "CAJA") {
+    try {
+      assertCaseQuantity(item.quantity);
+    } catch {
+      throw new OfflineCommandError({
+        code: "VALIDATION_ERROR",
+        message: "La cantidad por caja debe expresarse en unidades enteras",
+        retryable: false,
+        status: 400,
+      });
+    }
+  }
+  const comparablePrice = getBaseUnitPrice(
+    currentPrice,
+    product.unitOfMeasure,
+    product.unitsPerBox
+  );
+  const priceDifference =
+    Math.abs(comparablePrice - item.unitPrice) *
+    (product.unitOfMeasure === "CAJA" ? (product.unitsPerBox ?? 1) : 1);
+  return {
+    comparablePrice,
+    hasChanged:
+      priceDifference >= 0.01 - Number.EPSILON * Math.max(1, currentPrice),
+  };
+}
 
 export function findOfflinePreSaleCommercialChanges(
   command: OfflineCommandV1,
@@ -108,12 +142,17 @@ export function findOfflinePreSaleCommercialChanges(
       });
     }
 
-    if (Math.abs(currentPrice - item.unitPrice) >= 0.01) {
+    const { comparablePrice, hasChanged } = compareOfflinePrice(
+      product,
+      item,
+      currentPrice
+    );
+    if (hasChanged) {
       changes.push({
         path: `payload.items.${index}.unitPrice`,
         message: `El precio de ${product.name} cambio`,
         capturedValue: item.unitPrice,
-        currentValue: currentPrice,
+        currentValue: comparablePrice,
       });
     }
 

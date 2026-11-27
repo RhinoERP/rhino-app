@@ -18,6 +18,7 @@ const addSalesToRouteSheetSchema = z
           .max(50, "El número de remito es demasiado largo")
       )
       .default({}),
+    siteIds: z.record(z.string().min(1), z.uuid()),
   })
   .superRefine((data, ctx) => {
     const selectedIds = new Set(data.saleIds);
@@ -27,6 +28,16 @@ const addSalesToRouteSheetSchema = z
           code: "custom",
           message: "La venta del remito no está en la selección",
           path: ["remittances"],
+        });
+        break;
+      }
+    }
+    for (const saleId of data.saleIds) {
+      if (!data.siteIds[saleId]) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Elegí una sucursal para cada venta",
+          path: ["siteIds"],
         });
         break;
       }

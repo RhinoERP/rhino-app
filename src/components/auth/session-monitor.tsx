@@ -83,7 +83,17 @@ export function SessionMonitor() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {
-        purgeAllOfflineData().catch(() => null);
+        purgeAllOfflineData().catch(() => {
+          toast.error(
+            "No se pudieron borrar los datos offline de este dispositivo",
+            {
+              id: "offline-logout-purge-failed",
+              description:
+                "No compartas el dispositivo. Borrá los datos del sitio desde el navegador antes de cambiar de cuenta.",
+              duration: Number.POSITIVE_INFINITY,
+            }
+          );
+        });
         showExpiredSessionWarning();
         return;
       }
