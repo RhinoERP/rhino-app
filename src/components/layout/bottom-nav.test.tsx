@@ -3,14 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { BottomNav } from "./bottom-nav";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/org/acme/visitas" }));
-vi.mock("next/link", () => ({
-  useLinkStatus: () => ({ pending: false }),
-  default: ({ href, children, ...props }: React.ComponentProps<"a">) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
-}));
 
 describe("mobile bottom navigation", () => {
   it("includes the visit route for sales managers", () => {
@@ -27,6 +19,7 @@ describe("mobile bottom navigation", () => {
     expect(html.indexOf("Visitas")).toBeLessThan(html.indexOf("Cotizaciones"));
     expect(html).not.toContain('href="/org/acme/stock"');
     expect(html).not.toContain("Salir");
+    expect(html.match(/<a /g)).toHaveLength(5);
   });
 
   it("does not show the visit route without sales management permission", () => {

@@ -94,3 +94,17 @@ Una consulta `HEAD` previa informó `error = null` incluso cuando el HTTP era `4
 El merge incorpora migraciones de Remitos desde `main` que comparten las versiones `20261112000000`, `20261112010000` y `20261112020000` con las de Visitas ya aplicadas manualmente en ensayo. También `20261125000000_sales_pricing_management_access.sql` comparte versión con `20261125000000_customer_site_postal_codes.sql`. No se renombraron ni reejecutaron archivos aplicados.
 
 **Bloqueo de despliegue:** la compilación y las pruebas del código no verifican el esquema remoto. Antes de cualquier PR que despliegue la app o ejecute migraciones, conciliar por entorno el historial, las versiones duplicadas y las dependencias de los archivos afectados. No usar `supabase db push`, `migration repair` ni desplegar en producción sin esa revisión.
+## Cotizaciones comerciales para clientes
+
+`supabase/migrations/20261127130000_sales_quote_client_drafts.sql` agrega los borradores
+de cotización compartibles entre dispositivos. El PDF se genera desde el
+documento HTML guardado en el borrador; convertirlo en petición de aprobación
+usa la clave idempotente del borrador y no modifica solicitudes previas.
+
+**No aplicar con `supabase db push` ni reparar el historial automáticamente.**
+Primero hay que conciliar las versiones de migraciones duplicadas en el entorno
+de destino, verificar que la migración de idempotencia
+`20261110000000_sales_quote_request_idempotency.sql` esté aplicada y probar
+guardar, retomar, compartir y convertir en un entorno de ensayo. Hasta entonces,
+la lista de solicitudes existente sigue funcionando, pero el guardado de
+borradores en la cuenta no estará disponible.

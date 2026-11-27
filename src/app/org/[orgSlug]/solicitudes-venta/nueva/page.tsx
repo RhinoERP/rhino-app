@@ -7,15 +7,19 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { getPriceLevelsByOrgSlug } from "@/modules/price-levels/service/price-levels.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
+import { getClientQuoteDraft } from "@/modules/sales-quote-requests/service/client-quote-drafts.service";
 
 type NewSalesQuoteRequestPageProps = {
   params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{ draft?: string }>;
 };
 
 export default async function NewSalesQuoteRequestPage({
   params,
+  searchParams,
 }: NewSalesQuoteRequestPageProps) {
   const { orgSlug } = await params;
+  const { draft: draftId } = await searchParams;
   await guardOrganizationPermissionAccess(orgSlug, [
     "sales.manage",
     "sales.manage.all",
@@ -42,6 +46,12 @@ export default async function NewSalesQuoteRequestPage({
   if (!authData.user) {
     notFound();
   }
+  const draft = draftId
+    ? await getClientQuoteDraft(orgSlug, authData.user.id, draftId)
+    : null;
+  if (draftId && (!draft || draft.approval_request_id)) {
+    notFound();
+  }
   const { data: variants, error } = productIds.length
     ? await supabase
         .from("product_variants")
@@ -60,12 +70,15 @@ export default async function NewSalesQuoteRequestPage({
       <div className="min-w-0">
         <h1 className="font-heading text-2xl">Cotizador competitivo</h1>
         <p className="text-muted-foreground text-sm">
-          Cotizá contra el precio de competencia. La solicitud se envía a
-          aprobación antes de convertirse en preventa.
+          Prepará una cotización para el cliente y compartí el PDF. Cuando esté
+          lista, convertí el borrador en petición de aprobación.
         </p>
       </div>
       <SalesQuoteRequestForm
         customers={customers}
+        initialDraft={
+          draft ? { id: draft.id, values: draft.quote_payload } : undefined
+        }
         organizationId={organization.id}
         orgSlug={orgSlug}
         ownerUserId={authData.user.id}

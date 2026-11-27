@@ -10,7 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { PendingLink } from "./pending-link";
+import { NavigationFeedbackLink } from "./navigation-feedback-link";
 
 type BottomNavProps = {
   orgSlug: string;
@@ -61,25 +61,26 @@ function BottomNavLink({
       );
     }
     return (
-      <a
+      <NavigationFeedbackLink
         aria-current={item.isActive ? "page" : undefined}
         className={className}
         href={item.offlineHref}
+        pendingLabel="Abriendo…"
       >
         {contents}
-      </a>
+      </NavigationFeedbackLink>
     );
   }
 
   return (
-    <PendingLink
+    <NavigationFeedbackLink
       aria-current={item.isActive ? "page" : undefined}
       className={className}
       href={item.href}
       pendingLabel="Abriendo…"
     >
       {contents}
-    </PendingLink>
+    </NavigationFeedbackLink>
   );
 }
 

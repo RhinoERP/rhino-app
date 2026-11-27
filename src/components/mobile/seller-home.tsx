@@ -8,7 +8,7 @@ import {
   Receipt,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-import { PendingLink } from "@/components/layout/pending-link";
+import { NavigationFeedbackLink } from "@/components/layout/navigation-feedback-link";
 import { Card, CardContent } from "@/components/ui/card";
 
 type SellerMobileHomeProps = {
@@ -168,20 +168,28 @@ export function SellerMobileHome({
                 return <div key={button.href}>{card}</div>;
               }
               return (
-                <a href={button.offlineHref} key={button.href}>
+                <NavigationFeedbackLink
+                  className="block"
+                  href={button.offlineHref}
+                  key={button.href}
+                  pendingClassName="rounded-xl bg-secondary/95 text-secondary-foreground"
+                  pendingLabel={`Abriendo ${button.label}…`}
+                >
                   {card}
-                </a>
+                </NavigationFeedbackLink>
               );
             }
 
             return (
-              <PendingLink
+              <NavigationFeedbackLink
+                className="block"
                 href={button.href}
                 key={button.href}
-                pendingLabel="Abriendo…"
+                pendingClassName="rounded-xl bg-secondary/95 text-secondary-foreground"
+                pendingLabel={`Abriendo ${button.label}…`}
               >
                 {card}
-              </PendingLink>
+              </NavigationFeedbackLink>
             );
           })}
         </div>

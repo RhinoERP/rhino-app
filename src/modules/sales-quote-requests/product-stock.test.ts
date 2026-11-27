@@ -10,6 +10,7 @@ describe("quote product stock label", () => {
           totalUnitQuantity: null,
           unitOfMeasure: "UN",
           tracksStockUnits: false,
+          unitsPerBox: null,
         },
         true
       )
@@ -24,9 +25,27 @@ describe("quote product stock label", () => {
           totalUnitQuantity: null,
           unitOfMeasure: "UN",
           tracksStockUnits: false,
+          unitsPerBox: null,
         },
         false
       )
     ).toBe("Stock al cargar: no informado");
+  });
+
+  it("shows full boxes, loose units and the stored individual-unit count", () => {
+    expect(
+      quoteProductStockLabel(
+        {
+          totalQuantity: 8,
+          totalUnitQuantity: null,
+          unitOfMeasure: "CAJA",
+          unitsPerBox: 6,
+          tracksStockUnits: false,
+        },
+        true
+      )
+    ).toBe(
+      "Stock del snapshot: 1 caja y 2 unidades sueltas · 8 unidades totales"
+    );
   });
 });

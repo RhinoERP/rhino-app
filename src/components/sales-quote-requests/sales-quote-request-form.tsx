@@ -1,9 +1,11 @@
 "use client";
 
+import { Check, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
 import { WhatsAppApprovalShare } from "@/components/sales-quote-requests/whatsapp-approval-share";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,12 +15,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { SearchableCatalogPicker } from "@/components/ui/searchable-catalog-picker";
 import { Spinner } from "@/components/ui/spinner";
 import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { generatePDFBlobFromHTML } from "@/lib/pdf-generator";
 import type { Customer } from "@/modules/customers/types";
+import { formatCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import type { StoredOfflineSalesQuoteCommand } from "@/modules/offline/contracts/offline-sales-quote-command";
 import {
   enqueueOfflineSalesQuoteCommand,
@@ -37,14 +42,25 @@ import type { PriceLevelWithStatus } from "@/modules/price-levels/types";
 import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-conversion";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
+import {
+  convertClientQuoteDraftAction,
+  saveClientQuoteDraftAction,
+} from "@/modules/sales-quote-requests/actions/client-quote-drafts.action";
 import { createSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/create-sales-quote-request.action";
 import { updateSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/update-sales-quote-request.action";
 import {
+  type AdditionalQuoteTax,
+  additionalQuoteTaxSchema,
+  calculateQuoteTaxes,
+} from "@/modules/sales-quote-requests/client-quote-taxes";
+import {
   calculateCompetitivePriceSuggestion,
+  normalizeQuoteUnitPrice,
   type SalesQuotePricingMethod,
 } from "@/modules/sales-quote-requests/competitive-pricing";
 import { quoteProductStockLabel } from "@/modules/sales-quote-requests/product-stock";
 import {
+  isValidCaseQuoteQuantity,
   type QuoteSellingUnit,
   quoteSellingUnitFactor,
 } from "@/modules/sales-quote-requests/selling-unit";
@@ -112,6 +128,7 @@ type SalesQuoteRequestFormProps = {
   variants: ProductVariantOption[];
   requestId?: string;
   initialValues?: SalesQuoteRequestEditValues;
+  initialDraft?: { id: string; values: CreateSalesQuoteRequestInput };
   snapshotPriceByLevel?: Record<string, Record<string, number>>;
 };
 
@@ -169,15 +186,16 @@ function buildLineView(params: {
           basePrice: snapshotBasePrice,
           adjustments: priceAdjustments,
         }).price;
-  const baseUnitPrice = truncateMoney(
-    factor *
-      convertPriceToQuoteCurrency(
-        salePrice,
-        product.currency,
-        currency,
-        exchangeRate
-      )
+  const convertedPrice = convertPriceToQuoteCurrency(
+    salePrice,
+    product.currency,
+    currency,
+    exchangeRate
   );
+  const baseUnitPrice =
+    product.unitOfMeasure === "CAJA"
+      ? factor * convertedPrice
+      : truncateMoney(factor * convertedPrice);
   const selectedAgreedPrice =
     item.agreedUnitPrice == null || item.agreedUnitPrice.trim() === ""
       ? undefined
@@ -191,7 +209,8 @@ function buildLineView(params: {
   const suggestion = calculateLineSuggestion(
     item,
     baseUnitPrice,
-    validSelectedPrice
+    validSelectedPrice,
+    product.unitOfMeasure === "CAJA"
   );
 
   return { item, product, baseUnitPrice, suggestion };
@@ -200,7 +219,8 @@ function buildLineView(params: {
 function calculateLineSuggestion(
   item: RequestItemDraft,
   baseUnitPrice: number,
-  selectedAgreedPrice: number | undefined
+  selectedAgreedPrice: number | undefined,
+  preserveUnitPrecision: boolean
 ) {
   if (item.pricingMethod === "COMPETITOR") {
     const competitorPrice = Number(item.competitorUnitPrice);
@@ -214,7 +234,8 @@ function calculateLineSuggestion(
     return calculateCompetitivePriceSuggestion(
       baseUnitPrice,
       competitorPrice,
-      selectedAgreedPrice
+      selectedAgreedPrice,
+      preserveUnitPrecision
     );
   }
 
@@ -228,20 +249,22 @@ function calculateLineSuggestion(
     ) {
       return null;
     }
-    const percentagePrice = truncateMoney(
-      baseUnitPrice * (1 - percentage / 100)
-    );
+    const percentagePrice = preserveUnitPrecision
+      ? baseUnitPrice * (1 - percentage / 100)
+      : truncateMoney(baseUnitPrice * (1 - percentage / 100));
     return calculateCompetitivePriceSuggestion(
       baseUnitPrice,
       baseUnitPrice,
-      selectedAgreedPrice ?? percentagePrice
+      selectedAgreedPrice ?? percentagePrice,
+      preserveUnitPrecision
     );
   }
 
   return calculateCompetitivePriceSuggestion(
     baseUnitPrice,
     baseUnitPrice,
-    selectedAgreedPrice ?? baseUnitPrice
+    selectedAgreedPrice ?? baseUnitPrice,
+    preserveUnitPrecision
   );
 }
 
@@ -258,6 +281,8 @@ function buildRequestValues(params: {
   paymentTerm: string;
   invoiceType: string;
   observations: string;
+  clientQuoteEnabled: boolean;
+  additionalTaxes: AdditionalQuoteTax[];
   items: ParsedRequestItemDraft[];
   products: SaleProduct[];
 }): CreateSalesQuoteRequestInput {
@@ -292,9 +317,11 @@ function buildRequestValues(params: {
       | "FACTURA_C"
       | "FACTURA_E",
     observations: params.observations.trim(),
+    clientQuoteEnabled: params.clientQuoteEnabled,
+    additionalTaxes: params.additionalTaxes,
     items: params.items.map((item) => ({
       productId: item.productId,
-      productVariantId: item.productVariantId,
+      productVariantId: item.productVariantId ?? null,
       sellingUnit: item.sellingUnit,
       quantity: item.quantityNumber,
       pricingMethod: item.pricingMethod,
@@ -418,6 +445,21 @@ function offlineQuoteCustomerName(record: StoredOfflineSalesQuoteCommand) {
   return customer?.fantasyName || customer?.businessName || "Cliente";
 }
 
+function downloadAndOpenWhatsApp(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  window.open(
+    `https://wa.me/?text=${encodeURIComponent("Te comparto la cotización adjunta.")}`,
+    "_blank",
+    "noopener,noreferrer"
+  );
+  toast.info("PDF descargado. Adjuntalo manualmente en WhatsApp");
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates seller form state and pricing preview.
 export function SalesQuoteRequestForm({
   orgSlug,
@@ -430,47 +472,79 @@ export function SalesQuoteRequestForm({
   variants,
   requestId,
   initialValues,
+  initialDraft,
   snapshotPriceByLevel,
 }: SalesQuoteRequestFormProps) {
   const router = useRouter();
-  const [customerId, setCustomerId] = useState(initialValues?.customerId ?? "");
-  const customerSegment = initialValues?.customerSegment ?? "ACTIVE";
-  const [sellerZone, setSellerZone] = useState(initialValues?.sellerZone ?? "");
+  const draftValues = initialDraft?.values;
+  const [draftId, setDraftId] = useState(initialDraft?.id);
+  const [customerId, setCustomerId] = useState(
+    initialValues?.customerId ?? draftValues?.customerId ?? ""
+  );
+  const customerSegment =
+    initialValues?.customerSegment ?? draftValues?.customerSegment ?? "ACTIVE";
+  const [sellerZone, setSellerZone] = useState(
+    initialValues?.sellerZone ?? draftValues?.sellerZone ?? ""
+  );
   // Preserve historical USD requests on edit; all new requests are in pesos.
-  const currency = initialValues?.currency ?? "ARS";
+  const currency = initialValues?.currency ?? draftValues?.currency ?? "ARS";
   const [exchangeRate, setExchangeRate] = useState(
-    initialValues?.exchangeRate?.toString() ?? ""
+    initialValues?.exchangeRate?.toString() ??
+      draftValues?.exchangeRate?.toString() ??
+      ""
   );
   const [priceLevelId, setPriceLevelId] = useState(
-    initialValues?.priceLevelId ?? ""
+    initialValues?.priceLevelId ?? draftValues?.priceLevelId ?? ""
   );
   const [salesPriceListId, setSalesPriceListId] = useState(
-    initialValues?.salesPriceListId ?? ""
+    initialValues?.salesPriceListId ?? draftValues?.salesPriceListId ?? ""
   );
   const [paymentMethod, setPaymentMethod] = useState(
-    initialValues?.paymentMethod ?? ""
+    initialValues?.paymentMethod ?? draftValues?.paymentMethod ?? ""
   );
   const [paymentTerm, setPaymentTerm] = useState(
-    initialValues?.paymentTerm ?? ""
+    initialValues?.paymentTerm ?? draftValues?.paymentTerm ?? ""
   );
   const [invoiceType, setInvoiceType] = useState(
-    initialValues?.invoiceType ?? "NOTA_DE_VENTA"
+    initialValues?.invoiceType ?? draftValues?.invoiceType ?? "NOTA_DE_VENTA"
   );
   const [observations, setObservations] = useState(
-    initialValues?.observations ?? ""
+    initialValues?.observations ?? draftValues?.observations ?? ""
   );
+  const [clientQuoteEnabled, setClientQuoteEnabled] = useState(
+    draftValues?.clientQuoteEnabled ??
+      (draftValues?.additionalTaxes?.length ?? 0) > 0
+  );
+  const [additionalTaxes, setAdditionalTaxes] = useState<
+    { id: string; name: string; rate: string }[]
+  >(() => {
+    const saved = (
+      initialValues?.additionalTaxes ??
+      draftValues?.additionalTaxes ??
+      []
+    ).map((tax, index) => ({
+      id: `tax-${index}`,
+      name: tax.name,
+      rate: String(tax.rate),
+    }));
+    return saved.length === 0 && draftValues?.clientQuoteEnabled
+      ? [{ id: "initial-tax", name: "", rate: "" }]
+      : saved;
+  });
+  const [isSharing, setIsSharing] = useState(false);
+  const shareReady = useRef<{ fingerprint: string; file: File } | null>(null);
   const [items, setItems] = useState<RequestItemDraft[]>(
-    (initialValues?.items ?? []).map((item, index) => ({
+    (initialValues?.items ?? draftValues?.items ?? []).map((item, index) => ({
       id: `initial-${index}`,
       productId: item.productId,
-      productVariantId: item.productVariantId,
+      productVariantId: item.productVariantId ?? null,
       sellingUnit: item.sellingUnit ?? "UNIDADES",
       quantity: item.quantity.toString(),
       pricingMethod: item.pricingMethod,
-      competitorUnitPrice: item.competitorUnitPrice.toString(),
-      discountPercentage: item.discountPercentage.toString(),
-      agreedUnitPrice: item.agreedUnitPrice.toString(),
-      comment: item.comment,
+      competitorUnitPrice: item.competitorUnitPrice?.toString() ?? "",
+      discountPercentage: item.discountPercentage?.toString() ?? "",
+      agreedUnitPrice: item.agreedUnitPrice?.toString() ?? null,
+      comment: item.comment ?? "",
     }))
   );
   const [selectedProductId, setSelectedProductId] = useState("");
@@ -620,9 +694,40 @@ export function SalesQuoteRequestForm({
     }
     const quantity = Number(line.item.quantity);
     return Number.isFinite(quantity) && quantity > 0
-      ? sum + line.suggestion.agreedUnitPrice * quantity
+      ? sum + truncateMoney(line.suggestion.agreedUnitPrice * quantity)
       : sum;
   }, 0);
+  const showAdditionalTaxes = Boolean(requestId || clientQuoteEnabled);
+  const enteredAdditionalTaxes = showAdditionalTaxes
+    ? additionalTaxes.filter((tax) => tax.name.trim() || tax.rate.trim())
+    : [];
+  const validAdditionalTaxes = enteredAdditionalTaxes
+    .map((tax) => ({ name: tax.name.trim(), rate: Number(tax.rate) }))
+    .filter((tax) => additionalQuoteTaxSchema.safeParse(tax).success);
+  const taxesValid =
+    enteredAdditionalTaxes.length <= 20 &&
+    validAdditionalTaxes.length === enteredAdditionalTaxes.length;
+  const preview = calculateQuoteTaxes(
+    lineViews.flatMap((line, index) => {
+      const quantity = Number(line.item.quantity);
+      return line.product &&
+        line.suggestion &&
+        Number.isFinite(quantity) &&
+        quantity > 0
+        ? [
+            {
+              lineId: `line-${index + 1}`,
+              productId: line.product.id,
+              netAmount: truncateMoney(
+                line.suggestion.agreedUnitPrice * quantity
+              ),
+              taxes: line.product.taxes,
+            },
+          ]
+        : [];
+    }),
+    validAdditionalTaxes
+  );
 
   const handleAddItem = () => {
     if (!selectedProduct) {
@@ -650,7 +755,7 @@ export function SalesQuoteRequestForm({
             ? selectedVariantId
             : null,
           sellingUnit: selectedSellingUnit,
-          quantity: "1",
+          quantity: selectedProduct.unitOfMeasure === "CAJA" ? "0" : "1",
           pricingMethod: "COMPETITOR",
           competitorUnitPrice: "",
           discountPercentage: "",
@@ -678,14 +783,20 @@ export function SalesQuoteRequestForm({
     method: SalesQuotePricingMethod,
     baseUnitPrice: number
   ) => {
+    const item = items.find((entry) => entry.id === itemId);
+    const isCaseProduct = products.some(
+      (product) =>
+        product.id === item?.productId && product.unitOfMeasure === "CAJA"
+    );
+    const agreedUnitPrice =
+      method === "COMPETITOR"
+        ? null
+        : normalizeQuoteUnitPrice(baseUnitPrice, isCaseProduct).toString();
     updateItem(itemId, {
       pricingMethod: method,
       competitorUnitPrice: "",
       discountPercentage: method === "PERCENTAGE" ? "0" : "",
-      agreedUnitPrice:
-        method === "COMPETITOR"
-          ? null
-          : truncateMoney(baseUnitPrice).toString(),
+      agreedUnitPrice,
     });
   };
 
@@ -694,13 +805,21 @@ export function SalesQuoteRequestForm({
     baseUnitPrice: number,
     value: string
   ) => {
+    const item = items.find((entry) => entry.id === itemId);
+    const isCaseProduct = products.some(
+      (product) =>
+        product.id === item?.productId && product.unitOfMeasure === "CAJA"
+    );
     const percentage = Number(value);
     const agreedUnitPrice =
       value.trim() !== "" &&
       Number.isFinite(percentage) &&
       percentage >= 0 &&
       percentage <= 100
-        ? truncateMoney(baseUnitPrice * (1 - percentage / 100)).toString()
+        ? (isCaseProduct
+            ? baseUnitPrice * (1 - percentage / 100)
+            : truncateMoney(baseUnitPrice * (1 - percentage / 100))
+          ).toString()
         : "";
     updateItem(itemId, { discountPercentage: value, agreedUnitPrice });
   };
@@ -780,18 +899,18 @@ export function SalesQuoteRequestForm({
     router.refresh();
   }
 
-  const handleSubmit = () => {
+  const validatedValues = (): CreateSalesQuoteRequestInput | null => {
     if (!selectedCustomer) {
       toast.error("Seleccioná un cliente");
-      return;
+      return null;
     }
     if (!sellerZone.trim()) {
       toast.error("Ingresá la zona del vendedor");
-      return;
+      return null;
     }
     if (items.length === 0) {
       toast.error("Agregá al menos un producto");
-      return;
+      return null;
     }
 
     const parsedItems = items.map((item, index) => {
@@ -811,28 +930,168 @@ export function SalesQuoteRequestForm({
         pricingValid: Boolean(lineViews[index]?.suggestion),
       };
     });
-    if (hasInvalidQuoteItems(parsedItems)) {
+    if (
+      hasInvalidQuoteItems(parsedItems) ||
+      parsedItems.some((item) => {
+        const product = products.find((entry) => entry.id === item.productId);
+        return (
+          product != null &&
+          !isValidCaseQuoteQuantity(
+            product,
+            item.sellingUnit,
+            item.quantityNumber
+          )
+        );
+      })
+    ) {
       toast.error("Revisá las cantidades y precios de competencia");
+      return null;
+    }
+    if (!taxesValid) {
+      toast.error(
+        "Revisá el nombre y porcentaje de los impuestos adicionales (mayor a 0 y hasta 100%)"
+      );
+      return null;
+    }
+    return buildRequestValues({
+      orgSlug,
+      customerId,
+      customerSegment,
+      sellerZone,
+      currency,
+      exchangeRate: exchangeRateNumber,
+      priceLevelId,
+      salesPriceListId,
+      paymentMethod,
+      paymentTerm,
+      invoiceType,
+      observations,
+      clientQuoteEnabled,
+      additionalTaxes: validAdditionalTaxes,
+      items: parsedItems,
+      products,
+    });
+  };
+
+  const saveDraft = async () => {
+    const values = validatedValues();
+    if (!values) {
+      return null;
+    }
+    const result = await saveClientQuoteDraftAction(values, draftId);
+    if (!result.success) {
+      toast.error(result.error);
+      return null;
+    }
+    setDraftId(result.draftId);
+    router.refresh();
+    return result;
+  };
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: browser sharing requires separate success, cancellation and fallback paths.
+  const handleShare = async () => {
+    if (isSharing || isPending) {
       return;
     }
+    const currentValues = validatedValues();
+    if (!currentValues) {
+      return;
+    }
+    const fingerprint = JSON.stringify(currentValues);
+    const ready = shareReady.current;
+    if (
+      ready?.fingerprint === fingerprint &&
+      navigator.canShare?.({ files: [ready.file] }) &&
+      navigator.share
+    ) {
+      setIsSharing(true);
+      try {
+        // Call share synchronously from the click to retain user activation on iOS.
+        await navigator.share({
+          files: [ready.file],
+          title: "Cotización para el cliente",
+        });
+        toast.success("Elegí WhatsApp para enviar el PDF");
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "AbortError")) {
+          toast.error(
+            "No se pudo abrir el menú para compartir. Intentá de nuevo"
+          );
+        }
+      } finally {
+        setIsSharing(false);
+      }
+      return;
+    }
+    setIsSharing(true);
+    try {
+      const saved = await saveDraft();
+      if (!saved) {
+        return;
+      }
+      const blob = await generatePDFBlobFromHTML(saved.html);
+      const fileName = `cotizacion-${saved.draftId}.pdf`;
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      shareReady.current = { fingerprint, file };
+      if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: "Cotización para el cliente",
+          });
+          toast.success(
+            "Cotización guardada. Elegí WhatsApp para enviar el PDF"
+          );
+          return;
+        } catch (error) {
+          if (!(error instanceof Error && error.name === "NotAllowedError")) {
+            throw error;
+          }
+          toast.info(
+            "PDF listo. Tocá otra vez «Enviar PDF por WhatsApp» para abrir el menú de compartir"
+          );
+          return;
+        }
+      }
+      downloadAndOpenWhatsApp(blob, fileName);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return;
+      }
+      toast.error(
+        error instanceof Error ? error.message : "No se pudo compartir el PDF"
+      );
+    } finally {
+      setIsSharing(false);
+    }
+  };
 
+  const handleSubmit = () => {
+    const values = validatedValues();
+    if (!values) {
+      return;
+    }
     startTransition(async () => {
-      const values = buildRequestValues({
-        orgSlug,
-        customerId,
-        customerSegment,
-        sellerZone,
-        currency,
-        exchangeRate: exchangeRateNumber,
-        priceLevelId,
-        salesPriceListId,
-        paymentMethod,
-        paymentTerm,
-        invoiceType,
-        observations,
-        items: parsedItems,
-        products,
-      });
+      if (!(requestId || snapshotPriceByLevel)) {
+        const saved = await saveClientQuoteDraftAction(values, draftId);
+        if (!saved.success) {
+          toast.error(saved.error);
+          return;
+        }
+        setDraftId(saved.draftId);
+        const converted = await convertClientQuoteDraftAction(
+          orgSlug,
+          saved.draftId
+        );
+        if (!converted.success) {
+          toast.error(converted.error);
+          return;
+        }
+        toast.success("Cotización convertida en petición de aprobación");
+        router.push(`/org/${orgSlug}/solicitudes-venta`);
+        router.refresh();
+        return;
+      }
       const result = await submitOrQueueQuote({
         requestId,
         useSnapshot: snapshotPriceByLevel !== undefined,
@@ -923,13 +1182,63 @@ export function SalesQuoteRequestForm({
         </Card>
       )}
       <div className="min-w-0 flex-1 space-y-6">
+        {!(requestId || snapshotPriceByLevel) && (
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  checked={clientQuoteEnabled}
+                  className="mt-1"
+                  id="client-quote-enabled"
+                  onCheckedChange={(checked) => {
+                    setClientQuoteEnabled(checked === true);
+                    if (checked === true && additionalTaxes.length === 0) {
+                      setAdditionalTaxes([
+                        { id: crypto.randomUUID(), name: "", rate: "" },
+                      ]);
+                    }
+                  }}
+                />
+                <label
+                  className="cursor-pointer space-y-1"
+                  htmlFor="client-quote-enabled"
+                >
+                  <span className="block font-semibold">
+                    Cotización para enviar al cliente
+                  </span>
+                  <span className="block text-muted-foreground text-sm">
+                    Activá esta opción para agregar impuestos adicionales y
+                    enviar el PDF por WhatsApp.
+                  </span>
+                </label>
+              </div>
+              <Button
+                disabled={
+                  isPending || isSharing || items.length === 0 || !customerId
+                }
+                onClick={() =>
+                  startTransition(async () => {
+                    const saved = await saveDraft();
+                    if (saved) {
+                      toast.success("Cotización guardada en tu cuenta");
+                    }
+                  })
+                }
+                type="button"
+                variant="outline"
+              >
+                Guardar borrador
+              </Button>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Datos comerciales</CardTitle>
             <CardDescription>
               {requestId
                 ? "Al guardar, la cotización vuelve a la bandeja de aprobación."
-                : "La solicitud se enviará a un administrador para su aprobación."}
+                : "Podés guardar un borrador. La petición de aprobación se crea solo cuando lo indiques."}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -1027,6 +1336,119 @@ export function SalesQuoteRequestForm({
 
         <Card>
           <CardHeader>
+            <CardTitle>Impuestos de la cotización</CardTitle>
+            <CardDescription>
+              Se incluyen automáticamente IVA y percepciones asignados a cada
+              producto.
+              {showAdditionalTaxes &&
+                " Podés agregar otros impuestos estimados con nombre y porcentaje sobre el subtotal."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {showAdditionalTaxes && (
+              <div className="space-y-4">
+                {additionalTaxes.map((tax) => (
+                  <div className="flex flex-wrap items-end gap-3" key={tax.id}>
+                    <label
+                      className="min-w-40 flex-1 space-y-2 text-sm"
+                      htmlFor={`tax-name-${tax.id}`}
+                    >
+                      <span>Nombre del impuesto</span>
+                      <Input
+                        id={`tax-name-${tax.id}`}
+                        maxLength={100}
+                        onChange={(event) =>
+                          setAdditionalTaxes((current) =>
+                            current.map((entry) =>
+                              entry.id === tax.id
+                                ? { ...entry, name: event.target.value }
+                                : entry
+                            )
+                          )
+                        }
+                        placeholder="Ej.: Percepción"
+                        value={tax.name}
+                      />
+                    </label>
+                    <label
+                      className="w-28 space-y-2 text-sm"
+                      htmlFor={`tax-rate-${tax.id}`}
+                    >
+                      <span>Porcentaje (%)</span>
+                      <Input
+                        id={`tax-rate-${tax.id}`}
+                        inputMode="decimal"
+                        max="100"
+                        min="0.01"
+                        onChange={(event) =>
+                          setAdditionalTaxes((current) =>
+                            current.map((entry) =>
+                              entry.id === tax.id
+                                ? { ...entry, rate: event.target.value }
+                                : entry
+                            )
+                          )
+                        }
+                        step="any"
+                        type="number"
+                        value={tax.rate}
+                      />
+                    </label>
+                    <Button
+                      aria-label={`Quitar impuesto ${tax.name || "sin nombre"}`}
+                      onClick={() =>
+                        setAdditionalTaxes((current) =>
+                          current.filter((entry) => entry.id !== tax.id)
+                        )
+                      }
+                      type="button"
+                      variant="outline"
+                    >
+                      Quitar
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  disabled={additionalTaxes.length >= 20}
+                  onClick={() =>
+                    setAdditionalTaxes((current) => [
+                      ...current,
+                      { id: crypto.randomUUID(), name: "", rate: "" },
+                    ])
+                  }
+                  type="button"
+                  variant="outline"
+                >
+                  Agregar otro impuesto
+                </Button>
+              </div>
+            )}
+            <div className="space-y-2 border-t pt-4 text-sm">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>{formatCurrency(preview.subtotal, currency)}</span>
+              </div>
+              {preview.taxBreakdown.map((tax, index) => (
+                <div
+                  className="flex justify-between gap-2"
+                  key={`${tax.name}-${tax.rate}-${index}`}
+                >
+                  <span>
+                    {tax.name} ({tax.rate}%)
+                  </span>
+                  <span>{formatCurrency(tax.taxAmount, currency)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t pt-2 font-semibold">
+                <span>Total estimado</span>
+                <span>{formatCurrency(preview.total, currency)}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Productos</CardTitle>
             <CardDescription>
               Elegí una modalidad de precio para cada producto y completá sus
@@ -1034,7 +1456,7 @@ export function SalesQuoteRequestForm({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="sales-quote-product-picker">
+            <div className="sales-quote-product-picker flex flex-col gap-4">
               <div className="min-w-0">
                 <Field label="Producto">
                   <SearchableCatalogPicker
@@ -1051,7 +1473,7 @@ export function SalesQuoteRequestForm({
                   />
                 </Field>
                 {selectedProduct && (
-                  <p className="text-muted-foreground text-sm">
+                  <p className="mt-2 text-muted-foreground text-sm">
                     {quoteProductStockLabel(
                       selectedProduct,
                       snapshotPriceByLevel !== undefined
@@ -1100,7 +1522,10 @@ export function SalesQuoteRequestForm({
                   </select>
                 ) : (
                   <div className="flex h-9 min-w-0 items-center rounded-md border bg-muted/30 px-3 text-muted-foreground text-sm">
-                    {selectedProduct?.unitOfMeasure ?? "Seleccioná un producto"}
+                    {selectedProduct?.unitOfMeasure === "CAJA"
+                      ? `CAJA · ${selectedProduct.unitsPerBox} unidades por caja`
+                      : (selectedProduct?.unitOfMeasure ??
+                        "Seleccioná un producto")}
                   </div>
                 )}
               </Field>
@@ -1180,6 +1605,49 @@ export function SalesQuoteRequestForm({
             />
           </CardContent>
         </Card>
+        {!requestId && (
+          <Card id="client-quote-actions">
+            <CardHeader>
+              <CardTitle>
+                {clientQuoteEnabled
+                  ? "Cotización para el cliente"
+                  : "Petición de aprobación"}
+              </CardTitle>
+              <CardDescription>
+                {clientQuoteEnabled
+                  ? "El PDF es una estimación comercial, no un comprobante fiscal. Enviar el PDF no crea una petición de aprobación."
+                  : "Activá la casilla «Cotización para enviar al cliente» al principio si también querés enviar un PDF por WhatsApp."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row">
+              {clientQuoteEnabled && !snapshotPriceByLevel && (
+                <Button
+                  disabled={
+                    isPending || isSharing || items.length === 0 || !customerId
+                  }
+                  onClick={handleShare}
+                  type="button"
+                  variant="outline"
+                >
+                  {isSharing && <Spinner className="mr-2" />}
+                  Enviar PDF por WhatsApp
+                </Button>
+              )}
+              <Button
+                disabled={
+                  isPending || isSharing || items.length === 0 || !customerId
+                }
+                onClick={handleSubmit}
+                type="button"
+              >
+                {isPending && <Spinner className="mr-2" />}
+                {snapshotPriceByLevel
+                  ? "Guardar solicitud offline para aprobación"
+                  : "Convertir en petición de aprobación"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="w-full min-w-0 xl:w-80 xl:max-w-xs">
@@ -1197,22 +1665,27 @@ export function SalesQuoteRequestForm({
                 <span>{items.length}</span>
               </div>
               <div className="flex justify-between border-t pt-4 font-semibold">
-                <span>Subtotal propuesto</span>
-                <span>{formatCurrency(subtotal, currency)}</span>
+                <span>
+                  {requestId ? "Subtotal propuesto" : "Total estimado"}
+                </span>
+                <span>
+                  {formatCurrency(
+                    requestId ? subtotal : preview.total,
+                    currency
+                  )}
+                </span>
               </div>
-              <p className="text-muted-foreground text-xs">
-                Los impuestos se estiman usando los impuestos asignados a cada
-                producto.
-              </p>
-              <Button
-                className="w-full"
-                disabled={isPending || items.length === 0 || !customerId}
-                onClick={handleSubmit}
-                type="button"
-              >
-                {isPending && <Spinner className="mr-2" />}
-                {submitLabel}
-              </Button>
+              {requestId && (
+                <Button
+                  className="w-full"
+                  disabled={isPending || items.length === 0 || !customerId}
+                  onClick={handleSubmit}
+                  type="button"
+                >
+                  {isPending && <Spinner className="mr-2" />}
+                  {submitLabel}
+                </Button>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -1285,11 +1758,18 @@ function RequestItemCard({
   onAgreedPriceChange: (value: string) => void;
   onRemove: () => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const itemLabelClassName = "flex h-12 items-end overflow-hidden leading-5";
   const quantity = Number(item.quantity);
+  const caseUnitsPerBox =
+    product?.unitOfMeasure === "CAJA" &&
+    Number.isSafeInteger(product.unitsPerBox) &&
+    (product.unitsPerBox ?? 0) > 0
+      ? product.unitsPerBox
+      : null;
   const lineTotal =
     suggestion && Number.isFinite(quantity) && quantity > 0
-      ? suggestion.agreedUnitPrice * quantity
+      ? truncateMoney(suggestion.agreedUnitPrice * quantity)
       : null;
   const adjustmentLabel = getAdjustmentLabel(suggestion);
   let finalPriceLabel = `Precio lista (${currency})`;
@@ -1300,170 +1780,253 @@ function RequestItemCard({
   }
 
   return (
-    <div className="min-w-0 rounded-lg border p-3 sm:p-4">
-      <div className="mb-4 flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
-        <div className="min-w-0">
-          <p className="break-words font-medium">
-            {product?.name ?? "Producto"}
-            {variant ? ` · ${variant.color} / ${variant.talle}` : ""}
-          </p>
-          <p className="text-muted-foreground text-xs">
-            {product?.sku} · Precio base cotizado:{" "}
-            {formatCurrency(baseUnitPrice, currency)}
-          </p>
-        </div>
-      </div>
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Field
-          label={`Cantidad (${item.sellingUnit === "CAJAS" ? "cajas" : (product?.unitOfMeasure ?? "unidad")})`}
-          labelClassName={itemLabelClassName}
+    <div className="min-w-0 rounded-lg border">
+      {collapsed && (
+        <button
+          aria-controls={`quote-item-${item.id}`}
+          aria-expanded={false}
+          aria-label={`Editar ${product?.name ?? "producto"}`}
+          className="flex min-h-16 w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+          onClick={() => setCollapsed(false)}
+          type="button"
         >
-          <Input
-            min="0.001"
-            onChange={(event) => onUpdate({ quantity: event.target.value })}
-            step="any"
-            type="number"
-            value={item.quantity}
-          />
-        </Field>
-        {product?.unitOfMeasure === "UN" && (
-          <Field label="Unidad de venta" labelClassName={itemLabelClassName}>
+          <span className="min-w-0">
+            <span className="block truncate font-medium">
+              {product?.name ?? "Producto"}
+              {variant ? ` · ${variant.color} / ${variant.talle}` : ""}
+            </span>
+            <span className="block truncate text-muted-foreground text-xs">
+              SKU {product?.sku ?? "—"} ·{" "}
+              {caseUnitsPerBox &&
+              Number.isSafeInteger(quantity) &&
+              quantity >= 0
+                ? formatCaseUnitQuantity(quantity, caseUnitsPerBox)
+                : `${item.quantity} ${item.sellingUnit === "CAJAS" ? "cajas" : (product?.unitOfMeasure ?? "unidades")}`}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 font-semibold text-sm">
+            {lineTotal == null ? "—" : formatCurrency(lineTotal, currency)}
+            <ChevronDown
+              aria-hidden="true"
+              className="size-4 text-muted-foreground"
+            />
+          </span>
+        </button>
+      )}
+      <div
+        className={collapsed ? "hidden p-3 sm:p-4 md:block" : "p-3 sm:p-4"}
+        id={`quote-item-${item.id}`}
+      >
+        <div className="mb-4 flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
+          <div className="min-w-0">
+            <p className="break-words font-medium">
+              {product?.name ?? "Producto"}
+              {variant ? ` · ${variant.color} / ${variant.talle}` : ""}
+            </p>
+            <p className="text-muted-foreground text-xs">
+              {product?.sku} · Precio base cotizado
+              {caseUnitsPerBox ? " por caja" : ""}:{" "}
+              {formatCurrency(
+                caseUnitsPerBox
+                  ? baseUnitPrice * caseUnitsPerBox
+                  : baseUnitPrice,
+                currency
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {caseUnitsPerBox ? (
+            <div className="space-y-2 sm:col-span-2 xl:col-span-2">
+              <p className="font-medium text-sm">Cantidad</p>
+              <CaseUnitQuantityFields
+                onChange={(totalUnits) =>
+                  onUpdate({ quantity: totalUnits.toString() })
+                }
+                showTotalUnitsInput
+                totalUnits={
+                  Number.isSafeInteger(quantity) && quantity >= 0 ? quantity : 0
+                }
+                unitsPerBox={caseUnitsPerBox}
+              />
+              <p className="text-muted-foreground text-xs">
+                {formatCaseUnitQuantity(
+                  Number.isSafeInteger(quantity) && quantity >= 0
+                    ? quantity
+                    : 0,
+                  caseUnitsPerBox
+                )}
+              </p>
+            </div>
+          ) : (
+            <Field
+              label={`Cantidad (${item.sellingUnit === "CAJAS" ? "cajas" : (product?.unitOfMeasure ?? "unidad")})`}
+              labelClassName={itemLabelClassName}
+            >
+              <Input
+                min="0.001"
+                onChange={(event) => onUpdate({ quantity: event.target.value })}
+                step="any"
+                type="number"
+                value={item.quantity}
+              />
+            </Field>
+          )}
+          {product?.unitOfMeasure === "UN" && (
+            <Field label="Unidad de venta" labelClassName={itemLabelClassName}>
+              <select
+                aria-label="Unidad de venta del producto"
+                className={selectClassName}
+                onChange={(event) =>
+                  onUpdate({
+                    sellingUnit: event.target.value as QuoteSellingUnit,
+                    agreedUnitPrice: null,
+                    competitorUnitPrice: "",
+                    discountPercentage: "",
+                  })
+                }
+                value={item.sellingUnit}
+              >
+                <option value="UNIDADES">UNIDADES</option>
+                {Number.isInteger(product.unitsPerBox) &&
+                  (product.unitsPerBox ?? 0) > 0 && (
+                    <option value="CAJAS">
+                      CAJAS ({product.unitsPerBox} unidades)
+                    </option>
+                  )}
+              </select>
+            </Field>
+          )}
+          <Field
+            label="Modalidad de precio"
+            labelClassName={itemLabelClassName}
+          >
             <select
-              aria-label="Unidad de venta del producto"
               className={selectClassName}
               onChange={(event) =>
-                onUpdate({
-                  sellingUnit: event.target.value as QuoteSellingUnit,
-                  agreedUnitPrice: null,
-                  competitorUnitPrice: "",
-                  discountPercentage: "",
-                })
+                onPricingMethodChange(
+                  event.target.value as SalesQuotePricingMethod
+                )
               }
-              value={item.sellingUnit}
+              value={item.pricingMethod}
             >
-              <option value="UNIDADES">UNIDADES</option>
-              {Number.isInteger(product.unitsPerBox) &&
-                (product.unitsPerBox ?? 0) > 0 && (
-                  <option value="CAJAS">
-                    CAJAS ({product.unitsPerBox} unidades)
-                  </option>
-                )}
+              <option value="COMPETITOR">Por precio competencia</option>
+              <option value="PERCENTAGE">Por porcentaje</option>
+              <option value="LIST_PRICE">Precio lista</option>
             </select>
           </Field>
-        )}
-        <Field label="Modalidad de precio" labelClassName={itemLabelClassName}>
-          <select
-            className={selectClassName}
-            onChange={(event) =>
-              onPricingMethodChange(
-                event.target.value as SalesQuotePricingMethod
-              )
-            }
-            value={item.pricingMethod}
-          >
-            <option value="COMPETITOR">Por precio competencia</option>
-            <option value="PERCENTAGE">Por porcentaje</option>
-            <option value="LIST_PRICE">Precio lista</option>
-          </select>
-        </Field>
-        {item.pricingMethod === "COMPETITOR" && (
-          <Field
-            label={`Precio competencia (${currency})`}
-            labelClassName={itemLabelClassName}
-          >
+          {item.pricingMethod === "COMPETITOR" && (
+            <Field
+              label={`Precio competencia${caseUnitsPerBox ? " por unidad" : ""} (${currency})`}
+              labelClassName={itemLabelClassName}
+            >
+              <Input
+                min="0"
+                onChange={(event) =>
+                  onUpdate({ competitorUnitPrice: event.target.value })
+                }
+                step="0.000001"
+                type="number"
+                value={item.competitorUnitPrice}
+              />
+            </Field>
+          )}
+          {item.pricingMethod === "PERCENTAGE" && (
+            <Field
+              label="Porcentaje de descuento (%)"
+              labelClassName={itemLabelClassName}
+            >
+              <Input
+                max="100"
+                min="0"
+                onChange={(event) => onPercentageChange(event.target.value)}
+                step="0.01"
+                type="number"
+                value={item.discountPercentage}
+              />
+            </Field>
+          )}
+          <div>
+            <p
+              className={`${itemLabelClassName} mb-2 text-muted-foreground text-xs`}
+            >
+              {finalPriceLabel}
+              {caseUnitsPerBox ? " por unidad" : ""}
+            </p>
             <Input
+              aria-label="Precio final editable"
               min="0"
-              onChange={(event) =>
-                onUpdate({ competitorUnitPrice: event.target.value })
+              onChange={(event) => onAgreedPriceChange(event.target.value)}
+              placeholder={
+                suggestion
+                  ? suggestion.agreedUnitPrice.toString()
+                  : "Ingresá el precio final"
               }
-              step="0.000001"
+              step={caseUnitsPerBox ? "any" : "0.01"}
               type="number"
-              value={item.competitorUnitPrice}
+              value={
+                item.agreedUnitPrice ??
+                suggestion?.agreedUnitPrice.toString() ??
+                ""
+              }
             />
-          </Field>
-        )}
-        {item.pricingMethod === "PERCENTAGE" && (
-          <Field
-            label="Porcentaje de descuento (%)"
-            labelClassName={itemLabelClassName}
-          >
-            <Input
-              max="100"
-              min="0"
-              onChange={(event) => onPercentageChange(event.target.value)}
-              step="0.01"
-              type="number"
-              value={item.discountPercentage}
-            />
-          </Field>
-        )}
-        <div>
-          <p
-            className={`${itemLabelClassName} mb-2 text-muted-foreground text-xs`}
-          >
-            {finalPriceLabel}
-          </p>
-          <Input
-            aria-label="Precio final editable"
-            min="0"
-            onChange={(event) => onAgreedPriceChange(event.target.value)}
-            placeholder={
-              suggestion
-                ? suggestion.agreedUnitPrice.toString()
-                : "Ingresá el precio final"
-            }
-            step="0.01"
-            type="number"
-            value={
-              item.agreedUnitPrice ??
-              suggestion?.agreedUnitPrice.toString() ??
-              ""
-            }
-          />
-          {item.pricingMethod === "COMPETITOR" &&
-            suggestion?.adjustmentType === "DISCOUNT" && (
+            {item.pricingMethod === "COMPETITOR" &&
+              suggestion?.adjustmentType === "DISCOUNT" && (
+                <p className="text-muted-foreground text-xs">
+                  Descuento unitario:{" "}
+                  {formatCurrency(suggestion.discountAmount, currency)}
+                </p>
+              )}
+            {suggestion?.adjustmentType === "PRICE_OVERRIDE" && (
               <p className="text-muted-foreground text-xs">
-                Descuento unitario:{" "}
-                {formatCurrency(suggestion.discountAmount, currency)}
+                Aumento unitario:{" "}
+                {formatCurrency(suggestion.priceIncreaseAmount, currency)}
               </p>
             )}
-          {suggestion?.adjustmentType === "PRICE_OVERRIDE" && (
-            <p className="text-muted-foreground text-xs">
-              Aumento unitario:{" "}
-              {formatCurrency(suggestion.priceIncreaseAmount, currency)}
+          </div>
+          <div className="flex min-w-0 flex-col gap-2">
+            <p
+              className={`${itemLabelClassName} text-muted-foreground text-xs`}
+            >
+              Subtotal acordado
             </p>
-          )}
+            <p className="flex h-9 items-center font-semibold text-sm">
+              {lineTotal == null ? "—" : formatCurrency(lineTotal, currency)}
+            </p>
+          </div>
+          <Field
+            label="Comentario del producto"
+            labelClassName={itemLabelClassName}
+          >
+            <Input
+              maxLength={1000}
+              onChange={(event) => onUpdate({ comment: event.target.value })}
+              placeholder="Opcional"
+              value={item.comment}
+            />
+          </Field>
         </div>
-        <div className="flex min-w-0 flex-col gap-2">
-          <p className={`${itemLabelClassName} text-muted-foreground text-xs`}>
-            Subtotal acordado
-          </p>
-          <p className="flex h-9 items-center font-semibold text-sm">
-            {lineTotal == null ? "—" : formatCurrency(lineTotal, currency)}
-          </p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3 md:justify-end">
+          <Button
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={onRemove}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Quitar producto
+          </Button>
+          <Button
+            className="md:hidden"
+            onClick={() => setCollapsed(true)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <Check className="size-4" />
+            Listo
+          </Button>
         </div>
-        <Field
-          label="Comentario del producto"
-          labelClassName={itemLabelClassName}
-        >
-          <Input
-            maxLength={1000}
-            onChange={(event) => onUpdate({ comment: event.target.value })}
-            placeholder="Opcional"
-            value={item.comment}
-          />
-        </Field>
-      </div>
-      <div className="mt-4 flex justify-end border-t pt-3">
-        <Button
-          className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={onRemove}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          Quitar producto
-        </Button>
       </div>
     </div>
   );

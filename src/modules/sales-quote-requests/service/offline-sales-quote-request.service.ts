@@ -12,9 +12,16 @@ import {
   getSaleProducts,
   getSalesAccessContext,
 } from "@/modules/sales/service/sales.service";
-import { buildItemizedTaxPlan } from "@/modules/taxes/item-tax-calculations";
-import { calculateCompetitivePriceSuggestion } from "../competitive-pricing";
-import { quoteSellingUnitFactor, quoteUnitSnapshot } from "../selling-unit";
+import { calculateQuoteTaxes } from "../client-quote-taxes";
+import {
+  calculateCompetitivePriceSuggestion,
+  normalizeQuoteUnitPrice,
+} from "../competitive-pricing";
+import {
+  isValidCaseQuoteQuantity,
+  quoteSellingUnitFactor,
+  quoteUnitSnapshot,
+} from "../selling-unit";
 import { createSalesQuoteRequestSchema } from "./sales-quote-requests.service";
 
 export const offlineSalesQuoteRequestCommandSchema = z.object({
@@ -192,6 +199,18 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
         409
       );
     }
+    if (
+      (currentProduct.unitOfMeasure === "CAJA" ||
+        product.unitOfMeasure === "CAJA") &&
+      (currentProduct.unitOfMeasure !== product.unitOfMeasure ||
+        product.unitsPerBox !== currentProduct.unitsPerBox ||
+        !isValidCaseQuoteQuantity(product, item.sellingUnit, item.quantity))
+    ) {
+      throw new OfflineQuoteRequestError(
+        "La cantidad o el empaque de caja ya no es válido",
+        409
+      );
+    }
     const priceByLevel = selectedLevel
       ? product.priceByLevel?.find(
           (entry) => entry.priceLevelId === selectedLevel.id
@@ -235,19 +254,21 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
       );
     }
     const factor = quoteSellingUnitFactor(product, item.sellingUnit);
-    const baseUnitPrice = truncateMoney(
-      factor *
-        convertPriceToQuoteCurrency(
-          baseProductPrice,
-          product.currency,
-          command.quote.currency,
-          command.quote.exchangeRate
-        )
+    const convertedPrice = convertPriceToQuoteCurrency(
+      baseProductPrice,
+      product.currency,
+      command.quote.currency,
+      command.quote.exchangeRate
     );
+    const baseUnitPrice =
+      product.unitOfMeasure === "CAJA"
+        ? factor * convertedPrice
+        : truncateMoney(factor * convertedPrice);
     const pricing = calculateCompetitivePriceSuggestion(
       baseUnitPrice,
       item.competitorUnitPrice,
-      item.agreedUnitPrice
+      item.agreedUnitPrice,
+      product.unitOfMeasure === "CAJA"
     );
     const variant = item.productVariantId
       ? activeVariants.get(item.productVariantId)
@@ -265,21 +286,21 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
     const unitCost =
       costProductCurrency == null
         ? null
-        : truncateMoney(
+        : normalizeQuoteUnitPrice(
             factor *
               convertPriceToQuoteCurrency(
                 costProductCurrency,
                 product.currency,
                 command.quote.currency,
                 command.quote.exchangeRate
-              )
+              ),
+            product.unitOfMeasure === "CAJA"
           );
     return { item, index, product, variant, pricing, lineSubtotal, unitCost };
   });
 
-  const taxPlan = buildItemizedTaxPlan({
-    globalDiscountAmount: 0,
-    lines: lines.map((line) => ({
+  const taxPlan = calculateQuoteTaxes(
+    lines.map((line) => ({
       lineId: `line-${line.index + 1}`,
       productId: line.product.id,
       netAmount: line.lineSubtotal,
@@ -291,7 +312,8 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
         source: "product" as const,
       })),
     })),
-  });
+    command.quote.additionalTaxes
+  );
   const lineSnapshots = lines.map((line) => ({
     line_number: line.index + 1,
     product_id: line.product.id,
@@ -336,7 +358,7 @@ export async function createOfflineSalesQuoteRequest(rawCommand: unknown) {
   const subtotal = truncateMoney(
     lines.reduce((sum, line) => sum + line.lineSubtotal, 0)
   );
-  const taxAmount = truncateMoney(taxPlan.totalTaxAmount);
+  const taxAmount = taxPlan.taxAmount;
   const userName =
     snapshot.sellers.find((seller) => seller.id === command.ownerUserId)
       ?.name ?? "Vendedor";

@@ -41,6 +41,7 @@ export type SalesQuoteRequestEditValues = {
   paymentTerm: string;
   invoiceType: string;
   observations: string;
+  additionalTaxes?: Array<{ name: string; rate: number }>;
   items: Array<{
     productId: string;
     productVariantId: string | null;
@@ -126,6 +127,7 @@ type EditableItemRow = {
   agreed_unit_price: number;
   discount_percentage: number;
   product_comment: string | null;
+  taxes_snapshot: Array<{ name: string; rate: number; source?: string }> | null;
 };
 export type SalesQuoteRequestDetail = {
   id: string;
@@ -351,7 +353,7 @@ export async function getOwnSalesQuoteRequestForEdit(params: {
   const itemsQuery = database
     .from("sales_quote_request_items")
     .select(
-      "product_id, product_variant_id, unit_of_measure_snapshot, quantity, pricing_method, competitor_unit_price, agreed_unit_price, discount_percentage, product_comment"
+      "product_id, product_variant_id, unit_of_measure_snapshot, quantity, pricing_method, competitor_unit_price, agreed_unit_price, discount_percentage, product_comment, taxes_snapshot"
     )
     .eq("request_id", request.id)
     .order("line_number", { ascending: true });
@@ -375,6 +377,9 @@ export async function getOwnSalesQuoteRequestForEdit(params: {
     paymentTerm: request.payment_term ?? "",
     invoiceType: request.invoice_type ?? "NOTA_DE_VENTA",
     observations: request.seller_observations ?? "",
+    additionalTaxes: (items?.[0]?.taxes_snapshot ?? [])
+      .filter((tax) => tax.source === "manual")
+      .map((tax) => ({ name: tax.name, rate: tax.rate })),
     items: (items ?? []).map((item) => ({
       productId: item.product_id,
       productVariantId: item.product_variant_id,

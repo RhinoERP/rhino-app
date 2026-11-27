@@ -30,15 +30,18 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { cancelSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/cancel-sales-quote-request.action";
+import type { ClientQuoteDraft } from "@/modules/sales-quote-requests/service/client-quote-drafts.service";
 import type { MySalesQuoteRequest } from "@/modules/sales-quote-requests/service/my-sales-quote-requests.service";
 import { canShareApprovalRequest } from "@/modules/sales-quote-requests/whatsapp-approval-share";
 
 export function MySalesQuoteRequestsList({
   orgSlug,
   requests,
+  drafts = [],
 }: {
   orgSlug: string;
   requests: MySalesQuoteRequest[];
+  drafts?: ClientQuoteDraft[];
 }) {
   const [isNavigatingToNew, setIsNavigatingToNew] = useState(false);
   const [online, setOnline] = useState(true);
@@ -87,6 +90,41 @@ export function MySalesQuoteRequestsList({
           )}
         </Button>
       </div>
+
+      {drafts.length > 0 && (
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle>Cotizaciones para el cliente</CardTitle>
+            <CardDescription>
+              Borradores guardados en tu cuenta, aún no enviados a aprobación.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {drafts.map((draft) => (
+              <div
+                className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 last:border-0"
+                key={draft.id}
+              >
+                <div>
+                  <p className="font-medium">{draft.customer_name_snapshot}</p>
+                  <p className="text-muted-foreground text-sm">
+                    {formatCurrency(draft.total_amount, draft.currency)} ·
+                    Actualizada{" "}
+                    {new Date(draft.updated_at).toLocaleDateString("es-AR")}
+                  </p>
+                </div>
+                <Button asChild size="sm" variant="outline">
+                  <Link
+                    href={`/org/${orgSlug}/solicitudes-venta/nueva?draft=${draft.id}`}
+                  >
+                    Retomar cotización
+                  </Link>
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {requests.length === 0 ? (
         <Card className="min-w-0">
@@ -255,11 +293,11 @@ function RequestRow({
             </Button>
           )}
           {request.history.length > 0 && (
-            <details className="relative text-left">
-              <summary className="cursor-pointer text-primary text-xs hover:underline">
+            <details className="order-last w-full text-left xl:relative xl:order-none xl:w-auto">
+              <summary className="cursor-pointer py-2 text-primary text-sm hover:underline xl:py-0 xl:text-xs">
                 Historial ({request.history.length})
               </summary>
-              <div className="absolute left-0 z-10 mt-2 max-h-64 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border bg-background p-3 shadow-lg">
+              <div className="mt-2 max-h-[50vh] w-full overflow-y-auto rounded-md border bg-background p-3 shadow-sm xl:absolute xl:left-0 xl:z-10 xl:max-h-64 xl:w-72 xl:max-w-[calc(100vw-2rem)] xl:shadow-lg">
                 {request.history.map((entry) => (
                   <div className="border-b py-2 last:border-0" key={entry.id}>
                     <p className="font-medium text-xs">

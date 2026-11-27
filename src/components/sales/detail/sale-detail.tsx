@@ -95,6 +95,7 @@ import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-condition
 import type { Customer } from "@/modules/customers/types";
 import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-invoice-email.action";
 import {
+  formatCaseUnitQuantity,
   getPricePerIndividualUnit,
   splitCaseUnitQuantity,
   tryNormalizeCaseUnitQuantity,
@@ -2450,7 +2451,7 @@ export function SaleDetail({
           {statusInfo.label}
         </Badge>
 
-        <div className="ml-auto flex gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
           {!relatedOrder && isDraftSale ? (
             <RemittancePreviewModal
               isGenerating={isGeneratingRemittancePdf}
@@ -3958,18 +3959,26 @@ export function SaleDetail({
                                 {caseQuantity ? "Cantidad" : "Cantidad (uds)"}
                               </span>
                               {caseQuantity && item.unitsPerBox ? (
-                                <CaseUnitQuantityFields
-                                  compact
-                                  disabled={!canEditFiscalFields}
-                                  onChange={(quantity) =>
-                                    handleQuantityChange(
-                                      item.id,
-                                      String(quantity)
-                                    )
-                                  }
-                                  totalUnits={item.quantity}
-                                  unitsPerBox={item.unitsPerBox}
-                                />
+                                <>
+                                  <CaseUnitQuantityFields
+                                    compact
+                                    disabled={!canEditFiscalFields}
+                                    onChange={(quantity) =>
+                                      handleQuantityChange(
+                                        item.id,
+                                        String(quantity)
+                                      )
+                                    }
+                                    totalUnits={item.quantity}
+                                    unitsPerBox={item.unitsPerBox}
+                                  />
+                                  <span className="text-muted-foreground text-xs">
+                                    {formatCaseUnitQuantity(
+                                      item.quantity,
+                                      item.unitsPerBox
+                                    )}
+                                  </span>
+                                </>
                               ) : (
                                 <Input
                                   className="h-8 w-full min-w-[80px]"

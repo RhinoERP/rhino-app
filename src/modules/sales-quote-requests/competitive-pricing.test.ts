@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { truncateMoney } from "@/lib/decimal";
 import { calculateCompetitivePriceSuggestion } from "./competitive-pricing";
 
 describe("calculateCompetitivePriceSuggestion", () => {
@@ -58,5 +59,20 @@ describe("calculateCompetitivePriceSuggestion", () => {
   it("rejects negative or non-finite prices", () => {
     expect(() => calculateCompetitivePriceSuggestion(-1, 10)).toThrow();
     expect(() => calculateCompetitivePriceSuggestion(10, Number.NaN)).toThrow();
+  });
+
+  it("keeps sub-cent per-unit prices when a full box is quoted as individual units", () => {
+    const quote = calculateCompetitivePriceSuggestion(
+      100 / 6,
+      100 / 6,
+      undefined,
+      true
+    );
+    expect(quote.baseUnitPrice).toBeCloseTo(100 / 6);
+    expect(truncateMoney(quote.agreedUnitPrice * 6)).toBe(100);
+    expect(truncateMoney(quote.agreedUnitPrice * 8)).toBe(133.33);
+    expect(
+      calculateCompetitivePriceSuggestion(100 / 6, 100 / 6).agreedUnitPrice
+    ).toBe(16.66);
   });
 });

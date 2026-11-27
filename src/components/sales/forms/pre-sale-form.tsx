@@ -83,9 +83,9 @@ import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assi
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
 import {
+  formatCaseUnitQuantity,
   getPricePerIndividualUnit,
   splitCaseUnitQuantity,
-  tryNormalizeCaseUnitQuantity,
 } from "@/modules/inventory/utils/case-units";
 import type { WarehouseOption } from "@/modules/inventory/utils/warehouse-presentation";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
@@ -648,9 +648,7 @@ export function PreSaleForm({
     Map<string, Map<string, PriceListItemBasic>>
   >(new Map());
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
-  const [selectedCaseQuantity, setSelectedCaseQuantity] = useState("");
-  const [selectedLooseUnitQuantity, setSelectedLooseUnitQuantity] =
-    useState("");
+  const [selectedCaseTotalUnits, setSelectedCaseTotalUnits] = useState(0);
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
@@ -1294,14 +1292,11 @@ export function PreSaleForm({
     }
 
     const isCaseProduct = product.unitOfMeasure === "CAJA";
-    const caseBoxes = Number(selectedCaseQuantity);
-    const looseUnits = Number(selectedLooseUnitQuantity);
     const invalidCaseQuantity =
-      !Number.isInteger(caseBoxes) ||
-      caseBoxes < 0 ||
-      !Number.isInteger(looseUnits) ||
-      looseUnits < 0 ||
-      caseBoxes + looseUnits <= 0;
+      !Number.isSafeInteger(selectedCaseTotalUnits) ||
+      selectedCaseTotalUnits <= 0 ||
+      !Number.isSafeInteger(product.unitsPerBox) ||
+      (product.unitsPerBox ?? 0) <= 0;
     const invalidQuantity = isCaseProduct
       ? invalidCaseQuantity
       : !selectedQuantity || selectedQuantity <= 0;
@@ -1312,10 +1307,7 @@ export function PreSaleForm({
 
     const listedPrice = productPrices.get(product.id) ?? product.price;
     const baseQuantity = isCaseProduct
-      ? tryNormalizeCaseUnitQuantity(
-          { boxes: caseBoxes, units: looseUnits },
-          product.unitsPerBox ?? 0
-        )
+      ? selectedCaseTotalUnits
       : convertToBaseUnits(selectedQuantity, inputUnit, product);
     if (baseQuantity === null) {
       setError("Ingresá una cantidad válida en cajas y unidades");
@@ -1424,8 +1416,7 @@ export function PreSaleForm({
 
     setSelectedProductId("");
     setSelectedQuantity(0);
-    setSelectedCaseQuantity("");
-    setSelectedLooseUnitQuantity("");
+    setSelectedCaseTotalUnits(0);
     setInputUnit("UNITS");
     setError(null);
   };
@@ -2855,6 +2846,7 @@ export function PreSaleForm({
                                     keywords={[product.name, product.sku]}
                                     onSelect={() => {
                                       setSelectedProductId(product.id);
+                                      setSelectedCaseTotalUnits(0);
                                       setIsProductPickerOpen(false);
                                     }}
                                     value={product.id}
@@ -2930,37 +2922,27 @@ export function PreSaleForm({
                     )}
 
                   {selectedProduct?.unitOfMeasure === "CAJA" ? (
-                    <div className="grid w-full grid-cols-2 gap-3 sm:w-64">
-                      <div className="space-y-2">
-                        <Label htmlFor="case-quantity">Cajas</Label>
-                        <Input
-                          id="case-quantity"
-                          inputMode="numeric"
-                          min={0}
-                          onChange={(event) =>
-                            setSelectedCaseQuantity(event.target.value)
-                          }
-                          placeholder="0"
-                          step="1"
-                          type="number"
-                          value={selectedCaseQuantity}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="loose-unit-quantity">Unidades</Label>
-                        <Input
-                          id="loose-unit-quantity"
-                          inputMode="numeric"
-                          min={0}
-                          onChange={(event) =>
-                            setSelectedLooseUnitQuantity(event.target.value)
-                          }
-                          placeholder="0"
-                          step="1"
-                          type="number"
-                          value={selectedLooseUnitQuantity}
-                        />
-                      </div>
+                    <div className="w-full space-y-2 sm:w-64">
+                      {selectedProduct.unitsPerBox ? (
+                        <>
+                          <CaseUnitQuantityFields
+                            onChange={setSelectedCaseTotalUnits}
+                            showTotalUnitsInput
+                            totalUnits={selectedCaseTotalUnits}
+                            unitsPerBox={selectedProduct.unitsPerBox}
+                          />
+                          <p className="text-muted-foreground text-xs">
+                            {formatCaseUnitQuantity(
+                              selectedCaseTotalUnits,
+                              selectedProduct.unitsPerBox
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-destructive text-sm">
+                          Este producto no tiene unidades por caja válidas.
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <div className="w-full space-y-2 sm:flex-1">
@@ -3179,6 +3161,15 @@ export function PreSaleForm({
                                 <span className="block truncate text-muted-foreground text-xs">
                                   SKU {item.sku}
                                 </span>
+                                {item.unitOfMeasure === "CAJA" &&
+                                  item.unitsPerBox && (
+                                    <span className="block text-muted-foreground text-xs">
+                                      {formatCaseUnitQuantity(
+                                        item.quantity,
+                                        item.unitsPerBox
+                                      )}
+                                    </span>
+                                  )}
                               </span>
                               <span className="flex shrink-0 items-center gap-1 font-semibold text-sm">
                                 {formatCurrency(itemSubtotal)}
@@ -3234,6 +3225,7 @@ export function PreSaleForm({
                                   onChange={(quantity) =>
                                     handleUpdateItemQuantity(item.id, quantity)
                                   }
+                                  showTotalUnitsInput
                                   totalUnits={item.quantity}
                                   unitsPerBox={item.unitsPerBox}
                                 />
@@ -3258,6 +3250,14 @@ export function PreSaleForm({
                                       : item.quantity
                                   }
                                 />
+                              )}
+                              {caseQuantity && item.unitsPerBox && (
+                                <span className="text-muted-foreground text-xs">
+                                  {formatCaseUnitQuantity(
+                                    item.quantity,
+                                    item.unitsPerBox
+                                  )}
+                                </span>
                               )}
                             </div>
 

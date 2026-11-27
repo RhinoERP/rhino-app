@@ -55,6 +55,16 @@ export function splitCaseUnitQuantity(
   };
 }
 
+/** Show both the commercial presentation and the stored individual-unit count. */
+export function formatCaseUnitQuantity(
+  totalUnits: number,
+  unitsPerBox: number
+): string {
+  const { boxes, units } = splitCaseUnitQuantity(totalUnits, unitsPerBox);
+  const boxLabel = boxes === 1 ? "caja" : "cajas";
+  return `${boxes} ${boxLabel}${units ? ` y ${units} ${units === 1 ? "unidad suelta" : "unidades sueltas"}` : ""} · ${totalUnits} ${totalUnits === 1 ? "unidad total" : "unidades totales"}`;
+}
+
 /** Convert a box price to the proportional price for one individual unit. */
 export function getPricePerIndividualUnit(
   pricePerBox: number,

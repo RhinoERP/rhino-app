@@ -12,6 +12,7 @@ import type {
   PaginatedResult,
 } from "../types";
 import { customerSellerScopeFilter } from "./customer-visibility";
+import { canOpenCustomerSale } from "./recent-sales-visibility";
 
 export type CustomerChannel = "DISTRIBUIDORA" | "POS" | "MIXTO";
 
@@ -578,7 +579,7 @@ export async function getCustomerWithStats(
   const { data: sales, error: salesError } = await supabase
     .from("sales_orders")
     .select(
-      "id, sale_number, status, sale_date, total_amount, invoice_type, invoice_number"
+      "id, user_id, sale_number, status, sale_date, total_amount, invoice_type, invoice_number"
     )
     .eq("customer_id", customerId)
     .eq("organization_id", org.id)
@@ -598,15 +599,18 @@ export async function getCustomerWithStats(
     0;
 
   // Get recent sales (last 10)
-  const recentSales: CustomerSale[] = (sales?.slice(0, 10) ?? []).map((s) => ({
-    id: s.id,
-    sale_number: s.sale_number,
-    status: s.status,
-    sale_date: s.sale_date,
-    total_amount: Number(s.total_amount) || 0,
-    invoice_type: s.invoice_type,
-    invoice_number: s.invoice_number,
-  }));
+  const recentSales: CustomerSale[] = (sales ?? [])
+    .filter((sale) => canOpenCustomerSale(sale, accessContext))
+    .slice(0, 10)
+    .map((s) => ({
+      id: s.id,
+      sale_number: s.sale_number,
+      status: s.status,
+      sale_date: s.sale_date,
+      total_amount: Number(s.total_amount) || 0,
+      invoice_type: s.invoice_type,
+      invoice_number: s.invoice_number,
+    }));
 
   return {
     ...customer,

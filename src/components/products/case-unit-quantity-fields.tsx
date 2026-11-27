@@ -14,6 +14,7 @@ type CaseUnitQuantityFieldsProps = {
   onChange: (totalUnits: number) => void;
   disabled?: boolean;
   compact?: boolean;
+  showTotalUnitsInput?: boolean;
 };
 
 export function CaseUnitQuantityFields({
@@ -22,6 +23,7 @@ export function CaseUnitQuantityFields({
   onChange,
   disabled = false,
   compact = false,
+  showTotalUnitsInput = false,
 }: CaseUnitQuantityFieldsProps) {
   const id = useId();
   const quantity = splitCaseUnitQuantity(totalUnits, unitsPerBox);
@@ -83,7 +85,7 @@ export function CaseUnitQuantityFields({
           className={compact ? "text-xs" : undefined}
           htmlFor={`${id}-units`}
         >
-          Unidades
+          Unidades sueltas
         </Label>
         <Input
           aria-label="Unidades sueltas"
@@ -99,6 +101,34 @@ export function CaseUnitQuantityFields({
           value={quantity.units || ""}
         />
       </div>
+      {showTotalUnitsInput && (
+        <div className="col-span-2 space-y-1">
+          <Label
+            className={compact ? "text-xs" : undefined}
+            htmlFor={`${id}-total-units`}
+          >
+            Unidades totales
+          </Label>
+          <Input
+            aria-label="Unidades totales"
+            className={inputClassName}
+            disabled={disabled}
+            id={`${id}-total-units`}
+            inputMode="numeric"
+            min={0}
+            onChange={(event) => {
+              const value = Number(event.target.value || 0);
+              if (Number.isSafeInteger(value) && value >= 0) {
+                onChange(value);
+              }
+            }}
+            placeholder="0"
+            step="1"
+            type="number"
+            value={totalUnits || ""}
+          />
+        </div>
+      )}
     </div>
   );
 }

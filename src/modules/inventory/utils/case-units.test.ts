@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatCaseUnitQuantity,
   getBaseUnitPrice,
   getPricePerIndividualUnit,
   normalizeCaseUnitQuantity,
@@ -20,6 +21,10 @@ describe("case unit quantities", () => {
 
   it("displays a total stock quantity as boxes plus the remainder", () => {
     expect(splitCaseUnitQuantity(20, 6)).toEqual({ boxes: 3, units: 2 });
+    expect(formatCaseUnitQuantity(6, 6)).toBe("1 caja · 6 unidades totales");
+    expect(formatCaseUnitQuantity(8, 6)).toBe(
+      "1 caja y 2 unidades sueltas · 8 unidades totales"
+    );
   });
 
   it("calculates the proportional individual-unit price from a box price", () => {

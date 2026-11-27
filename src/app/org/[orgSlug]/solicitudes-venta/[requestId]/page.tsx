@@ -13,6 +13,7 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { requireAuth } from "@/lib/supabase/auth";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { formatQuoteUnitQuantity } from "@/modules/sales-quote-requests/selling-unit";
 import { getOwnSalesQuoteRequestDetails } from "@/modules/sales-quote-requests/service/my-sales-quote-requests.service";
 
 type SalesQuoteRequestDetailPageProps = {
@@ -157,8 +158,10 @@ export default async function SalesQuoteRequestDetailPage({
                       </p>
                     </td>
                     <td className="p-3 text-right">
-                      {item.quantity.toLocaleString("es-AR")}{" "}
-                      {item.unit_of_measure_snapshot || ""}
+                      {formatQuoteUnitQuantity(
+                        item.quantity,
+                        item.unit_of_measure_snapshot
+                      )}
                     </td>
                     <td className="p-3 text-right">
                       {formatCurrency(item.base_unit_price, request.currency)}

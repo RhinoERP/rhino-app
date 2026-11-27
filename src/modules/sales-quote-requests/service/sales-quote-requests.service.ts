@@ -10,12 +10,20 @@ import { convertPriceToQuoteCurrency } from "@/modules/quotes/utils/currency-con
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import type { SaleProduct } from "@/modules/sales/types";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
-import { buildItemizedTaxPlan } from "@/modules/taxes/item-tax-calculations";
+import {
+  additionalQuoteTaxSchema,
+  calculateQuoteTaxes,
+} from "../client-quote-taxes";
 import {
   calculateCompetitivePriceSuggestion,
+  normalizeQuoteUnitPrice,
   type SalesQuotePricingMethod,
 } from "../competitive-pricing";
-import { quoteSellingUnitFactor, quoteUnitSnapshot } from "../selling-unit";
+import {
+  isValidCaseQuoteQuantity,
+  quoteSellingUnitFactor,
+  quoteUnitSnapshot,
+} from "../selling-unit";
 
 const itemInputSchema = z.object({
   productId: z.string().uuid(),
@@ -50,6 +58,12 @@ export const createSalesQuoteRequestSchema = z.object({
     "FACTURA_E",
   ]),
   observations: z.string().trim().max(4000).optional().default(""),
+  clientQuoteEnabled: z.boolean().optional().default(false),
+  additionalTaxes: z
+    .array(additionalQuoteTaxSchema)
+    .max(20)
+    .optional()
+    .default([]),
   items: z.array(itemInputSchema).min(1),
 });
 
@@ -96,7 +110,11 @@ function mapRequestLine(params: {
   unitCost: number | null;
   taxSnapshots: Record<string, string | number | null>[];
 }): RequestLineSnapshot {
-  const suggestion = calculateLinePricing(params.item, params.baseUnitPrice);
+  const suggestion = calculateLinePricing(
+    params.item,
+    params.baseUnitPrice,
+    params.product.unitOfMeasure === "CAJA"
+  );
   const lineSubtotal = truncateMoney(
     suggestion.agreedUnitPrice * params.item.quantity
   );
@@ -134,15 +152,17 @@ function mapRequestLine(params: {
   };
 }
 
-function calculateLinePricing(
+export function calculateLinePricing(
   item: CreateSalesQuoteRequestInput["items"][number],
-  baseUnitPrice: number
+  baseUnitPrice: number,
+  preserveUnitPrecision = false
 ) {
   if (item.pricingMethod === "COMPETITOR") {
     return calculateCompetitivePriceSuggestion(
       baseUnitPrice,
       item.competitorUnitPrice,
-      item.agreedUnitPrice
+      item.agreedUnitPrice,
+      preserveUnitPrecision
     );
   }
   if (item.agreedUnitPrice == null) {
@@ -154,11 +174,23 @@ function calculateLinePricing(
   return calculateCompetitivePriceSuggestion(
     baseUnitPrice,
     baseUnitPrice,
-    item.agreedUnitPrice
+    item.agreedUnitPrice,
+    preserveUnitPrecision
   );
 }
 
-function prepareRequestLine(params: {
+function assertCaseQuoteQuantity(
+  product: SaleProduct,
+  item: CreateSalesQuoteRequestInput["items"][number]
+) {
+  if (!isValidCaseQuoteQuantity(product, item.sellingUnit, item.quantity)) {
+    throw new Error(
+      "Las cajas deben cotizarse en unidades individuales enteras"
+    );
+  }
+}
+
+export function prepareRequestLine(params: {
   item: CreateSalesQuoteRequestInput["items"][number];
   index: number;
   productsById: Map<string, SaleProduct>;
@@ -178,6 +210,7 @@ function prepareRequestLine(params: {
   if (!product) {
     throw new Error("Uno de los productos ya no está disponible");
   }
+  assertCaseQuoteQuantity(product, item);
   const variant = item.productVariantId
     ? (variantsById.get(item.productVariantId) ?? null)
     : null;
@@ -226,8 +259,17 @@ function prepareRequestLine(params: {
     index,
     product,
     variant,
-    baseUnitPrice: truncateMoney(baseUnitPrice * factor),
-    unitCost: unitCost == null ? null : truncateMoney(unitCost * factor),
+    baseUnitPrice: normalizeQuoteUnitPrice(
+      baseUnitPrice * factor,
+      product.unitOfMeasure === "CAJA"
+    ),
+    unitCost:
+      unitCost == null
+        ? null
+        : normalizeQuoteUnitPrice(
+            unitCost * factor,
+            product.unitOfMeasure === "CAJA"
+          ),
   };
 }
 
@@ -314,22 +356,25 @@ export async function createSalesQuoteRequest(
 
   const lineSubtotals = lines.map((line) =>
     truncateMoney(
-      calculateLinePricing(line.item, line.baseUnitPrice).agreedUnitPrice *
-        line.item.quantity
+      calculateLinePricing(
+        line.item,
+        line.baseUnitPrice,
+        line.product.unitOfMeasure === "CAJA"
+      ).agreedUnitPrice * line.item.quantity
     )
   );
   const subtotalAmount = truncateMoney(
     lineSubtotals.reduce((sum, lineSubtotal) => sum + lineSubtotal, 0)
   );
-  const taxPlan = buildItemizedTaxPlan({
-    globalDiscountAmount: 0,
-    lines: lines.map((line, index) => ({
+  const taxPlan = calculateQuoteTaxes(
+    lines.map((line, index) => ({
       lineId: `line-${index + 1}`,
       productId: line.product.id,
       netAmount: lineSubtotals[index],
       taxes: line.product.taxes,
     })),
-  });
+    input.additionalTaxes
+  );
   const lineSnapshots = lines.map((line) => {
     const taxSnapshots = taxPlan.itemTaxes
       .filter((tax) => tax.lineId === `line-${line.index + 1}`)
@@ -344,7 +389,7 @@ export async function createSalesQuoteRequest(
       }));
     return mapRequestLine({ ...line, taxSnapshots });
   });
-  const taxAmount = truncateMoney(taxPlan.totalTaxAmount);
+  const taxAmount = taxPlan.taxAmount;
   const totalAmount = truncateMoney(subtotalAmount + taxAmount);
 
   const { data: authData, error: authError } = await supabase.auth.getUser();

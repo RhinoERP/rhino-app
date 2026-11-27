@@ -20,6 +20,13 @@ export type CompetitivePriceSuggestion = {
   adjustmentType: CompetitivePriceAdjustmentType;
 };
 
+export function normalizeQuoteUnitPrice(
+  value: number,
+  preserveUnitPrecision = false
+): number {
+  return preserveUnitPrecision ? value : truncateMoney(value);
+}
+
 /**
  * Suggests matching the competitor when they are cheaper than our list price.
  * When the competitor is more expensive, keep our own list price as the
@@ -28,7 +35,8 @@ export type CompetitivePriceSuggestion = {
 export function calculateCompetitivePriceSuggestion(
   baseUnitPrice: number,
   competitorUnitPrice: number,
-  selectedAgreedUnitPrice?: number
+  selectedAgreedUnitPrice?: number,
+  preserveUnitPrecision = false
 ): CompetitivePriceSuggestion {
   if (
     !(Number.isFinite(baseUnitPrice) && Number.isFinite(competitorUnitPrice)) ||
@@ -40,8 +48,11 @@ export function calculateCompetitivePriceSuggestion(
     );
   }
 
-  const base = truncateMoney(baseUnitPrice);
-  const competitor = truncateMoney(competitorUnitPrice);
+  const base = normalizeQuoteUnitPrice(baseUnitPrice, preserveUnitPrecision);
+  const competitor = normalizeQuoteUnitPrice(
+    competitorUnitPrice,
+    preserveUnitPrecision
+  );
   if (
     selectedAgreedUnitPrice != null &&
     (!Number.isFinite(selectedAgreedUnitPrice) || selectedAgreedUnitPrice < 0)
@@ -51,9 +62,8 @@ export function calculateCompetitivePriceSuggestion(
     );
   }
 
-  const agreed = truncateMoney(
-    selectedAgreedUnitPrice ?? Math.min(base, competitor)
-  );
+  const selectedPrice = selectedAgreedUnitPrice ?? Math.min(base, competitor);
+  const agreed = normalizeQuoteUnitPrice(selectedPrice, preserveUnitPrecision);
   const isDiscount = agreed < base;
   const isIncrease = agreed > base;
   let adjustmentType: CompetitivePriceAdjustmentType = "NONE";
@@ -67,12 +77,16 @@ export function calculateCompetitivePriceSuggestion(
     baseUnitPrice: base,
     competitorUnitPrice: competitor,
     agreedUnitPrice: agreed,
-    discountAmount: isDiscount ? truncateMoney(base - agreed) : 0,
+    discountAmount: isDiscount
+      ? normalizeQuoteUnitPrice(base - agreed, preserveUnitPrecision)
+      : 0,
     discountPercentage:
       isDiscount && base > 0
         ? truncateToDecimals(((base - agreed) / base) * 100, 6)
         : 0,
-    priceIncreaseAmount: isIncrease ? truncateMoney(agreed - base) : 0,
+    priceIncreaseAmount: isIncrease
+      ? normalizeQuoteUnitPrice(agreed - base, preserveUnitPrecision)
+      : 0,
     adjustmentType,
   };
 }

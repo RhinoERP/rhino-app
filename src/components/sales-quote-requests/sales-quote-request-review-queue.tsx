@@ -14,6 +14,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { reviewSalesQuoteRequestAction } from "@/modules/sales-quote-requests/actions/review-sales-quote-request.action";
+import { formatQuoteUnitQuantity } from "@/modules/sales-quote-requests/selling-unit";
 import type {
   SalesQuoteRequestReview,
   SalesQuoteRequestReviewItem,
@@ -311,8 +312,11 @@ function RequestItemReview({
           </p>
         </div>
         <p className="max-w-full text-muted-foreground text-sm sm:shrink-0 sm:text-right">
-          Cantidad: {item.quantity.toLocaleString("es-AR")}{" "}
-          {item.unit_of_measure_snapshot || ""}
+          Cantidad:{" "}
+          {formatQuoteUnitQuantity(
+            item.quantity,
+            item.unit_of_measure_snapshot
+          )}
         </p>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-5 min-[360px]:grid-cols-2">

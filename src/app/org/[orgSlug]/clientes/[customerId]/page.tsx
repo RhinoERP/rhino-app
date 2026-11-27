@@ -245,7 +245,9 @@ export default async function CustomerDetailsPage({
               orgSlug={orgSlug}
             />
           )}
-          <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
+          {siteAccess.canRead && (
+            <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
+          )}
 
           <DebitNotesCard debitNotes={debitNotes} orgSlug={orgSlug} />
 
