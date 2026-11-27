@@ -5,11 +5,13 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
 import { useEffect } from "react";
-import type { Control, FieldArrayWithId, UseFormWatch } from "react-hook-form";
 import {
+  type Control,
   Controller,
+  type FieldArrayWithId,
+  type UseFormSetValue,
+  type UseFormWatch,
   useFieldArray,
-  useFormContext,
   useWatch,
 } from "react-hook-form";
 import { CaseUnitQuantityFields } from "@/components/products/case-unit-quantity-fields";
@@ -50,6 +52,7 @@ import type {
 type PurchaseReceiptItemsProps = {
   itemFields: FieldArrayWithId<ReceiptFormValues, "items", "id">[];
   control: Control<ReceiptFormValues>;
+  setValue: UseFormSetValue<ReceiptFormValues>;
   watch: UseFormWatch<ReceiptFormValues>;
   onToggleAll: (checked: boolean) => void;
   onProcessSelected: () => void;
@@ -76,17 +79,17 @@ function ItemLotRows({
   itemIndex,
   item,
   control,
+  setValue,
 }: {
   itemIndex: number;
   item: ReceivedItemForm;
   control: Control<ReceiptFormValues>;
+  setValue: UseFormSetValue<ReceiptFormValues>;
 }) {
   const { fields, append, remove } = useFieldArray({
     control,
     name: `items.${itemIndex}.lots`,
   });
-  const { setValue } = useFormContext<ReceiptFormValues>();
-
   // useWatch on the array level for live totals — this is safe because we are
   // NOT mixing it with setValue on individual paths anymore.
   const lots = useWatch({
@@ -379,6 +382,7 @@ function ProductVariantMatrixSection({
 export function PurchaseReceiptItems({
   itemFields,
   control,
+  setValue,
   watch,
   onToggleAll,
   onProcessSelected,
@@ -443,7 +447,12 @@ export function PurchaseReceiptItems({
     return (
       <>
         <Separator />
-        <ItemLotRows control={control} item={item} itemIndex={idx} />
+        <ItemLotRows
+          control={control}
+          item={item}
+          itemIndex={idx}
+          setValue={setValue}
+        />
       </>
     );
   }

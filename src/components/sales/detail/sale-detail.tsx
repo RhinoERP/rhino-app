@@ -285,8 +285,15 @@ const formatAveragePerUnit = (
 
 const formatPriceByMeasure = (
   price: number,
-  unitOfMeasure: ItemState["unitOfMeasure"]
-): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+  unitOfMeasure: ItemState["unitOfMeasure"],
+  unitsPerBox: number | null = null
+): string => {
+  if (unitOfMeasure === "CAJA" && unitsPerBox && unitsPerBox > 0) {
+    return `${formatCurrency(getPricePerIndividualUnit(price, unitsPerBox))} x unidad`;
+  }
+
+  return `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+};
 
 const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   const average = product.averageQuantityPerUnit;
@@ -3598,7 +3605,8 @@ export function SaleDetail({
                                   {selectedProduct.sku} ·{" "}
                                   {formatPriceByMeasure(
                                     selectedProduct.price,
-                                    selectedProduct.unitOfMeasure
+                                    selectedProduct.unitOfMeasure,
+                                    selectedProduct.unitsPerBox
                                   )}
                                 </span>
                               </div>
@@ -3670,7 +3678,8 @@ export function SaleDetail({
                                             {product.sku} ·{" "}
                                             {formatPriceByMeasure(
                                               product.price,
-                                              product.unitOfMeasure
+                                              product.unitOfMeasure,
+                                              product.unitsPerBox
                                             )}
                                           </p>
                                           {averageLabel ? (

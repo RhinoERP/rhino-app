@@ -881,6 +881,7 @@ export function PurchaseReceipt({
             onToggleAll={handleToggleAll}
             onVariantStockChange={handleVariantStockChange}
             selectedCount={receivedCount}
+            setValue={form.setValue}
             variantData={variantData}
             variantStockValues={variantStockValues}
             watch={form.watch}

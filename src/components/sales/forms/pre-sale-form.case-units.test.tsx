@@ -118,6 +118,10 @@ it("retains the box price and proportional total after adding CAM-001 and runnin
     if (!choice) {
       throw new Error("Missing product choice");
     }
+    expect(choice.textContent?.replace(/\s/g, "")).toContain(
+      "$16.900,00xunidad"
+    );
+    expect(choice.textContent).not.toContain("x caja");
     await act(async () => choice.click());
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,

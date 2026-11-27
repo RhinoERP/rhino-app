@@ -47,6 +47,7 @@ export type SaleReturnItemInput = {
   itemCondition?: ReturnedItemCondition;
   unitQuantity?: number;
   productVariantId?: string | null;
+  unitOfMeasure?: string | null;
 };
 
 export type CreateSaleReturnInput = {
@@ -812,6 +813,14 @@ export function planSaleReturnStockForItem(params: {
   returnId: string;
 }): StockReentryEntry[] {
   const { lotsById, outbounds, item, restockReason, returnId } = params;
+  const integerQuantity =
+    item.unitOfMeasure === "CAJA" || Boolean(item.productVariantId);
+
+  if (integerQuantity && !Number.isSafeInteger(item.quantity)) {
+    throw new Error(
+      "La cantidad a reingresar debe expresarse en unidades enteras"
+    );
+  }
 
   const matching = outbounds.filter(
     (m) =>
@@ -896,7 +905,7 @@ export function planSaleReturnStockForItem(params: {
           totalToReturn: item.quantity,
           remaining,
           isLast,
-          integer: Boolean(item.productVariantId),
+          integer: integerQuantity,
         });
 
     if (lotShare <= 0) {
@@ -1322,6 +1331,7 @@ export async function createSaleReturn(
         restock: true,
         unitQuantity: line.unitQuantity,
         productVariantId: line.saleItem.product_variant_id,
+        unitOfMeasure: line.saleItem.product?.unit_of_measure,
       }));
     if (itemsToRestock.length > 0) {
       restockRollbacks = await restockReturnedItems({

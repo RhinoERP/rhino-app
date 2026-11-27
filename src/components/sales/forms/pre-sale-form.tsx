@@ -423,8 +423,15 @@ const unitOfMeasureLabels: Record<SaleProduct["unitOfMeasure"], string> = {
 
 const formatPriceByMeasure = (
   price: number,
-  unitOfMeasure: SaleProduct["unitOfMeasure"]
-): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+  unitOfMeasure: SaleProduct["unitOfMeasure"],
+  unitsPerBox: number | null = null
+): string => {
+  if (unitOfMeasure === "CAJA" && unitsPerBox && unitsPerBox > 0) {
+    return `${formatCurrency(getPricePerIndividualUnit(price, unitsPerBox))} x unidad`;
+  }
+
+  return `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+};
 
 const formatStockQuantity = (value: number): string =>
   value.toLocaleString("es-AR", {
@@ -2680,7 +2687,8 @@ export function PreSaleForm({
                               {formatPriceByMeasure(
                                 productPrices.get(selectedProduct.id) ??
                                   selectedProduct.price,
-                                selectedProduct.unitOfMeasure
+                                selectedProduct.unitOfMeasure,
+                                selectedProduct.unitsPerBox
                               )}
                             </span>
                             <span className="truncate text-muted-foreground text-xs">
@@ -2746,7 +2754,8 @@ export function PreSaleForm({
                                           SKU {product.sku} ·{" "}
                                           {formatPriceByMeasure(
                                             adjustedPrice,
-                                            product.unitOfMeasure
+                                            product.unitOfMeasure,
+                                            product.unitsPerBox
                                           )}
                                         </p>
                                         <p className="text-muted-foreground text-xs">
