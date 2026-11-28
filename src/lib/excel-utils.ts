@@ -127,15 +127,31 @@ export async function downloadWorksheet({
  */
 export async function downloadProductsTemplate(
   products: ProductForExport[],
-  supplierName: string
+  supplierName: string,
+  includeDiscounts = false
 ): Promise<void> {
   const worksheetData = [
-    ["Nombre", "SKU", "Precio", "Moneda"], // Headers
+    [
+      "Nombre",
+      "SKU",
+      "Precio",
+      "Moneda",
+      ...(includeDiscounts
+        ? [
+            "Descuento 1",
+            "Descuento 2",
+            "Descuento 3",
+            "Descuento 4",
+            "Descuento 5",
+          ]
+        : []),
+    ],
     ...products.map((product) => [
       product.name,
       product.sku,
       "", // Empty price column
       "", // Empty currency column
+      ...(includeDiscounts ? [0, 0, 0, 0, 0] : []),
     ]),
   ];
 
@@ -152,6 +168,9 @@ export async function downloadProductsTemplate(
       { wch: 20 }, // SKU column width
       { wch: 15 }, // Precio column width
       { wch: 10 }, // Moneda column width
+      ...(includeDiscounts
+        ? Array.from({ length: 5 }, () => ({ wch: 15 }))
+        : []),
     ],
   });
 }

@@ -59,6 +59,12 @@ import {
   type InputUnit,
 } from "@/modules/purchases/utils/purchase-calculations";
 import {
+  getPurchaseDiscountDetails,
+  type PurchaseDiscountDetails,
+  recalculateHabitualPurchaseLine,
+  updatePurchaseListCost,
+} from "@/modules/purchases/utils/purchase-discounts";
+import {
   quantityAfterVariantChange,
   sumPurchaseVariantStocks,
 } from "@/modules/purchases/utils/purchase-item-variants";
@@ -69,9 +75,10 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
 import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
+import { PurchaseLineDiscounts } from "../shared/purchase-line-discounts";
 import { VariantBreakdown } from "../shared/variant-breakdown";
 
-export type PurchaseDetailItem = {
+export type PurchaseDetailItem = PurchaseDiscountDetails & {
   id?: string;
   product_id: string;
   product_name: string;
@@ -115,6 +122,8 @@ function withUpdatedPurchaseUnitCost(
 }
 
 type PurchaseDetailItemsProps = {
+  discountsEnabled?: boolean;
+  postInvoiceIncludeTaxes?: boolean;
   items: PurchaseDetailItem[];
   products: ProductWithPrice[];
   supplierId: string;
@@ -134,6 +143,8 @@ type PurchaseDetailItemsProps = {
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Component handles multiple unit types, conversions, and complex state management
 export function PurchaseDetailItems({
+  discountsEnabled = false,
+  postInvoiceIncludeTaxes = false,
   items,
   products,
   supplierId,
@@ -296,13 +307,13 @@ export function PurchaseDetailItems({
     );
     const subtotal = Math.max(0, gross - discount);
 
-    return {
+    return recalculateHabitualPurchaseLine({
       ...item,
       quantity: validatedQuantity,
       unit_quantity: unitQuantity,
       total_weight_kg: totalWeight ?? undefined,
       subtotal,
-    };
+    });
   };
 
   const handleQuantityChange = (id: string | undefined, value: string) => {
@@ -489,7 +500,8 @@ export function PurchaseDetailItems({
     }
     const subtotal = gross;
 
-    return {
+    return recalculateHabitualPurchaseLine({
+      ...getPurchaseDiscountDetails(product.purchase_discounts),
       id: crypto.randomUUID(),
       product_id: product.id,
       product_name: product.name,
@@ -505,7 +517,7 @@ export function PurchaseDetailItems({
       discount_percent: 0,
       has_variants: product.has_variants,
       variant_stocks: product.has_variants ? {} : null,
-    };
+    });
   };
 
   const handleDiscountChange = (id: string | undefined, value: string) => {
@@ -537,11 +549,11 @@ export function PurchaseDetailItems({
           Math.max(0, gross)
         );
         const subtotal = Math.max(0, gross - discount);
-        return {
+        return recalculateHabitualPurchaseLine({
           ...item,
           discount_percent: discountPercent,
           subtotal,
-        };
+        });
       })
     );
   };
@@ -1152,7 +1164,7 @@ export function PurchaseDetailItems({
                         </span>
                         {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The price editor handles box, weight and standard unit prices in one row. */}
                         {(() => {
-                          if (isEditingDetails) {
+                          if (isEditingDetails && item.list_unit_cost == null) {
                             if (itemIsWeightOrVolume && item.weight_per_unit) {
                               return (
                                 <div className="flex items-center gap-1">
@@ -1240,7 +1252,9 @@ export function PurchaseDetailItems({
 
                       <div className="flex flex-col gap-1">
                         <span className="text-muted-foreground text-xs">
-                          Descuento %
+                          {item.list_unit_cost != null
+                            ? "Descuento adicional %"
+                            : "Descuento %"}
                         </span>
                         {isEditingDetails ? (
                           <Input
@@ -1328,6 +1342,55 @@ export function PurchaseDetailItems({
                               {item.quantity} unidades.
                             </output>
                           )}
+                        </div>
+                      )}
+                      {(discountsEnabled ||
+                        Object.keys(getPurchaseDiscountDetails(item)).length >
+                          0) && (
+                        <div className="col-span-full">
+                          <PurchaseLineDiscounts
+                            currency={currency}
+                            editable={isEditingDetails && discountsEnabled}
+                            item={item}
+                            netAmount={
+                              isEditingDetails
+                                ? (taxPlan.lineBases.get(item.id ?? "") ??
+                                  item.subtotal)
+                                : (item.persistedTaxes?.[0]?.baseAmount ??
+                                  taxPlan.lineBases.get(item.id ?? "") ??
+                                  item.subtotal)
+                            }
+                            onChange={(details) =>
+                              onItemsChange(
+                                items.map((current) =>
+                                  current === item
+                                    ? {
+                                        ...item,
+                                        post_invoice_discounts_include_taxes:
+                                          item.post_invoice_discounts_include_taxes ??
+                                          postInvoiceIncludeTaxes,
+                                        ...details,
+                                      }
+                                    : current
+                                )
+                              )
+                            }
+                            onListCostChange={(cost) =>
+                              onItemsChange(
+                                items.map((current) =>
+                                  current === item
+                                    ? updatePurchaseListCost(item, cost)
+                                    : current
+                                )
+                              )
+                            }
+                            taxAmount={(isEditingDetails
+                              ? taxPlan.itemTaxes.filter(
+                                  (tax) => tax.lineId === item.id
+                                )
+                              : (item.persistedTaxes ?? [])
+                            ).reduce((sum, tax) => sum + tax.taxAmount, 0)}
+                          />
                         </div>
                       )}
                       {(isEditingDetails || hasItemTaxSnapshots) && (

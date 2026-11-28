@@ -20,6 +20,7 @@ import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
+import { serializePurchaseDiscountDetails } from "@/modules/purchases/utils/purchase-discounts";
 import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
 import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
 import { toFallbackItemTaxes } from "@/modules/taxes/item-tax-calculations";
@@ -172,6 +173,7 @@ function NewPurchaseContent() {
         }
 
         return {
+          ...serializePurchaseDiscountDetails(item),
           product_id: item.product_id,
           quantity: item.quantity,
           unit_quantity: unitQuantity,

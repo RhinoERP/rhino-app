@@ -54,12 +54,16 @@ import { replacePriceListAction } from "@/modules/price-lists/actions/replace-pr
 import { priceListsClientQueryOptions } from "@/modules/price-lists/queries/queries.client";
 import { priceListsQueryKey } from "@/modules/price-lists/queries/query-keys";
 import type { ImportPriceListItem } from "@/modules/price-lists/types";
+import {
+  normalizePriceListDiscountCells,
+  parsePriceListRow,
+} from "@/modules/price-lists/utils/price-list-import";
+import type { PurchaseDiscountMethod } from "@/modules/purchases/utils/purchase-discounts";
 import { suppliersClientQueryOptions } from "@/modules/suppliers/queries/queries.client";
 
 // Excel column regex patterns (moved to top-level for performance)
 const SKU_COLUMN_REGEX = /^sku$/i;
 const PRICE_COLUMN_REGEX = /^(precio|price)$/i;
-const CURRENCY_COLUMN_REGEX = /^(moneda|currency)$/i;
 
 const priceListSchema = z.object({
   supplier_id: z.string().min(1, "El proveedor es obligatorio"),
@@ -95,10 +99,13 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
   const [replacesListId, setReplacesListId] = useState<string>(NONE);
+  const [discountMethod, setDiscountMethod] =
+    useState<PurchaseDiscountMethod>("sequential");
   const router = useRouter();
   const queryClient = useQueryClient();
 
   const { data: orgSettings } = useOrgSettings(orgSlug);
+  const discountsEnabled = orgSettings?.purchase_discounts_enabled === true;
   const configurablePriceListsEnabled =
     orgSettings?.configurable_price_lists_enabled ?? false;
 
@@ -144,6 +151,7 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     setErrorMessage(null);
     setSuccessMessage(null);
     setReplacesListId(NONE);
+    setDiscountMethod("sequential");
     reset();
   };
 
@@ -180,7 +188,11 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
         return;
       }
 
-      await downloadProductsTemplate(result.products, selectedSupplier.name);
+      await downloadProductsTemplate(
+        result.products,
+        selectedSupplier.name,
+        discountsEnabled
+      );
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -200,30 +212,8 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
 
   const parseRowToItem = (
     row: Record<string, unknown>
-  ): ImportPriceListItem | null => {
-    const skuKey = findColumnKey(row, SKU_COLUMN_REGEX);
-    const priceKey = findColumnKey(row, PRICE_COLUMN_REGEX);
-    const currencyKey = findColumnKey(row, CURRENCY_COLUMN_REGEX);
-
-    if (!(skuKey && priceKey)) {
-      return null;
-    }
-
-    const sku = String(row[skuKey]).trim();
-    const price = Number(row[priceKey]);
-    const rawCurrency = currencyKey
-      ? String(row[currencyKey]).trim().toUpperCase()
-      : "";
-    const currency = rawCurrency === "USD" ? "USD" : "ARS";
-
-    if (!sku || Number.isNaN(price) || price <= 0) {
-      return null;
-    }
-
-    const item: ImportPriceListItem = { sku, price, currency };
-
-    return item;
-  };
+  ): ImportPriceListItem | null =>
+    parsePriceListRow(row, discountsEnabled ? discountMethod : undefined);
 
   const parseExcelFile = async (file: File): Promise<ImportPriceListItem[]> => {
     // Dynamically import xlsx to reduce bundle size
@@ -236,9 +226,15 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
       reader.onload = (e) => {
         try {
           const data = e.target?.result;
-          const workbook = XLSX.read(data, { type: "binary" });
+          const workbook = XLSX.read(data, {
+            type: "binary",
+            cellNF: discountsEnabled,
+          });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
+          if (discountsEnabled) {
+            normalizePriceListDiscountCells(worksheet);
+          }
           const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<
             string,
             unknown
@@ -375,6 +371,7 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
         name: values.name,
         valid_from: validFromDate,
         items,
+        habitual_discount_method: discountsEnabled ? discountMethod : undefined,
       });
 
       if (!(result.success && result.data)) {
@@ -610,6 +607,35 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                 )}
               />
 
+              {discountsEnabled && (
+                <div className="space-y-2">
+                  <label
+                    className="font-medium text-sm"
+                    htmlFor="habitual-discount-method"
+                  >
+                    Método de descuentos habituales
+                  </label>
+                  <select
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    disabled={isSubmitting}
+                    id="habitual-discount-method"
+                    onChange={(e) =>
+                      setDiscountMethod(
+                        e.target.value as PurchaseDiscountMethod
+                      )
+                    }
+                    value={discountMethod}
+                  >
+                    <option value="sequential">Escalonado</option>
+                    <option value="additive">Sumatorio</option>
+                  </select>
+                  <p className="text-muted-foreground text-xs">
+                    Común a todos los productos. Siempre antes de impuestos. El
+                    precio corresponde a la unidad del producto: si es CAJA,
+                    ingresá el precio por caja.
+                  </p>
+                </div>
+              )}
               <FormField
                 control={form.control}
                 name="file"
@@ -626,8 +652,9 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">
-                      El archivo debe contener columnas: SKU y Precio. Otras
-                      columnas (como Nombre) serán ignoradas.
+                      {discountsEnabled
+                        ? "Columnas: SKU, Precio y opcionalmente Moneda, Descuento 1, Descuento 2, Descuento 3, Descuento 4 y Descuento 5. Los vacíos equivalen a 0%."
+                        : "El archivo debe contener columnas: SKU y Precio. Otras columnas (como Nombre) serán ignoradas."}
                     </p>
                     <FormMessage />
                   </FormItem>

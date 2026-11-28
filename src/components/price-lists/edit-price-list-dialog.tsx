@@ -1,6 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -33,9 +34,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { updatePriceListAction } from "@/modules/price-lists/actions/update-price-list.action";
+import { priceListsQueryKey } from "@/modules/price-lists/queries/query-keys";
 
 const editPriceListSchema = z.object({
+  habitual_discount_method: z.enum(["additive", "sequential"]),
   name: z.string().min(1, "El nombre es obligatorio"),
   valid_from: z.date({
     message: "La fecha de vigencia es obligatoria",
@@ -49,6 +53,7 @@ type EditPriceListDialogProps = {
   priceListId: string;
   currentName: string;
   currentValidFrom: string;
+  currentDiscountMethod?: "additive" | "sequential";
 };
 
 export function EditPriceListDialog({
@@ -56,27 +61,43 @@ export function EditPriceListDialog({
   priceListId,
   currentName,
   currentValidFrom,
+  currentDiscountMethod = "sequential",
 }: EditPriceListDialogProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { data: settings } = useOrgSettings(orgSlug);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isMountedRef = useRef(true);
+  const getDefaults = (): EditPriceListFormValues => ({
+    name: currentName,
+    valid_from: new Date(`${currentValidFrom}T00:00:00`),
+    habitual_discount_method: currentDiscountMethod,
+  });
 
   const form = useForm<EditPriceListFormValues>({
     resolver: zodResolver(editPriceListSchema),
-    defaultValues: {
-      name: currentName,
-      valid_from: new Date(currentValidFrom),
-    },
+    defaultValues: getDefaults(),
   });
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
       isMountedRef.current = false;
-    },
-    []
-  );
+    };
+  }, []);
 
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      form.reset(getDefaults());
+      setErrorMessage(null);
+    }
+    setOpen(next);
+  };
+
+  const discountMethod = settings?.purchase_discounts_enabled
+    ? form.watch("habitual_discount_method")
+    : undefined;
   const onSubmit = async (values: EditPriceListFormValues) => {
     if (!isMountedRef.current) {
       return;
@@ -89,6 +110,7 @@ export function EditPriceListDialog({
         priceListId,
         name: values.name,
         valid_from: format(values.valid_from, "yyyy-MM-dd"),
+        habitual_discount_method: discountMethod,
       });
 
       if (!isMountedRef.current) {
@@ -102,6 +124,17 @@ export function EditPriceListDialog({
       }
 
       setOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["price-list-items", orgSlug, priceListId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["products", "by-supplier", orgSlug],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: priceListsQueryKey(orgSlug),
+        }),
+      ]);
       router.refresh();
     } catch (error) {
       if (!isMountedRef.current) {
@@ -116,7 +149,7 @@ export function EditPriceListDialog({
   };
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           Editar
@@ -132,6 +165,34 @@ export function EditPriceListDialog({
 
         <Form {...form}>
           <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
+            {settings?.purchase_discounts_enabled && (
+              <FormField
+                control={form.control}
+                name="habitual_discount_method"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Método de los cinco descuentos habituales
+                    </FormLabel>
+                    <FormControl>
+                      <select
+                        {...field}
+                        className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                        disabled={form.formState.isSubmitting}
+                      >
+                        <option value="sequential">Escalonado</option>
+                        <option value="additive">Sumatorio</option>
+                      </select>
+                    </FormControl>
+                    <p className="text-muted-foreground text-xs">
+                      Aplica a todos los productos y recalcula sus costos netos.
+                      En modo sumatorio, cada suma debe ser menor a 100%.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <FormField
               control={form.control}
               name="name"

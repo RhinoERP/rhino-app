@@ -1,5 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  calculateHabitualPurchaseCost,
+  HABITUAL_DISCOUNT_FIELDS,
+  type HabitualDiscounts,
+  type PurchaseDiscountMethod,
+} from "@/modules/purchases/utils/purchase-discounts";
 import type {
   ImportPriceListItem,
   ImportPriceListResult,
@@ -43,6 +50,7 @@ async function resolvePriceListsAccessContext(
 }
 
 export type CreatePriceListInput = {
+  habitual_discount_method?: PurchaseDiscountMethod;
   orgSlug: string;
   supplier_id: string;
   name: string;
@@ -52,11 +60,104 @@ export type CreatePriceListInput = {
 };
 
 export type UpdatePriceListInput = {
+  habitual_discount_method?: PurchaseDiscountMethod;
   orgSlug: string;
   priceListId: string;
   valid_from?: string;
   name?: string;
 };
+
+export type UpdatePriceListItemDiscountsInput = {
+  orgSlug: string;
+  priceListId: string;
+  itemId: string;
+  listPrice: number;
+  discounts: HabitualDiscounts;
+};
+
+export async function updatePriceListItemDiscounts(
+  input: UpdatePriceListItemDiscountsInput
+): Promise<void> {
+  const [org, settings] = await Promise.all([
+    getOrganizationBySlug(input.orgSlug),
+    getOrgSettings(input.orgSlug),
+  ]);
+  if (!(org?.id && settings.purchase_discounts_enabled)) {
+    throw new Error(
+      "Los descuentos desglosados de compra no están habilitados"
+    );
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc(
+    "update_price_list_item_discounts_atomic",
+    {
+      p_org_id: org.id,
+      p_price_list_id: input.priceListId,
+      p_item_id: input.itemId,
+      p_list_price: input.listPrice,
+      p_discounts: Object.fromEntries(
+        HABITUAL_DISCOUNT_FIELDS.map((field) => [
+          field,
+          input.discounts[field] ?? 0,
+        ])
+      ),
+    }
+  );
+  if (error || !data) {
+    throw new Error(error?.message ?? "Producto no encontrado en la lista");
+  }
+}
+
+export type UpdatePriceListPricesInput = {
+  orgSlug: string;
+  priceListId: string;
+  item_ids: string[];
+  price?: number;
+  amount_delta?: number;
+  percentage?: number;
+};
+
+export async function updatePriceListPrices(
+  input: UpdatePriceListPricesInput
+): Promise<number> {
+  const org = await getOrganizationBySlug(input.orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc(
+    "update_price_list_prices_atomic",
+    {
+      p_org_id: org.id,
+      p_price_list_id: input.priceListId,
+      p_item_ids: input.item_ids,
+      p_price: input.price,
+      p_amount_delta: input.amount_delta,
+      p_percentage: input.percentage,
+    }
+  );
+  if (error || data === null) {
+    throw new Error(error?.message ?? "No se pudieron actualizar los precios");
+  }
+  return data;
+}
+
+function validateImportDiscounts(
+  input: CreatePriceListInput,
+  enabled: boolean,
+  method: PurchaseDiscountMethod
+) {
+  if (!enabled && input.habitual_discount_method) {
+    throw new Error(
+      "Los descuentos desglosados de compra no están habilitados"
+    );
+  }
+  if (enabled) {
+    for (const item of input.items) {
+      calculateHabitualPurchaseCost(item.price, method, item);
+    }
+  }
+}
 
 /**
  * Returns all price lists that belong to the organization identified by the slug.
@@ -183,14 +284,23 @@ export async function importPriceList(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase.rpc("import_price_list", {
+  const settings = await getOrgSettings(input.orgSlug);
+  const method = input.habitual_discount_method ?? "sequential";
+  const args = {
     p_organization_id: org.id,
     p_supplier_id: input.supplier_id,
     p_name: input.name,
     p_valid_from: input.valid_from,
     p_items: input.items,
     p_notes: input.notes ?? undefined,
-  });
+  };
+  validateImportDiscounts(input, settings.purchase_discounts_enabled, method);
+  const { data, error } = settings.purchase_discounts_enabled
+    ? await supabase.rpc("import_price_list_with_discounts", {
+        ...args,
+        p_habitual_discount_method: method,
+      })
+    : await supabase.rpc("import_price_list", args);
 
   if (error) {
     throw new Error(`Error importando lista de precios: ${error.message}`);
@@ -256,7 +366,7 @@ export async function getPriceListById(
   // Fetch additional metadata from base table
   const { data: metaData } = await supabase
     .from("price_lists")
-    .select("created_at, updated_at")
+    .select("created_at, updated_at, habitual_discount_method")
     .eq("id", priceListId)
     .maybeSingle();
 
@@ -266,6 +376,7 @@ export async function getPriceListById(
       ?.name,
     created_at: metaData?.created_at,
     updated_at: metaData?.updated_at,
+    habitual_discount_method: metaData?.habitual_discount_method,
   } as PriceList;
 
   return result;
@@ -390,7 +501,7 @@ export async function getPriceListItemsBatch(
 }
 
 /**
- * Updates a price list's editable fields (valid_from, name).
+ * Updates the header and its common discount method atomically.
  */
 export async function updatePriceList(
   input: UpdatePriceListInput
@@ -401,51 +512,19 @@ export async function updatePriceList(
     throw new Error("Organización no encontrada");
   }
 
-  if (!(input.valid_from || input.name)) {
+  if (!(input.valid_from || input.name || input.habitual_discount_method)) {
     throw new Error("Debe proporcionar al menos un campo para actualizar");
   }
 
   const supabase = await createClient();
 
-  // Verify the price list belongs to this organization
-  const { data: existingPriceList } = await supabase
-    .from("price_lists")
-    .select("organization_id")
-    .eq("id", input.priceListId)
-    .single();
-
-  if (!existingPriceList) {
-    throw new Error("Lista de precios no encontrada");
-  }
-
-  if (existingPriceList.organization_id !== org.id) {
-    throw new Error("No tiene permisos para modificar esta lista de precios");
-  }
-
-  // Prepare update payload
-  const updatePayload: {
-    valid_from?: string;
-    name?: string;
-    updated_at: string;
-  } = {
-    updated_at: new Date().toISOString(),
-  };
-
-  if (input.valid_from) {
-    updatePayload.valid_from = input.valid_from;
-  }
-
-  if (input.name) {
-    updatePayload.name = input.name;
-  }
-
-  // Update the price list
-  const { data, error } = await supabase
-    .from("price_lists")
-    .update(updatePayload)
-    .eq("id", input.priceListId)
-    .select()
-    .single();
+  const { data, error } = await supabase.rpc("update_price_list_atomic", {
+    p_org_id: org.id,
+    p_price_list_id: input.priceListId,
+    p_name: input.name,
+    p_valid_from: input.valid_from,
+    p_habitual_discount_method: input.habitual_discount_method,
+  });
 
   if (error) {
     throw new Error(`Error actualizando lista de precios: ${error.message}`);

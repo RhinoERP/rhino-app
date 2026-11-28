@@ -15,7 +15,9 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { formatDateOnly } from "@/lib/format";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { PriceList, PriceListStatus } from "@/modules/price-lists/types";
+import { PURCHASE_DISCOUNT_METHOD_LABELS } from "@/modules/purchases/utils/purchase-discounts";
 import { EditPriceListDialog } from "./edit-price-list-dialog";
 
 type PriceListInfoCardProps = {
@@ -57,6 +59,7 @@ export function PriceListInfoCard({
   updatedAt,
 }: PriceListInfoCardProps) {
   const validFrom = formatDateOnly(priceList.valid_from);
+  const { data: settings } = useOrgSettings(orgSlug);
 
   return (
     <Card className="sticky top-4">
@@ -66,6 +69,7 @@ export function PriceListInfoCard({
           <CardDescription>Información general</CardDescription>
         </div>
         <EditPriceListDialog
+          currentDiscountMethod={priceList.habitual_discount_method}
           currentName={priceList.name}
           currentValidFrom={priceList.valid_from}
           orgSlug={orgSlug}
@@ -73,6 +77,18 @@ export function PriceListInfoCard({
         />
       </CardHeader>
       <CardContent className="space-y-6">
+        {settings?.purchase_discounts_enabled && (
+          <p className="text-sm">
+            Descuentos habituales:{" "}
+            <strong>
+              {
+                PURCHASE_DISCOUNT_METHOD_LABELS[
+                  priceList.habitual_discount_method ?? "sequential"
+                ]
+              }
+            </strong>
+          </p>
+        )}
         <div className="space-y-3">
           <div>
             <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">

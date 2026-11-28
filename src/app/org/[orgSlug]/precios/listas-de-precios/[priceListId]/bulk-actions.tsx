@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { PriceListItem } from "@/modules/price-lists/types";
 
 type PriceListItemsBulkActionsProps = {
@@ -51,6 +52,8 @@ export function PriceListItemsBulkActions({
   priceListId,
   table,
 }: PriceListItemsBulkActionsProps) {
+  const { data: settings } = useOrgSettings(orgSlug);
+  const discountsEnabled = settings?.purchase_discounts_enabled === true;
   const router = useRouter();
   const queryClient = useQueryClient();
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
@@ -96,7 +99,9 @@ export function PriceListItemsBulkActions({
 
     if (isRelative) {
       const hasNegativeResult = selectedItems.some((item) => {
-        const currentPrice = item.purchase_price ?? item.price ?? 0;
+        const currentPrice = discountsEnabled
+          ? (item.list_price ?? item.purchase_price ?? item.price ?? 0)
+          : (item.purchase_price ?? item.price ?? 0);
         return currentPrice + parsed < 0;
       });
 
@@ -162,6 +167,9 @@ export function PriceListItemsBulkActions({
     });
 
     table.toggleAllRowsSelected(false);
+    await queryClient.invalidateQueries({
+      queryKey: ["products", "by-supplier", orgSlug],
+    });
     setPriceDialogOpen(false);
     setPriceValue("");
     setErrorMessage(null);
@@ -230,6 +238,8 @@ export function PriceListItemsBulkActions({
               Actualizar el precio para {selectedItems.length}{" "}
               {selectedItems.length === 1 ? "producto" : "productos"}{" "}
               seleccionados.
+              {discountsEnabled &&
+                " Se modifica el precio de lista original y se recalcula el costo neto habitual."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

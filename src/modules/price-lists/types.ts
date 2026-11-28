@@ -1,10 +1,15 @@
 // Price Lists Types
+import type {
+  HabitualDiscounts,
+  PurchaseDiscountMethod,
+} from "@/modules/purchases/utils/purchase-discounts";
 // Note: These types should be updated once the database schema is finalized
 // and the Supabase types are regenerated
 
 export type PriceListStatus = "Active" | "Scheduled" | "Archived" | "Inactive";
 
 export type PriceList = {
+  habitual_discount_method?: PurchaseDiscountMethod;
   id: string;
   supplier_id: string;
   name: string;
@@ -19,7 +24,8 @@ export type PriceList = {
   supplier_name?: string;
 };
 
-export type PriceListItem = {
+export type PriceListItem = HabitualDiscounts & {
+  list_price?: number | null;
   id: string;
   price_list_id: string;
   product_id: string;
@@ -38,7 +44,7 @@ export type PriceListWithItems = PriceList & {
   items: PriceListItem[];
 };
 
-export type ImportPriceListItem = {
+export type ImportPriceListItem = HabitualDiscounts & {
   sku: string;
   price: number;
   currency?: string;

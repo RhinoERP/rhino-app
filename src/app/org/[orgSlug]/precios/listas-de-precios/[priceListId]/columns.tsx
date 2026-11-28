@@ -6,7 +6,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { formatCurrency } from "@/lib/format";
 import type { PriceListItem } from "@/modules/price-lists/types";
 
-export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
+export const createPriceListItemColumns = (
+  discountsEnabled = false
+): ColumnDef<PriceListItem>[] => [
   {
     id: "select",
     header: ({ table }) => (
@@ -57,7 +59,10 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
     id: "purchase_price",
     accessorKey: "purchase_price",
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Precio compra" />
+      <DataTableColumnHeader
+        column={column}
+        label={discountsEnabled ? "Costo neto habitual" : "Precio compra"}
+      />
     ),
     cell: ({ row }) =>
       formatCurrency(row.original.purchase_price ?? 0, row.original.currency),

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useVariantLoader } from "@/hooks/use-variant-loader";
 import type { Category } from "@/modules/categories/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { confirmDraftPurchaseAction } from "@/modules/purchases/actions/confirm-draft-purchase.action";
 import { useProductTaxes } from "@/modules/purchases/hooks/use-product-taxes";
 import { useUpdatePurchaseOrder } from "@/modules/purchases/hooks/use-update-purchase-order";
@@ -16,6 +17,10 @@ import type {
   PurchaseOrder,
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
+import {
+  getPurchaseDiscountDetails,
+  serializePurchaseDiscountDetails,
+} from "@/modules/purchases/utils/purchase-discounts";
 import {
   purchaseVariantAllocationChanged,
   sumPurchaseVariantStocks,
@@ -168,6 +173,7 @@ function mapPurchaseOrderItemToDetailItem(
   }
 
   return {
+    ...getPurchaseDiscountDetails(item),
     id: item.id,
     product_id: item.product_id,
     product_name: item.product_name ?? item.product_id,
@@ -213,6 +219,7 @@ export function PurchaseDetail({
   receiptHistory,
   invoiceMismatch,
 }: PurchaseDetailProps) {
+  const { data: settings } = useOrgSettings(orgSlug);
   const router = useRouter();
   const updatePurchase = useUpdatePurchaseOrder(orgSlug);
   const updateStatus = useUpdatePurchaseStatus(orgSlug);
@@ -369,6 +376,7 @@ export function PurchaseDetail({
       product_id: item.product_id,
       quantity: item.quantity,
       unit_quantity: item.unit_quantity,
+      ...serializePurchaseDiscountDetails(item),
       unit_cost: item.unit_cost,
       subtotal: item.subtotal,
       discount_percentage: item.discount_percent ?? 0,
@@ -721,6 +729,7 @@ export function PurchaseDetail({
           <PurchaseDetailItems
             categories={categories}
             currency={purchaseOrder.currency ?? "ARS"}
+            discountsEnabled={settings?.purchase_discounts_enabled === true}
             fallbackTaxes={toFallbackItemTaxes(selectedTaxes)}
             globalDiscountPercent={globalDiscountPercentage}
             hasItemTaxSnapshots={
@@ -730,6 +739,9 @@ export function PurchaseDetail({
             items={items}
             onError={setError}
             onItemsChange={setItems}
+            postInvoiceIncludeTaxes={
+              settings?.post_invoice_discounts_include_taxes === true
+            }
             products={products}
             productTaxes={productTaxes}
             receivedProgress={receivedProgress}

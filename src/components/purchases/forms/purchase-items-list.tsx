@@ -17,6 +17,7 @@ import {
 } from "@/hooks/use-purchase-form";
 import { useVariantLoader } from "@/hooks/use-variant-loader";
 import type { Category } from "@/modules/categories/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
@@ -55,6 +56,7 @@ export function PurchaseItemsList({
   taxes,
   globalDiscountPercent,
 }: PurchaseItemsListProps) {
+  const { data: settings } = useOrgSettings(orgSlug);
   const { variantMetaMap } = useVariantLoader(orgSlug, items);
 
   const {
@@ -162,6 +164,7 @@ export function PurchaseItemsList({
           </div>
           <ItemsView
             currency={currency}
+            discountsEnabled={settings?.purchase_discounts_enabled === true}
             fallbackTaxes={fallbackTaxes}
             globalDiscountPercent={globalDiscountPercent}
             handleUpdateDiscount={handleItemUpdate("discount")}

@@ -2,6 +2,7 @@ import { CaseUnitsSettings } from "@/components/configuration/case-units-setting
 import { ConfigurationMetrics } from "@/components/configuration/configuration-metrics";
 import { ConfigurationQuickLinks } from "@/components/configuration/configuration-quick-links";
 import { OrganizationInfo } from "@/components/configuration/organization-info";
+import { PurchaseDiscountsSettings } from "@/components/configuration/purchase-discounts-settings";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import { getActiveInvitationsBySlug } from "@/modules/organizations/service/invitations.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
@@ -65,6 +66,11 @@ export default async function ConfigurationPage({
       />
 
       <ConfigurationMetrics metrics={metrics} orgSlug={orgSlug} />
+      <PurchaseDiscountsSettings
+        enabled={orgSettings.purchase_discounts_enabled}
+        includeTaxes={orgSettings.post_invoice_discounts_include_taxes}
+        orgSlug={orgSlug}
+      />
 
       <div>
         <h2 className="mb-4 font-heading text-lg">Accesos Rápidos</h2>

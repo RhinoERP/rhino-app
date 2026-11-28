@@ -10,7 +10,8 @@ import {
   type TaxableItemLine,
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
-import type { Database } from "@/types/supabase";
+import type { Database, Json } from "@/types/supabase";
+import type { PurchaseDiscountDetails } from "../utils/purchase-discounts";
 
 type Client = Awaited<ReturnType<typeof createClient>>;
 
@@ -246,17 +247,19 @@ export async function persistPurchaseFiscalState(params: {
   orgId: string;
   orderId: string;
   mode: "replace" | "confirm" | "receipt" | "receipt_legacy";
-  items: Array<{
-    id: string;
-    product_id: string;
-    quantity: number;
-    unit_quantity: number | null;
-    unit_cost: number;
-    subtotal: number;
-    discount_percentage?: number;
-    variant_stocks?: unknown;
-    tax_override?: ItemTaxInput[] | null;
-  }>;
+  items: Array<
+    PurchaseDiscountDetails & {
+      id: string;
+      product_id: string;
+      quantity: number;
+      unit_quantity: number | null;
+      unit_cost: number;
+      subtotal: number;
+      discount_percentage?: number;
+      variant_stocks?: Json;
+      tax_override?: ItemTaxInput[] | null;
+    }
+  >;
   plan: ItemizedTaxPlan;
   subtotal: number;
   discountPercentage: number;
@@ -270,36 +273,31 @@ export async function persistPurchaseFiscalState(params: {
   payableDueDate?: string | null;
 }): Promise<Database["public"]["Tables"]["purchase_orders"]["Row"]> {
   const fiscal = buildPurchaseFiscalPayload(params);
-  // The RPC becomes part of the generated Supabase types after its migration is applied.
-  const client = params.supabase as unknown as {
-    rpc: (
-      name: string,
-      args: Record<string, unknown>
-    ) => Promise<{
-      data: Database["public"]["Tables"]["purchase_orders"]["Row"] | null;
-      error: { message: string } | null;
-    }>;
-  };
-  const { data, error } = await client.rpc("persist_purchase_fiscal_state", {
-    p_org_id: params.orgId,
-    p_purchase_order_id: params.orderId,
-    p_mode: params.mode,
-    p_items: fiscal.items,
-    p_item_taxes: fiscal.item_taxes,
-    p_order_taxes: fiscal.order_taxes,
-    p_subtotal: fiscal.subtotal,
-    p_tax_amount: fiscal.tax_amount,
-    p_discount_percentage: fiscal.discount_percentage,
-    p_discount_amount: fiscal.discount_amount,
-    p_total_amount: fiscal.total_amount,
-    p_fallback_taxes: fiscal.fallback_taxes,
-    p_supplier_id: fiscal.supplier_id,
-    p_purchase_date: fiscal.purchase_date,
-    p_expiration_date: fiscal.expiration_date,
-    p_remittance_number: fiscal.remittance_number,
-    p_next_status: params.nextStatus ?? null,
-    p_payable_due_date: params.payableDueDate ?? null,
-  });
+  const { data, error } = await params.supabase.rpc(
+    "persist_purchase_fiscal_state",
+    {
+      p_org_id: params.orgId,
+      p_purchase_order_id: params.orderId,
+      p_mode: params.mode,
+      p_items: fiscal.items,
+      p_item_taxes: fiscal.item_taxes,
+      p_order_taxes: fiscal.order_taxes,
+      p_subtotal: fiscal.subtotal,
+      p_tax_amount: fiscal.tax_amount,
+      p_discount_percentage: fiscal.discount_percentage,
+      p_discount_amount: fiscal.discount_amount,
+      p_total_amount: fiscal.total_amount,
+      p_fallback_taxes: fiscal.fallback_taxes,
+      // Required named SQL parameters accept NULL, but generated RPC types omit
+      // that nullability. Keep these keys present for PostgREST resolution.
+      p_supplier_id: fiscal.supplier_id as string,
+      p_purchase_date: fiscal.purchase_date,
+      p_expiration_date: fiscal.expiration_date as string,
+      p_remittance_number: fiscal.remittance_number as string,
+      p_next_status: params.nextStatus,
+      p_payable_due_date: params.payableDueDate ?? undefined,
+    }
+  );
   if (error || !data) {
     throw new Error(
       `No se pudo guardar la compra de forma atómica: ${error?.message ?? "No encontrada"}`
@@ -311,17 +309,19 @@ export async function persistPurchaseFiscalState(params: {
 /** Serialize one fiscal plan for either the existing RPC or an atomic receipt. */
 export function buildPurchaseFiscalPayload(params: {
   mode: "replace" | "confirm" | "receipt" | "receipt_legacy";
-  items: Array<{
-    id: string;
-    product_id: string;
-    quantity: number;
-    unit_quantity: number | null;
-    unit_cost: number;
-    subtotal: number;
-    discount_percentage?: number;
-    variant_stocks?: unknown;
-    tax_override?: ItemTaxInput[] | null;
-  }>;
+  items: Array<
+    PurchaseDiscountDetails & {
+      id: string;
+      product_id: string;
+      quantity: number;
+      unit_quantity: number | null;
+      unit_cost: number;
+      subtotal: number;
+      discount_percentage?: number;
+      variant_stocks?: Json;
+      tax_override?: ItemTaxInput[] | null;
+    }
+  >;
   plan: ItemizedTaxPlan;
   subtotal: number;
   discountPercentage: number;

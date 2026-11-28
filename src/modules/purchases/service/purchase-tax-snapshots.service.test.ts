@@ -250,6 +250,12 @@ describe("impuestos por ítem de compra", () => {
           unit_cost: 100,
           subtotal: 100,
           discount_percentage: 10,
+          list_unit_cost: 125,
+          discount_1_percentage: 20,
+          post_invoice_prompt_payment_discount_percentage: 30,
+          post_invoice_volume_discount_percentage: 10,
+          post_invoice_goods_discount_percentage: 5,
+          post_invoice_discounts_include_taxes: true,
         },
       ],
       plan,
@@ -267,7 +273,17 @@ describe("impuestos por ítem de compra", () => {
       "persist_purchase_fiscal_state",
       expect.objectContaining({
         p_total_amount: 121,
-        p_items: [expect.objectContaining({ discount_percentage: 10 })],
+        p_items: [
+          expect.objectContaining({
+            discount_percentage: 10,
+            list_unit_cost: 125,
+            discount_1_percentage: 20,
+            post_invoice_prompt_payment_discount_percentage: 30,
+            post_invoice_volume_discount_percentage: 10,
+            post_invoice_goods_discount_percentage: 5,
+            post_invoice_discounts_include_taxes: true,
+          }),
+        ],
         p_item_taxes: [
           expect.objectContaining({ line_id: "item-id", tax_amount: 21 }),
         ],

@@ -23,6 +23,7 @@ import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { splitCaseUnitQuantity } from "@/modules/inventory/utils/case-units";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
+import { updatePurchaseListCost } from "@/modules/purchases/utils/purchase-discounts";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import {
   buildItemizedTaxPlan,
@@ -30,6 +31,7 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
 import { PurchaseItemTaxPicker } from "../shared/purchase-item-tax-picker";
+import { PurchaseLineDiscounts } from "../shared/purchase-line-discounts";
 
 function isWeightOrVolumeUnit(unit: string): boolean {
   return unit === "KG" || unit === "LT" || unit === "MT";
@@ -190,6 +192,7 @@ function VariantItemCard({
               min={0}
               onChange={handleUnitCostChange}
               placeholder="0.00"
+              readOnly={item.list_unit_cost != null}
               step="0.01"
               type="number"
               value={item.unit_cost || ""}
@@ -198,7 +201,11 @@ function VariantItemCard({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">Descuento %</span>
+          <span className="text-muted-foreground text-xs">
+            {item.list_unit_cost != null
+              ? "Descuento adicional %"
+              : "Descuento %"}
+          </span>
           <Input
             className="h-8 w-20"
             inputMode="decimal"
@@ -311,6 +318,7 @@ function NonVariantItemRow({
           min={0}
           onChange={handleNumericChange("unitCost")}
           placeholder="0.00"
+          readOnly={item.list_unit_cost != null}
           step="0.01"
           type="number"
           value={
@@ -328,6 +336,7 @@ function NonVariantItemRow({
           min={0}
           onChange={handleNumericChange("pricePerKg")}
           placeholder="0.00"
+          readOnly={item.list_unit_cost != null}
           step="0.01"
           type="number"
           value={item.price_per_kg || ""}
@@ -343,6 +352,7 @@ function NonVariantItemRow({
           min={0}
           onChange={handleNumericChange("unitCost")}
           placeholder="0.00"
+          readOnly={item.list_unit_cost != null}
           step="0.01"
           type="number"
           value={item.unit_cost || ""}
@@ -428,7 +438,11 @@ function NonVariantItemRow({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">Descuento %</span>
+          <span className="text-muted-foreground text-xs">
+            {item.list_unit_cost != null
+              ? "Descuento adicional %"
+              : "Descuento %"}
+          </span>
           <Input
             className="h-8 w-full"
             inputMode="decimal"
@@ -473,6 +487,8 @@ function NonVariantItemRow({
 }
 
 type RenderItemProps = {
+  discountsEnabled: boolean;
+  netAmount: number;
   item: PurchaseItem;
   index: number;
   products: ProductWithPrice[];
@@ -507,6 +523,8 @@ function renderPurchaseItem(props: RenderItemProps) {
     fallbackTaxes,
     taxes,
     calculatedTaxes,
+    discountsEnabled,
+    netAmount,
     onUpdateItem,
     onRemoveItem,
     handleUpdateDiscount,
@@ -535,6 +553,24 @@ function renderPurchaseItem(props: RenderItemProps) {
           variantMeta={variantMetaMap[item.product_id]}
         />
         <div className="px-4 pb-3">
+          {discountsEnabled && (
+            <PurchaseLineDiscounts
+              currency={currency}
+              editable
+              item={item}
+              netAmount={netAmount}
+              onChange={(details) =>
+                onUpdateItem(index, { ...item, ...details })
+              }
+              onListCostChange={(cost) =>
+                onUpdateItem(index, updatePurchaseListCost(item, cost))
+              }
+              taxAmount={calculatedTaxes.reduce(
+                (sum, tax) => sum + tax.taxAmount,
+                0
+              )}
+            />
+          )}
           <PurchaseItemTaxPicker
             availableTaxes={taxes}
             calculatedTaxes={calculatedTaxes}
@@ -566,6 +602,22 @@ function renderPurchaseItem(props: RenderItemProps) {
         product={product}
       />
       <div className="px-4 pb-3">
+        {discountsEnabled && (
+          <PurchaseLineDiscounts
+            currency={currency}
+            editable
+            item={item}
+            netAmount={netAmount}
+            onChange={(details) => onUpdateItem(index, { ...item, ...details })}
+            onListCostChange={(cost) =>
+              onUpdateItem(index, updatePurchaseListCost(item, cost))
+            }
+            taxAmount={calculatedTaxes.reduce(
+              (sum, tax) => sum + tax.taxAmount,
+              0
+            )}
+          />
+        )}
         <PurchaseItemTaxPicker
           availableTaxes={taxes}
           calculatedTaxes={calculatedTaxes}
@@ -583,6 +635,7 @@ function renderPurchaseItem(props: RenderItemProps) {
 }
 
 type ItemsViewProps = {
+  discountsEnabled?: boolean;
   items: PurchaseItem[];
   products: ProductWithPrice[];
   currency?: string;
@@ -606,6 +659,7 @@ type ItemsViewProps = {
 };
 
 export function ItemsView({
+  discountsEnabled = false,
   items,
   products,
   currency = "ARS",
@@ -659,6 +713,8 @@ export function ItemsView({
       <div className="divide-y">
         {items.map((item, index) =>
           renderPurchaseItem({
+            discountsEnabled,
+            netAmount: plan.lineBases.get(`item-${index}`) ?? item.subtotal,
             item,
             index,
             products,

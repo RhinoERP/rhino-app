@@ -21,8 +21,17 @@ import type {
   PaginationParams,
   PurchaseMetrics,
 } from "../types";
+import {
+  getPurchaseDiscountDetails,
+  type PurchaseDiscountDetails,
+  serializePurchaseDiscountDetails,
+} from "../utils/purchase-discounts";
 import { legacyPurchaseFiscalFieldsChanged } from "../utils/purchase-legacy";
 import { appendReceiptProgress } from "../utils/receipt-progress";
+import {
+  enrichPurchaseProducts,
+  resolvePurchaseDiscountItems,
+} from "./purchase-discounts.service";
 import {
   getPurchaseReceiptProgress,
   type ReceiptLine,
@@ -83,6 +92,7 @@ export type PurchaseOrderItem =
 export type ProductWithPrice =
   Database["public"]["Views"]["products_with_price"]["Row"] & {
     has_variants: boolean;
+    purchase_discounts?: PurchaseDiscountDetails;
   };
 type AccountsPayableRow =
   Database["public"]["Tables"]["accounts_payable"]["Row"];
@@ -247,7 +257,7 @@ export type CreatePurchaseOrderInput = {
   remittance_number?: string;
   currency?: string;
   payable_origin?: PurchasePayableOrigin;
-  items: {
+  items: (PurchaseDiscountDetails & {
     product_id: string;
     quantity: number;
     unit_quantity: number;
@@ -258,7 +268,7 @@ export type CreatePurchaseOrderInput = {
     units_per_box?: number | null;
     variant_stocks?: Record<string, Record<string, number>>;
     taxes?: ItemTaxInput[];
-  }[];
+  })[];
   taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
 };
@@ -302,10 +312,14 @@ export async function getProductsBySupplier(
     hasVariantsMap[row.id] = row.has_variants ?? false;
   }
 
-  return (data ?? []).map((product) => ({
-    ...product,
-    has_variants: hasVariantsMap[product.id ?? ""] ?? false,
-  }));
+  return enrichPurchaseProducts(
+    supabase,
+    org.id,
+    (data ?? []).map((product) => ({
+      ...product,
+      has_variants: hasVariantsMap[product.id ?? ""] ?? false,
+    }))
+  );
 }
 
 /**
@@ -345,10 +359,14 @@ export async function getAllProductsByOrg(
     hasVariantsMap[row.id] = row.has_variants ?? false;
   }
 
-  return (data ?? []).map((product) => ({
-    ...product,
-    has_variants: hasVariantsMap[product.id ?? ""] ?? false,
-  }));
+  return enrichPurchaseProducts(
+    supabase,
+    org.id,
+    (data ?? []).map((product) => ({
+      ...product,
+      has_variants: hasVariantsMap[product.id ?? ""] ?? false,
+    }))
+  );
 }
 
 /**
@@ -462,7 +480,11 @@ export async function createPurchaseOrder(
   const supabase = await createClient();
   const input = {
     ...request,
-    items: await resolvePurchaseUnits(supabase, org.id, request.items),
+    items: await resolvePurchaseDiscountItems(
+      supabase,
+      org.id,
+      await resolvePurchaseUnits(supabase, org.id, request.items)
+    ),
   };
 
   const subtotal_amount = input.items.reduce(
@@ -551,6 +573,7 @@ export async function createPurchaseOrder(
 
   try {
     const storedItems = resolvedItems.map((item) => ({
+      ...serializePurchaseDiscountDetails(item),
       id: crypto.randomUUID(),
       product_id: item.product_id,
       quantity: Math.max(
@@ -631,6 +654,9 @@ function calculateItemCost(
   item: PurchaseOrderItem,
   costMap: Record<string, number>
 ): { unit_cost: number; subtotal: number } {
+  if (item.list_unit_cost != null) {
+    return { unit_cost: item.unit_cost ?? 0, subtotal: item.subtotal ?? 0 };
+  }
   const existingCost = item.unit_cost ?? 0;
   const hasExistingCost = existingCost > 0;
   const costPrice = hasExistingCost
@@ -802,12 +828,14 @@ export async function confirmDraftPurchaseOrder(params: {
     orderId: params.purchaseOrderId,
     mode: "confirm",
     items: updatedItems.map((item) => ({
+      ...getPurchaseDiscountDetails(item),
       id: item.id,
       product_id: item.product_id,
       quantity: item.quantity,
       unit_quantity: item.unit_quantity,
       unit_cost: item.unit_cost,
       subtotal: item.subtotal,
+      discount_percentage: item.discount_percentage ?? 0,
       variant_stocks: item.variant_stocks,
       tax_override:
         item.tax_override === null
@@ -1732,7 +1760,7 @@ export type UpdatePurchaseOrderInput = {
   purchase_date?: string;
   expiration_date?: string | null;
   remittance_number?: string | null;
-  items?: {
+  items?: (PurchaseDiscountDetails & {
     id?: string;
     product_id: string;
     quantity: number;
@@ -1744,7 +1772,7 @@ export type UpdatePurchaseOrderInput = {
     units_per_box?: number | null;
     variant_stocks?: Record<string, Record<string, number>> | null;
     taxes?: ItemTaxInput[];
-  }[];
+  })[];
   taxes?: PurchaseTaxInput;
   global_discount_percentage?: number;
 };
@@ -1867,10 +1895,11 @@ export async function updatePurchaseOrder(
       );
     }
   }
+  let savedDiscountItems: PurchaseOrderItem[] = [];
   if (input.items?.length) {
     const { data: savedItems, error: savedItemsError } = await supabase
       .from("purchase_order_items")
-      .select("id, product_id, quantity, variant_stocks, discount_percentage")
+      .select("*")
       .eq("purchase_order_id", input.purchaseOrderId)
       .eq("organization_id", org.id);
     if (savedItemsError) {
@@ -1878,6 +1907,7 @@ export async function updatePurchaseOrder(
         `No se pudieron validar los ítems: ${savedItemsError.message}`
       );
     }
+    savedDiscountItems = savedItems ?? [];
     await assertPurchaseVariantAllocations({
       supabase,
       orgId: org.id,
@@ -1912,7 +1942,12 @@ export async function updatePurchaseOrder(
   });
   const fallbackTaxes = selections.fallbackTaxes;
   const unitResolvedItems = input.items
-    ? await resolvePurchaseUnits(supabase, org.id, input.items)
+    ? await resolvePurchaseDiscountItems(
+        supabase,
+        org.id,
+        await resolvePurchaseUnits(supabase, org.id, input.items),
+        savedDiscountItems
+      )
     : undefined;
   const resolvedItems = unitResolvedItems?.map((item, index) => ({
     ...item,
@@ -1946,7 +1981,8 @@ export async function updatePurchaseOrder(
     });
 
     const storedItems = resolvedItems.map((item) => ({
-      id: crypto.randomUUID(),
+      ...serializePurchaseDiscountDetails(item),
+      id: item.id ?? crypto.randomUUID(),
       product_id: item.product_id,
       quantity: Math.max(
         ["KG", "LT", "MT"].includes(item.unit_of_measure ?? "") ? 0 : 1,

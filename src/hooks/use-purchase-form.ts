@@ -10,8 +10,13 @@ import {
   getAvailableUnits,
   getPricePerKg,
 } from "@/modules/purchases/utils/purchase-calculations";
+import {
+  getPurchaseDiscountDetails,
+  type PurchaseDiscountDetails,
+  updatePurchaseListCost,
+} from "@/modules/purchases/utils/purchase-discounts";
 
-export type PurchaseItem = {
+export type PurchaseItem = PurchaseDiscountDetails & {
   product_id: string;
   product_name: string;
   quantity: number;
@@ -74,7 +79,8 @@ function buildPurchaseItem(
     return null;
   }
 
-  return {
+  const item: PurchaseItem = {
+    ...getPurchaseDiscountDetails(product.purchase_discounts ?? {}),
     product_id: product.id,
     product_name: product.name,
     quantity: baseQuantity,
@@ -90,6 +96,9 @@ function buildPurchaseItem(
     has_variants: product.has_variants ?? false,
     variant_stocks: product.has_variants ? {} : undefined,
   };
+  return item.list_unit_cost != null
+    ? updatePurchaseListCost(item, item.list_unit_cost)
+    : item;
 }
 
 function addPurchaseItem(
@@ -341,7 +350,13 @@ export function useItemManagement(
         return;
       }
 
-      onUpdateItem(index, ITEM_BUILDER_MAP[field](item, value));
+      const updated = ITEM_BUILDER_MAP[field](item, value);
+      onUpdateItem(
+        index,
+        updated.list_unit_cost != null
+          ? updatePurchaseListCost(updated, updated.list_unit_cost)
+          : updated
+      );
     };
 
   return {

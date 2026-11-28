@@ -13,7 +13,11 @@ import { DataTable } from "@/components/data-table/data-table";
 import { DataTableActionBar } from "@/components/data-table/data-table-action-bar";
 import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { EditItemDiscountsDialog } from "@/components/price-lists/edit-item-discounts-dialog";
+import { formatCurrency } from "@/lib/format";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { PriceListItem } from "@/modules/price-lists/types";
+import { HABITUAL_DISCOUNT_FIELDS } from "@/modules/purchases/utils/purchase-discounts";
 import { PriceListItemsBulkActions } from "./bulk-actions";
 import { createPriceListItemColumns } from "./columns";
 
@@ -50,7 +54,39 @@ export function PriceListItemsDataTable({
     queryFn: () => fetchPriceListItems(orgSlug, priceListId),
   });
 
-  const columns = useMemo(() => createPriceListItemColumns(), []);
+  const { data: settings } = useOrgSettings(orgSlug);
+  const enabled = settings?.purchase_discounts_enabled === true;
+  const columns = useMemo(() => {
+    const base = createPriceListItemColumns(enabled);
+    if (!enabled) {
+      return base;
+    }
+    return [
+      ...base,
+      {
+        id: "list_price",
+        header: "Precio de lista",
+        cell: ({ row }: { row: { original: PriceListItem } }) =>
+          formatCurrency(
+            row.original.list_price ?? row.original.purchase_price ?? 0,
+            row.original.currency
+          ),
+      },
+      ...HABITUAL_DISCOUNT_FIELDS.map((field, index) => ({
+        id: field,
+        header: `Descuento ${index + 1}`,
+        cell: ({ row }: { row: { original: PriceListItem } }) =>
+          `${row.original[field] ?? 0}%`,
+      })),
+      {
+        id: "discount_actions",
+        header: "",
+        cell: ({ row }: { row: { original: PriceListItem } }) => (
+          <EditItemDiscountsDialog item={row.original} orgSlug={orgSlug} />
+        ),
+      },
+    ];
+  }, [enabled, orgSlug]);
 
   const table = useReactTable<PriceListItem>({
     data: items ?? [],
